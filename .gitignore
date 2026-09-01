@@ -1,0 +1,42 @@
+# --- Секреты и локальное окружение ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# --- Зависимости ---
+node_modules/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# --- Сборка ---
+dist/
+build/
+out/
+target/
+*.egg-info/
+
+# --- Кэши инструментов ---
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+.coverage
+*.log
+
+# --- IDE / ОС ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Claude Code (локальные, не общие настройки) ---
+.claude/settings.local.json

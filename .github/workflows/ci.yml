@@ -1,0 +1,45 @@
+# CI гоняет те же проверки, что и локально, но на Ubuntu — той же ОС, что в production.
+# Это основной механизм, который ловит расхождения Windows/Ubuntu до мержа:
+# регистр в именах файлов, пути, нативные зависимости.
+#
+# ЗАПОЛНИТЬ после выбора стека: шаг установки окружения и зависимостей.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # TODO: установка рантайма под выбранный стек, например:
+      #   - uses: actions/setup-node@v4   с { node-version, cache: npm }
+      #   - uses: actions/setup-python@v5 с { python-version, cache: pip }
+      #   - uses: actions/setup-go@v5     с { go-version }
+
+      # TODO: установка зависимостей (npm ci | uv sync | go mod download)
+
+      - name: Полная проверка
+        run: bash scripts/check.sh
+
+  # Проверка, которую нельзя пройти на Windows: имена файлов, отличающиеся только регистром.
+  case-sensitivity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Конфликты регистра в именах файлов
+        run: |
+          dupes=$(git ls-files | tr 'A-Z' 'a-z' | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "Файлы, различающиеся только регистром — сломают сборку на Ubuntu:"
+            echo "$dupes"
+            exit 1
+          fi
+          echo "Конфликтов регистра нет."
