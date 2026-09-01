@@ -3,57 +3,37 @@
     "context7": {
       "type": "stdio",
       "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp",
-        "--api-key",
-        "${CONTEXT7_API_KEY}"
-      ],
+      "args": ["-y", "@upstash/context7-mcp", "--api-key", "${CONTEXT7_API_KEY}"],
       "env": {}
     },
     "playwright": {
       "type": "stdio",
       "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp@latest"
-      ],
+      "args": ["-y", "@playwright/mcp@latest"],
       "env": {}
     },
     "chrome-devtools": {
       "type": "stdio",
       "command": "npx",
-      "args": [
-        "-y",
-        "chrome-devtools-mcp@latest"
-      ],
+      "args": ["-y", "chrome-devtools-mcp@latest"],
       "env": {}
     },
     "git": {
       "type": "stdio",
       "command": "uvx",
-      "args": [
-        "mcp-server-git"
-      ],
+      "args": ["mcp-server-git"],
       "env": {}
     },
     "shadcn": {
       "type": "stdio",
       "command": "npx",
-      "args": [
-        "-y",
-        "shadcn@latest",
-        "mcp"
-      ],
+      "args": ["-y", "shadcn@latest", "mcp"],
       "env": {}
     },
     "@21st-dev/magic": {
       "type": "stdio",
       "command": "npx",
-      "args": [
-        "-y",
-        "@21st-dev/magic@latest"
-      ],
+      "args": ["-y", "@21st-dev/magic@latest"],
       "env": {
         "API_KEY": "${MAGIC_API_KEY}"
       }

@@ -25,7 +25,7 @@
 - [ ] Подтвердить [ADR-0010](docs/adr/0010-model-billinga.md) — модель биллинга
 - [ ] Проверить связку FreeSWITCH + GOIP на живом железе (нужен шлюз и сервер)
 - [ ] Заполнить разделы «Стек», «Команды», «Структура» → заполнить разделы «Стек», «Команды», «Структура» в [CLAUDE.md](CLAUDE.md)
-- [ ] Развернуть монорепозиторий: pnpm workspaces, apps/ и packages/, tsconfig strict, eslint, prettier, vitest
+- [ ] Этап 0, продолжение: `packages/config` (ADR-0002), `packages/logger` (ADR-0004), доменные ошибки (ADR-0003), подключение к БД и первая миграция, `apps/api` на NestJS
 - [ ] Реализовать этап 0: конфиг, ошибки, логгер, авторизация, подключение к БД, первая миграция
 - [ ] Прототип телефонии на живом железе: FreeSWITCH + GOIP + звонок + запись + CDR
 - [ ] Перенести репозиторий в ФС WSL2 (`~/projects/zvonix`): работа через `/mnt/d` заметно медленнее
@@ -68,6 +68,10 @@
 - [x] ADR 0002-0006: конфигурация, ошибки, логи, миграции, тесты — 2026-09-01
 - [x] Точка проверки `scripts/check.*` и CI на Ubuntu с проверкой конфликтов регистра — 2026-09-01
 - [x] docs/DOMAIN.md, docs/CONVENTIONS.md, .env.example — 2026-09-01
+- [x] Монорепозиторий развёрнут: pnpm workspaces, TypeScript strict, eslint, prettier, vitest — 2026-09-01
+- [x] `packages/shared`: модуль денег в микроединицах на BigInt, 14 тестов — 2026-09-01
+- [x] `bash scripts/check.sh` проходит полностью: формат, линтер, типы, тесты — 2026-09-01
+- [x] docs/DESIGN.md: принципы интерфейса — 2026-09-01
 - [x] Домен описан: DOMAIN.md, GLOSSARY.md, ARCHITECTURE.md, BACKLOG.md — 2026-09-01
 - [x] ADR 0008-0012: стек, АТС, биллинг, правовой контур, мобильное приложение — 2026-09-01
 - [x] Решено: АТС — FreeSWITCH ([ADR-0009](docs/adr/0009-programmnaya-ats.md)) — 2026-09-01

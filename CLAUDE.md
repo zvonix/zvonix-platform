@@ -82,6 +82,7 @@ scripts/   — check.sh: единая точка проверки проекта
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — компоненты, потоки данных, границы модулей
 - [docs/GLOSSARY.md](docs/GLOSSARY.md) — доменные термины (единый язык кода и обсуждений)
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — ветки, коммиты, именование, комментарии
+- [docs/DESIGN.md](docs/DESIGN.md) — принципы интерфейса: плотность, темы, обязательные правила
 - [docs/adr/](docs/adr/) — принятые архитектурные решения и их причины
 - [docs/api/](docs/api/) — контракты API
 - [TASKS.md](TASKS.md) — текущее состояние работ

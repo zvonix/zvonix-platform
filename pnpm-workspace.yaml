@@ -1,0 +1,9 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 11 читает настройки отсюда, а не из поля "pnpm" в package.json.
+# Сборочные скрипты разрешаются поимённо: по умолчанию pnpm их не выполняет.
+# esbuild собирает свой бинарник — без него не запускается vitest.
+allowBuilds:
+  esbuild: true
