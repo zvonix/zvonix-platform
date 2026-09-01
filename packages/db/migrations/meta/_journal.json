@@ -8,6 +8,13 @@
       "when": 1788260602827,
       "tag": "0000_uchyotnye_zapisi",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788266667722,
+      "tag": "0001_spravochnik_operatorov",
+      "breakpoints": true
     }
   ]
 }

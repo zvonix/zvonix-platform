@@ -4,11 +4,12 @@ import { AuthGuard } from './http/auth.guard.js';
 import { DomainExceptionFilter } from './http/domain-exception.filter.js';
 import { InfraModule } from './infra/infra.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
+import { CatalogModule } from './modules/catalog/catalog.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 
 @Module({
-  imports: [InfraModule, AuditModule, IdentityModule, HealthModule],
+  imports: [InfraModule, AuditModule, IdentityModule, CatalogModule, HealthModule],
   providers: [
     // Доступ закрыт по умолчанию: обработчик открывается пометкой `@Public()`.
     // Обратный порядок оставляет незакрытым один обработчик, и узнают об этом не первыми.
