@@ -220,6 +220,40 @@ describe('sessions', () => {
   });
 });
 
+describe('журнал запросов', () => {
+  it('получает текст запроса, но не значения параметров', async () => {
+    // Штатный журнал Drizzle печатает параметры целиком — в них хеши паролей,
+    // адреса и номера абонентов, — и делает это мимо маскирования логгера (ADR-0004).
+    const seen: { query: string; parameters: number }[] = [];
+    const logged = createDatabase({
+      url,
+      poolMax: 1,
+      logQuery: (query, parameters) => seen.push({ query, parameters }),
+    });
+
+    try {
+      const secret = 'значение-которого-не-должно-быть-в-логе';
+      await logged.db.execute(sql`select ${secret}::text as value`);
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.query).toContain('select');
+      expect(seen[0]?.parameters).toBe(1);
+      expect(JSON.stringify(seen)).not.toContain(secret);
+    } finally {
+      await logged.close();
+    }
+  });
+
+  it('молчит, когда приёмник не задан', async () => {
+    const silent = createDatabase({ url, poolMax: 1 });
+    try {
+      await expect(silent.db.execute(sql`select 1`)).resolves.toBeDefined();
+    } finally {
+      await silent.close();
+    }
+  });
+});
+
 describe('ошибки', () => {
   it('превышение statement_timeout превращается в недоступность зависимости', async () => {
     // Зависший запрос удерживает соединение пула; лучше отдать ошибку, чем ждать.

@@ -28,6 +28,13 @@ export default tseslint.config(
     },
   },
   {
+    // Модуль NestJS — пустой класс с декоратором: он и есть единица сборки,
+    // а тела у него быть не должно. Правило про «класс без членов» здесь
+    // требовало бы писать бессмысленный код ради его удовлетворения.
+    files: ['**/*.module.ts'],
+    rules: { '@typescript-eslint/no-extraneous-class': 'off' },
+  },
+  {
     // Тесты: в них допустимы утверждения о типах, которых нет в рантайме.
     files: ['**/*.test.ts'],
     rules: { '@typescript-eslint/no-non-null-assertion': 'off' },

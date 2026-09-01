@@ -34,7 +34,8 @@
 
 | Компонент | Ответственность | Расположение | Зависит от |
 |-----------|-----------------|--------------|------------|
-| `http` | Контроллеры, аутентификация, валидация входа | `apps/api/src/http` | доменные модули |
+| `infra` | Конфигурация, логгер, пул соединений с базой. Глобальный модуль | `apps/api/src/infra` | `packages/config`, `packages/logger`, `packages/db` |
+| `http` | Защитники доступа, разбор входа схемами zod, сквозной идентификатор, отображение доменных ошибок в HTTP | `apps/api/src/http` | `identity` |
 | `routing` | Выбор шлюза/SIM под конкретный вызов. Вызывается узлом в реальном времени | `apps/api/src/modules/routing` | `catalog`, `limits`, `billing` |
 | `billing` | Резервы, проводки, тарификация CDR, комиссия, балансы | `apps/api/src/modules/billing` | `packages/db` |
 | `limits` | Счётчики по окнам и проверка лимитов | `apps/api/src/modules/limits` | Redis + БД |

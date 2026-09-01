@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+
+    // Внедрение зависимостей NestJS читает типы параметров конструктора из метаданных,
+    // которые генерирует компилятор. Без этих двух опций контейнер не знает,
+    // что подставлять, и падает при старте.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/config" },
+    { "path": "../../packages/logger" },
+    { "path": "../../packages/db" }
+  ]
+}

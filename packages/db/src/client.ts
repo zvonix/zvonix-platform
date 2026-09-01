@@ -21,12 +21,22 @@ import * as schema from './schema/index.js';
 
 export type Database = NodePgDatabase<typeof schema>;
 
+/** Приёмник журнала запросов. Значения параметров не передаются намеренно. */
+export type QueryLogger = (query: string, parameterCount: number) => void;
+
 export interface DatabaseOptions {
   readonly url: string;
   /** Верхняя граница соединений этого процесса. Сумма по всем процессам — не больше `max_connections`. */
   readonly poolMax: number;
-  /** Логировать каждый запрос. Только для разработки: в логе окажутся значения параметров. */
-  readonly logQueries?: boolean;
+  /**
+   * Журнал запросов для разработки.
+   *
+   * Принимает только текст запроса и число параметров. Значений параметров здесь нет
+   * и быть не должно: в них хеши паролей, адреса почты и номера абонентов, а этот
+   * вывод идёт мимо маскирования логгера (ADR-0004). Штатный журнал Drizzle печатает
+   * их целиком, поэтому он не используется.
+   */
+  readonly logQuery?: QueryLogger;
   /**
    * Предел времени одного запроса, мс. `0` снимает ограничение.
    *
@@ -82,10 +92,19 @@ export function createDatabase(options: DatabaseOptions): DatabaseHandle {
     if (onPoolError !== undefined) onPoolError(error);
   });
 
+  const sink = options.logQuery;
   const db = drizzle(pool, {
     schema,
     casing: CASING,
-    ...(options.logQueries === true ? { logger: true } : {}),
+    ...(sink === undefined
+      ? {}
+      : {
+          logger: {
+            logQuery: (query: string, parameters: unknown[]): void => {
+              sink(query, parameters.length);
+            },
+          },
+        }),
   });
 
   return {
