@@ -30,20 +30,25 @@
 
 ## Компоненты
 
+Модули NestJS живут в `apps/api/src/modules/<имя>` и совпадают по именам с таблицей ниже.
+
 | Компонент | Ответственность | Расположение | Зависит от |
 |-----------|-----------------|--------------|------------|
-| `api` | REST/API для кабинетов клиента, партнёра и админа | `src/api` | `billing`, `limits`, `catalog` |
-| `routing` | Выбор шлюза/SIM под конкретный вызов. Вызывается узлом в реальном времени | `src/routing` | `catalog`, `limits`, `billing` |
-| `billing` | Резервы, проводки, тарификация CDR, комиссия, балансы | `src/billing` | БД |
-| `limits` | Счётчики по окнам и проверка лимитов | `src/limits` | Redis + БД |
-| `catalog` | Направления, операторы, MNP, коридоры цен, тарифы | `src/catalog` | БД |
-| `telephony` | Приём CDR и событий от узлов, состояние шлюзов и SIM | `src/telephony` | `billing` |
-| `recordings` | Приём, хранение, выдача записей по подписанным ссылкам | `src/recordings` | объектное хранилище |
-| `nodes` | Реестр узлов, генерация команды установки, health и метрики | `src/nodes` | БД |
-| `payments` | Пополнения клиентов и выплаты партнёрам | `src/payments` | `billing` |
-| `identity` | Учётные записи, роли, права, 2FA, API-ключи | `src/identity` | БД |
-| `audit` | Неизменяемый журнал действий | `src/audit` | БД |
-| `node-agent` | На узле: установка, обновление, метрики, выгрузка записей | `node/agent` | control plane |
+| `http` | Контроллеры, аутентификация, валидация входа | `apps/api/src/http` | доменные модули |
+| `routing` | Выбор шлюза/SIM под конкретный вызов. Вызывается узлом в реальном времени | `apps/api/src/modules/routing` | `catalog`, `limits`, `billing` |
+| `billing` | Резервы, проводки, тарификация CDR, комиссия, балансы | `apps/api/src/modules/billing` | `packages/db` |
+| `limits` | Счётчики по окнам и проверка лимитов | `apps/api/src/modules/limits` | Redis + БД |
+| `catalog` | Направления, коридоры цен, тарифы, `OperatorResolver` ([ADR-0013](adr/0013-opredelenie-operatora.md)) | `apps/api/src/modules/catalog` | БД, внешний lookup |
+| `telephony` | Приём CDR от узлов, состояние шлюзов и SIM | `apps/api/src/modules/telephony` | `billing` |
+| `recordings` | Приём, хранение, выдача записей по подписанным ссылкам | `apps/api/src/modules/recordings` | объектное хранилище |
+| `nodes` | Реестр узлов, генерация команды установки, health и метрики | `apps/api/src/modules/nodes` | БД |
+| `payments` | Пополнения клиентов и выплаты партнёрам | `apps/api/src/modules/payments` | `billing` |
+| `identity` | Учётные записи, роли, права, 2FA, API-ключи | `apps/api/src/modules/identity` | БД |
+| `audit` | Неизменяемый журнал действий | `apps/api/src/modules/audit` | БД |
+| `web` | Админка и кабинеты клиента и партнёра | `apps/web` | `api` |
+| `worker` | Сверка CDR, выплаты, агрегация ASR, освобождение резервов, обновление MNP | `apps/worker` | `billing`, `catalog` |
+| `esl` | Долгоживущее соединение с узлами, события вызовов в реальном времени | `apps/esl` | `telephony` |
+| `agent` | На узле: установка, обновление, метрики, выгрузка записей | `apps/agent` | control plane |
 
 ## Потоки данных
 

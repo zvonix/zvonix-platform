@@ -1,8 +1,6 @@
 # CI гоняет те же проверки, что и локально, но на Ubuntu — той же ОС, что в production.
-# Это основной механизм, который ловит расхождения Windows/Ubuntu до мержа:
-# регистр в именах файлов, пути, нативные зависимости.
-#
-# ЗАПОЛНИТЬ после выбора стека: шаг установки окружения и зависимостей.
+# Это основной механизм, который ловит расхождения до мержа: регистр в именах файлов,
+# пути, нативные зависимости.
 
 name: CI
 
@@ -19,12 +17,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TODO: установка рантайма под выбранный стек, например:
-      #   - uses: actions/setup-node@v4   с { node-version, cache: npm }
-      #   - uses: actions/setup-python@v5 с { python-version, cache: pip }
-      #   - uses: actions/setup-go@v5     с { go-version }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
-      # TODO: установка зависимостей (npm ci | uv sync | go mod download)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Установка зависимостей
+        run: pnpm install --frozen-lockfile
 
       - name: Полная проверка
         run: bash scripts/check.sh
