@@ -10,12 +10,17 @@ import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import {
+  addPortSchema,
+  assignSimSchema,
   channelStatusSchema,
   createChannelSchema,
   createGatewaySchema,
+  createSimSchema,
   gatewayStatusSchema,
+  simConcurrencySchema,
+  simStatusSchema,
 } from './schemas.js';
-import type { ChannelRow, GatewayRow } from './telephony.repository.js';
+import type { ChannelRow, GatewayPortRow, GatewayRow, SimCardRow } from './telephony.repository.js';
 import { TelephonyService, type IssuedSipAccount } from './telephony.service.js';
 
 /**
@@ -51,6 +56,46 @@ interface ChannelView {
   readonly sip_username: string;
   readonly recording_required: boolean;
   readonly caller_id: string | null;
+}
+
+/**
+ * SIM в ответе.
+ *
+ * Номер здесь полный: этот обработчик доступен только администратору и поддержке.
+ * **В клиентский контур ни номер SIM, ни ICCID не попадают ни в каком виде**
+ * ([ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md)): по номеру
+ * клиент вышел бы на партнёра напрямую в обход платформы.
+ */
+interface SimView {
+  readonly id: string;
+  readonly partner_id: string;
+  readonly operator_id: string;
+  readonly msisdn: string;
+  readonly iccid: string | null;
+  readonly status: string;
+  readonly network_scope: string;
+  readonly max_concurrent_calls: number;
+  readonly operator_confirmed_at: string | null;
+  readonly activated_at: string | null;
+}
+
+interface PortView {
+  readonly id: string;
+  readonly gateway_id: string;
+  readonly port_number: number;
+  readonly sim_card_id: string | null;
+  readonly state: string;
+}
+
+/** Кандидат на терминацию: что увидит поддержка, разбирая «почему не звонит». */
+interface CandidateView {
+  readonly sim_card_id: string;
+  readonly msisdn: string;
+  readonly max_concurrent_calls: number;
+  readonly gateway_id: string;
+  readonly gateway_type: string;
+  readonly port_number: number;
+  readonly port_state: string;
 }
 
 @Controller()
@@ -176,6 +221,171 @@ export class TelephonyController {
     );
     return { channel: toChannelView(updated) };
   }
+
+  // --- SIM-карты --------------------------------------------------------------
+
+  @Roles('admin')
+  @Post('sim-cards')
+  async createSim(
+    @Body(zodBody(createSimSchema)) body: z.infer<typeof createSimSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ sim: SimView }> {
+    const sim = await this.telephony.createSim(
+      {
+        partnerId: parseId(body.partnerId, 'partner'),
+        operatorId: parseId(body.operatorId, 'operator'),
+        msisdn: body.msisdn,
+        iccid: body.iccid ?? null,
+        activatedAt: body.activatedAt === undefined ? null : new Date(body.activatedAt),
+      },
+      actor.userId,
+      actor.role,
+    );
+    return { sim: toSimView(sim) };
+  }
+
+  @Roles('admin', 'support')
+  @Get('sim-cards')
+  async listSims(@Query('partnerId') partnerId?: string): Promise<{ sim_cards: SimView[] }> {
+    const rows = await this.telephony.listSims(
+      partnerId === undefined ? undefined : parseId(partnerId, 'partner'),
+    );
+    return { sim_cards: rows.map(toSimView) };
+  }
+
+  @Roles('admin')
+  @Post('sim-cards/:id/status')
+  async setSimStatus(
+    @Param('id') id: string,
+    @Body(zodBody(simStatusSchema)) body: z.infer<typeof simStatusSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ sim: SimView }> {
+    const updated = await this.telephony.setSimStatus(
+      parseId(id, 'simCard'),
+      body.status,
+      actor.userId,
+      actor.role,
+    );
+    return { sim: toSimView(updated) };
+  }
+
+  /**
+   * Число одновременных вызовов на SIM — **только администратор**.
+   *
+   * Инвариант DOMAIN.md. Партнёр заинтересован поднять значение и не увидеть последствий
+   * сразу: оператор блокирует SIM за поведение, не похожее на человеческое, и позже.
+   */
+  @Roles('admin')
+  @Post('sim-cards/:id/concurrency')
+  async setSimConcurrency(
+    @Param('id') id: string,
+    @Body(zodBody(simConcurrencySchema)) body: z.infer<typeof simConcurrencySchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ sim: SimView }> {
+    const updated = await this.telephony.setSimConcurrency(
+      parseId(id, 'simCard'),
+      body.maxConcurrentCalls,
+      actor.userId,
+      actor.role,
+    );
+    return { sim: toSimView(updated) };
+  }
+
+  // --- Порты -------------------------------------------------------------------
+
+  @Roles('admin')
+  @Post('gateways/:id/ports')
+  async addPort(
+    @Param('id') id: string,
+    @Body(zodBody(addPortSchema)) body: z.infer<typeof addPortSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ port: PortView }> {
+    const port = await this.telephony.addPort(
+      parseId(id, 'gateway'),
+      body.portNumber,
+      actor.userId,
+      actor.role,
+    );
+    return { port: toPortView(port) };
+  }
+
+  @Roles('admin', 'support')
+  @Get('gateways/:id/ports')
+  async listPorts(@Param('id') id: string): Promise<{ ports: PortView[] }> {
+    const rows = await this.telephony.listPorts(parseId(id, 'gateway'));
+    return { ports: rows.map(toPortView) };
+  }
+
+  /** Установка SIM в порт или её извлечение (`simCardId: null`). */
+  @Roles('admin')
+  @Post('gateway-ports/:id/sim')
+  async assignSim(
+    @Param('id') id: string,
+    @Body(zodBody(assignSimSchema)) body: z.infer<typeof assignSimSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ port: PortView }> {
+    const updated = await this.telephony.assignSimToPort(
+      parseId(id, 'gatewayPort'),
+      body.simCardId === null ? null : parseId(body.simCardId, 'simCard'),
+      actor.userId,
+      actor.role,
+    );
+    return { port: toPortView(updated) };
+  }
+
+  /**
+   * Какие SIM вообще подходят под оператора.
+   *
+   * Разбор «почему у клиента не звонит» почти всегда сводится к этому вопросу,
+   * и отвечать на него по логам неудобно.
+   */
+  @Roles('admin', 'support')
+  @Get('routing/sim-candidates')
+  async simCandidates(
+    @Query('operatorId') operatorId: string,
+    @Query('recording') recording?: string,
+  ): Promise<{ candidates: CandidateView[] }> {
+    const found = await this.telephony.findSimCandidates(
+      parseId(operatorId, 'operator'),
+      recording === 'true',
+    );
+    return {
+      candidates: found.map((item) => ({
+        sim_card_id: item.sim.id,
+        msisdn: item.sim.msisdn,
+        max_concurrent_calls: item.sim.maxConcurrentCalls,
+        gateway_id: item.gateway.id,
+        gateway_type: item.gateway.type,
+        port_number: item.port.portNumber,
+        port_state: item.port.state,
+      })),
+    };
+  }
+}
+
+function toSimView(row: SimCardRow): SimView {
+  return {
+    id: row.id,
+    partner_id: row.partnerId,
+    operator_id: row.operatorId,
+    msisdn: row.msisdn,
+    iccid: row.iccid,
+    status: row.status,
+    network_scope: row.networkScope,
+    max_concurrent_calls: row.maxConcurrentCalls,
+    operator_confirmed_at: row.operatorConfirmedAt?.toISOString() ?? null,
+    activated_at: row.activatedAt?.toISOString() ?? null,
+  };
+}
+
+function toPortView(row: GatewayPortRow): PortView {
+  return {
+    id: row.id,
+    gateway_id: row.gatewayId,
+    port_number: row.portNumber,
+    sim_card_id: row.simCardId,
+    state: row.state,
+  };
 }
 
 function toAccountView(account: IssuedSipAccount): SipAccountView {

@@ -2,7 +2,15 @@
  * Схемы входных данных телефонии (ADR-0009).
  */
 
-import { GATEWAY_TYPES, GATEWAY_STATUSES, CHANNEL_STATUSES } from '@zvonix/shared';
+import {
+  CHANNEL_STATUSES,
+  GATEWAY_STATUSES,
+  GATEWAY_TYPES,
+  MAX_CONCURRENT_CALLS_LIMIT,
+  normalizeMsisdn,
+  SIM_STATUSES,
+  type Msisdn,
+} from '@zvonix/shared';
 import { z } from 'zod';
 
 const name = z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное');
@@ -64,3 +72,67 @@ export const directoryRequestSchema = z
     hostname: z.string().trim().max(255).optional(),
   })
   .loose();
+
+export const createSimSchema = z.object({
+  partnerId: z.uuid('должен быть идентификатором'),
+
+  /**
+   * Оператор, которого объявляет партнёр. Сверяется с ответом резолвера по собственному
+   * номеру SIM: подтверждённое расхождение — отказ, а не предупреждение.
+   */
+  operatorId: z.uuid('должен быть идентификатором'),
+
+  /** Собственный номер SIM. Нормализуется: `8916…`, `+7 916 …` и `7916…` — одно и то же. */
+  msisdn: z
+    .string()
+    .trim()
+    .min(1, 'не может быть пустым')
+    .transform((value, ctx): Msisdn => {
+      const normalized = normalizeMsisdn(value);
+      if (normalized === undefined) {
+        ctx.addIssue({ code: 'custom', message: 'не похоже на российский номер' });
+        return '70000000000' as Msisdn;
+      }
+      return normalized;
+    }),
+
+  /** Идентификатор чипа: 19–20 цифр. */
+  iccid: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{18,22}$/, 'должен быть числом из 18–22 цифр')
+    .optional(),
+
+  /** Дата активации у оператора. По ней считается возраст SIM в антифроде. */
+  activatedAt: z.iso.datetime({ error: 'должна быть датой в формате ISO' }).optional(),
+});
+
+export const simStatusSchema = z.object({
+  status: z.enum(SIM_STATUSES),
+});
+
+export const simConcurrencySchema = z.object({
+  /**
+   * Одновременных вызовов на SIM. Инвариант DOMAIN.md: меняет только администратор —
+   * превышение это прямой путь к блокировке SIM оператором.
+   */
+  maxConcurrentCalls: z.coerce
+    .number()
+    .int('должно быть целым числом')
+    .min(1, 'не может быть меньше одного')
+    .max(MAX_CONCURRENT_CALLS_LIMIT, 'выше разумного предела'),
+});
+
+export const addPortSchema = z.object({
+  /** Номер порта на устройстве, как он подписан на корпусе. */
+  portNumber: z.coerce
+    .number()
+    .int('должен быть целым числом')
+    .min(1, 'нумерация портов начинается с единицы')
+    .max(256, 'неправдоподобно много'),
+});
+
+export const assignSimSchema = z.object({
+  /** `null` означает «вынуть SIM из порта». */
+  simCardId: z.uuid('должен быть идентификатором').nullable(),
+});

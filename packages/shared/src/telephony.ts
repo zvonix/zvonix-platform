@@ -61,3 +61,60 @@ const SIP_USERNAME = /^(gw|ch)-[0-9a-z]{12}$/;
 export function isSipUsername(value: string): boolean {
   return SIP_USERNAME.test(value);
 }
+
+/**
+ * Состояние SIM-карты (жизненный цикл в DOMAIN.md).
+ *
+ * `new`       — заведена партнёром, в работу не пущена;
+ * `active`    — принимает вызовы;
+ * `throttled` — временно придержана: подошла к лимиту или просела по ASR.
+ *               Возвращается в `active` сама, когда показатели восстановились;
+ * `blocked`   — заблокирована оператором или администратором. Сама не возвращается;
+ * `retired`   — выведена навсегда. Запись остаётся: на неё ссылаются CDR.
+ */
+export const SIM_STATUSES = ['new', 'active', 'throttled', 'blocked', 'retired'] as const;
+export type SimStatus = (typeof SIM_STATUSES)[number];
+
+/** Состояния, в которых SIM годится для вызова. */
+export const USABLE_SIM_STATUSES: readonly SimStatus[] = ['active'];
+
+/**
+ * Куда SIM может звонить по своему тарифу.
+ *
+ * В v1 значение одно: **все партнёры работают на безлимите внутри своей сети**,
+ * и на этом построена экономика платформы (ADR-0013). Перечисление заведено с одним
+ * значением намеренно — чтобы «только своя сеть» было записано явно, а не подразумевалось
+ * молчанием. Появится SIM с внесетевыми минутами — добавится значение, и маршрутизация
+ * обязана будет его учесть.
+ */
+export const SIM_NETWORK_SCOPES = ['own_network'] as const;
+export type SimNetworkScope = (typeof SIM_NETWORK_SCOPES)[number];
+
+/**
+ * Состояние порта шлюза.
+ *
+ * `unknown`  — порт объявлен, но оборудование о нём ещё не отчиталось;
+ * `idle`     — свободен;
+ * `busy`     — занят вызовом;
+ * `fault`    — оборудование сообщило о неисправности;
+ * `disabled` — выключен человеком: партнёром или администратором.
+ *
+ * Первые четыре проставляет агент узла по данным оборудования, последнее — человек.
+ * Пока агента нет, порт остаётся в `unknown`, и это **не** повод его не использовать:
+ * «о состоянии не отчитались» и «неисправен» — разные утверждения.
+ */
+export const GATEWAY_PORT_STATES = ['unknown', 'idle', 'busy', 'fault', 'disabled'] as const;
+export type GatewayPortState = (typeof GATEWAY_PORT_STATES)[number];
+
+/** Состояния порта, при которых на него допустимо направить вызов. */
+export const USABLE_PORT_STATES: readonly GatewayPortState[] = ['unknown', 'idle'];
+
+/**
+ * Сколько вызовов SIM обслуживает одновременно.
+ *
+ * По умолчанию один. Инвариант DOMAIN.md: значение меняет **только администратор** —
+ * превышение это прямой путь к блокировке SIM оператором, а партнёр заинтересован
+ * поднять его и не увидеть последствий сразу.
+ */
+export const DEFAULT_MAX_CONCURRENT_CALLS = 1;
+export const MAX_CONCURRENT_CALLS_LIMIT = 8;

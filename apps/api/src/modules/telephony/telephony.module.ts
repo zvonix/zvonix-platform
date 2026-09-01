@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
+import { CatalogModule } from '../catalog/catalog.module.js';
 import { NodeDirectoryController } from './node-directory.controller.js';
 import { TelephonyController } from './telephony.controller.js';
 import { TelephonyRepository } from './telephony.repository.js';
 import { TelephonyService } from './telephony.service.js';
 
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, CatalogModule],
   controllers: [TelephonyController, NodeDirectoryController],
   providers: [TelephonyService, TelephonyRepository],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.

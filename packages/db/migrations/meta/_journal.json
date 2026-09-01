@@ -43,6 +43,13 @@
       "when": 1788279722529,
       "tag": "0005_shlyuzy_i_kanaly",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788306288595,
+      "tag": "0006_sim_karty_i_porty",
+      "breakpoints": true
     }
   ]
 }

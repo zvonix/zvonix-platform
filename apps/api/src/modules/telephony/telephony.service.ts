@@ -9,14 +9,18 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   notFound,
+  validationFailed,
   type ChannelStatus,
   type GatewayStatus,
   type GatewayType,
   type Id,
+  type Msisdn,
+  type SimStatus,
   type UserRole,
 } from '@zvonix/shared';
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
+import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
 import { issueSipCredentials, type SipCredentials } from './sip-credentials.js';
 import {
@@ -24,8 +28,23 @@ import {
   type ChannelId,
   type ChannelRow,
   type GatewayId,
+  type GatewayPortId,
+  type GatewayPortRow,
   type GatewayRow,
+  type SimCandidate,
+  type SimCardId,
+  type SimCardRow,
 } from './telephony.repository.js';
+
+/**
+ * Маскирование номера для журнала.
+ *
+ * Номер SIM — персональные данные партнёра. В журнале нужен опознаваемый след,
+ * а не сам номер: `7913*****33`.
+ */
+function maskMsisdn(msisdn: string): string {
+  return `${msisdn.slice(0, 4)}*****${msisdn.slice(-2)}`;
+}
 
 /** Учётная запись вместе с паролем. Пароль существует только здесь и только один раз. */
 export interface IssuedSipAccount {
@@ -39,6 +58,7 @@ export class TelephonyService {
   constructor(
     private readonly repository: TelephonyRepository,
     private readonly audit: AuditService,
+    private readonly resolver: OperatorResolverService,
     @Inject(APP_CONFIG) private readonly config: Config,
   ) {}
 
@@ -217,6 +237,223 @@ export class TelephonyService {
 
   async listChannels(clientId?: Id<'client'>): Promise<ChannelRow[]> {
     return this.repository.listChannels(clientId);
+  }
+
+  // --- SIM-карты --------------------------------------------------------------
+
+  /**
+   * Заводит SIM и **сверяет объявленного оператора с фактическим**.
+   *
+   * Партнёр объявляет оператора сам, а от этого значения зависит вся экономика вызова:
+   * SIM звонит бесплатно только внутри своей сети ([ADR-0013](../../../../../docs/adr/0013-opredelenie-operatora.md)).
+   * Ошибка здесь означает не «чуть дороже», а платный звонок с каждого вызова через эту SIM.
+   *
+   * Поэтому собственный номер SIM прогоняется через тот же `OperatorResolver`, что и номера
+   * назначения. Три исхода, и они разные:
+   *
+   * - подтверждён и совпал → запись с отметкой о сверке;
+   * - **подтверждён и не совпал → отказ.** Это не предупреждение: заводить SIM с заведомо
+   *   неверным оператором значит согласиться терять деньги партнёра на каждом вызове;
+   * - не подтверждён → запись без отметки. «Источник не знает» и «источник возразил» —
+   *   разные утверждения, и второе не следует из первого.
+   */
+  async createSim(
+    input: {
+      partnerId: Id<'partner'>;
+      operatorId: Id<'operator'>;
+      msisdn: Msisdn;
+      iccid: string | null;
+      activatedAt: Date | null;
+    },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<SimCardRow> {
+    const resolution = await this.resolver.resolve(input.msisdn);
+    let confirmedAt: Date | null = null;
+
+    if (resolution.confirmed && resolution.serving !== undefined) {
+      if (resolution.serving.id !== input.operatorId) {
+        throw validationFailed('Объявленный оператор не совпадает с фактическим', {
+          details: {
+            declared_operator_id: input.operatorId,
+            actual_operator_id: resolution.serving.id,
+            actual_operator: resolution.serving.name,
+          },
+        });
+      }
+      confirmedAt = new Date();
+    }
+
+    const sim = await this.repository.createSim({
+      partnerId: input.partnerId,
+      operatorId: input.operatorId,
+      msisdn: input.msisdn,
+      iccid: input.iccid,
+      activatedAt: input.activatedAt,
+      operatorConfirmedAt: confirmedAt,
+    });
+
+    await this.audit.record({
+      action: 'sim.created',
+      entityType: 'sim_card',
+      entityId: sim.id,
+      actorUserId,
+      actorRole,
+      // Номер маскируется: он персональные данные партнёра, а журнал читают люди,
+      // которым полный номер не нужен (ADR-0004).
+      after: {
+        msisdn: maskMsisdn(sim.msisdn),
+        operator_id: sim.operatorId,
+        operator_confirmed: confirmedAt !== null,
+      },
+    });
+
+    return sim;
+  }
+
+  async setSimStatus(
+    id: SimCardId,
+    status: SimStatus,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<SimCardRow> {
+    const existing = await this.repository.findSim(id);
+    if (existing === undefined) throw notFound('SIM не найдена');
+
+    const updated = await this.repository.setSimStatus(id, status);
+    if (updated === undefined) throw notFound('SIM не найдена');
+
+    await this.audit.record({
+      action: 'sim.status_changed',
+      entityType: 'sim_card',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: { status: existing.status },
+      after: { status },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Меняет число одновременных вызовов на SIM.
+   *
+   * Инвариант DOMAIN.md: это делает **только администратор**. Партнёр заинтересован
+   * поднять значение и не увидеть последствий сразу — а последствие одно и позднее:
+   * оператор блокирует SIM за поведение, не похожее на человеческое.
+   */
+  async setSimConcurrency(
+    id: SimCardId,
+    value: number,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<SimCardRow> {
+    const existing = await this.repository.findSim(id);
+    if (existing === undefined) throw notFound('SIM не найдена');
+
+    const updated = await this.repository.setSimConcurrency(id, value);
+    if (updated === undefined) throw notFound('SIM не найдена');
+
+    await this.audit.record({
+      action: 'sim.concurrency_changed',
+      entityType: 'sim_card',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: { max_concurrent_calls: existing.maxConcurrentCalls },
+      after: { max_concurrent_calls: value },
+    });
+
+    return updated;
+  }
+
+  async listSims(partnerId?: Id<'partner'>): Promise<SimCardRow[]> {
+    return this.repository.listSims(partnerId);
+  }
+
+  // --- Порты -------------------------------------------------------------------
+
+  async addPort(
+    gatewayId: GatewayId,
+    portNumber: number,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<GatewayPortRow> {
+    const gateway = await this.repository.findGateway(gatewayId);
+    if (gateway === undefined) throw notFound('Шлюз не найден');
+
+    const port = await this.repository.createPort({ gatewayId, portNumber });
+    await this.audit.record({
+      action: 'gateway_port.created',
+      entityType: 'gateway_port',
+      entityId: port.id,
+      actorUserId,
+      actorRole,
+      after: { gateway_id: gatewayId, port_number: portNumber },
+    });
+    return port;
+  }
+
+  /**
+   * Ставит SIM в порт или вынимает её.
+   *
+   * SIM и порт обязаны принадлежать одному партнёру: иначе чужая SIM оказалась бы
+   * в чужом шлюзе, а выручка от вызова ушла бы не тому.
+   */
+  async assignSimToPort(
+    portId: GatewayPortId,
+    simCardId: SimCardId | null,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<GatewayPortRow> {
+    const port = await this.repository.findPort(portId);
+    if (port === undefined) throw notFound('Порт не найден');
+
+    const gateway = await this.repository.findGateway(port.gatewayId);
+    if (gateway === undefined) throw notFound('Шлюз не найден');
+
+    if (simCardId !== null) {
+      const sim = await this.repository.findSim(simCardId);
+      if (sim === undefined) throw notFound('SIM не найдена');
+      if (sim.partnerId !== gateway.partnerId) {
+        throw validationFailed('SIM и шлюз принадлежат разным партнёрам');
+      }
+    }
+
+    const updated = await this.repository.setPortSim(portId, simCardId);
+    if (updated === undefined) throw notFound('Порт не найден');
+
+    await this.audit.record({
+      action: simCardId === null ? 'gateway_port.sim_removed' : 'gateway_port.sim_installed',
+      entityType: 'gateway_port',
+      entityId: portId,
+      actorUserId,
+      actorRole,
+      before: { sim_card_id: port.simCardId },
+      after: { sim_card_id: simCardId },
+    });
+
+    return updated;
+  }
+
+  async listPorts(gatewayId: GatewayId): Promise<GatewayPortRow[]> {
+    return this.repository.listPorts(gatewayId);
+  }
+
+  /**
+   * Кандидаты на терминацию под конкретного оператора.
+   *
+   * Понадобится маршрутизации; здесь же доступно поддержке для разбора «почему
+   * не звонит» — вопрос почти всегда сводится к «а есть ли вообще подходящая SIM».
+   */
+  async findSimCandidates(
+    operatorId: Id<'operator'>,
+    requiresRecording: boolean,
+  ): Promise<SimCandidate[]> {
+    return this.repository.findSimCandidates(operatorId, {
+      excludeRecordingIncapable: requiresRecording,
+    });
   }
 
   // --- Каталог для узла -------------------------------------------------------
