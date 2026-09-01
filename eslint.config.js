@@ -17,6 +17,11 @@ export default tseslint.config(
       '@typescript-eslint/no-unnecessary-condition': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/consistent-type-imports': 'error',
+      // Подчёркивание в начале имени — принятый способ сказать «значение не нужно».
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
     },
   },
   {
