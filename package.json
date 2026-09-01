@@ -14,12 +14,13 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --build --force",
-    "deadcode": "knip",
+    "deadcode": "node scripts/deadcode.mjs",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "pnpm --filter @zvonix/db db:generate",
     "db:migrate": "pnpm --filter @zvonix/db db:migrate",
-    "admin:create": "pnpm --filter @zvonix/api admin:create"
+    "admin:create": "pnpm --filter @zvonix/api admin:create",
+    "numbers:resolve": "pnpm --filter @zvonix/api numbers:resolve"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

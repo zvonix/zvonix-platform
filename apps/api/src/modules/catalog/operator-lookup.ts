@@ -86,8 +86,16 @@ interface VoxlinkResponse {
   readonly region?: unknown;
 }
 
+/**
+ * Значение из ответа источника.
+ *
+ * Прочерк источник ставит там, где значения нет, — и записать его как регион
+ * значит завести регион с названием «-» и отдавать его партнёру в покрытии.
+ */
 function text(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' || trimmed === '-' ? undefined : trimmed;
 }
 
 @Injectable()

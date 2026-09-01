@@ -37,7 +37,22 @@ async function main(): Promise<void> {
 
   // Поднимается всё приложение целиком: администратор создаётся тем же кодом,
   // что и любая другая учётная запись, включая параметры хеширования пароля.
-  const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
+  // `abortOnError: false` обязателен: иначе NestJS перехватывает ошибку провайдера
+  // и завершает процесс сам, до нашего обработчика. Неверная конфигурация тогда
+  // выглядит как молчаливый выход с кодом 1 — без единого слова о причине.
+  let app;
+  try {
+    app = await NestFactory.createApplicationContext(AppModule, {
+      logger: false,
+      abortOnError: false,
+    });
+  } catch (cause) {
+    process.stderr.write(`Не удалось поднять приложение: ${String(cause)}
+`);
+    process.exitCode = 1;
+    return;
+  }
+
   try {
     const created = await app.get(IdentityService).createByAdmin({
       email: input.data.ADMIN_EMAIL,

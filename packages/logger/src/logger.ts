@@ -84,10 +84,21 @@ export function createLogger(options: LoggerOptions, destination?: DestinationSt
   };
 
   const root = stream === undefined ? pino(settings) : pino(settings, stream);
-  return wrap(root.child({ component: options.component }));
+  return wrap(root, { component: options.component });
 }
 
-function wrap(instance: PinoLogger): Logger {
+/**
+ * Оборачивает pino, храня накопленные поля отдельно от него.
+ *
+ * Дочерний логгер создаётся от **корня** с полным набором полей, а не от родителя.
+ * Причина: pino склеивает поля родителя и потомка как готовые куски текста и одинаковый
+ * ключ не заменяет, а дописывает. Дочерний логгер от дочернего давал запись с двумя
+ * полями `component` подряд — по такой записи нельзя ни отфильтровать, ни понять,
+ * какой компонент её написал.
+ */
+function wrap(root: PinoLogger, bindings: Record<string, unknown>): Logger {
+  const instance = root.child(bindings);
+
   const write = (level: LogLevel, message: string, fields?: LogFields): void => {
     instance[level](fields === undefined ? {} : (redact(fields) as object), message);
   };
@@ -108,7 +119,7 @@ function wrap(instance: PinoLogger): Logger {
       instance.error(redact(payload) as object, message);
     },
     child: (component, fields) =>
-      wrap(instance.child({ component, ...(redact(fields ?? {}) as object) })),
+      wrap(root, { ...bindings, component, ...(redact(fields ?? {}) as object) }),
   };
 }
 

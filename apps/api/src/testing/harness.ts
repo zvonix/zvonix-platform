@@ -33,16 +33,18 @@ function assertTestDatabase(url = TEST_DATABASE_URL): void {
  * читает конфигурацию при импорте зависимостей, и опоздать сюда — значит получить
  * отказ загрузки конфигурации вместо теста (ADR-0002).
  */
-export function prepareEnvironment(url = TEST_DATABASE_URL): void {
-  assertTestDatabase(url);
-  process.env['DATABASE_URL'] = url;
+export function prepareEnvironment(overrides: Record<string, string> = {}): void {
+  assertTestDatabase(TEST_DATABASE_URL);
+  process.env['DATABASE_URL'] = TEST_DATABASE_URL;
   process.env['SECRET_KEY'] = 'x'.repeat(32);
   process.env['APP_ENV'] = 'test';
   process.env['LOG_LEVEL'] = 'error';
   process.env['LOG_FORMAT'] = 'json';
-  // Внешний сервис определения оператора в тестах не дёргаем: проверка не должна
-  // зависеть ни от сети, ни от чужой доступности (ADR-0006).
+  // Настоящий внешний сервис в тестах не дёргаем: проверка не должна зависеть
+  // ни от сети, ни от чужой доступности (ADR-0006). Заглушка на границе —
+  // допустима и подставляется через переопределение адреса.
   process.env['OPERATOR_LOOKUP_ENABLED'] = 'false';
+  Object.assign(process.env, overrides);
 }
 
 /** Приводит базу к состоянию сразу после миграций. Каждый прогон начинается с чистого. */

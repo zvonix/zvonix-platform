@@ -7,7 +7,8 @@
     "typecheck": "tsc --build",
     "dev": "concurrently -n tsc,api -c blue,green \"tsc --build --watch --preserveWatchOutput ../../tsconfig.json\" \"node --watch --enable-source-maps dist/main.js\"",
     "start": "node --enable-source-maps dist/main.js",
-    "admin:create": "node dist/modules/identity/create-admin.js"
+    "admin:create": "node dist/modules/identity/create-admin.js",
+    "numbers:resolve": "node dist/modules/catalog/resolve-batch.js"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

@@ -34,6 +34,10 @@ export async function buildApplication(): Promise<BuiltApplication> {
     // Свой логгер (ADR-0004). Штатный вывод NestJS оставлен только для сообщений
     // самого фреймворка при старте.
     bufferLogs: true,
+    // Ошибку провайдера NestJS по умолчанию перехватывает и завершает процесс сам,
+    // до вызывающего кода. Тогда неверная конфигурация выглядит как молчаливый выход
+    // с кодом 1, и причину приходится искать наугад.
+    abortOnError: false,
   });
 
   const config = app.get<Config>(APP_CONFIG);

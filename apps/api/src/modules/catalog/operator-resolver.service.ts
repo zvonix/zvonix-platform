@@ -50,6 +50,27 @@ export interface OperatorResolution {
   readonly confirmed: boolean;
   /** Почему не подтверждён — для внятного отказа и для разбора. */
   readonly reason?: string;
+  /**
+   * Названия операторов, которые вернул источник, но которых нет в справочнике.
+   *
+   * Возвращаются наружу, а не только пишутся в лог: это единственный способ узнать,
+   * какие написания администратору нужно добавить. Без них пробел в справочнике
+   * выглядит как «номер не определяется» и разбирается чтением логов.
+   *
+   * Сюда попадает и обслуживающий оператор, и прежний: незнакомый прежний оператор
+   * означает, что факт переноса записан не будет, а это искажает и приоритет
+   * фонового обновления, и замер доли перенесённых номеров.
+   */
+  readonly unknownOperatorNames?: readonly string[];
+  /**
+   * Источник сообщил, что номер переносился, — независимо от того, знает ли
+   * справочник названного прежнего оператора.
+   *
+   * Отделено от `previousOperator` намеренно: иначе доля перенесённых номеров
+   * занижается ровно на те случаи, где справочник неполон, то есть замер врёт
+   * тем сильнее, чем хуже данные.
+   */
+  readonly portedBySource?: boolean;
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -88,6 +109,14 @@ export class OperatorResolverService {
     if (answer !== undefined) {
       const resolved = await this.store(msisdn, answer, now);
       if (resolved !== undefined) return resolved;
+
+      // Источник ответил, но названия нет в справочнике. Имя надо донести наверх:
+      // иначе пробел в справочнике неотличим от неизвестного номера.
+      return {
+        ...(await this.fromNumberingPlan(msisdn, 'operator_not_in_catalog')),
+        unknownOperatorNames: [answer.operatorName],
+        portedBySource: answer.previousOperatorName !== undefined,
+      };
     }
 
     return this.fromNumberingPlan(msisdn, this.lookup.enabled ? undefined : 'lookup_disabled');
@@ -125,6 +154,13 @@ export class OperatorResolverService {
     // База такую пару отвергнет ограничением, поэтому отбрасываем здесь.
     const previousId = previous === undefined || previous.id === serving.id ? null : previous.id;
 
+    // Прежний оператор назван, но справочник его не знает: факт переноса записан
+    // не будет. Это пробел справочника, и о нём нужно сообщить, а не проглотить.
+    const missingPrevious =
+      answer.previousOperatorName !== undefined && previous === undefined
+        ? [answer.previousOperatorName]
+        : [];
+
     await this.repository.saveResolution({
       msisdn,
       operatorId: serving.id,
@@ -136,7 +172,18 @@ export class OperatorResolverService {
     });
     await this.repository.registerUse(msisdn, now);
 
-    return this.build(msisdn, serving.id, previousId, answer.region ?? null, 'lookup');
+    const resolution = await this.build(
+      msisdn,
+      serving.id,
+      previousId,
+      answer.region ?? null,
+      'lookup',
+    );
+    return {
+      ...resolution,
+      portedBySource: answer.previousOperatorName !== undefined,
+      ...(missingPrevious.length === 0 ? {} : { unknownOperatorNames: missingPrevious }),
+    };
   }
 
   /** Последний рубеж: кому выделен диапазон. Оператора не подтверждает. */
