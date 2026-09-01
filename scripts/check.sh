@@ -30,10 +30,10 @@ die_not_configured() {
 # --- Шаги проверки -----------------------------------------------------------
 # Порядок важен: сначала дешёвые и быстрые, потом дорогие.
 
-step "Формат"     die_not_configured   # TODO: prettier --check . | ruff format --check . | gofmt -l .
-step "Линтер"     die_not_configured   # TODO: eslint . | ruff check . | golangci-lint run
-step "Типы"       die_not_configured   # TODO: tsc --noEmit | mypy . | (встроено в компилятор)
-step "Тесты"      die_not_configured   # TODO: vitest run | pytest | go test ./...
+step "Формат"    pnpm format:check
+step "Линтер"    pnpm lint
+step "Типы"      pnpm typecheck
+step "Тесты"     pnpm test
 
 # --- Итог --------------------------------------------------------------------
 echo ""

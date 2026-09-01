@@ -28,5 +28,18 @@
       "Bash(git reset --hard:*)",
       "Bash(git clean:*)"
     ]
+  },
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"systemMessage\": \"Перед сжатием контекста: зафиксируй состояние в TASKS.md и docs/\", \"hookSpecificOutput\": {\"hookEventName\": \"PreCompact\", \"additionalContext\": \"Контекст сейчас будет сжат. Прежде чем продолжать, зафиксируй в файлах всё, что нельзя потерять: состояние и следующий шаг в TASKS.md, принятые решения в docs/adr/, выясненные факты о внешних системах в docs/. Не полагайся на память о разговоре.\"}}'",
+            "statusMessage": "Фиксация состояния перед сжатием"
+          }
+        ]
+      }
+    ]
   }
 }
