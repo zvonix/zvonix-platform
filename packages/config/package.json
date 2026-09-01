@@ -1,5 +1,5 @@
 {
-  "name": "@zvonix/shared",
+  "name": "@zvonix/config",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,6 +10,7 @@
     "typecheck": "tsc --build"
   },
   "dependencies": {
+    "@zvonix/shared": "workspace:*",
     "zod": "^4.5.4"
   }
 }
