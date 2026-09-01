@@ -15,6 +15,13 @@
       "when": 1788266667722,
       "tag": "0001_spravochnik_operatorov",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788270631959,
+      "tag": "0002_dengi_scheta_i_provodki",
+      "breakpoints": true
     }
   ]
 }

@@ -73,14 +73,21 @@ describe('соглашения схемы (ADR-0016)', () => {
     }
   });
 
-  it.each(tables)('%s: идентификаторы объявлены как uuid', (_name, table) => {
-    for (const column of getTableConfig(table).columns) {
-      const name = column.name;
-      if (name === 'id' || /Id$/.test(name)) {
-        // Исключения: `correlationId` приходит извне и не обязан быть UUID,
-        // `entityId` в журнале аудита ссылается в том числе на сущности
-        // с числовым номером (CDR, проводка) и на объекты внешних систем.
-        if (name === 'correlationId' || name === 'entityId') continue;
+  it.each(tables)('%s: ссылки на другие таблицы объявлены как uuid', (_name, table) => {
+    const config = getTableConfig(table);
+
+    // Правило про «всё, что кончается на Id» было слишком грубым: под него попадали
+    // и полиморфные ссылки — `accounts.owner_id` указывает то на клиента, то на партнёра,
+    // а `ledger_transactions.reference_id` — на вызов, платёж или заявку на выплату.
+    // Одним внешним ключом это не выразить, поэтому и тип там текстовый.
+    //
+    // Проверяем то, что имели в виду на самом деле: **настоящая** ссылка обязана быть uuid.
+    const referencing = new Set(
+      config.foreignKeys.flatMap((key) => key.reference().columns.map((column) => column.name)),
+    );
+
+    for (const column of config.columns) {
+      if (column.primary || referencing.has(column.name)) {
         expect(column.getSQLType()).toBe('uuid');
       }
     }

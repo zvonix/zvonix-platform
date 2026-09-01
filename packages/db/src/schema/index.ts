@@ -8,3 +8,11 @@
 export { users, sessions } from './users.js';
 export { auditLog } from './audit-log.js';
 export { operators, operatorAliases, numberingPlanRanges, numberResolutions } from './catalog.js';
+export {
+  clients,
+  partners,
+  partnerAliases,
+  accounts,
+  ledgerTransactions,
+  ledgerEntries,
+} from './billing.js';
