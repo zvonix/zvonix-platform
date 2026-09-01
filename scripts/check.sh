@@ -110,6 +110,7 @@ dependency_audit() {
 # --- Шаги проверки -----------------------------------------------------------
 
 step "Формат"        pnpm format:check
+step "Ссылки в доках" node scripts/docs-links.mjs
 step "Линтер"        pnpm lint
 step "Типы"          pnpm typecheck
 step "Мёртвый код"   pnpm deadcode
