@@ -25,7 +25,7 @@ export class MachineSelfController {
   self(@CurrentMachine() machine: MachinePrincipal): {
     key_id: string;
     kind: string;
-    owner_id: string | null;
+    owner_id: string;
   } {
     return { key_id: machine.keyId, kind: machine.kind, owner_id: machine.ownerId };
   }

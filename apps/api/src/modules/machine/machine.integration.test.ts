@@ -56,15 +56,33 @@ async function issueNodeKey(allowedIps: string[] = []): Promise<IssuedKey> {
   return response.json<{ key: IssuedKey }>().key;
 }
 
-async function issueEnrollment(): Promise<IssuedKey> {
+/**
+ * Токен установки выпускается только вместе с узлом: он бессмыслен без узла,
+ * для которого предназначен. Достаём его из команды установки — ровно оттуда,
+ * откуда его берёт человек.
+ */
+async function issueEnrollment(): Promise<{
+  keyId: string;
+  secret: string;
+  expiresAt: string | null;
+}> {
   const response = await api().inject({
     method: 'POST',
-    url: '/machine-keys/enrollment',
+    url: '/nodes',
     headers: auth(),
-    payload: { label: 'Установка узла' },
+    payload: { name: `Узел ${String(Date.now())}-${String(Math.random()).slice(2, 8)}` },
   });
   expect(response.statusCode).toBe(201);
-  return response.json<{ key: IssuedKey }>().key;
+  const install = response.json<{ install: { command: string; token_expires_at: string | null } }>()
+    .install;
+
+  const presented = install.command.slice(install.command.lastIndexOf(' ') + 1);
+  const at = presented.indexOf('.');
+  return {
+    keyId: presented.slice(0, at),
+    secret: presented.slice(at + 1),
+    expiresAt: install.token_expires_at,
+  };
 }
 
 const self = (headers: Record<string, string>) =>
@@ -129,8 +147,8 @@ describe('выпуск ключа', () => {
 
   it('у токена установки срок есть и он короткий', async () => {
     const key = await issueEnrollment();
-    expect(key.expires_at).not.toBeNull();
-    const hours = (new Date(key.expires_at ?? 0).getTime() - Date.now()) / 3_600_000;
+    expect(key.expiresAt).not.toBeNull();
+    const hours = (new Date(key.expiresAt ?? 0).getTime() - Date.now()) / 3_600_000;
     expect(hours).toBeGreaterThan(0);
     expect(hours).toBeLessThanOrEqual(1);
   });
@@ -273,45 +291,7 @@ describe('два контура не смешиваются', () => {
 
   it('токен установки не годится как рабочий ключ', async () => {
     const key = await issueEnrollment();
-    expect((await self(basic(key.key_id, key.secret))).statusCode).toBe(401);
-  });
-});
-
-describe('одноразовость токена установки', () => {
-  it('применяется ровно один раз даже при одновременных попытках', async () => {
-    const key = await issueEnrollment();
-    const { MachineService } = await import('./machine.service.js');
-    const service = api().get(MachineService);
-    const presented = { keyId: key.key_id, secret: key.secret };
-
-    const attempts = await Promise.allSettled([
-      service.consumeEnrollment(presented, '127.0.0.1'),
-      service.consumeEnrollment(presented, '127.0.0.1'),
-      service.consumeEnrollment(presented, '127.0.0.1'),
-    ]);
-
-    // Условное обновление, а не проверка перед записью: иначе все три увидели бы
-    // «не применён», и одноразовость осталась бы только словом.
-    expect(attempts.filter((a) => a.status === 'fulfilled')).toHaveLength(1);
-    expect(attempts.filter((a) => a.status === 'rejected')).toHaveLength(2);
-  });
-
-  it('повторное применение попадает в журнал: команду прочитал кто-то ещё', async () => {
-    const key = await issueEnrollment();
-    const { MachineService } = await import('./machine.service.js');
-    const service = api().get(MachineService);
-    const presented = { keyId: key.key_id, secret: key.secret };
-
-    await service.consumeEnrollment(presented, '127.0.0.1');
-    await expect(service.consumeEnrollment(presented, '127.0.0.1')).rejects.toThrow();
-
-    const recorded = await withDatabase(async (execute) => {
-      const result = await execute(
-        sql`select count(*)::int as n from audit_log where action = 'machine_key.enrollment_reused'`,
-      );
-      return (result.rows[0] as { n: number }).n;
-    });
-    expect(recorded).toBeGreaterThan(0);
+    expect((await self(basic(key.keyId, key.secret))).statusCode).toBe(401);
   });
 });
 

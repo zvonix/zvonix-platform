@@ -35,18 +35,48 @@ export interface IssuedKey {
   readonly secretHash: string;
 }
 
+/**
+ * Алфавит видимой части идентификатора: строчные буквы и цифры.
+ *
+ * Нижний регистр — потому что идентификатор читают вслух в поддержке и переписывают
+ * руками. Разделителей `-` и `_` здесь нет: они уже разделяют части `zvx_node_…`.
+ */
+const KEY_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/**
+ * Наибольшее кратное длине алфавита, помещающееся в байт.
+ *
+ * Байты сверх него отбрасываются: `% 36` от произвольного байта даёт первым десяти
+ * символам алфавита больший вес. Смещение не ломает уникальность, но сокращает
+ * пространство идентификаторов, а расплачиваться за это пришлось бы совпадениями.
+ */
+const UNBIASED_LIMIT = Math.floor(256 / KEY_ID_ALPHABET.length) * KEY_ID_ALPHABET.length;
+
+/**
+ * Видимая часть идентификатора — ровно `KEY_ID_CHARS` символов.
+ *
+ * Ровно, а не «примерно»: формат `zvx_node_<12 символов>` записан в ADR-0019 и в контракте,
+ * а идентификатор плавающей длины ломает и разбор, и поиск глазами в логах.
+ */
+function randomKeyIdSuffix(): string {
+  let suffix = '';
+  while (suffix.length < KEY_ID_CHARS) {
+    for (const byte of randomBytes(KEY_ID_CHARS)) {
+      if (byte >= UNBIASED_LIMIT) continue;
+      // `charAt`, а не индексация: при `noUncheckedIndexedAccess` вторая даёт
+      // `string | undefined`, и `undefined` молча склеился бы в идентификатор.
+      suffix += KEY_ID_ALPHABET.charAt(byte % KEY_ID_ALPHABET.length);
+      if (suffix.length === KEY_ID_CHARS) break;
+    }
+  }
+  return suffix;
+}
+
 export function issueKey(kind: MachineKeyKind): IssuedKey {
-  // base64url даёт буквы обоих регистров; идентификатор приводится к нижнему,
-  // потому что его читают вслух и переписывают руками.
-  const suffix = randomBytes(KEY_ID_CHARS)
-    .toString('base64url')
-    .replace(/[^a-zA-Z0-9]/g, '')
-    .toLowerCase()
-    .slice(0, KEY_ID_CHARS);
   const secret = randomBytes(SECRET_BYTES).toString('base64url');
 
   return {
-    keyId: `zvx_${keyIdTag(kind)}_${suffix}`,
+    keyId: `zvx_${keyIdTag(kind)}_${randomKeyIdSuffix()}`,
     secret,
     secretHash: hashSecret(secret),
   };

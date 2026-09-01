@@ -17,6 +17,9 @@
   баланса. Обоснование — [ADR-0010](../adr/0010-model-billinga.md).
 - [machine-keys.md](machine-keys.md) — выпуск и отзыв ключей узлов и клиентских
   интеграций. Обоснование — [ADR-0019](../adr/0019-dostup-mashin.md).
+- [nodes.md](nodes.md) — реестр узлов АТС: заведение, команда установки, регистрация,
+  heartbeat, вывод из эксплуатации. Обоснование —
+  [ADR-0009](../adr/0009-programmnaya-ats.md).
 - [node.md](node.md) — узел АТС → control plane: учётные записи SIP, запрос маршрута
   на каждый вызов, CDR, регистрация узла, heartbeat. Обоснование —
   [ADR-0009](../adr/0009-programmnaya-ats.md) и [ADR-0019](../adr/0019-dostup-mashin.md).

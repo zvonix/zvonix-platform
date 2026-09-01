@@ -38,13 +38,22 @@ import { MachineRepository, type MachineKeyId, type MachineKeyRow } from './mach
  */
 const ABSENT_KEY_HASH = hashSecret('отсутствующий ключ');
 
+/**
+ * Ключи, которыми машина работает.
+ *
+ * Токена установки здесь нет намеренно: он обменивается на постоянный ключ отдельным
+ * обработчиком и больше ни на что не годится. Обработчик, который его принимает,
+ * обязан назвать его вид явно.
+ */
+const WORKING_KINDS: readonly MachineKeyKind[] = ['node', 'client_api'];
+
 /** Проверенная машина. Роли пользователя здесь нет и быть не может. */
 export interface MachinePrincipal {
   readonly credentialId: MachineKeyId;
   readonly keyId: string;
   readonly kind: MachineKeyKind;
-  /** Узел или клиент. У одноразового токена установки владельца ещё нет. */
-  readonly ownerId: string | null;
+  /** Узел или клиент. Обязателен и у токена установки: он выпускается для узла. */
+  readonly ownerId: string;
 }
 
 /** Ключ вместе с секретом. Секрет существует только здесь и только один раз. */
@@ -57,11 +66,16 @@ export interface IssuedCredential {
 
 export interface IssueInput {
   readonly kind: MachineKeyKind;
-  readonly ownerId: string | null;
+  readonly ownerId: string;
   readonly label: string;
   readonly allowedIps: readonly string[];
-  readonly actorUserId: Id<'user'>;
-  readonly actorRole: UserRole;
+  /**
+   * Кто выпустил. `null` — выпустила система: так происходит, когда узел сам
+   * обменивает токен установки на рабочий ключ. Приписывать это администратору
+   * значило бы соврать журналу о том, кто действовал.
+   */
+  readonly actorUserId: Id<'user'> | null;
+  readonly actorRole: UserRole | null;
 }
 
 @Injectable()
@@ -77,13 +91,25 @@ export class MachineService {
   }
 
   /**
-   * Проверяет предъявленный ключ.
+   * Проверяет предъявленный ключ. **Без побочных действий, кроме отметки о применении.**
+   *
+   * Вызывается из защитника, поэтому ничего не расходует: одноразовый токен установки
+   * здесь только проверяется, а помечается применённым — в обработчике. Защитник,
+   * который тратит ресурс, тратит его и на запросе, который потом упадёт на разборе тела.
    *
    * Наружу все отказы выглядят одинаково: по разнице ответов иначе выясняется, какой
    * идентификатор существует и с какого адреса ключ принимается. Настоящая причина
    * уходит в лог — там её и читает тот, кто разбирает отказ узла.
+   *
+   * Пустой `allowedKinds` означает «любой рабочий ключ»: токен установки рабочим
+   * не является и требует явного указания.
    */
-  async authenticate(presented: PresentedKey, ip: string | undefined): Promise<MachinePrincipal> {
+  async verify(
+    presented: PresentedKey,
+    ip: string | undefined,
+    allowedKinds: readonly MachineKeyKind[] = WORKING_KINDS,
+  ): Promise<MachinePrincipal> {
+    const kinds = allowedKinds.length === 0 ? WORKING_KINDS : allowedKinds;
     const now = new Date();
     const row = await this.repository.findByKeyId(presented.keyId);
     const presentedHash = hashSecret(presented.secret);
@@ -107,10 +133,8 @@ export class MachineService {
     if (!ipAllowed(row.allowedIps, ip)) {
       this.reject(presented.keyId, 'адрес не в списке разрешённых', ip);
     }
-    if (row.kind === 'enrollment') {
-      // Одноразовый токен установки — не учётные данные для работы: он обменивается
-      // на постоянный ключ отдельным обработчиком и больше ни на что не годится.
-      this.reject(presented.keyId, 'токен установки предъявлен как рабочий ключ', ip);
+    if (!kinds.includes(row.kind)) {
+      this.reject(presented.keyId, `ключ вида ${row.kind} здесь не принимается`, ip);
     }
 
     if (
@@ -129,43 +153,25 @@ export class MachineService {
   }
 
   /**
-   * Применяет одноразовый токен установки.
+   * Помечает одноразовый токен установки применённым.
    *
-   * Отметка ставится условным обновлением, а не проверкой перед записью: два одновременных
-   * запуска скрипта иначе оба прошли бы проверку, и «одноразовый» стал бы словом.
+   * Ключ к этому моменту уже проверен защитником. Отметка ставится условным обновлением,
+   * а не проверкой перед записью: два одновременных запуска скрипта иначе оба прошли бы
+   * проверку, и «одноразовый» осталось бы только словом.
    */
-  async consumeEnrollment(presented: PresentedKey, ip: string | undefined): Promise<MachineKeyRow> {
-    const now = new Date();
-    const row = await this.repository.findByKeyId(presented.keyId);
-    const presentedHash = hashSecret(presented.secret);
-
-    if (row === undefined) {
-      secretHashEquals(ABSENT_KEY_HASH, presentedHash);
-      this.reject(presented.keyId, 'токен установки не найден', ip);
-    }
-    if (!secretHashEquals(row.secretHash, presentedHash)) {
-      this.reject(presented.keyId, 'секрет токена установки не совпал', ip);
-    }
-    if (row.kind !== 'enrollment') {
-      this.reject(presented.keyId, 'предъявлен не токен установки', ip);
-    }
-    if (row.revokedAt !== null) {
-      this.reject(presented.keyId, 'токен установки отозван', ip);
-    }
-    if (row.expiresAt !== null && row.expiresAt <= now) {
-      this.reject(presented.keyId, 'срок токена установки истёк', ip);
-    }
-
-    const consumed = await this.repository.consumeEnrollment(row.id, now);
+  async consumeEnrollment(
+    credentialId: MachineKeyId,
+    ip: string | undefined,
+  ): Promise<MachineKeyRow> {
+    const consumed = await this.repository.consumeEnrollment(credentialId, new Date());
     if (consumed === undefined) {
       // Повторное применение — не досадная случайность, а признак того, что команду
       // установки прочитал кто-то ещё. Поэтому запись в журнал, а не только отказ.
       await this.audit.record({
         action: 'machine_key.enrollment_reused',
         entityType: 'machine_credential',
-        entityId: row.id,
+        entityId: credentialId,
         ip: ip ?? null,
-        after: { key_id: row.keyId },
       });
       throw conflict('Токен установки уже применён');
     }
@@ -173,9 +179,9 @@ export class MachineService {
     await this.audit.record({
       action: 'machine_key.enrollment_consumed',
       entityType: 'machine_credential',
-      entityId: row.id,
+      entityId: credentialId,
       ip: ip ?? null,
-      after: { key_id: row.keyId },
+      after: { key_id: consumed.keyId, owner_id: consumed.ownerId },
     });
 
     return consumed;
@@ -217,6 +223,25 @@ export class MachineService {
       secret: issued.secret,
       expiresAt: row.expiresAt,
     };
+  }
+
+  /**
+   * Отзывает все действующие ключи владельца.
+   *
+   * Нужен при выводе узла из эксплуатации: оставить узел закрытым, а его ключи
+   * действующими значит оставить работающий доступ у машины, которой больше нет.
+   * Возвращает число отозванных — оно попадает в журнал.
+   */
+  async revokeAllOf(
+    ownerId: string,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<number> {
+    const rows = await this.repository.listLiveByOwner(ownerId);
+    for (const row of rows) {
+      await this.revoke(row.id, actorUserId, actorRole);
+    }
+    return rows.length;
   }
 
   async revoke(id: MachineKeyId, actorUserId: Id<'user'>, actorRole: UserRole): Promise<void> {

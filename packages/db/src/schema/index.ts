@@ -17,3 +17,4 @@ export {
   ledgerEntries,
 } from './billing.js';
 export { machineCredentials } from './machine.js';
+export { nodes } from './nodes.js';

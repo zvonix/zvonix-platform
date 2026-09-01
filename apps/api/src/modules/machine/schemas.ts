@@ -39,12 +39,3 @@ export const issueClientKeySchema = z.object({
   label,
   allowedIps: z.array(ipAddress).max(32, 'слишком много адресов').default([]),
 });
-
-export const issueEnrollmentSchema = z.object({
-  label,
-  /**
-   * Адрес будущего узла, если он известен заранее. Токен живёт час, но ограничение
-   * по адресу закрывает и этот час.
-   */
-  allowedIps: z.array(ipAddress).max(8, 'слишком много адресов').default([]),
-});

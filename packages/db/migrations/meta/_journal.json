@@ -29,6 +29,13 @@
       "when": 1788274184295,
       "tag": "0003_klyuchi_mashinnogo_dostupa",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788275727446,
+      "tag": "0004_reestr_uzlov",
+      "breakpoints": true
     }
   ]
 }

@@ -13,7 +13,7 @@ import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import { MachineService } from './machine.service.js';
-import { issueClientKeySchema, issueEnrollmentSchema, issueNodeKeySchema } from './schemas.js';
+import { issueClientKeySchema, issueNodeKeySchema } from './schemas.js';
 
 /**
  * Ключ в ответе на выпуск.
@@ -33,7 +33,7 @@ interface KeyView {
   readonly credential_id: string;
   readonly key_id: string;
   readonly kind: string;
-  readonly owner_id: string | null;
+  readonly owner_id: string;
   readonly label: string;
   readonly allowed_ips: readonly string[];
   readonly expires_at: string | null;
@@ -87,28 +87,9 @@ export class MachineController {
     return { key: toIssuedView(issued) };
   }
 
-  /**
-   * Одноразовый токен установки узла.
-   *
-   * Попадает в команду вида `curl … | sudo bash -s -- <токен>`, а та — в историю оболочки
-   * и в переписку. Поэтому живёт час и применяется ровно один раз.
-   */
-  @Roles('admin')
-  @Post('enrollment')
-  async issueEnrollment(
-    @Body(zodBody(issueEnrollmentSchema)) body: z.infer<typeof issueEnrollmentSchema>,
-    @CurrentUser() actor: Principal,
-  ): Promise<{ key: IssuedKeyView }> {
-    const issued = await this.machine.issue({
-      kind: 'enrollment',
-      ownerId: null,
-      label: body.label,
-      allowedIps: body.allowedIps,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
-    });
-    return { key: toIssuedView(issued) };
-  }
+  // Одноразовый токен установки выпускается вместе с узлом — в модуле `nodes`:
+  // он бессмыслен без узла, для которого предназначен, и второй способ его получить
+  // означал бы второй способ ошибиться.
 
   @Roles('admin')
   @Get()
@@ -147,7 +128,7 @@ function toKeyView(row: {
   id: string;
   keyId: string;
   kind: string;
-  ownerId: string | null;
+  ownerId: string;
   label: string;
   allowedIps: string[];
   expiresAt: Date | null;

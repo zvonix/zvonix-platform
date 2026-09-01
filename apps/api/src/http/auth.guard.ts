@@ -109,12 +109,9 @@ export class AuthGuard implements CanActivate {
       throw unauthenticated('Требуется машинный ключ');
     }
 
-    const principal = await this.machine.authenticate(presented, request.ip);
-    if (allowedKinds.length > 0 && !allowedKinds.includes(principal.kind)) {
-      throw permissionDenied('Ключ не того вида');
-    }
-
-    request.machine = principal;
+    // Вид ключа проверяется внутри `verify`, а не здесь: иначе отказ по виду отличался бы
+    // по ответу от отказа по секрету, и по разнице выяснялось бы, какой ключ существует.
+    request.machine = await this.machine.verify(presented, request.ip, allowedKinds);
     return true;
   }
 }

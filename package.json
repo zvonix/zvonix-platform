@@ -10,6 +10,7 @@
     "build": "tsc --build",
     "dev": "pnpm --filter @zvonix/api dev",
     "check": "bash scripts/check.sh",
+    "verify": "bash scripts/check.sh",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

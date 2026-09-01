@@ -36,7 +36,7 @@ export class MachineRepository {
     kind: MachineKeyKind;
     keyId: string;
     secretHash: string;
-    ownerId: string | null;
+    ownerId: string;
     label: string;
     allowedIps: string[];
     expiresAt: Date | null;
@@ -96,12 +96,17 @@ export class MachineRepository {
     return row;
   }
 
-  /** Ключи владельца, свежие сверху: по этому списку выполняется ротация. */
-  async listByOwner(kind: MachineKeyKind, ownerId: string): Promise<MachineKeyRow[]> {
+  /**
+   * Неотозванные ключи владельца, свежие сверху.
+   *
+   * По этому списку выполняется ротация и вывод узла из эксплуатации. Отозванные
+   * не возвращаются: отзывать отозванное незачем, а в журнал попал бы шум.
+   */
+  async listLiveByOwner(ownerId: string): Promise<MachineKeyRow[]> {
     return this.db
       .select()
       .from(machineCredentials)
-      .where(and(eq(machineCredentials.kind, kind), eq(machineCredentials.ownerId, ownerId)))
+      .where(and(eq(machineCredentials.ownerId, ownerId), isNull(machineCredentials.revokedAt)))
       .orderBy(sql`${machineCredentials.createdAt} desc`);
   }
 

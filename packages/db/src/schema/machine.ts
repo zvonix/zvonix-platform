@@ -32,10 +32,13 @@ export const machineCredentials = pgTable(
 
     /**
      * Узел или клиент. Ссылки на две разные таблицы внешним ключом не выразить —
-     * как `accounts.owner_id` в ADR-0010. У одноразового токена установки пусто:
-     * узла, которому он принадлежал бы, ещё нет.
+     * как `accounts.owner_id` в ADR-0010.
+     *
+     * Обязателен и у токена установки: по ARCHITECTURE.md администратор сначала заводит
+     * узел, а уже потом получает команду установки для него. Ничей токен позволял бы
+     * зарегистрировать узел, которого никто не заводил.
      */
-    ownerId: text(),
+    ownerId: text().notNull(),
 
     /** Человекочитаемое назначение: «Узел Москва-1, ключ от 2026-09-01». */
     label: text().notNull(),
@@ -68,12 +71,6 @@ export const machineCredentials = pgTable(
   },
   (t) => [
     check('machine_credentials_kind_check', oneOf(t.kind, MACHINE_KEY_KINDS)),
-    // Одноразовый токен установки ничьим быть и не может: узел появляется в момент
-    // его применения. У постоянных ключей владелец обязателен.
-    check(
-      'machine_credentials_owner_matches_kind',
-      sql`(${t.kind} = 'enrollment' and ${t.ownerId} is null) or (${t.kind} <> 'enrollment' and ${t.ownerId} is not null)`,
-    ),
     // Отметка о применении имеет смысл только у одноразового токена. У постоянного ключа
     // она означала бы, что кто-то перепутал её с `last_used_at`, и ключ тихо стал разовым.
     check(

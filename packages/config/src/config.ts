@@ -29,6 +29,7 @@ const PUBLIC_VARIABLES = new Set([
   'APP_NAME',
   'APP_HOST',
   'APP_PORT',
+  'PUBLIC_BASE_URL',
   'LOG_LEVEL',
   'LOG_FORMAT',
   'DATABASE_POOL_MAX',
@@ -59,6 +60,28 @@ export const configSchema = z.object({
   APP_NAME: z.string().min(1, 'не может быть пустым').default('zvonix'),
   APP_HOST: z.string().min(1, 'не может быть пустым').default('127.0.0.1'),
   APP_PORT: port.default(8000),
+
+  /**
+   * Адрес, по которому control plane виден **снаружи**: из него собирается команда
+   * установки узла и адреса, которые узел пишет себе в конфигурацию.
+   *
+   * `APP_HOST` для этого не годится: там адрес, который слушает процесс, и за обратным
+   * прокси это `127.0.0.1`. Узел, получивший такую команду, обратится сам к себе.
+   *
+   * Обязателен `https`: по этому каналу уходит секрет ключа в схеме Basic (ADR-0019).
+   * В разработке допускается `http` на локальном адресе — иначе локально ничего
+   * не проверить, а сертификата для `localhost` нет.
+   */
+  PUBLIC_BASE_URL: z
+    .url('должен быть адресом вида https://cp.example.com')
+    .refine(
+      (value) =>
+        value.startsWith('https://') ||
+        value.startsWith('http://127.0.0.1') ||
+        value.startsWith('http://localhost'),
+      'должен быть https: по этому каналу уходит секрет ключа',
+    )
+    .default('http://127.0.0.1:8000'),
 
   LOG_LEVEL: logLevel.default('info'),
   LOG_FORMAT: logFormat.default('json'),

@@ -46,7 +46,7 @@
 | Форматирование         | `pnpm format` |
 | Мёртвый код            | `pnpm deadcode` — knip: неиспользуемые файлы, экспорты и зависимости |
 | Ссылки в документации  | `node scripts/docs-links.mjs` — битые цели и несовпадение регистра |
-| **Полная проверка**    | `bash scripts/check.sh` — тот же скрипт гоняет CI |
+| **Полная проверка**    | `pnpm verify` (то же — `pnpm check`, `bash scripts/check.sh`). Тот же скрипт гоняет CI |
 | Сгенерировать миграцию | `pnpm db:generate` |
 | Применить миграции     | `pnpm db:migrate` |
 | Создать администратора | `ADMIN_EMAIL=… ADMIN_PASSWORD=… pnpm admin:create` (после `pnpm build`) |

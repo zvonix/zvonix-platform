@@ -32,6 +32,22 @@ describe('выпуск ключа', () => {
     expect(issued.secret.length).toBe(43);
   });
 
+  it('длина идентификатора постоянна на многих выпусках', () => {
+    // Прежняя реализация фильтровала base64url и изредка давала 10–11 символов:
+    // такое ловится не тестом, а падением раз в несколько тысяч ключей.
+    for (let i = 0; i < 5000; i += 1) {
+      expect(issueKey('node').keyId).toMatch(/^zvx_node_[a-z0-9]{12}$/);
+    }
+  });
+
+  it('в идентификаторе нет разделителей, которыми разделены его части', () => {
+    for (let i = 0; i < 200; i += 1) {
+      const suffix = issueKey('client_api').keyId.replace(/^zvx_client_/, '');
+      expect(suffix).not.toContain('_');
+      expect(suffix).not.toContain('-');
+    }
+  });
+
   it('два выпуска не совпадают', () => {
     const a = issueKey('node');
     const b = issueKey('node');
