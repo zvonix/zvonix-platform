@@ -74,6 +74,7 @@
 - [x] `packages/shared`: доменные ошибки по ADR-0003, 11 тестов — 2026-09-01
 - [x] `packages/config`: конфигурация по ADR-0002 на zod, 14 тестов — 2026-09-01
 - [x] docs/DESIGN.md: принципы интерфейса — 2026-09-01
+- [x] Прототип трёх кабинетов `docs/prototype/index.html`, опубликован для согласования — 2026-09-01
 - [x] Домен описан: DOMAIN.md, GLOSSARY.md, ARCHITECTURE.md, BACKLOG.md — 2026-09-01
 - [x] ADR 0008-0012: стек, АТС, биллинг, правовой контур, мобильное приложение — 2026-09-01
 - [x] Решено: АТС — FreeSWITCH ([ADR-0009](docs/adr/0009-programmnaya-ats.md)) — 2026-09-01

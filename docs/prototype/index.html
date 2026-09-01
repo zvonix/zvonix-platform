@@ -1,0 +1,1401 @@
+<title>Консоль Zvonix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+/>
+
+<style>
+  /* Светлая палитра — полная. Тёмная переопределяет только токены. */
+  :root {
+    --ground: #f2f5f7;
+    --surface: #ffffff;
+    --surface-sunk: #e9eef2;
+    --border: #d6dee5;
+    --border-strong: #b9c5cf;
+    --ink: #15212c;
+    --ink-muted: #5c6f80;
+    --ink-faint: #8698a7;
+
+    --accent: #b4622f;
+    --accent-soft: #f3e2d6;
+    --accent-ink: #8d4a21;
+
+    --ok: #2c8f62;
+    --ok-soft: #dcefe5;
+    --warn: #b08420;
+    --warn-soft: #f6ecd2;
+    --crit: #b53e36;
+    --crit-soft: #f7dedc;
+
+    --radius: 6px;
+    --shadow: 0 1px 2px rgb(21 33 44 / 0.06), 0 4px 12px rgb(21 33 44 / 0.04);
+
+    --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      --ground: #0d141a;
+      --surface: #151f28;
+      --surface-sunk: #101821;
+      --border: #24313d;
+      --border-strong: #354553;
+      --ink: #e2eaf1;
+      --ink-muted: #8ea1b2;
+      --ink-faint: #66788a;
+
+      --accent: #dd8b53;
+      --accent-soft: #3a2418;
+      --accent-ink: #f0ab77;
+
+      --ok: #46b585;
+      --ok-soft: #14291f;
+      --warn: #d9ab48;
+      --warn-soft: #2b2313;
+      --crit: #dc6d64;
+      --crit-soft: #2e1815;
+
+      --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 14px rgb(0 0 0 / 0.25);
+      color-scheme: dark;
+    }
+  }
+
+  :root[data-theme='dark'] {
+    --ground: #0d141a;
+    --surface: #151f28;
+    --surface-sunk: #101821;
+    --border: #24313d;
+    --border-strong: #354553;
+    --ink: #e2eaf1;
+    --ink-muted: #8ea1b2;
+    --ink-faint: #66788a;
+
+    --accent: #dd8b53;
+    --accent-soft: #3a2418;
+    --accent-ink: #f0ab77;
+
+    --ok: #46b585;
+    --ok-soft: #14291f;
+    --warn: #d9ab48;
+    --warn-soft: #2b2313;
+    --crit: #dc6d64;
+    --crit-soft: #2e1815;
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 14px rgb(0 0 0 / 0.25);
+    color-scheme: dark;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 20px 20px 64px;
+  }
+
+  /* ---------- Шапка ---------- */
+
+  header.top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-bottom: 16px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .brand b {
+    font-size: 19px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .brand span {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--ink-faint);
+  }
+
+  .switcher {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--surface-sunk);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .switcher button {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-muted);
+    background: none;
+    border: 0;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .switcher button:hover {
+    color: var(--ink);
+  }
+
+  .switcher button[aria-selected='true'] {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow);
+  }
+
+  :where(button, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---------- Общие блоки ---------- */
+
+  .panel[hidden] {
+    display: none;
+  }
+
+  .lede {
+    color: var(--ink-muted);
+    max-width: 62ch;
+    margin: 0 0 20px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  .card > h2 {
+    margin: 0;
+    padding: 13px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .card > h2 em {
+    font-style: normal;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--ink-faint);
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ---------- Плитки показателей ---------- */
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+    gap: 12px;
+  }
+
+  .tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 13px 15px;
+    box-shadow: var(--shadow);
+  }
+
+  .tile .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--ink-faint);
+  }
+
+  .tile .value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 26px;
+    font-weight: 500;
+    letter-spacing: -0.03em;
+    margin-top: 6px;
+    line-height: 1.1;
+  }
+
+  .tile .sub {
+    font-size: 12px;
+    color: var(--ink-muted);
+    margin-top: 4px;
+  }
+
+  .delta-up {
+    color: var(--ok);
+  }
+  .delta-down {
+    color: var(--crit);
+  }
+
+  /* ---------- Карта покрытия ---------- */
+
+  .scroll-x {
+    overflow-x: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+  }
+
+  th {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    text-align: left;
+    padding: 9px 12px;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .matrix td:first-child,
+  .matrix th:first-child {
+    position: sticky;
+    left: 0;
+    background: var(--surface);
+    font-weight: 500;
+  }
+
+  .cell {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    width: 100%;
+    border: 0;
+    background: none;
+    font-size: 13px;
+    color: inherit;
+    padding: 5px 0;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .lvl-ok {
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
+  .lvl-warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .lvl-crit {
+    background: var(--crit-soft);
+    color: var(--crit);
+    font-weight: 600;
+  }
+
+  .cell:hover {
+    outline: 1px solid currentColor;
+  }
+
+  .readout {
+    padding: 11px 16px;
+    font-size: 13px;
+    color: var(--ink-muted);
+    border-top: 1px solid var(--border);
+    background: var(--surface-sunk);
+    border-radius: 0 0 var(--radius) var(--radius);
+  }
+
+  .readout b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  /* ---------- Метки состояния ---------- */
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  .pill::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .p-ok {
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
+  .p-warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .p-crit {
+    background: var(--crit-soft);
+    color: var(--crit);
+  }
+  .p-idle {
+    background: var(--surface-sunk);
+    color: var(--ink-faint);
+  }
+
+  .alias {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    padding: 1px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .money {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .note {
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+    padding: 11px 14px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .note.warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .note.crit {
+    background: var(--crit-soft);
+    color: var(--crit);
+  }
+
+  .note b {
+    font-weight: 600;
+  }
+
+  .note .body {
+    color: var(--ink);
+  }
+
+  /* ---------- Журнал вызовов ---------- */
+
+  .log button.row {
+    display: grid;
+    grid-template-columns: 78px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    cursor: pointer;
+  }
+
+  .log button.row:hover {
+    background: var(--surface-sunk);
+  }
+
+  .log .time {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+  }
+
+  .log .who {
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+
+  .log .why {
+    padding: 0 16px 14px 106px;
+    font-size: 13px;
+    color: var(--ink-muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .log .why[hidden] {
+    display: none;
+  }
+
+  .why dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 3px 14px;
+    margin: 8px 0 0;
+  }
+
+  .why dt {
+    color: var(--ink-faint);
+    font-size: 12px;
+  }
+
+  .why dd {
+    margin: 0;
+    color: var(--ink);
+  }
+
+  .why .rejected {
+    margin-top: 9px;
+    padding-top: 9px;
+    border-top: 1px dashed var(--border);
+  }
+
+  /* ---------- Кабинет партнёра: рамка телефона ---------- */
+
+  .phone-stage {
+    display: grid;
+    grid-template-columns: 352px 1fr;
+    gap: 28px;
+    align-items: start;
+  }
+
+  @media (max-width: 780px) {
+    .phone-stage {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .phone {
+    border: 1px solid var(--border-strong);
+    border-radius: 22px;
+    background: var(--surface);
+    padding: 10px;
+    box-shadow: var(--shadow);
+  }
+
+  .phone-inner {
+    background: var(--ground);
+    border-radius: 14px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .phone-bar {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    padding: 0 2px 2px;
+  }
+
+  .earn {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .earn > div {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+
+  .earn .label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+  }
+
+  .earn .value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 19px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    margin-top: 3px;
+  }
+
+  .payout {
+    width: 100%;
+    font: inherit;
+    font-weight: 500;
+    padding: 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .payout:hover {
+    filter: brightness(1.06);
+  }
+
+  .gw {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+  }
+
+  .gw-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .gw-head .name {
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .ports {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .port {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 4px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.35;
+    cursor: pointer;
+    background: none;
+    color: var(--ink-muted);
+  }
+
+  .port:hover {
+    border-color: var(--border-strong);
+  }
+
+  .port .op {
+    display: block;
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--ink);
+  }
+
+  .port.busy {
+    border-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .port.busy .op {
+    color: var(--ok);
+  }
+  .port.blocked {
+    border-color: var(--crit);
+    background: var(--crit-soft);
+  }
+  .port.blocked .op {
+    color: var(--crit);
+  }
+  .port.empty {
+    border-style: dashed;
+    color: var(--ink-faint);
+  }
+
+  .side-note {
+    font-size: 13px;
+    color: var(--ink-muted);
+    max-width: 46ch;
+  }
+
+  .side-note h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 6px;
+  }
+
+  .side-note + .side-note {
+    margin-top: 18px;
+  }
+
+  /* ---------- Кабинет клиента ---------- */
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 16px;
+    align-items: start;
+  }
+
+  @media (max-width: 880px) {
+    .two-col {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .channel {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .channel:last-child {
+    border-bottom: 0;
+  }
+
+  .channel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 9px;
+  }
+
+  .channel-head .name {
+    font-weight: 600;
+  }
+
+  .prio {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .prio .rank {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    margin-right: 2px;
+  }
+
+  .meta {
+    margin-top: 9px;
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+  }
+
+  .bars {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 14px 16px;
+  }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: 74px 1fr 84px;
+    gap: 10px;
+    align-items: center;
+    font-size: 12.5px;
+  }
+
+  .bar {
+    height: 7px;
+    background: var(--surface-sunk);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .bar span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 4px;
+  }
+
+  .foot {
+    margin-top: 30px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    max-width: 72ch;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition: none !important;
+    }
+  }
+</style>
+
+<div class="shell">
+  <header class="top">
+    <div class="brand">
+      <b>Zvonix</b>
+      <span>прототип интерфейса</span>
+    </div>
+    <div class="switcher" role="tablist" aria-label="Кабинет">
+      <button role="tab" aria-selected="true" data-panel="admin">Админка</button>
+      <button role="tab" aria-selected="false" data-panel="partner">Кабинет партнёра</button>
+      <button role="tab" aria-selected="false" data-panel="client">Кабинет клиента</button>
+    </div>
+  </header>
+
+  <!-- ================= АДМИНКА ================= -->
+  <section class="panel" id="admin">
+    <p class="lede">
+      Рабочий экран владельца платформы. Плотность максимальная: главное — быстро увидеть, где
+      теряется трафик, и добраться до любого объекта.
+    </p>
+
+    <div class="stack">
+      <div class="tiles">
+        <div class="tile">
+          <div class="label">Активные вызовы</div>
+          <div class="value">47</div>
+          <div class="sub">пик за сутки — 214</div>
+        </div>
+        <div class="tile">
+          <div class="label">ASR за час</div>
+          <div class="value">63,2 %</div>
+          <div class="sub delta-down">−4,1 п.п. к вчерашнему</div>
+        </div>
+        <div class="tile">
+          <div class="label">Наценка за сегодня</div>
+          <div class="value">18 402,50 ₽</div>
+          <div class="sub delta-up">+12 % к среднему</div>
+        </div>
+        <div class="tile">
+          <div class="label">Партнёры на связи</div>
+          <div class="value">12 / 19</div>
+          <div class="sub">7 шлюзов офлайн дольше часа</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>
+          Покрытие: свободные SIM по операторам и регионам
+          <em>обновлено 14 секунд назад</em>
+        </h2>
+        <div class="scroll-x">
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th scope="col">Оператор</th>
+                <th scope="col">Москва</th>
+                <th scope="col">Санкт-Петербург</th>
+                <th scope="col">Свердловская</th>
+                <th scope="col">Новосибирская</th>
+                <th scope="col">Краснодарский</th>
+                <th scope="col">Татарстан</th>
+              </tr>
+            </thead>
+            <tbody id="matrix-body"></tbody>
+          </table>
+        </div>
+        <div class="readout" id="matrix-readout">
+          Выберите ячейку, чтобы увидеть, какие партнёры дают эту ёмкость.
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Партнёры <em>сортировка по доле трафика</em></h2>
+        <div class="scroll-x">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Псевдоним</th>
+                <th scope="col">Операторы</th>
+                <th scope="col">SIM</th>
+                <th scope="col">ASR</th>
+                <th scope="col">Цена, ₽/мин</th>
+                <th scope="col">Заработок за сутки</th>
+                <th scope="col">Состояние</th>
+              </tr>
+            </thead>
+            <tbody id="partners-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ПАРТНЁР ================= -->
+  <section class="panel" id="partner" hidden>
+    <p class="lede">
+      Партнёр смотрит с телефона, часто и коротко. Поэтому деньги и состояние SIM — на первом
+      экране, без прокрутки.
+    </p>
+
+    <div class="phone-stage">
+      <div class="phone">
+        <div class="phone-inner">
+          <div class="phone-bar">
+            <span>9:41</span>
+            <span>Zvonix</span>
+          </div>
+
+          <div class="earn">
+            <div>
+              <div class="label">Сегодня</div>
+              <div class="value">1 284 ₽</div>
+            </div>
+            <div>
+              <div class="label">За месяц</div>
+              <div class="value">31 907 ₽</div>
+            </div>
+            <div>
+              <div class="label">К выплате</div>
+              <div class="value">8 450 ₽</div>
+            </div>
+            <div>
+              <div class="label">Порог выплаты</div>
+              <div class="value">5 000 ₽</div>
+            </div>
+          </div>
+
+          <button class="payout" type="button" id="payout-btn">Запросить выплату 8 450 ₽</button>
+
+          <div class="note crit">
+            <span>▲</span>
+            <span class="body">
+              <b>SIM 4 в шлюзе «Дом» заблокирована оператором.</b> Мы приостановили её за 6 минут до
+              блокировки — доля отвеченных упала до 21 %. Замените карту, регистрация сохранится.
+            </span>
+          </div>
+
+          <div class="gw">
+            <div class="gw-head">
+              <span class="name">Шлюз «Дом» · GoIP-8</span>
+              <span class="pill p-ok">на связи</span>
+            </div>
+            <div class="ports" id="ports-home"></div>
+          </div>
+
+          <div class="gw">
+            <div class="gw-head">
+              <span class="name">Шлюз «Офис» · GoIP-4</span>
+              <span class="pill p-warn">сигнал слабый</span>
+            </div>
+            <div class="ports" id="ports-office"></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="side-note">
+          <h3>Что видно с одного взгляда</h3>
+          Цвет порта кодирует состояние, а не только подпись: занятая SIM зелёная, заблокированная
+          красная, пустой слот пунктирный. Партнёру не нужно читать таблицу, чтобы понять, что
+          сломалось.
+        </div>
+        <div class="side-note">
+          <h3>Система предупреждает раньше, чем ломается</h3>
+          Про блокировку SIM партнёр узнаёт от нас, а не от оператора. Приостановка при аномальном
+          профиле трафика — это защита его актива, и именно она удерживает партнёра на платформе.
+        </div>
+        <div class="side-note">
+          <h3>Выплата — по запросу</h3>
+          Кнопка активна только при достижении порога, который вы задаёте в админке. Ниже порога она
+          показывает, сколько осталось накопить.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= КЛИЕНТ ================= -->
+  <section class="panel" id="client" hidden>
+    <p class="lede">
+      Служба такси заходит редко. Здесь важнее понятность настроек и прозрачность списаний, чем
+      плотность. Партнёры видны только под псевдонимами.
+    </p>
+
+    <div class="two-col">
+      <div class="stack">
+        <div class="card">
+          <h2>Каналы <em>приоритет задаёте вы</em></h2>
+
+          <div class="channel">
+            <div class="channel-head">
+              <span class="name">Обзвон клиентов</span>
+              <span class="pill p-ok">работает</span>
+            </div>
+            <div class="prio">
+              <span class="rank">1.</span>
+              <span class="alias">Синий-14</span>
+              <span class="alias">Кедр-07</span>
+              <span class="rank">2.</span>
+              <span class="alias">Ясень-31</span>
+            </div>
+            <div class="meta">
+              <span>МТС · Т2 · Мегафон</span>
+              <span>лимит 500 вызовов в час</span>
+              <span>запись включена</span>
+              <span>08:00–21:00</span>
+            </div>
+          </div>
+
+          <div class="channel">
+            <div class="channel-head">
+              <span class="name">Подтверждение заказа</span>
+              <span class="pill p-warn">нет ёмкости по Билайну</span>
+            </div>
+            <div class="prio">
+              <span class="rank">1.</span>
+              <span class="alias">Кедр-07</span>
+              <span class="rank">2.</span>
+              <span class="alias">Синий-14</span>
+              <span class="alias">Гранит-02</span>
+            </div>
+            <div class="meta">
+              <span>МТС · Билайн</span>
+              <span>лимит 1 200 вызовов в сутки</span>
+              <span>без записи · дешевле на 18 %</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card log" id="call-log">
+          <h2>Последние вызовы <em>нажмите строку, чтобы увидеть решение</em></h2>
+          <div id="log-body"></div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <h2>Баланс</h2>
+          <div style="padding: 14px 16px">
+            <div class="num" style="font-size: 30px; font-weight: 500; letter-spacing: -0.03em">
+              42 180,45 ₽
+            </div>
+            <div style="color: var(--ink-muted); margin-top: 6px; font-size: 13px">
+              При текущем расходе хватит на <b class="num">18 дней</b>. Уведомим за 3 дня до нуля.
+            </div>
+          </div>
+          <div class="readout">
+            Пополнение зачисляет администратор вручную. История всех операций — в разделе «Расчёты».
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Расход за неделю <em>по операторам</em></h2>
+          <div class="bars">
+            <div class="bar-row">
+              <span>МТС</span>
+              <span class="bar"><span style="width: 100%"></span></span>
+              <span class="money">7 412,10 ₽</span>
+            </div>
+            <div class="bar-row">
+              <span>Т2</span>
+              <span class="bar"><span style="width: 68%"></span></span>
+              <span class="money">5 038,60 ₽</span>
+            </div>
+            <div class="bar-row">
+              <span>Мегафон</span>
+              <span class="bar"><span style="width: 41%"></span></span>
+              <span class="money">3 044,90 ₽</span>
+            </div>
+            <div class="bar-row">
+              <span>Билайн</span>
+              <span class="bar"><span style="width: 12%"></span></span>
+              <span class="money">889,20 ₽</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="note warn">
+          <span>▲</span>
+          <span class="body">
+            <b>По Билайну ёмкости почти нет.</b> В канале «Подтверждение заказа» 34 вызова за сутки
+            не состоялись по этой причине. Мы уже ищем партнёров с этим оператором.
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">
+    Прототип на выдуманных данных: ни один экран не подключён к системе. Служит для согласования
+    внешнего вида и состава экранов до того, как под них написан код. Правила, по которым он сделан,
+    — в <code>docs/DESIGN.md</code>.
+  </p>
+</div>
+
+<script>
+  'use strict';
+
+  /* ---------- Переключение кабинетов ---------- */
+  const tabs = Array.from(document.querySelectorAll('.switcher button'));
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      tabs.forEach((other) => {
+        const active = other === tab;
+        other.setAttribute('aria-selected', String(active));
+        document.getElementById(other.dataset.panel).hidden = !active;
+      });
+    });
+  });
+
+  /* ---------- Карта покрытия ---------- */
+  const REGIONS = [
+    'Москва',
+    'Санкт-Петербург',
+    'Свердловская',
+    'Новосибирская',
+    'Краснодарский',
+    'Татарстан',
+  ];
+
+  const COVERAGE = [
+    { operator: 'МТС', free: [14, 9, 6, 4, 7, 5], holders: 'Синий-14, Кедр-07, Ясень-31' },
+    { operator: 'Т2', free: [11, 7, 3, 2, 5, 4], holders: 'Синий-14, Гранит-02' },
+    { operator: 'Мегафон', free: [8, 5, 0, 1, 3, 2], holders: 'Кедр-07' },
+    { operator: 'Билайн', free: [2, 1, 0, 0, 1, 0], holders: 'Гранит-02' },
+    { operator: 'Йота', free: [4, 3, 2, 1, 2, 1], holders: 'Ясень-31' },
+  ];
+
+  function level(free) {
+    if (free === 0) return 'lvl-crit';
+    if (free <= 2) return 'lvl-warn';
+    return 'lvl-ok';
+  }
+
+  const matrixBody = document.getElementById('matrix-body');
+  const readout = document.getElementById('matrix-readout');
+
+  COVERAGE.forEach((row) => {
+    const tr = document.createElement('tr');
+    const head = document.createElement('td');
+    head.textContent = row.operator;
+    tr.append(head);
+
+    row.free.forEach((free, index) => {
+      const td = document.createElement('td');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'cell ' + level(free);
+      button.textContent = String(free);
+      button.addEventListener('click', () => {
+        readout.innerHTML =
+          free === 0
+            ? '<b>' +
+              row.operator +
+              ' · ' +
+              REGIONS[index] +
+              ':</b> свободных SIM нет. Вызовы на этого оператора в этом регионе не проходят — ' +
+              'через SIM другого оператора они перестают быть внутрисетевыми. Нужен партнёр с ' +
+              row.operator +
+              '.'
+            : '<b>' +
+              row.operator +
+              ' · ' +
+              REGIONS[index] +
+              ':</b> ' +
+              free +
+              ' свободных SIM. Ёмкость дают: ' +
+              row.holders +
+              '.';
+      });
+      td.append(button);
+      tr.append(td);
+    });
+
+    matrixBody.append(tr);
+  });
+
+  /* ---------- Таблица партнёров ---------- */
+  const PARTNERS = [
+    {
+      alias: 'Синий-14',
+      operators: 'МТС, Т2',
+      sim: '18 / 20',
+      asr: '71,4 %',
+      asrClass: '',
+      price: '1,15',
+      earned: '3 902,40 ₽',
+      state: ['p-ok', 'работает'],
+    },
+    {
+      alias: 'Кедр-07',
+      operators: 'МТС, Мегафон',
+      sim: '15 / 20',
+      asr: '66,8 %',
+      asrClass: '',
+      price: '1,22',
+      earned: '3 140,00 ₽',
+      state: ['p-ok', 'работает'],
+    },
+    {
+      alias: 'Ясень-31',
+      operators: 'МТС, Йота',
+      sim: '11 / 14',
+      asr: '48,1 %',
+      asrClass: 'delta-down',
+      price: '1,08',
+      earned: '1 806,70 ₽',
+      state: ['p-warn', 'ASR ниже порога'],
+    },
+    {
+      alias: 'Гранит-02',
+      operators: 'Т2, Билайн',
+      sim: '4 / 20',
+      asr: '—',
+      asrClass: '',
+      price: '1,30',
+      earned: '0,00 ₽',
+      state: ['p-crit', 'шлюз офлайн 3 ч'],
+    },
+    {
+      alias: 'Ольха-19',
+      operators: 'Мегафон',
+      sim: '0 / 6',
+      asr: '—',
+      asrClass: '',
+      price: '1,19',
+      earned: '0,00 ₽',
+      state: ['p-idle', 'ждёт регистрации SIM'],
+    },
+  ];
+
+  const partnersBody = document.getElementById('partners-body');
+  PARTNERS.forEach((partner) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><span class="alias">' +
+      partner.alias +
+      '</span></td>' +
+      '<td>' +
+      partner.operators +
+      '</td>' +
+      '<td class="num">' +
+      partner.sim +
+      '</td>' +
+      '<td class="num ' +
+      partner.asrClass +
+      '">' +
+      partner.asr +
+      '</td>' +
+      '<td class="num">' +
+      partner.price +
+      '</td>' +
+      '<td class="money">' +
+      partner.earned +
+      '</td>' +
+      '<td><span class="pill ' +
+      partner.state[0] +
+      '">' +
+      partner.state[1] +
+      '</span></td>';
+    partnersBody.append(tr);
+  });
+
+  /* ---------- Порты шлюзов ---------- */
+  const PORTS_HOME = [
+    { op: 'МТС', state: 'busy', text: '02:14' },
+    { op: 'МТС', state: '', text: 'свободна' },
+    { op: 'Т2', state: 'busy', text: '00:47' },
+    { op: 'Т2', state: 'blocked', text: 'блок' },
+    { op: 'МТС', state: '', text: 'свободна' },
+    { op: 'Мегафон', state: 'busy', text: '01:02' },
+    { op: 'Т2', state: '', text: 'свободна' },
+    { op: '—', state: 'empty', text: 'слот пуст' },
+  ];
+
+  const PORTS_OFFICE = [
+    { op: 'МТС', state: 'busy', text: '03:31' },
+    { op: 'Мегафон', state: '', text: 'свободна' },
+    { op: '—', state: 'empty', text: 'слот пуст' },
+    { op: '—', state: 'empty', text: 'слот пуст' },
+  ];
+
+  function renderPorts(id, ports) {
+    const host = document.getElementById(id);
+    ports.forEach((port, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'port ' + port.state;
+      button.innerHTML = '<span class="op">' + port.op + '</span>' + port.text;
+      button.title = 'Порт ' + (index + 1);
+      host.append(button);
+    });
+  }
+
+  renderPorts('ports-home', PORTS_HOME);
+  renderPorts('ports-office', PORTS_OFFICE);
+
+  document.getElementById('payout-btn').addEventListener('click', (event) => {
+    event.target.textContent = 'Запрос отправлен · рассмотрим за сутки';
+    event.target.disabled = true;
+    event.target.style.opacity = '0.65';
+  });
+
+  /* ---------- Журнал вызовов ---------- */
+  const CALLS = [
+    {
+      time: '14:38:02',
+      number: '+7 913 042-**-23',
+      status: ['p-ok', 'разговор 1:47'],
+      operator: 'Сбербанк-Телеком, определён запросом',
+      partner: 'Синий-14',
+      cost: '2,04 ₽',
+      why: 'Номер перенесён из МТС. План нумерации дал бы неверного оператора, поэтому маршрут построен по подтверждённому значению.',
+      rejected: null,
+    },
+    {
+      time: '14:37:51',
+      number: '+7 922 118-**-04',
+      status: ['p-crit', 'не состоялся'],
+      operator: 'Мегафон, Свердловская область',
+      partner: '—',
+      cost: '0,00 ₽',
+      why: 'Нет свободной SIM Мегафона в Свердловской области. Через SIM другого оператора вызов перестаёт быть внутрисетевым, поэтому он не совершается.',
+      rejected: ['Кедр-07 — все SIM Мегафона заняты', 'Ясень-31 — не покрывает регион'],
+    },
+    {
+      time: '14:37:44',
+      number: '+7 916 730-**-88',
+      status: ['p-ok', 'разговор 0:39'],
+      operator: 'МТС, Москва',
+      partner: 'Кедр-07',
+      cost: '0,81 ₽',
+      why: 'Партнёр первого приоритета принял вызов. Оператор взят из своей базы, значение действительно ещё 41 день.',
+      rejected: null,
+    },
+    {
+      time: '14:37:19',
+      number: '+7 999 204-**-17',
+      status: ['p-warn', 'отклонён'],
+      operator: 'не подтверждён',
+      partner: '—',
+      cost: '0,00 ₽',
+      why: 'Оператор номера не подтверждён, а гадать нельзя: ошибка означает платный звонок для партнёра. Номер поставлен в очередь на разрешение, следующий вызов пройдёт.',
+      rejected: null,
+    },
+    {
+      time: '14:36:58',
+      number: '+7 950 611-**-30',
+      status: ['p-warn', 'отклонён'],
+      operator: 'Т2, Новосибирская область',
+      partner: '—',
+      cost: '0,00 ₽',
+      why: 'Исчерпан лимит канала «Обзвон клиентов»: 500 вызовов в час. Лимит снимется в 15:00.',
+      rejected: null,
+    },
+  ];
+
+  const logBody = document.getElementById('log-body');
+  CALLS.forEach((call, index) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'row';
+    row.setAttribute('aria-expanded', 'false');
+    row.innerHTML =
+      '<span class="time">' +
+      call.time +
+      '</span>' +
+      '<span class="who">' +
+      call.number +
+      '</span>' +
+      '<span class="pill ' +
+      call.status[0] +
+      '">' +
+      call.status[1] +
+      '</span>';
+
+    const why = document.createElement('div');
+    why.className = 'why';
+    why.id = 'why-' + index;
+    why.hidden = true;
+
+    let inner =
+      '<div>' +
+      call.why +
+      '</div><dl>' +
+      '<dt>Оператор</dt><dd>' +
+      call.operator +
+      '</dd>' +
+      '<dt>Партнёр</dt><dd>' +
+      (call.partner === '—' ? '—' : '<span class="alias">' + call.partner + '</span>') +
+      '</dd>' +
+      '<dt>Списано</dt><dd class="money">' +
+      call.cost +
+      '</dd></dl>';
+
+    if (call.rejected) {
+      inner +=
+        '<div class="rejected"><dt style="color:var(--ink-faint);font-size:12px">Кто отпал</dt>' +
+        call.rejected.map((item) => '<div>' + item + '</div>').join('') +
+        '</div>';
+    }
+
+    why.innerHTML = inner;
+    row.setAttribute('aria-controls', why.id);
+
+    row.addEventListener('click', () => {
+      const open = why.hidden;
+      why.hidden = !open;
+      row.setAttribute('aria-expanded', String(open));
+    });
+
+    logBody.append(row, why);
+  });
+</script>
