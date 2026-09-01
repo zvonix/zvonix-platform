@@ -13,6 +13,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyMigrations, createDatabase } from '@zvonix/db';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { CORRELATION_ID_HEADER } from './http/correlation-id.hook.js';
 
 const url =
   process.env['TEST_DATABASE_URL'] ?? 'postgresql://zvonix:zvonix@127.0.0.1:5432/zvonix_test';
@@ -118,16 +119,16 @@ describe('проверки состояния', () => {
 describe('сквозной идентификатор', () => {
   it('возвращается в ответе', async () => {
     const response = await api().inject({ method: 'GET', url: '/health/live' });
-    expect(response.headers['x-correlation-id']).toMatch(/.{8,}/);
+    expect(response.headers[CORRELATION_ID_HEADER]).toMatch(/.{8,}/);
   });
 
   it('принимается от клиента, чтобы цепочка не рвалась', async () => {
     const response = await api().inject({
       method: 'GET',
       url: '/health/live',
-      headers: { 'x-correlation-id': 'client-request-0001' },
+      headers: { [CORRELATION_ID_HEADER]: 'client-request-0001' },
     });
-    expect(response.headers['x-correlation-id']).toBe('client-request-0001');
+    expect(response.headers[CORRELATION_ID_HEADER]).toBe('client-request-0001');
   });
 
   it('подменяется своим, если пришёл мусор', async () => {
@@ -135,9 +136,9 @@ describe('сквозной идентификатор', () => {
     const response = await api().inject({
       method: 'GET',
       url: '/health/live',
-      headers: { 'x-correlation-id': '<script>' },
+      headers: { [CORRELATION_ID_HEADER]: '<script>' },
     });
-    expect(response.headers['x-correlation-id']).not.toBe('<script>');
+    expect(response.headers[CORRELATION_ID_HEADER]).not.toBe('<script>');
   });
 });
 

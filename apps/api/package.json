@@ -23,8 +23,5 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "^4.5.4"
-  },
-  "devDependencies": {
-    "@nestjs/testing": "^12.0.1"
   }
 }

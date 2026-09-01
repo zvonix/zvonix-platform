@@ -10,3 +10,11 @@ packages:
 allowBuilds:
   '@swc/core': true
   esbuild: true
+
+# drizzle-kit тянет esbuild через устаревшие пакеты @esbuild-kit/*, застрявшие
+# на версии с известной уязвимостью (GHSA-67mh-4wv8-2f99). Она касается только
+# режима `esbuild --serve`, которым drizzle-kit не пользуется, но оставлять
+# известную уязвимость в гейте нельзя: её начнут игнорировать вместе с остальными.
+# Убрать, когда drizzle-kit перестанет зависеть от @esbuild-kit.
+overrides:
+  esbuild: '>=0.25.0'

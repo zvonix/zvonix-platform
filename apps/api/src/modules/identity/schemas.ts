@@ -40,7 +40,7 @@ const password = z.string().min(12, 'не короче 12 символов').max
  * получает любой, кто отправил форму. `satisfies` следит, чтобы список не разошёлся
  * с перечислением домена — опечатка в роли здесь была бы принята схемой молча.
  */
-export const SELF_SERVICE_ROLES = ['client', 'partner'] as const satisfies readonly UserRole[];
+const SELF_SERVICE_ROLES = ['client', 'partner'] as const satisfies readonly UserRole[];
 
 export const registerSchema = z.object({
   email,

@@ -14,6 +14,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --build --force",
+    "deadcode": "knip",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "pnpm --filter @zvonix/db db:generate",
@@ -26,11 +27,12 @@
     "@types/node": "^22.10.0",
     "concurrently": "^10.0.5",
     "eslint": "^9.17.0",
+    "knip": "^6.33.0",
     "prettier": "^3.4.0",
-    "tsx": "^4.23.13",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.18.0",
     "unplugin-swc": "^1.5.11",
-    "vitest": "^2.1.0"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }

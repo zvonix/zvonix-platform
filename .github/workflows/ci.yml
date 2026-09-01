@@ -50,23 +50,12 @@ jobs:
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
+      # Всё содержимое гейта — внутри check.sh, включая соответствие миграций схеме,
+      # смоук собранного приложения и аудит зависимостей. Отдельных шагов здесь
+      # нет намеренно: проверка, которая есть только в CI, не запускается локально
+      # и потому находит проблемы позже всех.
       - name: Полная проверка
         run: bash scripts/check.sh
-
-      # Схема и миграции обязаны сходиться: если кто-то правил схему Drizzle,
-      # но не сгенерировал миграцию, база разойдётся с кодом. Проверяем тем,
-      # что генерация не даёт новых файлов (ADR-0005).
-      - name: Миграции соответствуют схеме
-        run: |
-          before=$(git status --porcelain packages/db/migrations)
-          pnpm db:generate
-          after=$(git status --porcelain packages/db/migrations)
-          if [ "$before" != "$after" ]; then
-            echo "Схема изменена без миграции. Выполните pnpm db:generate и закоммитьте результат:"
-            git status --porcelain packages/db/migrations
-            exit 1
-          fi
-          echo "Миграции соответствуют схеме."
 
   # Проверка, которую нельзя пройти на Windows: имена файлов, отличающиеся только регистром.
   case-sensitivity:

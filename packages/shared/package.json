@@ -13,7 +13,6 @@
     "typecheck": "tsc --build"
   },
   "dependencies": {
-    "uuid": "^14.0.2",
-    "zod": "^4.5.4"
+    "uuid": "^14.0.2"
   }
 }
