@@ -45,6 +45,12 @@ export async function buildApplication(): Promise<BuiltApplication> {
 
   registerCorrelationId(app.getHttpAdapter().getInstance());
 
+  // Разбор `application/x-www-form-urlencoded` отдельно включать не нужно: адаптер
+  // NestJS регистрирует его сам. Плагин `@fastify/formbody` поверх этого даёт второй
+  // обработчик того же типа, и приложение падает при старте — проверено.
+  // Формат нужен ровно одному обработчику: привязке `directory` для FreeSWITCH,
+  // у которого другого формата нет (docs/api/node.md).
+
   // Без этого `onApplicationShutdown` не вызывается, и пул соединений остаётся
   // открытым после SIGTERM: оркестратор добьёт процесс по таймауту.
   app.enableShutdownHooks();

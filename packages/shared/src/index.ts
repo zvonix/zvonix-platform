@@ -8,3 +8,4 @@ export * from './catalog.js';
 export * from './billing.js';
 export * from './machine.js';
 export * from './nodes.js';
+export * from './telephony.js';

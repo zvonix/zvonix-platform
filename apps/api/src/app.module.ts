@@ -10,6 +10,7 @@ import { HealthModule } from './modules/health/health.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { MachineModule } from './modules/machine/machine.module.js';
 import { NodesModule } from './modules/nodes/nodes.module.js';
+import { TelephonyModule } from './modules/telephony/telephony.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { NodesModule } from './modules/nodes/nodes.module.js';
     IdentityModule,
     MachineModule,
     NodesModule,
+    TelephonyModule,
     CatalogModule,
     BillingModule,
     HealthModule,

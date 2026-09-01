@@ -40,7 +40,7 @@
 | `billing` | Резервы, проводки, тарификация CDR, комиссия, балансы | `apps/api/src/modules/billing` | `packages/db` |
 | `limits` | Счётчики по окнам и проверка лимитов | `apps/api/src/modules/limits` | Redis + БД |
 | `catalog` | Направления, коридоры цен, тарифы, операторы и MVNO, `OperatorResolver` и база `NumberResolution` ([ADR-0013](adr/0013-opredelenie-operatora.md)) | `apps/api/src/modules/catalog` | БД, внешний lookup |
-| `telephony` | Приём CDR от узлов, состояние шлюзов и SIM | `apps/api/src/modules/telephony` | `billing` |
+| `telephony` | Учётные записи SIP шлюзов и каналов и их выдача узлу (привязка `directory`), приём CDR от узлов, состояние шлюзов и SIM | `apps/api/src/modules/telephony` | `billing` |
 | `recordings` | Приём, хранение, выдача записей по подписанным ссылкам | `apps/api/src/modules/recordings` | объектное хранилище |
 | `nodes` | Реестр узлов, генерация команды установки, health и метрики | `apps/api/src/modules/nodes` | БД |
 | `payments` | Пополнения клиентов и выплаты партнёрам | `apps/api/src/modules/payments` | `billing` |

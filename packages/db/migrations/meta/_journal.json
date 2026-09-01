@@ -36,6 +36,13 @@
       "when": 1788275727446,
       "tag": "0004_reestr_uzlov",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788279722529,
+      "tag": "0005_shlyuzy_i_kanaly",
+      "breakpoints": true
     }
   ]
 }

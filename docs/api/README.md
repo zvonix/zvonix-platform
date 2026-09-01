@@ -20,6 +20,9 @@
 - [nodes.md](nodes.md) — реестр узлов АТС: заведение, команда установки, регистрация,
   heartbeat, вывод из эксплуатации. Обоснование —
   [ADR-0009](../adr/0009-programmnaya-ats.md).
+- [telephony.md](telephony.md) — шлюзы партнёров, каналы клиентов и каталог SIP,
+  который узел получает из control plane. Обоснование —
+  [ADR-0009](../adr/0009-programmnaya-ats.md).
 - [node.md](node.md) — узел АТС → control plane: учётные записи SIP, запрос маршрута
   на каждый вызов, CDR, регистрация узла, heartbeat. Обоснование —
   [ADR-0009](../adr/0009-programmnaya-ats.md) и [ADR-0019](../adr/0019-dostup-mashin.md).

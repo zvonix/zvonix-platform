@@ -18,3 +18,4 @@ export {
 } from './billing.js';
 export { machineCredentials } from './machine.js';
 export { nodes } from './nodes.js';
+export { gateways, channels } from './telephony.js';
