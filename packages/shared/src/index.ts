@@ -6,3 +6,4 @@ export * from './enums.js';
 export * from './msisdn.js';
 export * from './catalog.js';
 export * from './billing.js';
+export * from './machine.js';

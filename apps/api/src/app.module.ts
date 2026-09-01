@@ -8,9 +8,18 @@ import { BillingModule } from './modules/billing/billing.module.js';
 import { CatalogModule } from './modules/catalog/catalog.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
+import { MachineModule } from './modules/machine/machine.module.js';
 
 @Module({
-  imports: [InfraModule, AuditModule, IdentityModule, CatalogModule, BillingModule, HealthModule],
+  imports: [
+    InfraModule,
+    AuditModule,
+    IdentityModule,
+    MachineModule,
+    CatalogModule,
+    BillingModule,
+    HealthModule,
+  ],
   providers: [
     // Доступ закрыт по умолчанию: обработчик открывается пометкой `@Public()`.
     // Обратный порядок оставляет незакрытым один обработчик, и узнают об этом не первыми.

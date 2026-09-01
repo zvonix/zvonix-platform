@@ -6,6 +6,7 @@ import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
 import { internal } from '@zvonix/shared';
 import type { FastifyRequest } from 'fastify';
 import type { Principal, RequestMeta } from '../modules/identity/identity.service.js';
+import type { MachinePrincipal } from '../modules/machine/machine.service.js';
 import type { AuthenticatedRequest } from './auth.guard.js';
 
 /**
@@ -20,6 +21,22 @@ export const CurrentUser = createParamDecorator(
       throw internal('Обработчик требует вызывающую сторону, но помечен как публичный');
     }
     return request.principal;
+  },
+);
+
+/**
+ * Проверенная машина: узел АТС или клиентская интеграция (ADR-0019).
+ *
+ * Доступна только в обработчике, помеченном `@Machine()`. Отсутствие означает ошибку
+ * разметки обработчика, а не запроса, — поэтому внутренняя ошибка, а не 401.
+ */
+export const CurrentMachine = createParamDecorator(
+  (_data: unknown, context: ExecutionContext): MachinePrincipal => {
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    if (request.machine === undefined) {
+      throw internal('Обработчик требует машинный ключ, но не помечен @Machine()');
+    }
+    return request.machine;
   },
 );
 
