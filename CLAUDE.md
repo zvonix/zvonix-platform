@@ -40,13 +40,17 @@
 |-------------------|---------|
 | Установить зависимости | `pnpm install` |
 | Запустить всё локально | `pnpm dev` |
-| Тесты                  | `pnpm test` |
+| Тесты (модульные)      | `pnpm test` |
+| Тесты с базой          | `pnpm test:integration` — нужна живая PostgreSQL, адрес в `TEST_DATABASE_URL` |
 | Линтер                 | `pnpm lint` |
 | Проверка типов         | `pnpm typecheck` |
 | Форматирование         | `pnpm format` |
 | **Полная проверка**    | `bash scripts/check.sh` — тот же скрипт гоняет CI |
 | Сгенерировать миграцию | `pnpm db:generate` |
 | Применить миграции     | `pnpm db:migrate` |
+
+Локальная PostgreSQL 16 и команды её запуска — в [ADR-0007](docs/adr/0007-lokalnaya-sreda.md),
+раздел «Ревизия».
 
 ## Структура
 
@@ -92,7 +96,8 @@ scripts/   — check.sh: единая точка проверки проекта
 [ADR-0003](docs/adr/0003-obrabotka-oshibok.md) ошибки ·
 [ADR-0004](docs/adr/0004-logirovanie.md) логи ·
 [ADR-0005](docs/adr/0005-migracii.md) миграции ·
-[ADR-0006](docs/adr/0006-strategiya-testirovaniya.md) тесты
+[ADR-0006](docs/adr/0006-strategiya-testirovaniya.md) тесты ·
+[ADR-0016](docs/adr/0016-soglasheniya-shemy-bd.md) схема БД
 
 Читать их по необходимости, а не целиком в начале сессии.
 
@@ -183,6 +188,10 @@ MCP-серверы (`.mcp.json`), использовать по назначен
 
 - **Деньги — только `BigInt` в микроединицах** (1 руб = 1 000 000). `number` в денежных
   вычислениях — ошибка линтера, а не замечание. Округление — только при фиксации CDR.
+- **Схема БД меняется только миграцией** ([ADR-0005](docs/adr/0005-migracii.md)), а соглашения
+  схемы заданы в [ADR-0016](docs/adr/0016-soglasheniya-shemy-bd.md): идентификатор — `uuid`
+  без `DEFAULT`, перечисление — `text` с `CHECK` (не тип `enum`), время — только `timestamptz`.
+  `drizzle-kit push` не используется никогда.
 - **Баланс меняется только проводкой** в модуле `billing`. Прямая запись в остаток запрещена.
 - **Оператор номера — только через `OperatorResolver`** ([ADR-0013](docs/adr/0013-opredelenie-operatora.md)).
   Определять по префиксу нельзя: из-за MNP это неверный оператор.

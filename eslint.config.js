@@ -3,7 +3,10 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '*.config.js', '*.config.ts'] },
+  // Файлы настроек инструментов не входят в типизированный проект (tsconfig указывает
+  // только на src), поэтому проверка с типами на них не работает. Их корректность
+  // проверяется запуском самих инструментов: drizzle.config.ts — командой db:generate в CI.
+  { ignores: ['**/dist/**', '**/node_modules/**', '**/*.config.js', '**/*.config.ts'] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {

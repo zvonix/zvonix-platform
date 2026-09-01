@@ -14,6 +14,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # Интеграционным тестам нужна реальная база (ADR-0006). Версия совпадает
+    # с production: различия в поведении PostgreSQL между мажорными версиями
+    # проявляются именно в том, что проверяют эти тесты — ограничениях и типах.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: zvonix
+          POSTGRES_PASSWORD: zvonix
+          POSTGRES_DB: zvonix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zvonix"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://zvonix:zvonix@127.0.0.1:5432/zvonix_test
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +52,21 @@ jobs:
 
       - name: Полная проверка
         run: bash scripts/check.sh
+
+      # Схема и миграции обязаны сходиться: если кто-то правил схему Drizzle,
+      # но не сгенерировал миграцию, база разойдётся с кодом. Проверяем тем,
+      # что генерация не даёт новых файлов (ADR-0005).
+      - name: Миграции соответствуют схеме
+        run: |
+          before=$(git status --porcelain packages/db/migrations)
+          pnpm db:generate
+          after=$(git status --porcelain packages/db/migrations)
+          if [ "$before" != "$after" ]; then
+            echo "Схема изменена без миграции. Выполните pnpm db:generate и закоммитьте результат:"
+            git status --porcelain packages/db/migrations
+            exit 1
+          fi
+          echo "Миграции соответствуют схеме."
 
   # Проверка, которую нельзя пройти на Windows: имена файлов, отличающиеся только регистром.
   case-sensitivity:

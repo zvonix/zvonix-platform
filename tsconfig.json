@@ -1,8 +1,17 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/shared" },
-    { "path": "packages/config" },
-    { "path": "packages/logger" }
+    {
+      "path": "packages/shared"
+    },
+    {
+      "path": "packages/config"
+    },
+    {
+      "path": "packages/logger"
+    },
+    {
+      "path": "packages/db"
+    }
   ]
 }
