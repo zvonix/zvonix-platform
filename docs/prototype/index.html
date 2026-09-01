@@ -7,86 +7,82 @@
 />
 
 <style>
-  /* Светлая палитра — полная. Тёмная переопределяет только токены. */
   :root {
-    --ground: #f2f5f7;
+    --ground: #eef2f5;
     --surface: #ffffff;
-    --surface-sunk: #e9eef2;
-    --border: #d6dee5;
-    --border-strong: #b9c5cf;
-    --ink: #15212c;
-    --ink-muted: #5c6f80;
-    --ink-faint: #8698a7;
+    --sunk: #e4eaef;
+    --rail: #1b2732;
+    --rail-ink: #c3d0dc;
+    --rail-ink-dim: #7c8d9e;
+    --rail-active: #263646;
+    --border: #d3dbe2;
+    --border-soft: #e3e9ee;
+    --ink: #101c26;
+    --muted: #5b6d7d;
+    --faint: #8a9aa8;
 
     --accent: #b4622f;
-    --accent-soft: #f3e2d6;
-    --accent-ink: #8d4a21;
+    --accent-soft: #f5e4d8;
 
     --ok: #2c8f62;
     --ok-soft: #dcefe5;
-    --warn: #b08420;
-    --warn-soft: #f6ecd2;
+    --warn: #a8791a;
+    --warn-soft: #f7edd3;
     --crit: #b53e36;
-    --crit-soft: #f7dedc;
-
-    --radius: 6px;
-    --shadow: 0 1px 2px rgb(21 33 44 / 0.06), 0 4px 12px rgb(21 33 44 / 0.04);
+    --crit-soft: #f8dedc;
 
     --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-
+    --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
     color-scheme: light;
   }
 
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme='light']) {
-      --ground: #0d141a;
-      --surface: #151f28;
-      --surface-sunk: #101821;
-      --border: #24313d;
-      --border-strong: #354553;
-      --ink: #e2eaf1;
-      --ink-muted: #8ea1b2;
-      --ink-faint: #66788a;
-
+      --ground: #0b1116;
+      --surface: #131c24;
+      --sunk: #0e161d;
+      --rail: #0d151c;
+      --rail-ink: #b7c6d4;
+      --rail-ink-dim: #607386;
+      --rail-active: #1c2935;
+      --border: #22303c;
+      --border-soft: #1a252f;
+      --ink: #e3ebf2;
+      --muted: #8ca0b1;
+      --faint: #64778a;
       --accent: #dd8b53;
       --accent-soft: #3a2418;
-      --accent-ink: #f0ab77;
-
       --ok: #46b585;
       --ok-soft: #14291f;
-      --warn: #d9ab48;
-      --warn-soft: #2b2313;
+      --warn: #d4a744;
+      --warn-soft: #2a2212;
       --crit: #dc6d64;
-      --crit-soft: #2e1815;
-
-      --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 14px rgb(0 0 0 / 0.25);
+      --crit-soft: #2d1714;
       color-scheme: dark;
     }
   }
 
   :root[data-theme='dark'] {
-    --ground: #0d141a;
-    --surface: #151f28;
-    --surface-sunk: #101821;
-    --border: #24313d;
-    --border-strong: #354553;
-    --ink: #e2eaf1;
-    --ink-muted: #8ea1b2;
-    --ink-faint: #66788a;
-
+    --ground: #0b1116;
+    --surface: #131c24;
+    --sunk: #0e161d;
+    --rail: #0d151c;
+    --rail-ink: #b7c6d4;
+    --rail-ink-dim: #607386;
+    --rail-active: #1c2935;
+    --border: #22303c;
+    --border-soft: #1a252f;
+    --ink: #e3ebf2;
+    --muted: #8ca0b1;
+    --faint: #64778a;
     --accent: #dd8b53;
     --accent-soft: #3a2418;
-    --accent-ink: #f0ab77;
-
     --ok: #46b585;
     --ok-soft: #14291f;
-    --warn: #d9ab48;
-    --warn-soft: #2b2313;
+    --warn: #d4a744;
+    --warn-soft: #2a2212;
     --crit: #dc6d64;
-    --crit-soft: #2e1815;
-
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 14px rgb(0 0 0 / 0.25);
+    --crit-soft: #2d1714;
     color-scheme: dark;
   }
 
@@ -94,13 +90,18 @@
     box-sizing: border-box;
   }
 
+  html,
+  body {
+    height: 100%;
+  }
+
   body {
     margin: 0;
     background: var(--ground);
     color: var(--ink);
     font-family: var(--sans);
-    font-size: 14px;
-    line-height: 1.45;
+    font-size: 13px;
+    line-height: 1.4;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -110,276 +111,361 @@
     letter-spacing: -0.01em;
   }
 
-  .shell {
-    max-width: 1180px;
-    margin: 0 auto;
-    padding: 20px 20px 64px;
+  :where(button, input, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
-  /* ---------- Шапка ---------- */
+  /* ============ Каркас ============ */
 
-  header.top {
+  .app {
+    display: grid;
+    grid-template-columns: 224px 1fr;
+    height: 100vh;
+  }
+
+  @media (max-width: 900px) {
+    .app {
+      grid-template-columns: 58px 1fr;
+    }
+    .rail .label,
+    .rail .group-title,
+    .rail .brand span,
+    .rail .count {
+      display: none;
+    }
+    .rail a {
+      justify-content: center;
+    }
+  }
+
+  /* ---- Боковое меню ---- */
+
+  .rail {
+    background: var(--rail);
+    color: var(--rail-ink);
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-    padding-bottom: 16px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--border);
+    flex-direction: column;
+    overflow-y: auto;
   }
 
-  .brand {
+  .rail .brand {
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    gap: 8px;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid rgb(255 255 255 / 0.07);
   }
 
-  .brand b {
-    font-size: 19px;
+  .rail .brand b {
+    font-size: 16px;
     font-weight: 700;
     letter-spacing: -0.02em;
+    color: #fff;
   }
 
-  .brand span {
-    font-size: 11px;
+  .rail .brand span {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--rail-ink-dim);
+  }
+
+  .rail .group-title {
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.09em;
-    color: var(--ink-faint);
+    color: var(--rail-ink-dim);
+    padding: 14px 16px 5px;
   }
 
-  .switcher {
+  .rail a {
     display: flex;
-    gap: 2px;
-    padding: 2px;
-    background: var(--surface-sunk);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-
-  .switcher button {
-    font: inherit;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 16px;
+    color: var(--rail-ink);
+    text-decoration: none;
     font-size: 13px;
-    font-weight: 500;
-    color: var(--ink-muted);
-    background: none;
-    border: 0;
-    padding: 6px 14px;
-    border-radius: 4px;
+    border-left: 2px solid transparent;
     cursor: pointer;
   }
 
-  .switcher button:hover {
-    color: var(--ink);
+  .rail a:hover {
+    background: var(--rail-active);
   }
 
-  .switcher button[aria-selected='true'] {
-    background: var(--surface);
-    color: var(--ink);
-    box-shadow: var(--shadow);
-  }
-
-  :where(button, [tabindex]):focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
-  /* ---------- Общие блоки ---------- */
-
-  .panel[hidden] {
-    display: none;
-  }
-
-  .lede {
-    color: var(--ink-muted);
-    max-width: 62ch;
-    margin: 0 0 20px;
-  }
-
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-  }
-
-  .card > h2 {
-    margin: 0;
-    padding: 13px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .card > h2 em {
-    font-style: normal;
-    font-size: 11px;
-    font-weight: 400;
-    color: var(--ink-faint);
-  }
-
-  .stack {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  /* ---------- Плитки показателей ---------- */
-
-  .tiles {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
-    gap: 12px;
-  }
-
-  .tile {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 13px 15px;
-    box-shadow: var(--shadow);
-  }
-
-  .tile .label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--ink-faint);
-  }
-
-  .tile .value {
-    font-family: var(--mono);
-    font-variant-numeric: tabular-nums;
-    font-size: 26px;
+  .rail a[aria-current='page'] {
+    background: var(--rail-active);
+    border-left-color: var(--accent);
+    color: #fff;
     font-weight: 500;
-    letter-spacing: -0.03em;
-    margin-top: 6px;
-    line-height: 1.1;
   }
 
-  .tile .sub {
+  .rail .ico {
+    width: 15px;
+    text-align: center;
     font-size: 12px;
-    color: var(--ink-muted);
-    margin-top: 4px;
+    color: var(--rail-ink-dim);
+    flex: none;
   }
 
-  .delta-up {
-    color: var(--ok);
+  .rail a[aria-current='page'] .ico {
+    color: var(--accent);
   }
-  .delta-down {
+
+  .rail .label {
+    flex: 1;
+  }
+
+  .rail .count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--rail-ink-dim);
+  }
+
+  .rail .count.bad {
     color: var(--crit);
+    font-weight: 600;
   }
 
-  /* ---------- Карта покрытия ---------- */
+  .rail-foot {
+    margin-top: auto;
+    padding: 12px 16px;
+    border-top: 1px solid rgb(255 255 255 / 0.07);
+    font-size: 11px;
+    color: var(--rail-ink-dim);
+  }
 
-  .scroll-x {
-    overflow-x: auto;
+  /* ---- Правая часть ---- */
+
+  .main {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-width: 0;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 16px;
+    height: 46px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .topbar h1 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .topbar .crumb {
+    color: var(--faint);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--sunk);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0 8px;
+    height: 27px;
+    min-width: 180px;
+  }
+
+  .search input {
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--ink);
+    outline: none;
+    width: 100%;
+  }
+
+  .search span {
+    color: var(--faint);
+    font-size: 12px;
+  }
+
+  .roles {
+    display: flex;
+    gap: 1px;
+    background: var(--sunk);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px;
+  }
+
+  .roles button {
+    font: inherit;
+    font-size: 12px;
+    padding: 3px 10px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .roles button[aria-selected='true'] {
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  .content {
+    overflow: auto;
+    padding: 14px 16px 40px;
+  }
+
+  /* ---- Панель инструментов ---- */
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .btn {
+    font: inherit;
+    font-size: 12.5px;
+    height: 27px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    border-radius: 5px;
+    cursor: pointer;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .btn:hover {
+    border-color: var(--faint);
+  }
+
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .btn.on {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  select.btn {
+    padding-right: 6px;
+  }
+
+  .count-note {
+    font-size: 12px;
+    color: var(--faint);
+    margin-left: auto;
+  }
+
+  /* ---- Таблицы ---- */
+
+  .tablewrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: auto;
+    max-height: calc(100vh - 190px);
   }
 
   table {
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     width: 100%;
-    font-size: 13px;
+    font-size: 12.5px;
   }
 
-  th {
-    font-size: 11px;
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface);
+    font-size: 10.5px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--ink-faint);
+    color: var(--faint);
     text-align: left;
-    padding: 9px 12px;
+    padding: 7px 10px;
     white-space: nowrap;
     border-bottom: 1px solid var(--border);
   }
 
-  td {
-    padding: 9px 12px;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
+  thead th.r,
+  td.r {
+    text-align: right;
   }
 
-  tbody tr:last-child td {
-    border-bottom: 0;
+  tbody td {
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--border-soft);
+    white-space: nowrap;
   }
 
-  .matrix td:first-child,
-  .matrix th:first-child {
-    position: sticky;
-    left: 0;
-    background: var(--surface);
-    font-weight: 500;
+  tbody tr:hover td {
+    background: var(--sunk);
   }
 
-  .cell {
-    font-family: var(--mono);
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-    width: 100%;
-    border: 0;
-    background: none;
-    font-size: 13px;
-    color: inherit;
-    padding: 5px 0;
-    border-radius: 4px;
+  tbody tr.sel td {
+    background: var(--accent-soft);
+  }
+
+  tbody tr {
     cursor: pointer;
   }
 
-  .lvl-ok {
-    background: var(--ok-soft);
-    color: var(--ok);
-  }
-  .lvl-warn {
-    background: var(--warn-soft);
-    color: var(--warn);
-  }
-  .lvl-crit {
-    background: var(--crit-soft);
-    color: var(--crit);
-    font-weight: 600;
+  .pager {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 2px 0;
+    font-size: 12px;
+    color: var(--faint);
   }
 
-  .cell:hover {
-    outline: 1px solid currentColor;
-  }
-
-  .readout {
-    padding: 11px 16px;
-    font-size: 13px;
-    color: var(--ink-muted);
-    border-top: 1px solid var(--border);
-    background: var(--surface-sunk);
-    border-radius: 0 0 var(--radius) var(--radius);
-  }
-
-  .readout b {
-    color: var(--ink);
-    font-weight: 600;
-  }
-
-  /* ---------- Метки состояния ---------- */
+  /* ---- Мелкие элементы ---- */
 
   .pill {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    font-size: 11.5px;
+    gap: 4px;
+    font-size: 11px;
     font-weight: 500;
-    padding: 2px 8px;
+    padding: 1px 7px;
     border-radius: 20px;
     white-space: nowrap;
   }
 
   .pill::before {
     content: '';
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     background: currentColor;
   }
@@ -397,253 +483,332 @@
     color: var(--crit);
   }
   .p-idle {
-    background: var(--surface-sunk);
-    color: var(--ink-faint);
+    background: var(--sunk);
+    color: var(--faint);
   }
 
   .alias {
     font-family: var(--mono);
-    font-size: 12.5px;
-    padding: 1px 6px;
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
-    color: var(--ink);
-    white-space: nowrap;
+    font-size: 11.5px;
+    padding: 0 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
   }
 
-  .money {
-    font-family: var(--mono);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-
-  .note {
-    display: flex;
-    gap: 9px;
-    align-items: flex-start;
-    padding: 11px 14px;
-    border-radius: var(--radius);
-    font-size: 13px;
-    line-height: 1.45;
-  }
-
-  .note.warn {
-    background: var(--warn-soft);
-    color: var(--warn);
-  }
-  .note.crit {
-    background: var(--crit-soft);
+  .bad {
     color: var(--crit);
   }
-
-  .note b {
-    font-weight: 600;
+  .good {
+    color: var(--ok);
   }
 
-  .note .body {
-    color: var(--ink);
-  }
+  /* ---- Плитки ---- */
 
-  /* ---------- Журнал вызовов ---------- */
-
-  .log button.row {
+  .kpis {
     display: grid;
-    grid-template-columns: 78px 1fr auto;
+    grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+    gap: 9px;
+    margin-bottom: 12px;
+  }
+
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 12px;
+  }
+
+  .kpi .k {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--faint);
+  }
+
+  .kpi .v {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 21px;
+    font-weight: 500;
+    letter-spacing: -0.03em;
+    margin-top: 2px;
+  }
+
+  .kpi .s {
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+
+  .grid2 {
+    display: grid;
+    grid-template-columns: 1fr 340px;
     gap: 12px;
-    align-items: center;
-    width: 100%;
-    text-align: left;
-    font: inherit;
-    color: inherit;
-    background: none;
-    border: 0;
-    border-bottom: 1px solid var(--border);
-    padding: 10px 16px;
-    cursor: pointer;
-  }
-
-  .log button.row:hover {
-    background: var(--surface-sunk);
-  }
-
-  .log .time {
-    font-family: var(--mono);
-    font-size: 12.5px;
-    color: var(--ink-faint);
-  }
-
-  .log .who {
-    font-family: var(--mono);
-    font-size: 13px;
-  }
-
-  .log .why {
-    padding: 0 16px 14px 106px;
-    font-size: 13px;
-    color: var(--ink-muted);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .log .why[hidden] {
-    display: none;
-  }
-
-  .why dl {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 3px 14px;
-    margin: 8px 0 0;
-  }
-
-  .why dt {
-    color: var(--ink-faint);
-    font-size: 12px;
-  }
-
-  .why dd {
-    margin: 0;
-    color: var(--ink);
-  }
-
-  .why .rejected {
-    margin-top: 9px;
-    padding-top: 9px;
-    border-top: 1px dashed var(--border);
-  }
-
-  /* ---------- Кабинет партнёра: рамка телефона ---------- */
-
-  .phone-stage {
-    display: grid;
-    grid-template-columns: 352px 1fr;
-    gap: 28px;
     align-items: start;
   }
 
-  @media (max-width: 780px) {
-    .phone-stage {
+  @media (max-width: 1100px) {
+    .grid2 {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  .card > h2 {
+    margin: 0;
+    padding: 9px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: baseline;
+  }
+
+  .card > h2 em {
+    font-style: normal;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--faint);
+  }
+
+  .cell {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    color: inherit;
+    padding: 3px 0;
+    width: 100%;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .lvl-ok {
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
+  .lvl-warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .lvl-crit {
+    background: var(--crit-soft);
+    color: var(--crit);
+    font-weight: 600;
+  }
+
+  .readout {
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    background: var(--sunk);
+  }
+
+  .readout b {
+    color: var(--ink);
+  }
+
+  .list {
+    padding: 4px 0;
+  }
+
+  .list .row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 5px 12px;
+    font-size: 12.5px;
+  }
+
+  .list .row + .row {
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .list .row .t {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+    flex: none;
+  }
+
+  .list .row .x {
+    flex: 1;
+    color: var(--muted);
+  }
+
+  /* ---- Панель детали ---- */
+
+  .drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 380px;
+    max-width: 92vw;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgb(0 0 0 / 0.12);
+    display: flex;
+    flex-direction: column;
+    z-index: 20;
+  }
+
+  .drawer[hidden] {
+    display: none;
+  }
+
+  .drawer header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .drawer header b {
+    font-size: 13px;
+  }
+
+  .drawer .body {
+    overflow: auto;
+    padding: 12px;
+  }
+
+  .drawer dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    margin: 0 0 12px;
+    font-size: 12.5px;
+  }
+
+  .drawer dt {
+    color: var(--faint);
+  }
+
+  .drawer dd {
+    margin: 0;
+  }
+
+  .why {
+    background: var(--sunk);
+    border-radius: 5px;
+    padding: 9px 11px;
+    font-size: 12.5px;
+    color: var(--ink);
+    line-height: 1.45;
+  }
+
+  .why h4 {
+    margin: 0 0 5px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--faint);
+    font-weight: 600;
+  }
+
+  .rejected {
+    margin-top: 10px;
+    font-size: 12.5px;
+  }
+
+  .rejected div {
+    padding: 3px 0;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--muted);
+  }
+
+  /* ---- Телефон партнёра ---- */
+
+  .phone-grid {
+    display: grid;
+    grid-template-columns: 330px 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+
+  @media (max-width: 860px) {
+    .phone-grid {
       grid-template-columns: 1fr;
     }
   }
 
   .phone {
-    border: 1px solid var(--border-strong);
-    border-radius: 22px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
     background: var(--surface);
-    padding: 10px;
-    box-shadow: var(--shadow);
+    padding: 8px;
   }
 
-  .phone-inner {
+  .phone-in {
     background: var(--ground);
-    border-radius: 14px;
-    padding: 14px;
+    border-radius: 12px;
+    padding: 11px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-  }
-
-  .phone-bar {
-    display: flex;
-    justify-content: space-between;
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--ink-faint);
-    padding: 0 2px 2px;
+    gap: 9px;
   }
 
   .earn {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: 7px;
   }
 
   .earn > div {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 10px 12px;
+    border-radius: 5px;
+    padding: 7px 9px;
   }
 
-  .earn .label {
-    font-size: 10.5px;
+  .earn .k {
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--ink-faint);
+    color: var(--faint);
   }
 
-  .earn .value {
+  .earn .v {
     font-family: var(--mono);
-    font-variant-numeric: tabular-nums;
-    font-size: 19px;
+    font-size: 17px;
     font-weight: 500;
     letter-spacing: -0.02em;
-    margin-top: 3px;
-  }
-
-  .payout {
-    width: 100%;
-    font: inherit;
-    font-weight: 500;
-    padding: 10px;
-    border-radius: var(--radius);
-    border: 1px solid var(--accent);
-    background: var(--accent);
-    color: #fff;
-    cursor: pointer;
-  }
-
-  .payout:hover {
-    filter: brightness(1.06);
-  }
-
-  .gw {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 12px;
-  }
-
-  .gw-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-
-  .gw-head .name {
-    font-weight: 600;
-    font-size: 13px;
   }
 
   .ports {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
+    gap: 5px;
   }
 
   .port {
     border: 1px solid var(--border);
     border-radius: 4px;
-    padding: 6px 4px;
+    padding: 5px 2px;
     text-align: center;
     font-family: var(--mono);
-    font-size: 10.5px;
-    line-height: 1.35;
-    cursor: pointer;
+    font-size: 10px;
+    line-height: 1.3;
     background: none;
-    color: var(--ink-muted);
-  }
-
-  .port:hover {
-    border-color: var(--border-strong);
+    color: var(--muted);
+    cursor: pointer;
   }
 
   .port .op {
     display: block;
     font-weight: 600;
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--ink);
   }
 
@@ -663,121 +828,77 @@
   }
   .port.empty {
     border-style: dashed;
-    color: var(--ink-faint);
+    color: var(--faint);
   }
 
-  .side-note {
-    font-size: 13px;
-    color: var(--ink-muted);
-    max-width: 46ch;
+  .gw {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 9px;
   }
 
-  .side-note h3 {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--ink);
-    margin: 0 0 6px;
-  }
-
-  .side-note + .side-note {
-    margin-top: 18px;
-  }
-
-  /* ---------- Кабинет клиента ---------- */
-
-  .two-col {
-    display: grid;
-    grid-template-columns: 1fr 340px;
-    gap: 16px;
-    align-items: start;
-  }
-
-  @media (max-width: 880px) {
-    .two-col {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  .channel {
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .channel:last-child {
-    border-bottom: 0;
-  }
-
-  .channel-head {
+  .gw-head {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 9px;
-  }
-
-  .channel-head .name {
+    align-items: center;
+    margin-bottom: 7px;
+    font-size: 12.5px;
     font-weight: 600;
   }
 
-  .prio {
+  .note {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
+    gap: 7px;
+    padding: 8px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    line-height: 1.4;
   }
 
-  .prio .rank {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--ink-faint);
-    margin-right: 2px;
+  .note.crit {
+    background: var(--crit-soft);
+    color: var(--crit);
+  }
+  .note.warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .note b {
+    font-weight: 600;
+  }
+  .note .bd {
+    color: var(--ink);
   }
 
-  .meta {
-    margin-top: 9px;
+  .hint {
     font-size: 12.5px;
-    color: var(--ink-muted);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px 16px;
+    color: var(--muted);
+    max-width: 48ch;
   }
 
-  .bars {
-    display: flex;
-    flex-direction: column;
-    gap: 9px;
-    padding: 14px 16px;
-  }
-
-  .bar-row {
-    display: grid;
-    grid-template-columns: 74px 1fr 84px;
-    gap: 10px;
-    align-items: center;
+  .hint h3 {
     font-size: 12.5px;
+    color: var(--ink);
+    margin: 0 0 4px;
+  }
+
+  .hint + .hint {
+    margin-top: 14px;
   }
 
   .bar {
-    height: 7px;
-    background: var(--surface-sunk);
-    border-radius: 4px;
+    height: 6px;
+    background: var(--sunk);
+    border-radius: 3px;
     overflow: hidden;
+    min-width: 60px;
   }
 
   .bar span {
     display: block;
     height: 100%;
     background: var(--accent);
-    border-radius: 4px;
-  }
-
-  .foot {
-    margin-top: 30px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
-    font-size: 12.5px;
-    color: var(--ink-faint);
-    max-width: 72ch;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -787,315 +908,49 @@
   }
 </style>
 
-<div class="shell">
-  <header class="top">
-    <div class="brand">
-      <b>Zvonix</b>
-      <span>прототип интерфейса</span>
-    </div>
-    <div class="switcher" role="tablist" aria-label="Кабинет">
-      <button role="tab" aria-selected="true" data-panel="admin">Админка</button>
-      <button role="tab" aria-selected="false" data-panel="partner">Кабинет партнёра</button>
-      <button role="tab" aria-selected="false" data-panel="client">Кабинет клиента</button>
-    </div>
-  </header>
+<div class="app">
+  <nav class="rail">
+    <div class="brand"><b>Zvonix</b><span>консоль</span></div>
+    <div id="nav"></div>
+    <div class="rail-foot">Прототип на выдуманных данных</div>
+  </nav>
 
-  <!-- ================= АДМИНКА ================= -->
-  <section class="panel" id="admin">
-    <p class="lede">
-      Рабочий экран владельца платформы. Плотность максимальная: главное — быстро увидеть, где
-      теряется трафик, и добраться до любого объекта.
-    </p>
-
-    <div class="stack">
-      <div class="tiles">
-        <div class="tile">
-          <div class="label">Активные вызовы</div>
-          <div class="value">47</div>
-          <div class="sub">пик за сутки — 214</div>
-        </div>
-        <div class="tile">
-          <div class="label">ASR за час</div>
-          <div class="value">63,2 %</div>
-          <div class="sub delta-down">−4,1 п.п. к вчерашнему</div>
-        </div>
-        <div class="tile">
-          <div class="label">Наценка за сегодня</div>
-          <div class="value">18 402,50 ₽</div>
-          <div class="sub delta-up">+12 % к среднему</div>
-        </div>
-        <div class="tile">
-          <div class="label">Партнёры на связи</div>
-          <div class="value">12 / 19</div>
-          <div class="sub">7 шлюзов офлайн дольше часа</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>
-          Покрытие: свободные SIM по операторам и регионам
-          <em>обновлено 14 секунд назад</em>
-        </h2>
-        <div class="scroll-x">
-          <table class="matrix">
-            <thead>
-              <tr>
-                <th scope="col">Оператор</th>
-                <th scope="col">Москва</th>
-                <th scope="col">Санкт-Петербург</th>
-                <th scope="col">Свердловская</th>
-                <th scope="col">Новосибирская</th>
-                <th scope="col">Краснодарский</th>
-                <th scope="col">Татарстан</th>
-              </tr>
-            </thead>
-            <tbody id="matrix-body"></tbody>
-          </table>
-        </div>
-        <div class="readout" id="matrix-readout">
-          Выберите ячейку, чтобы увидеть, какие партнёры дают эту ёмкость.
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Партнёры <em>сортировка по доле трафика</em></h2>
-        <div class="scroll-x">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Псевдоним</th>
-                <th scope="col">Операторы</th>
-                <th scope="col">SIM</th>
-                <th scope="col">ASR</th>
-                <th scope="col">Цена, ₽/мин</th>
-                <th scope="col">Заработок за сутки</th>
-                <th scope="col">Состояние</th>
-              </tr>
-            </thead>
-            <tbody id="partners-body"></tbody>
-          </table>
-        </div>
+  <div class="main">
+    <div class="topbar">
+      <h1 id="page-title">Обзор</h1>
+      <span class="crumb" id="page-crumb"></span>
+      <div class="spacer"></div>
+      <label class="search"
+        ><span>⌕</span
+        ><input type="search" placeholder="номер, партнёр, SIM, вызов…" aria-label="Поиск"
+      /></label>
+      <div class="roles" role="tablist" aria-label="Роль">
+        <button role="tab" aria-selected="true" data-role="admin">Админ</button>
+        <button role="tab" aria-selected="false" data-role="partner">Партнёр</button>
+        <button role="tab" aria-selected="false" data-role="client">Клиент</button>
       </div>
     </div>
-  </section>
-
-  <!-- ================= ПАРТНЁР ================= -->
-  <section class="panel" id="partner" hidden>
-    <p class="lede">
-      Партнёр смотрит с телефона, часто и коротко. Поэтому деньги и состояние SIM — на первом
-      экране, без прокрутки.
-    </p>
-
-    <div class="phone-stage">
-      <div class="phone">
-        <div class="phone-inner">
-          <div class="phone-bar">
-            <span>9:41</span>
-            <span>Zvonix</span>
-          </div>
-
-          <div class="earn">
-            <div>
-              <div class="label">Сегодня</div>
-              <div class="value">1 284 ₽</div>
-            </div>
-            <div>
-              <div class="label">За месяц</div>
-              <div class="value">31 907 ₽</div>
-            </div>
-            <div>
-              <div class="label">К выплате</div>
-              <div class="value">8 450 ₽</div>
-            </div>
-            <div>
-              <div class="label">Порог выплаты</div>
-              <div class="value">5 000 ₽</div>
-            </div>
-          </div>
-
-          <button class="payout" type="button" id="payout-btn">Запросить выплату 8 450 ₽</button>
-
-          <div class="note crit">
-            <span>▲</span>
-            <span class="body">
-              <b>SIM 4 в шлюзе «Дом» заблокирована оператором.</b> Мы приостановили её за 6 минут до
-              блокировки — доля отвеченных упала до 21 %. Замените карту, регистрация сохранится.
-            </span>
-          </div>
-
-          <div class="gw">
-            <div class="gw-head">
-              <span class="name">Шлюз «Дом» · GoIP-8</span>
-              <span class="pill p-ok">на связи</span>
-            </div>
-            <div class="ports" id="ports-home"></div>
-          </div>
-
-          <div class="gw">
-            <div class="gw-head">
-              <span class="name">Шлюз «Офис» · GoIP-4</span>
-              <span class="pill p-warn">сигнал слабый</span>
-            </div>
-            <div class="ports" id="ports-office"></div>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <div class="side-note">
-          <h3>Что видно с одного взгляда</h3>
-          Цвет порта кодирует состояние, а не только подпись: занятая SIM зелёная, заблокированная
-          красная, пустой слот пунктирный. Партнёру не нужно читать таблицу, чтобы понять, что
-          сломалось.
-        </div>
-        <div class="side-note">
-          <h3>Система предупреждает раньше, чем ломается</h3>
-          Про блокировку SIM партнёр узнаёт от нас, а не от оператора. Приостановка при аномальном
-          профиле трафика — это защита его актива, и именно она удерживает партнёра на платформе.
-        </div>
-        <div class="side-note">
-          <h3>Выплата — по запросу</h3>
-          Кнопка активна только при достижении порога, который вы задаёте в админке. Ниже порога она
-          показывает, сколько осталось накопить.
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ================= КЛИЕНТ ================= -->
-  <section class="panel" id="client" hidden>
-    <p class="lede">
-      Служба такси заходит редко. Здесь важнее понятность настроек и прозрачность списаний, чем
-      плотность. Партнёры видны только под псевдонимами.
-    </p>
-
-    <div class="two-col">
-      <div class="stack">
-        <div class="card">
-          <h2>Каналы <em>приоритет задаёте вы</em></h2>
-
-          <div class="channel">
-            <div class="channel-head">
-              <span class="name">Обзвон клиентов</span>
-              <span class="pill p-ok">работает</span>
-            </div>
-            <div class="prio">
-              <span class="rank">1.</span>
-              <span class="alias">Синий-14</span>
-              <span class="alias">Кедр-07</span>
-              <span class="rank">2.</span>
-              <span class="alias">Ясень-31</span>
-            </div>
-            <div class="meta">
-              <span>МТС · Т2 · Мегафон</span>
-              <span>лимит 500 вызовов в час</span>
-              <span>запись включена</span>
-              <span>08:00–21:00</span>
-            </div>
-          </div>
-
-          <div class="channel">
-            <div class="channel-head">
-              <span class="name">Подтверждение заказа</span>
-              <span class="pill p-warn">нет ёмкости по Билайну</span>
-            </div>
-            <div class="prio">
-              <span class="rank">1.</span>
-              <span class="alias">Кедр-07</span>
-              <span class="rank">2.</span>
-              <span class="alias">Синий-14</span>
-              <span class="alias">Гранит-02</span>
-            </div>
-            <div class="meta">
-              <span>МТС · Билайн</span>
-              <span>лимит 1 200 вызовов в сутки</span>
-              <span>без записи · дешевле на 18 %</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="card log" id="call-log">
-          <h2>Последние вызовы <em>нажмите строку, чтобы увидеть решение</em></h2>
-          <div id="log-body"></div>
-        </div>
-      </div>
-
-      <div class="stack">
-        <div class="card">
-          <h2>Баланс</h2>
-          <div style="padding: 14px 16px">
-            <div class="num" style="font-size: 30px; font-weight: 500; letter-spacing: -0.03em">
-              42 180,45 ₽
-            </div>
-            <div style="color: var(--ink-muted); margin-top: 6px; font-size: 13px">
-              При текущем расходе хватит на <b class="num">18 дней</b>. Уведомим за 3 дня до нуля.
-            </div>
-          </div>
-          <div class="readout">
-            Пополнение зачисляет администратор вручную. История всех операций — в разделе «Расчёты».
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Расход за неделю <em>по операторам</em></h2>
-          <div class="bars">
-            <div class="bar-row">
-              <span>МТС</span>
-              <span class="bar"><span style="width: 100%"></span></span>
-              <span class="money">7 412,10 ₽</span>
-            </div>
-            <div class="bar-row">
-              <span>Т2</span>
-              <span class="bar"><span style="width: 68%"></span></span>
-              <span class="money">5 038,60 ₽</span>
-            </div>
-            <div class="bar-row">
-              <span>Мегафон</span>
-              <span class="bar"><span style="width: 41%"></span></span>
-              <span class="money">3 044,90 ₽</span>
-            </div>
-            <div class="bar-row">
-              <span>Билайн</span>
-              <span class="bar"><span style="width: 12%"></span></span>
-              <span class="money">889,20 ₽</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="note warn">
-          <span>▲</span>
-          <span class="body">
-            <b>По Билайну ёмкости почти нет.</b> В канале «Подтверждение заказа» 34 вызова за сутки
-            не состоялись по этой причине. Мы уже ищем партнёров с этим оператором.
-          </span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <p class="foot">
-    Прототип на выдуманных данных: ни один экран не подключён к системе. Служит для согласования
-    внешнего вида и состава экранов до того, как под них написан код. Правила, по которым он сделан,
-    — в <code>docs/DESIGN.md</code>.
-  </p>
+    <div class="content" id="content"></div>
+  </div>
 </div>
+
+<aside class="drawer" id="drawer" hidden aria-label="Карточка вызова">
+  <header>
+    <b id="drawer-title">Вызов</b><span class="spacer"></span>
+    <button class="btn" id="drawer-close" type="button">Закрыть</button>
+  </header>
+  <div class="body" id="drawer-body"></div>
+</aside>
 
 <script>
   'use strict';
 
-  /* ---------- Переключение кабинетов ---------- */
-  const tabs = Array.from(document.querySelectorAll('.switcher button'));
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      tabs.forEach((other) => {
-        const active = other === tab;
-        other.setAttribute('aria-selected', String(active));
-        document.getElementById(other.dataset.panel).hidden = !active;
-      });
-    });
-  });
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) =>
+    String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 
-  /* ---------- Карта покрытия ---------- */
+  /* ================= ДАННЫЕ ================= */
+
   const REGIONS = [
     'Москва',
     'Санкт-Петербург',
@@ -1106,296 +961,1317 @@
   ];
 
   const COVERAGE = [
-    { operator: 'МТС', free: [14, 9, 6, 4, 7, 5], holders: 'Синий-14, Кедр-07, Ясень-31' },
-    { operator: 'Т2', free: [11, 7, 3, 2, 5, 4], holders: 'Синий-14, Гранит-02' },
-    { operator: 'Мегафон', free: [8, 5, 0, 1, 3, 2], holders: 'Кедр-07' },
-    { operator: 'Билайн', free: [2, 1, 0, 0, 1, 0], holders: 'Гранит-02' },
-    { operator: 'Йота', free: [4, 3, 2, 1, 2, 1], holders: 'Ясень-31' },
+    { op: 'МТС', free: [14, 9, 6, 4, 7, 5], by: 'Синий-14, Кедр-07, Ясень-31' },
+    { op: 'Т2', free: [11, 7, 3, 2, 5, 4], by: 'Синий-14, Гранит-02' },
+    { op: 'Мегафон', free: [8, 5, 0, 1, 3, 2], by: 'Кедр-07' },
+    { op: 'Билайн', free: [2, 1, 0, 0, 1, 0], by: 'Гранит-02' },
+    { op: 'Йота', free: [4, 3, 2, 1, 2, 1], by: 'Ясень-31' },
   ];
 
-  function level(free) {
-    if (free === 0) return 'lvl-crit';
-    if (free <= 2) return 'lvl-warn';
-    return 'lvl-ok';
+  const OPS = ['МТС', 'Т2', 'Мегафон', 'Билайн', 'Йота'];
+  const ALIASES = [
+    'Синий-14',
+    'Кедр-07',
+    'Ясень-31',
+    'Гранит-02',
+    'Ольха-19',
+    'Береза-08',
+    'Клён-22',
+  ];
+  const CLIENTS = ['Такси «Вояж»', 'Такси «Лидер»', 'Драйв-Групп', 'Автопилот СПб'];
+  const CHANNELS = ['Обзвон клиентов', 'Подтверждение заказа', 'Напоминание', 'Опрос качества'];
+
+  function mask(n) {
+    return n.slice(0, 12) + '**-' + n.slice(-2);
   }
 
-  const matrixBody = document.getElementById('matrix-body');
-  const readout = document.getElementById('matrix-readout');
-
-  COVERAGE.forEach((row) => {
-    const tr = document.createElement('tr');
-    const head = document.createElement('td');
-    head.textContent = row.operator;
-    tr.append(head);
-
-    row.free.forEach((free, index) => {
-      const td = document.createElement('td');
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'cell ' + level(free);
-      button.textContent = String(free);
-      button.addEventListener('click', () => {
-        readout.innerHTML =
-          free === 0
-            ? '<b>' +
-              row.operator +
-              ' · ' +
-              REGIONS[index] +
-              ':</b> свободных SIM нет. Вызовы на этого оператора в этом регионе не проходят — ' +
-              'через SIM другого оператора они перестают быть внутрисетевыми. Нужен партнёр с ' +
-              row.operator +
-              '.'
-            : '<b>' +
-              row.operator +
-              ' · ' +
-              REGIONS[index] +
-              ':</b> ' +
-              free +
-              ' свободных SIM. Ёмкость дают: ' +
-              row.holders +
-              '.';
-      });
-      td.append(button);
-      tr.append(td);
-    });
-
-    matrixBody.append(tr);
-  });
-
-  /* ---------- Таблица партнёров ---------- */
-  const PARTNERS = [
+  const CALL_FAILS = [
     {
-      alias: 'Синий-14',
-      operators: 'МТС, Т2',
-      sim: '18 / 20',
-      asr: '71,4 %',
-      asrClass: '',
-      price: '1,15',
-      earned: '3 902,40 ₽',
-      state: ['p-ok', 'работает'],
-    },
-    {
-      alias: 'Кедр-07',
-      operators: 'МТС, Мегафон',
-      sim: '15 / 20',
-      asr: '66,8 %',
-      asrClass: '',
-      price: '1,22',
-      earned: '3 140,00 ₽',
-      state: ['p-ok', 'работает'],
-    },
-    {
-      alias: 'Ясень-31',
-      operators: 'МТС, Йота',
-      sim: '11 / 14',
-      asr: '48,1 %',
-      asrClass: 'delta-down',
-      price: '1,08',
-      earned: '1 806,70 ₽',
-      state: ['p-warn', 'ASR ниже порога'],
-    },
-    {
-      alias: 'Гранит-02',
-      operators: 'Т2, Билайн',
-      sim: '4 / 20',
-      asr: '—',
-      asrClass: '',
-      price: '1,30',
-      earned: '0,00 ₽',
-      state: ['p-crit', 'шлюз офлайн 3 ч'],
-    },
-    {
-      alias: 'Ольха-19',
-      operators: 'Мегафон',
-      sim: '0 / 6',
-      asr: '—',
-      asrClass: '',
-      price: '1,19',
-      earned: '0,00 ₽',
-      state: ['p-idle', 'ждёт регистрации SIM'],
-    },
-  ];
-
-  const partnersBody = document.getElementById('partners-body');
-  PARTNERS.forEach((partner) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td><span class="alias">' +
-      partner.alias +
-      '</span></td>' +
-      '<td>' +
-      partner.operators +
-      '</td>' +
-      '<td class="num">' +
-      partner.sim +
-      '</td>' +
-      '<td class="num ' +
-      partner.asrClass +
-      '">' +
-      partner.asr +
-      '</td>' +
-      '<td class="num">' +
-      partner.price +
-      '</td>' +
-      '<td class="money">' +
-      partner.earned +
-      '</td>' +
-      '<td><span class="pill ' +
-      partner.state[0] +
-      '">' +
-      partner.state[1] +
-      '</span></td>';
-    partnersBody.append(tr);
-  });
-
-  /* ---------- Порты шлюзов ---------- */
-  const PORTS_HOME = [
-    { op: 'МТС', state: 'busy', text: '02:14' },
-    { op: 'МТС', state: '', text: 'свободна' },
-    { op: 'Т2', state: 'busy', text: '00:47' },
-    { op: 'Т2', state: 'blocked', text: 'блок' },
-    { op: 'МТС', state: '', text: 'свободна' },
-    { op: 'Мегафон', state: 'busy', text: '01:02' },
-    { op: 'Т2', state: '', text: 'свободна' },
-    { op: '—', state: 'empty', text: 'слот пуст' },
-  ];
-
-  const PORTS_OFFICE = [
-    { op: 'МТС', state: 'busy', text: '03:31' },
-    { op: 'Мегафон', state: '', text: 'свободна' },
-    { op: '—', state: 'empty', text: 'слот пуст' },
-    { op: '—', state: 'empty', text: 'слот пуст' },
-  ];
-
-  function renderPorts(id, ports) {
-    const host = document.getElementById(id);
-    ports.forEach((port, index) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'port ' + port.state;
-      button.innerHTML = '<span class="op">' + port.op + '</span>' + port.text;
-      button.title = 'Порт ' + (index + 1);
-      host.append(button);
-    });
-  }
-
-  renderPorts('ports-home', PORTS_HOME);
-  renderPorts('ports-office', PORTS_OFFICE);
-
-  document.getElementById('payout-btn').addEventListener('click', (event) => {
-    event.target.textContent = 'Запрос отправлен · рассмотрим за сутки';
-    event.target.disabled = true;
-    event.target.style.opacity = '0.65';
-  });
-
-  /* ---------- Журнал вызовов ---------- */
-  const CALLS = [
-    {
-      time: '14:38:02',
-      number: '+7 913 042-**-23',
-      status: ['p-ok', 'разговор 1:47'],
-      operator: 'Сбербанк-Телеком, определён запросом',
-      partner: 'Синий-14',
-      cost: '2,04 ₽',
-      why: 'Номер перенесён из МТС. План нумерации дал бы неверного оператора, поэтому маршрут построен по подтверждённому значению.',
-      rejected: null,
-    },
-    {
-      time: '14:37:51',
-      number: '+7 922 118-**-04',
-      status: ['p-crit', 'не состоялся'],
-      operator: 'Мегафон, Свердловская область',
-      partner: '—',
-      cost: '0,00 ₽',
+      st: ['p-crit', 'не состоялся'],
       why: 'Нет свободной SIM Мегафона в Свердловской области. Через SIM другого оператора вызов перестаёт быть внутрисетевым, поэтому он не совершается.',
-      rejected: ['Кедр-07 — все SIM Мегафона заняты', 'Ясень-31 — не покрывает регион'],
+      rej: [
+        'Кедр-07 — все SIM Мегафона заняты',
+        'Ясень-31 — не покрывает регион',
+        'Гранит-02 — нет этого оператора',
+      ],
     },
     {
-      time: '14:37:44',
-      number: '+7 916 730-**-88',
-      status: ['p-ok', 'разговор 0:39'],
-      operator: 'МТС, Москва',
-      partner: 'Кедр-07',
-      cost: '0,81 ₽',
-      why: 'Партнёр первого приоритета принял вызов. Оператор взят из своей базы, значение действительно ещё 41 день.',
-      rejected: null,
-    },
-    {
-      time: '14:37:19',
-      number: '+7 999 204-**-17',
-      status: ['p-warn', 'отклонён'],
-      operator: 'не подтверждён',
-      partner: '—',
-      cost: '0,00 ₽',
+      st: ['p-warn', 'отклонён'],
       why: 'Оператор номера не подтверждён, а гадать нельзя: ошибка означает платный звонок для партнёра. Номер поставлен в очередь на разрешение, следующий вызов пройдёт.',
-      rejected: null,
+      rej: null,
     },
     {
-      time: '14:36:58',
-      number: '+7 950 611-**-30',
-      status: ['p-warn', 'отклонён'],
-      operator: 'Т2, Новосибирская область',
-      partner: '—',
-      cost: '0,00 ₽',
-      why: 'Исчерпан лимит канала «Обзвон клиентов»: 500 вызовов в час. Лимит снимется в 15:00.',
-      rejected: null,
+      st: ['p-warn', 'отклонён'],
+      why: 'Исчерпан лимит канала: 500 вызовов в час. Ограничение снимется в 15:00.',
+      rej: null,
+    },
+    {
+      st: ['p-crit', 'не состоялся'],
+      why: 'Все SIM Билайна заблокированы оператором. Партнёров с этим оператором сейчас нет — привлечение в работе.',
+      rej: ['Гранит-02 — 4 из 4 SIM заблокированы'],
     },
   ];
 
-  const logBody = document.getElementById('log-body');
-  CALLS.forEach((call, index) => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'row';
-    row.setAttribute('aria-expanded', 'false');
-    row.innerHTML =
-      '<span class="time">' +
-      call.time +
-      '</span>' +
-      '<span class="who">' +
-      call.number +
-      '</span>' +
-      '<span class="pill ' +
-      call.status[0] +
-      '">' +
-      call.status[1] +
-      '</span>';
+  function buildCalls(n) {
+    const out = [];
+    let sec = 14 * 3600 + 38 * 60 + 2;
+    for (let i = 0; i < n; i += 1) {
+      const failEvery = i % 5 === 1 || i % 7 === 3;
+      const fail = failEvery ? CALL_FAILS[i % CALL_FAILS.length] : null;
+      const dur = 20 + ((i * 37) % 260);
+      const op = OPS[i % OPS.length];
+      const alias = ALIASES[i % ALIASES.length];
+      const cost = (dur / 60) * (1.05 + (i % 5) * 0.06);
+      out.push({
+        time: fmtClock(sec),
+        number: mask(
+          '+7 9' +
+            String(13 + (i % 60)).padStart(2, '0') +
+            ' ' +
+            String(100 + ((i * 7) % 900)) +
+            '-' +
+            String(10 + (i % 90)) +
+            '-' +
+            String(10 + ((i * 3) % 90)),
+        ),
+        client: CLIENTS[i % CLIENTS.length],
+        channel: CHANNELS[i % CHANNELS.length],
+        op: fail && fail.rej ? op : op,
+        partner: fail ? '—' : alias,
+        dur: fail ? '—' : fmtDur(dur),
+        cost: fail ? '0,00' : cost.toFixed(2).replace('.', ','),
+        st: fail ? fail.st : ['p-ok', 'разговор'],
+        why: fail
+          ? fail.why
+          : 'Партнёр выбран по приоритету клиента. Оператор взят из своей базы, значение действительно ещё ' +
+            (5 + (i % 25)) +
+            ' дней.',
+        rej: fail ? fail.rej : null,
+      });
+      sec -= 7 + ((i * 13) % 40);
+    }
+    return out;
+  }
 
-    const why = document.createElement('div');
-    why.className = 'why';
-    why.id = 'why-' + index;
-    why.hidden = true;
+  function fmtClock(s) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const x = s % 60;
+    return [h, m, x].map((v) => String(v).padStart(2, '0')).join(':');
+  }
 
-    let inner =
-      '<div>' +
-      call.why +
-      '</div><dl>' +
-      '<dt>Оператор</dt><dd>' +
-      call.operator +
-      '</dd>' +
-      '<dt>Партнёр</dt><dd>' +
-      (call.partner === '—' ? '—' : '<span class="alias">' + call.partner + '</span>') +
-      '</dd>' +
-      '<dt>Списано</dt><dd class="money">' +
-      call.cost +
-      '</dd></dl>';
+  function fmtDur(s) {
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
 
-    if (call.rejected) {
-      inner +=
-        '<div class="rejected"><dt style="color:var(--ink-faint);font-size:12px">Кто отпал</dt>' +
-        call.rejected.map((item) => '<div>' + item + '</div>').join('') +
-        '</div>';
+  const CALLS = buildCalls(28);
+
+  const PARTNERS = [
+    [
+      'Синий-14',
+      'МТС, Т2',
+      '18 / 20',
+      '71,4',
+      '1,15',
+      '3 902,40',
+      'Москва, СПб',
+      ['p-ok', 'работает'],
+    ],
+    [
+      'Кедр-07',
+      'МТС, Мегафон',
+      '15 / 20',
+      '66,8',
+      '1,22',
+      '3 140,00',
+      'Москва',
+      ['p-ok', 'работает'],
+    ],
+    [
+      'Ясень-31',
+      'МТС, Йота',
+      '11 / 14',
+      '48,1',
+      '1,08',
+      '1 806,70',
+      'Новосибирская',
+      ['p-warn', 'ASR ниже порога'],
+    ],
+    [
+      'Гранит-02',
+      'Т2, Билайн',
+      '4 / 20',
+      '—',
+      '1,30',
+      '0,00',
+      'Краснодарский',
+      ['p-crit', 'шлюз офлайн 3 ч'],
+    ],
+    [
+      'Ольха-19',
+      'Мегафон',
+      '0 / 6',
+      '—',
+      '1,19',
+      '0,00',
+      'Татарстан',
+      ['p-idle', 'ждёт регистрации SIM'],
+    ],
+    ['Береза-08', 'МТС, Т2', '20 / 20', '69,2', '1,17', '4 210,80', 'СПб', ['p-ok', 'работает']],
+    ['Клён-22', 'Т2', '9 / 12', '58,3', '1,11', '1 402,15', 'Свердловская', ['p-ok', 'работает']],
+  ];
+
+  const SIMS = [];
+  for (let i = 0; i < 26; i += 1) {
+    const blocked = i % 9 === 4;
+    const idle = i % 11 === 7;
+    SIMS.push([
+      '8970' + String(1010101010 + i * 7717),
+      OPS[i % OPS.length],
+      mask(
+        '+7 9' +
+          String(10 + (i % 80)).padStart(2, '0') +
+          ' ' +
+          String(200 + ((i * 11) % 700)) +
+          '-' +
+          String(10 + (i % 80)) +
+          '-' +
+          String(11 + ((i * 5) % 80)),
+      ),
+      ALIASES[i % ALIASES.length],
+      'GoIP-8 · порт ' + ((i % 8) + 1),
+      REGIONS[i % REGIONS.length],
+      String(38 + ((i * 13) % 160)),
+      blocked ? '—' : String(52 + ((i * 7) % 30) + ',' + (i % 10)),
+      String(120 + ((i * 17) % 380)),
+      blocked ? ['p-crit', 'заблокирована'] : idle ? ['p-idle', 'прогрев'] : ['p-ok', 'активна'],
+    ]);
+  }
+
+  const LEDGER = [];
+  for (let i = 0; i < 22; i += 1) {
+    const kind = [
+      'Списание за вызов',
+      'Начисление партнёру',
+      'Наценка платформы',
+      'Пополнение баланса',
+      'Выплата партнёру',
+    ][i % 5];
+    const acc =
+      i % 5 === 3
+        ? CLIENTS[i % CLIENTS.length]
+        : i % 5 === 1 || i % 5 === 4
+          ? ALIASES[i % ALIASES.length]
+          : i % 5 === 2
+            ? 'Платформа'
+            : CLIENTS[i % CLIENTS.length];
+    const amount = (
+      i % 5 === 3 ? 25000 : i % 5 === 4 ? -8450 : ((i % 5) - 1) * (1.4 + (i % 7) * 0.3)
+    )
+      .toFixed(2)
+      .replace('.', ',');
+    LEDGER.push([
+      '2026-09-01 14:' + String(38 - i).padStart(2, '0'),
+      String(184920 - i),
+      kind,
+      acc,
+      amount,
+      i % 5 === 3 || i % 5 === 4 ? 'вручную' : 'вызов #' + (88910 + i),
+    ]);
+  }
+
+  /* ================= МЕНЮ ================= */
+
+  const MENUS = {
+    admin: [
+      {
+        title: 'Работа',
+        items: [
+          ['overview', '▦', 'Обзор', ''],
+          ['calls', '⇄', 'Вызовы', '28'],
+          ['coverage', '▤', 'Покрытие', '3'],
+        ],
+      },
+      {
+        title: 'Участники',
+        items: [
+          ['partners', '◈', 'Партнёры', '19'],
+          ['clients', '◇', 'Клиенты', '4'],
+          ['sims', '▭', 'SIM-карты', '132'],
+          ['gateways', '⌗', 'Шлюзы', '31'],
+          ['nodes', '⬡', 'Узлы АТС', '3'],
+        ],
+      },
+      {
+        title: 'Деньги',
+        items: [
+          ['ledger', '≡', 'Проводки', ''],
+          ['payouts', '↑', 'Выплаты', '2'],
+          ['tariffs', '₽', 'Тарифы и коридоры', ''],
+        ],
+      },
+      {
+        title: 'Служебное',
+        items: [
+          ['audit', '◷', 'Аудит', ''],
+          ['settings', '⚙', 'Настройки', ''],
+        ],
+      },
+    ],
+    partner: [
+      {
+        title: 'Мой кабинет',
+        items: [
+          ['p-home', '▦', 'Обзор', ''],
+          ['p-gw', '⌗', 'Шлюзы и SIM', '2'],
+          ['p-money', '₽', 'Заработок', ''],
+          ['p-rates', '↕', 'Цены и покрытие', ''],
+        ],
+      },
+    ],
+    client: [
+      {
+        title: 'Мой кабинет',
+        items: [
+          ['c-home', '▦', 'Обзор', ''],
+          ['c-channels', '⇄', 'Каналы', '2'],
+          ['c-calls', '☰', 'Вызовы и записи', '28'],
+          ['c-money', '₽', 'Баланс и расходы', ''],
+        ],
+      },
+    ],
+  };
+
+  let role = 'admin';
+  let page = 'overview';
+
+  function renderNav() {
+    $('nav').innerHTML = MENUS[role]
+      .map(
+        (g) =>
+          '<div class="group-title">' +
+          g.title +
+          '</div>' +
+          g.items
+            .map(
+              ([id, ico, label, count]) =>
+                '<a data-page="' +
+                id +
+                '"' +
+                (id === page ? ' aria-current="page"' : '') +
+                '>' +
+                '<span class="ico">' +
+                ico +
+                '</span><span class="label">' +
+                label +
+                '</span>' +
+                (count
+                  ? '<span class="count' +
+                    (id === 'coverage' || id === 'payouts' ? ' bad' : '') +
+                    '">' +
+                    count +
+                    '</span>'
+                  : '') +
+                '</a>',
+            )
+            .join(''),
+      )
+      .join('');
+    $('nav')
+      .querySelectorAll('a')
+      .forEach((a) => {
+        a.addEventListener('click', () => {
+          page = a.dataset.page;
+          renderNav();
+          renderPage();
+        });
+      });
+  }
+
+  /* ================= ТАБЛИЦЫ ================= */
+
+  function table(cols, rows, opts) {
+    const o = opts || {};
+    const head =
+      '<tr>' +
+      cols.map((c) => '<th' + (c.r ? ' class="r"' : '') + '>' + c.t + '</th>').join('') +
+      '</tr>';
+    const body = rows
+      .map(
+        (r, i) =>
+          '<tr data-i="' +
+          i +
+          '">' +
+          r
+            .map(
+              (cell, j) =>
+                '<td' +
+                (cols[j].r ? ' class="r"' : '') +
+                (cols[j].m ? ' class="num"' : '') +
+                '>' +
+                cell +
+                '</td>',
+            )
+            .join('') +
+          '</tr>',
+      )
+      .join('');
+    return (
+      '<div class="tablewrap"><table><thead>' +
+      head +
+      '</thead><tbody' +
+      (o.id ? ' id="' + o.id + '"' : '') +
+      '>' +
+      body +
+      '</tbody></table></div>' +
+      '<div class="pager">Показано ' +
+      rows.length +
+      ' из ' +
+      (o.total || rows.length) +
+      '<span class="spacer"></span>' +
+      '<button class="btn" type="button">Ещё 50</button></div>'
+    );
+  }
+
+  function toolbar(parts) {
+    return '<div class="toolbar">' + parts.join('') + '</div>';
+  }
+
+  const pill = (s) => '<span class="pill ' + s[0] + '">' + s[1] + '</span>';
+  const alias = (a) => (a === '—' ? '—' : '<span class="alias">' + a + '</span>');
+
+  /* ================= СТРАНИЦЫ ================= */
+
+  const PAGES = {};
+
+  PAGES.overview = () => {
+    const kpis = [
+      ['Активные вызовы', '47', 'пик за сутки — 214'],
+      ['ASR за час', '63,2 %', '<span class="bad">−4,1 п.п.</span> к вчерашнему'],
+      ['Наценка за сегодня', '18 402,50 ₽', '<span class="good">+12 %</span> к среднему'],
+      ['Партнёры на связи', '12 / 19', '7 шлюзов офлайн'],
+      ['SIM свободно', '84 / 132', '11 заблокировано'],
+      ['Отказов за час', '38', '21 — нет ёмкости'],
+    ];
+    return (
+      '<div class="kpis">' +
+      kpis
+        .map(
+          (k) =>
+            '<div class="kpi"><div class="k">' +
+            k[0] +
+            '</div><div class="v">' +
+            k[1] +
+            '</div><div class="s">' +
+            k[2] +
+            '</div></div>',
+        )
+        .join('') +
+      '</div><div class="grid2"><div>' +
+      coverageCard() +
+      '</div><div class="card"><h2>Последние отказы <em>за 10 минут</em></h2><div class="list">' +
+      CALLS.filter((c) => c.st[0] !== 'p-ok')
+        .slice(0, 9)
+        .map(
+          (c) =>
+            '<div class="row"><span class="t">' +
+            c.time +
+            '</span><span class="x">' +
+            esc(c.why.split('.')[0]) +
+            '</span></div>',
+        )
+        .join('') +
+      '</div></div></div>'
+    );
+  };
+
+  function coverageCard() {
+    return (
+      '<div class="card"><h2>Свободные SIM по операторам и регионам <em>обновлено 14 с назад</em></h2>' +
+      '<div style="overflow:auto"><table><thead><tr><th>Оператор</th>' +
+      REGIONS.map((r) => '<th class="r">' + r + '</th>').join('') +
+      '</tr></thead><tbody>' +
+      COVERAGE.map(
+        (row, ri) =>
+          '<tr><td style="font-weight:500">' +
+          row.op +
+          '</td>' +
+          row.free
+            .map(
+              (f, ci) =>
+                '<td><button class="cell ' +
+                (f === 0 ? 'lvl-crit' : f <= 2 ? 'lvl-warn' : 'lvl-ok') +
+                '" data-r="' +
+                ri +
+                '" data-c="' +
+                ci +
+                '">' +
+                f +
+                '</button></td>',
+            )
+            .join('') +
+          '</tr>',
+      ).join('') +
+      '</tbody></table></div><div class="readout" id="cov-out">Выберите ячейку, чтобы увидеть, кто даёт эту ёмкость.</div></div>'
+    );
+  }
+
+  PAGES.coverage = () => coverageCard();
+
+  PAGES.calls = () =>
+    toolbar([
+      '<select class="btn"><option>Все клиенты</option>' +
+        CLIENTS.map((c) => '<option>' + c + '</option>').join('') +
+        '</select>',
+      '<select class="btn"><option>Все операторы</option>' +
+        OPS.map((o) => '<option>' + o + '</option>').join('') +
+        '</select>',
+      '<button class="btn on" type="button">Только отказы</button>',
+      '<button class="btn" type="button">Сегодня</button>',
+      '<button class="btn" type="button">↓ CSV</button>',
+      '<span class="count-note">28 из 14 208 за сутки</span>',
+    ]) +
+    table(
+      [
+        { t: 'Время', m: 1 },
+        { t: 'Номер', m: 1 },
+        { t: 'Клиент' },
+        { t: 'Канал' },
+        { t: 'Оператор' },
+        { t: 'Партнёр' },
+        { t: 'Длит.', r: 1, m: 1 },
+        { t: 'Стоимость, ₽', r: 1, m: 1 },
+        { t: 'Итог' },
+      ],
+      CALLS.map((c) => [
+        c.time,
+        c.number,
+        c.client,
+        c.channel,
+        c.op,
+        alias(c.partner),
+        c.dur,
+        c.cost,
+        pill(c.st),
+      ]),
+      { id: 'calls-body', total: 14208 },
+    );
+
+  PAGES.partners = () =>
+    toolbar([
+      '<button class="btn on" type="button">Все</button>',
+      '<button class="btn" type="button">С проблемами · 3</button>',
+      '<button class="btn" type="button">Ждут модерации · 2</button>',
+      '<button class="btn primary" type="button">+ Пригласить партнёра</button>',
+      '<span class="count-note">7 из 19</span>',
+    ]) +
+    table(
+      [
+        { t: 'Псевдоним' },
+        { t: 'Операторы' },
+        { t: 'SIM', r: 1, m: 1 },
+        { t: 'ASR, %', r: 1, m: 1 },
+        { t: 'Цена, ₽/мин', r: 1, m: 1 },
+        { t: 'Заработок за сутки, ₽', r: 1, m: 1 },
+        { t: 'Регионы' },
+        { t: 'Состояние' },
+      ],
+      PARTNERS.map((p) => [
+        alias(p[0]),
+        p[1],
+        p[2],
+        p[3] === '—'
+          ? '—'
+          : parseFloat(p[3].replace(',', '.')) < 55
+            ? '<span class="bad">' + p[3] + '</span>'
+            : p[3],
+        p[4],
+        p[5],
+        p[6],
+        pill(p[7]),
+      ]),
+      { total: 19 },
+    );
+
+  PAGES.sims = () =>
+    toolbar([
+      '<select class="btn"><option>Все операторы</option>' +
+        OPS.map((o) => '<option>' + o + '</option>').join('') +
+        '</select>',
+      '<select class="btn"><option>Все регионы</option>' +
+        REGIONS.map((r) => '<option>' + r + '</option>').join('') +
+        '</select>',
+      '<button class="btn" type="button">Заблокированные · 11</button>',
+      '<button class="btn" type="button">На прогреве · 6</button>',
+      '<button class="btn" type="button">↓ CSV</button>',
+      '<span class="count-note">26 из 132</span>',
+    ]) +
+    table(
+      [
+        { t: 'ICCID', m: 1 },
+        { t: 'Оператор' },
+        { t: 'Номер', m: 1 },
+        { t: 'Партнёр' },
+        { t: 'Шлюз и порт' },
+        { t: 'Регион' },
+        { t: 'Вызовов', r: 1, m: 1 },
+        { t: 'ASR, %', r: 1, m: 1 },
+        { t: 'Минут', r: 1, m: 1 },
+        { t: 'Состояние' },
+      ],
+      SIMS.map((s) => [s[0], s[1], s[2], alias(s[3]), s[4], s[5], s[6], s[7], s[8], pill(s[9])]),
+      { total: 132 },
+    );
+
+  PAGES.ledger = () =>
+    toolbar([
+      '<select class="btn"><option>Все типы</option><option>Списания</option><option>Начисления</option><option>Пополнения</option><option>Выплаты</option></select>',
+      '<button class="btn" type="button">Сегодня</button>',
+      '<button class="btn" type="button">↓ CSV</button>',
+      '<span class="count-note">22 из 41 903 за сутки</span>',
+    ]) +
+    table(
+      [
+        { t: 'Время', m: 1 },
+        { t: '№', r: 1, m: 1 },
+        { t: 'Операция' },
+        { t: 'Счёт' },
+        { t: 'Сумма, ₽', r: 1, m: 1 },
+        { t: 'Основание' },
+      ],
+      LEDGER.map((l) => [
+        l[0],
+        l[1],
+        l[2],
+        l[3],
+        l[4].startsWith('-') ? '<span class="bad">' + l[4] + '</span>' : l[4],
+        l[5],
+      ]),
+      { total: 41903 },
+    );
+
+  PAGES.clients = () =>
+    toolbar([
+      '<button class="btn on" type="button">Все</button>',
+      '<button class="btn" type="button">Низкий баланс · 1</button>',
+      '<button class="btn primary" type="button">+ Клиент</button>',
+    ]) +
+    table(
+      [
+        { t: 'Клиент' },
+        { t: 'Каналов', r: 1, m: 1 },
+        { t: 'Баланс, ₽', r: 1, m: 1 },
+        { t: 'Хватит на', r: 1 },
+        { t: 'Вызовов за сутки', r: 1, m: 1 },
+        { t: 'ASR, %', r: 1, m: 1 },
+        { t: 'Расход за сутки, ₽', r: 1, m: 1 },
+        { t: 'Состояние' },
+      ],
+      [
+        [
+          'Такси «Вояж»',
+          '4',
+          '42 180,45',
+          '18 дней',
+          '6 204',
+          '64,1',
+          '2 341,20',
+          pill(['p-ok', 'работает']),
+        ],
+        [
+          'Такси «Лидер»',
+          '2',
+          '3 902,00',
+          '<span class="bad">2 дня</span>',
+          '4 118',
+          '61,7',
+          '1 902,40',
+          pill(['p-warn', 'низкий баланс']),
+        ],
+        [
+          'Драйв-Групп',
+          '3',
+          '128 400,10',
+          '61 день',
+          '2 880',
+          '68,9',
+          '1 204,55',
+          pill(['p-ok', 'работает']),
+        ],
+        [
+          'Автопилот СПб',
+          '1',
+          '15 002,30',
+          '9 дней',
+          '1 006',
+          '59,2',
+          '612,80',
+          pill(['p-ok', 'работает']),
+        ],
+      ],
+      { total: 4 },
+    );
+
+  PAGES.gateways = () =>
+    toolbar([
+      '<button class="btn on" type="button">Все</button>',
+      '<button class="btn" type="button">Офлайн · 7</button>',
+      '<button class="btn" type="button">↓ CSV</button>',
+      '<span class="count-note">8 из 31</span>',
+    ]) +
+    table(
+      [
+        { t: 'Шлюз' },
+        { t: 'Партнёр' },
+        { t: 'Модель' },
+        { t: 'Портов', r: 1, m: 1 },
+        { t: 'Занято', r: 1, m: 1 },
+        { t: 'Узел' },
+        { t: 'Регион' },
+        { t: 'Аптайм' },
+        { t: 'Состояние' },
+      ],
+      Array.from({ length: 8 }, (_, i) => [
+        'GW-' + String(101 + i),
+        alias(ALIASES[i % ALIASES.length]),
+        i % 3 === 0 ? 'GoIP-8' : i % 3 === 1 ? 'GoIP-4' : 'Android',
+        i % 3 === 0 ? '8' : i % 3 === 1 ? '4' : '1',
+        String(i % 5),
+        'node-' + ((i % 3) + 1),
+        REGIONS[i % REGIONS.length],
+        i === 3 ? '—' : 12 + i * 3 + ' ч',
+        i === 3
+          ? pill(['p-crit', 'офлайн 3 ч'])
+          : i === 6
+            ? pill(['p-warn', 'сигнал слабый'])
+            : pill(['p-ok', 'на связи']),
+      ]),
+      { total: 31 },
+    );
+
+  PAGES.nodes = () =>
+    toolbar([
+      '<button class="btn primary" type="button">+ Подключить узел</button>',
+      '<span class="count-note">3 узла</span>',
+    ]) +
+    table(
+      [
+        { t: 'Узел' },
+        { t: 'Адрес' },
+        { t: 'Версия' },
+        { t: 'Шлюзов', r: 1, m: 1 },
+        { t: 'Вызовов сейчас', r: 1, m: 1 },
+        { t: 'CPU', r: 1 },
+        { t: 'Аптайм' },
+        { t: 'Состояние' },
+      ],
+      [
+        ['node-1', '10.20.0.11', '1.4.2', '14', '22', '18 %', '41 сут', pill(['p-ok', 'online'])],
+        ['node-2', '10.20.0.12', '1.4.2', '11', '19', '24 %', '41 сут', pill(['p-ok', 'online'])],
+        [
+          'node-3',
+          '10.20.0.13',
+          '1.4.1',
+          '6',
+          '6',
+          '9 %',
+          '3 сут',
+          pill(['p-warn', 'версия устарела']),
+        ],
+      ],
+    );
+
+  PAGES.payouts = () =>
+    toolbar([
+      '<button class="btn on" type="button">Ожидают · 2</button>',
+      '<button class="btn" type="button">Проведённые</button>',
+      '<span class="count-note">порог 5 000 ₽</span>',
+    ]) +
+    table(
+      [
+        { t: 'Запрошено', m: 1 },
+        { t: 'Партнёр' },
+        { t: 'Сумма, ₽', r: 1, m: 1 },
+        { t: 'Реквизиты' },
+        { t: 'Состояние' },
+        { t: '' },
+      ],
+      [
+        [
+          '2026-09-01 11:02',
+          alias('Синий-14'),
+          '8 450,00',
+          'СБП · **12',
+          pill(['p-warn', 'ожидает']),
+          '<button class="btn primary" type="button">Провести</button>',
+        ],
+        [
+          '2026-09-01 09:40',
+          alias('Береза-08'),
+          '12 300,00',
+          'СБП · **77',
+          pill(['p-warn', 'ожидает']),
+          '<button class="btn primary" type="button">Провести</button>',
+        ],
+        [
+          '2026-08-31 18:15',
+          alias('Кедр-07'),
+          '6 120,00',
+          'СБП · **41',
+          pill(['p-ok', 'проведена']),
+          '',
+        ],
+      ],
+    );
+
+  PAGES.tariffs = () =>
+    toolbar([
+      '<button class="btn primary" type="button">+ Направление</button>',
+      '<span class="count-note">наценка: 0,10 ₽ за вызов + 12 %</span>',
+    ]) +
+    table(
+      [
+        { t: 'Оператор' },
+        { t: 'Мин. цена, ₽', r: 1, m: 1 },
+        { t: 'Макс. цена, ₽', r: 1, m: 1 },
+        { t: 'Средняя у партнёров, ₽', r: 1, m: 1 },
+        { t: 'Цена клиенту, ₽', r: 1, m: 1 },
+        { t: 'Маржа, ₽', r: 1, m: 1 },
+        { t: 'Действует с' },
+      ],
+      OPS.map((o, i) => [
+        o,
+        '0,90',
+        '1,60',
+        (1.08 + i * 0.04).toFixed(2).replace('.', ','),
+        (1.31 + i * 0.05).toFixed(2).replace('.', ','),
+        (0.23 + i * 0.01).toFixed(2).replace('.', ','),
+        '2026-08-15',
+      ]),
+    );
+
+  PAGES.audit = () =>
+    toolbar([
+      '<select class="btn"><option>Все действия</option><option>Деньги</option><option>Тарифы</option><option>Лимиты</option></select>',
+      '<button class="btn" type="button">↓ CSV</button>',
+    ]) +
+    table(
+      [
+        { t: 'Время', m: 1 },
+        { t: 'Кто' },
+        { t: 'Действие' },
+        { t: 'Объект' },
+        { t: 'Было' },
+        { t: 'Стало' },
+        { t: 'IP', m: 1 },
+      ],
+      [
+        [
+          '2026-09-01 13:40',
+          'admin@zvonix',
+          'Изменён коридор цены',
+          'Мегафон',
+          '0,90 – 1,50',
+          '0,90 – 1,60',
+          '10.0.0.5',
+        ],
+        [
+          '2026-09-01 12:11',
+          'admin@zvonix',
+          'Пополнен баланс',
+          'Такси «Вояж»',
+          '17 180,45 ₽',
+          '42 180,45 ₽',
+          '10.0.0.5',
+        ],
+        [
+          '2026-09-01 10:02',
+          'support@zvonix',
+          'Отключён шлюз',
+          'GW-104 · Гранит-02',
+          'на связи',
+          'отключён',
+          '10.0.0.9',
+        ],
+        [
+          '2026-08-31 19:55',
+          'admin@zvonix',
+          'Изменена наценка',
+          'Платформа',
+          '0,10 ₽ + 10 %',
+          '0,10 ₽ + 12 %',
+          '10.0.0.5',
+        ],
+      ],
+    );
+
+  PAGES.settings = () =>
+    '<div class="grid2"><div class="card"><h2>Пороги и лимиты</h2>' +
+    table(
+      [{ t: 'Параметр' }, { t: 'Значение', r: 1 }, { t: 'Применяется к' }],
+      [
+        ['Порог выплаты партнёру', '5 000 ₽', 'все партнёры'],
+        ['Отключать SIM после неудач подряд', '12', 'SIM'],
+        ['Отключать канал после неудач подряд', '40', 'канал клиента'],
+        ['Порог ASR для понижения приоритета', '55 %', 'шлюз'],
+        ['Одновременных вызовов на SIM', '1', 'по умолчанию'],
+        ['Срок годности записи об операторе', '30 дней', 'база номеров'],
+      ],
+    ) +
+    '</div><div class="card"><h2>Источники данных</h2><div class="list">' +
+    '<div class="row"><span class="x">План нумерации НИЦ Телеком</span>' +
+    pill(['p-ok', 'обновлён 03:00']) +
+    '</div>' +
+    '<div class="row"><span class="x">План нумерации Минцифры</span>' +
+    pill(['p-ok', 'обновлён 03:02']) +
+    '</div>' +
+    '<div class="row"><span class="x">NUM API — определение оператора</span>' +
+    pill(['p-ok', '2 104 запроса за сутки']) +
+    '</div>' +
+    '</div></div></div>';
+
+  /* ---- Партнёр ---- */
+
+  const PORTS_A = [
+    ['МТС', 'busy', '02:14'],
+    ['МТС', '', 'свободна'],
+    ['Т2', 'busy', '00:47'],
+    ['Т2', 'blocked', 'блок'],
+    ['МТС', '', 'свободна'],
+    ['Мегафон', 'busy', '01:02'],
+    ['Т2', '', 'свободна'],
+    ['—', 'empty', 'пусто'],
+  ];
+  const PORTS_B = [
+    ['МТС', 'busy', '03:31'],
+    ['Мегафон', '', 'свободна'],
+    ['—', 'empty', 'пусто'],
+    ['—', 'empty', 'пусто'],
+  ];
+
+  const ports = (list) =>
+    list
+      .map(
+        (p) =>
+          '<button class="port ' +
+          p[1] +
+          '" type="button"><span class="op">' +
+          p[0] +
+          '</span>' +
+          p[2] +
+          '</button>',
+      )
+      .join('');
+
+  PAGES['p-home'] = () =>
+    '<div class="phone-grid"><div class="phone"><div class="phone-in">' +
+    '<div class="earn">' +
+    [
+      ['Сегодня', '1 284 ₽'],
+      ['За месяц', '31 907 ₽'],
+      ['К выплате', '8 450 ₽'],
+      ['Порог', '5 000 ₽'],
+    ]
+      .map((e) => '<div><div class="k">' + e[0] + '</div><div class="v">' + e[1] + '</div></div>')
+      .join('') +
+    '</div>' +
+    '<button class="btn primary" style="width:100%;justify-content:center;height:32px" type="button" id="payout">Запросить выплату 8 450 ₽</button>' +
+    '<div class="note crit"><span>▲</span><span class="bd"><b>SIM 4 в шлюзе «Дом» заблокирована.</b> Мы приостановили её за 6 минут до блокировки — доля отвеченных упала до 21 %. Замените карту, регистрация сохранится.</span></div>' +
+    '<div class="gw"><div class="gw-head"><span>Шлюз «Дом» · GoIP-8</span>' +
+    pill(['p-ok', 'на связи']) +
+    '</div><div class="ports">' +
+    ports(PORTS_A) +
+    '</div></div>' +
+    '<div class="gw"><div class="gw-head"><span>Шлюз «Офис» · GoIP-4</span>' +
+    pill(['p-warn', 'сигнал слабый']) +
+    '</div><div class="ports">' +
+    ports(PORTS_B) +
+    '</div></div>' +
+    '</div></div><div>' +
+    '<div class="hint"><h3>Состояние читается цветом</h3>Занятая SIM зелёная, заблокированная красная, пустой слот пунктирный. Партнёру не нужно читать таблицу, чтобы понять, что сломалось.</div>' +
+    '<div class="hint"><h3>Мы предупреждаем раньше оператора</h3>Приостановка при аномальном профиле трафика — защита актива партнёра. Именно она удерживает партнёра на платформе.</div>' +
+    '<div class="hint"><h3>Выплата по запросу</h3>Кнопка активна при достижении порога, который задаётся в админке. Ниже порога показывает, сколько осталось накопить.</div>' +
+    '</div></div>';
+
+  PAGES['p-gw'] = () =>
+    toolbar([
+      '<button class="btn primary" type="button">+ Добавить шлюз</button>',
+      '<span class="count-note">2 шлюза · 12 SIM</span>',
+    ]) +
+    table(
+      [
+        { t: 'Шлюз' },
+        { t: 'Порт', r: 1, m: 1 },
+        { t: 'Оператор' },
+        { t: 'Номер', m: 1 },
+        { t: 'Регион' },
+        { t: 'Вызовов', r: 1, m: 1 },
+        { t: 'ASR, %', r: 1, m: 1 },
+        { t: 'Состояние' },
+      ],
+      SIMS.slice(0, 12).map((s, i) => [
+        'Шлюз «' + (i < 8 ? 'Дом' : 'Офис') + '»',
+        String((i % 8) + 1),
+        s[1],
+        s[2],
+        s[5],
+        s[6],
+        s[7],
+        pill(s[9]),
+      ]),
+    );
+
+  PAGES['p-money'] = () =>
+    toolbar([
+      '<button class="btn" type="button">Сентябрь</button>',
+      '<button class="btn" type="button">↓ CSV</button>',
+    ]) +
+    table(
+      [
+        { t: 'Дата', m: 1 },
+        { t: 'Вызовов', r: 1, m: 1 },
+        { t: 'Минут', r: 1, m: 1 },
+        { t: 'Начислено, ₽', r: 1, m: 1 },
+        { t: 'Выплачено, ₽', r: 1, m: 1 },
+        { t: 'Остаток, ₽', r: 1, m: 1 },
+      ],
+      Array.from({ length: 12 }, (_, i) => [
+        '2026-09-' + String(1 + i).padStart(2, '0'),
+        String(180 + ((i * 37) % 220)),
+        String(420 + ((i * 61) % 500)),
+        (900 + ((i * 173) % 700)).toFixed(2).replace('.', ','),
+        i % 5 === 0 ? '6 000,00' : '0,00',
+        (2000 + ((i * 311) % 7000)).toFixed(2).replace('.', ','),
+      ]),
+    );
+
+  PAGES['p-rates'] = () =>
+    toolbar(['<span class="count-note">коридор задан платформой: 0,90 – 1,60 ₽/мин</span>']) +
+    table(
+      [
+        { t: 'Оператор' },
+        { t: 'Моя цена, ₽/мин', r: 1, m: 1 },
+        { t: 'Средняя по площадке', r: 1, m: 1 },
+        { t: 'Моя позиция' },
+        { t: 'Регионы' },
+        { t: 'Тарификация' },
+      ],
+      [
+        [
+          'МТС',
+          '1,15',
+          '1,18',
+          '<span class="good">2-й из 9</span>',
+          'Москва, СПб',
+          '60 / 1, соединение 0 ₽',
+        ],
+        [
+          'Т2',
+          '1,22',
+          '1,14',
+          '<span class="bad">7-й из 6</span>',
+          'Москва',
+          '60 / 1, соединение 0 ₽',
+        ],
+      ],
+    );
+
+  /* ---- Клиент ---- */
+
+  PAGES['c-home'] = () =>
+    '<div class="kpis">' +
+    [
+      ['Баланс', '42 180,45 ₽', 'хватит на 18 дней'],
+      ['Вызовов за сутки', '6 204', '<span class="bad">312 отказов</span>'],
+      ['ASR', '64,1 %', 'среднее по площадке 63,2 %'],
+      ['Расход за сутки', '2 341,20 ₽', 'средняя цена 1,32 ₽/мин'],
+    ]
+      .map(
+        (k) =>
+          '<div class="kpi"><div class="k">' +
+          k[0] +
+          '</div><div class="v">' +
+          k[1] +
+          '</div><div class="s">' +
+          k[2] +
+          '</div></div>',
+      )
+      .join('') +
+    '</div>' +
+    '<div class="note warn" style="margin-bottom:12px"><span>▲</span><span class="bd"><b>По Билайну ёмкости почти нет.</b> В канале «Подтверждение заказа» 34 вызова за сутки не состоялись по этой причине. Платформа привлекает партнёров с этим оператором.</span></div>' +
+    PAGES['c-calls']();
+
+  PAGES['c-channels'] = () =>
+    toolbar(['<button class="btn primary" type="button">+ Канал</button>']) +
+    table(
+      [
+        { t: 'Канал' },
+        { t: 'Операторы' },
+        { t: 'Партнёры по приоритету' },
+        { t: 'Лимит' },
+        { t: 'Расписание' },
+        { t: 'Запись' },
+        { t: 'Вызовов за сутки', r: 1, m: 1 },
+        { t: 'Состояние' },
+      ],
+      [
+        [
+          'Обзвон клиентов',
+          'МТС · Т2 · Мегафон',
+          '<span class="num" style="color:var(--faint)">1.</span> ' +
+            alias('Синий-14') +
+            ' ' +
+            alias('Кедр-07') +
+            ' <span class="num" style="color:var(--faint)">2.</span> ' +
+            alias('Ясень-31'),
+          '500 / час',
+          '08:00–21:00',
+          'да',
+          '3 902',
+          pill(['p-ok', 'работает']),
+        ],
+        [
+          'Подтверждение заказа',
+          'МТС · Билайн',
+          '<span class="num" style="color:var(--faint)">1.</span> ' +
+            alias('Кедр-07') +
+            ' <span class="num" style="color:var(--faint)">2.</span> ' +
+            alias('Синий-14') +
+            ' ' +
+            alias('Гранит-02'),
+          '1 200 / сутки',
+          'круглосуточно',
+          'нет · −18 % к цене',
+          '2 302',
+          pill(['p-warn', 'нет ёмкости по Билайну']),
+        ],
+      ],
+    );
+
+  PAGES['c-calls'] = () =>
+    toolbar([
+      '<select class="btn"><option>Все каналы</option>' +
+        CHANNELS.map((c) => '<option>' + c + '</option>').join('') +
+        '</select>',
+      '<button class="btn on" type="button">Только отказы</button>',
+      '<button class="btn" type="button">С записью</button>',
+      '<button class="btn" type="button">↓ CSV</button>',
+      '<span class="count-note">нажмите строку — покажем, почему</span>',
+    ]) +
+    table(
+      [
+        { t: 'Время', m: 1 },
+        { t: 'Номер', m: 1 },
+        { t: 'Канал' },
+        { t: 'Оператор' },
+        { t: 'Партнёр' },
+        { t: 'Длит.', r: 1, m: 1 },
+        { t: 'Списано, ₽', r: 1, m: 1 },
+        { t: 'Запись' },
+        { t: 'Итог' },
+      ],
+      CALLS.map((c) => [
+        c.time,
+        c.number,
+        c.channel,
+        c.op,
+        alias(c.partner),
+        c.dur,
+        c.cost,
+        c.st[0] === 'p-ok' ? '▶ 0:' + c.dur.split(':')[1] : '—',
+        pill(c.st),
+      ]),
+      { id: 'calls-body', total: 6204 },
+    );
+
+  PAGES['c-money'] = () =>
+    '<div class="kpis"><div class="kpi"><div class="k">Баланс</div><div class="v">42 180,45 ₽</div><div class="s">хватит на 18 дней</div></div></div>' +
+    '<div class="grid2"><div>' +
+    table(
+      [
+        { t: 'Время', m: 1 },
+        { t: 'Операция' },
+        { t: 'Основание' },
+        { t: 'Сумма, ₽', r: 1, m: 1 },
+        { t: 'Остаток, ₽', r: 1, m: 1 },
+      ],
+      LEDGER.slice(0, 14).map((l, i) => [
+        l[0],
+        l[2],
+        l[5],
+        l[4],
+        (42180.45 + i * 12.4).toFixed(2).replace('.', ','),
+      ]),
+      { total: 41903 },
+    ) +
+    '</div><div class="card"><h2>Расход за неделю <em>по операторам</em></h2><div class="list">' +
+    [
+      ['МТС', 100, '7 412,10'],
+      ['Т2', 68, '5 038,60'],
+      ['Мегафон', 41, '3 044,90'],
+      ['Билайн', 12, '889,20'],
+    ]
+      .map(
+        (b) =>
+          '<div class="row"><span style="width:58px">' +
+          b[0] +
+          '</span><span class="bar" style="flex:1"><span style="width:' +
+          b[1] +
+          '%"></span></span><span class="num" style="width:74px;text-align:right">' +
+          b[2] +
+          '</span></div>',
+      )
+      .join('') +
+    '</div></div></div>';
+
+  /* ================= РЕНДЕР ================= */
+
+  const TITLES = {
+    overview: ['Обзор', 'состояние платформы'],
+    calls: ['Вызовы', 'журнал за сегодня'],
+    coverage: ['Покрытие', 'свободные SIM'],
+    partners: ['Партнёры', ''],
+    clients: ['Клиенты', ''],
+    sims: ['SIM-карты', ''],
+    gateways: ['Шлюзы', ''],
+    nodes: ['Узлы АТС', ''],
+    ledger: ['Проводки', 'двойная запись'],
+    payouts: ['Выплаты', 'по запросу партнёра'],
+    tariffs: ['Тарифы и коридоры', ''],
+    audit: ['Аудит', 'действия администраторов'],
+    settings: ['Настройки', 'пороги и источники'],
+    'p-home': ['Обзор', 'кабинет партнёра'],
+    'p-gw': ['Шлюзы и SIM', ''],
+    'p-money': ['Заработок', ''],
+    'p-rates': ['Цены и покрытие', ''],
+    'c-home': ['Обзор', 'кабинет клиента'],
+    'c-channels': ['Каналы', ''],
+    'c-calls': ['Вызовы и записи', ''],
+    'c-money': ['Баланс и расходы', ''],
+  };
+
+  function renderPage() {
+    const t = TITLES[page] || ['', ''];
+    $('page-title').textContent = t[0];
+    $('page-crumb').textContent = t[1];
+    $('content').innerHTML = (
+      PAGES[page] ||
+      (() =>
+        '<div class="card"><h2>Раздел</h2><div class="readout">В прототипе не заполнен.</div></div>')
+    )();
+    wire();
+    $('content').scrollTop = 0;
+  }
+
+  function wire() {
+    $('content')
+      .querySelectorAll('.cell[data-r]')
+      .forEach((b) => {
+        b.addEventListener('click', () => {
+          const row = COVERAGE[+b.dataset.r];
+          const free = row.free[+b.dataset.c];
+          const reg = REGIONS[+b.dataset.c];
+          const out = $('cov-out');
+          if (!out) return;
+          out.innerHTML =
+            free === 0
+              ? '<b>' +
+                row.op +
+                ' · ' +
+                reg +
+                ':</b> свободных SIM нет. Вызовы не проходят — через SIM другого оператора они перестают быть внутрисетевыми. Нужен партнёр с ' +
+                row.op +
+                '.'
+              : '<b>' +
+                row.op +
+                ' · ' +
+                reg +
+                ':</b> ' +
+                free +
+                ' свободных SIM. Ёмкость дают: ' +
+                row.by +
+                '.';
+        });
+      });
+
+    const body = $('calls-body');
+    if (body) {
+      body.querySelectorAll('tr').forEach((tr) => {
+        tr.addEventListener('click', () => {
+          body.querySelectorAll('tr').forEach((x) => x.classList.remove('sel'));
+          tr.classList.add('sel');
+          openCall(CALLS[+tr.dataset.i]);
+        });
+      });
     }
 
-    why.innerHTML = inner;
-    row.setAttribute('aria-controls', why.id);
+    const pay = $('payout');
+    if (pay) {
+      pay.addEventListener('click', () => {
+        pay.textContent = 'Запрос отправлен · рассмотрим за сутки';
+        pay.disabled = true;
+        pay.style.opacity = '0.6';
+      });
+    }
+  }
 
-    row.addEventListener('click', () => {
-      const open = why.hidden;
-      why.hidden = !open;
-      row.setAttribute('aria-expanded', String(open));
-    });
+  function openCall(c) {
+    $('drawer-title').textContent = 'Вызов ' + c.time;
+    $('drawer-body').innerHTML =
+      '<dl>' +
+      '<dt>Номер</dt><dd class="num">' +
+      c.number +
+      '</dd>' +
+      '<dt>Клиент</dt><dd>' +
+      c.client +
+      '</dd>' +
+      '<dt>Канал</dt><dd>' +
+      c.channel +
+      '</dd>' +
+      '<dt>Оператор</dt><dd>' +
+      c.op +
+      '</dd>' +
+      '<dt>Партнёр</dt><dd>' +
+      alias(c.partner) +
+      '</dd>' +
+      '<dt>Длительность</dt><dd class="num">' +
+      c.dur +
+      '</dd>' +
+      '<dt>Списано</dt><dd class="num">' +
+      c.cost +
+      ' ₽</dd>' +
+      '<dt>Итог</dt><dd>' +
+      pill(c.st) +
+      '</dd>' +
+      '</dl>' +
+      '<div class="why"><h4>Решение маршрутизации</h4>' +
+      esc(c.why) +
+      '</div>' +
+      (c.rej
+        ? '<div class="rejected"><h4 style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);margin:12px 0 4px">Кто отпал</h4>' +
+          c.rej.map((r) => '<div>' + esc(r) + '</div>').join('') +
+          '</div>'
+        : '');
+    $('drawer').hidden = false;
+  }
 
-    logBody.append(row, why);
+  $('drawer-close').addEventListener('click', () => {
+    $('drawer').hidden = true;
   });
+
+  document.querySelectorAll('.roles button').forEach((b) => {
+    b.addEventListener('click', () => {
+      document
+        .querySelectorAll('.roles button')
+        .forEach((o) => o.setAttribute('aria-selected', String(o === b)));
+      role = b.dataset.role;
+      page = MENUS[role][0].items[0][0];
+      $('drawer').hidden = true;
+      renderNav();
+      renderPage();
+    });
+  });
+
+  renderNav();
+  renderPage();
 </script>
