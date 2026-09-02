@@ -25,6 +25,14 @@ import { TelephonyRepository, type SimCandidate } from '../telephony/telephony.r
  */
 const OPERATOR_LOOKUP_BUDGET_MS = 800;
 
+/**
+ * Запас поверх предельной длительности, после которого открытый вызов считается брошенным.
+ *
+ * Разговор не может законно идти дольше предельной длительности: узел обрывает его сам.
+ * Всё, что висит дольше вместе с запасом, — это вызов, по которому не пришёл CDR.
+ */
+const ABANDONED_CALL_MARGIN_MS = 5 * 60 * 1000;
+
 export interface RouteRequest {
   readonly externalId: string;
   readonly channelId: Id<'channel'>;
@@ -112,7 +120,22 @@ export class RoutingService {
     }
 
     // 3. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM.
-    const claimed = await this.claimSim(request, channel.id, operatorId, region, candidates);
+    let claimed = await this.claimSim(request, channel.id, operatorId, region, candidates);
+    if (claimed === undefined) {
+      // Прежде чем отказать, убираем вызовы, по которым узел не прислал CDR: они
+      // занимают место на SIM вечно, и без уборки такая SIM больше не примет звонков.
+      // Уборка здесь, а не в горячем пути: отказ — редкий случай, и лишний запрос
+      // на нём не мешает, а на каждом успешном вызове мешал бы.
+      const closed = await this.callsRepository.closeAbandoned(
+        new Date(
+          Date.now() - this.config.MAX_CALL_DURATION_SECONDS * 1000 - ABANDONED_CALL_MARGIN_MS,
+        ),
+      );
+      if (closed > 0) {
+        this.logger.warn('Закрыты вызовы без CDR, место на SIM освобождено', { count: closed });
+        claimed = await this.claimSim(request, channel.id, operatorId, region, candidates);
+      }
+    }
     if (claimed === undefined) {
       return this.reject(request, channel.id, operatorId, region, 'no_sim_available');
     }

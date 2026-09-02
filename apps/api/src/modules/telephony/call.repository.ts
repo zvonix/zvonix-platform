@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
 import { calls, simCards } from '@zvonix/db/schema';
 import {
@@ -121,5 +121,24 @@ export class CallRepository {
       .where(eq(calls.channelId, channelId))
       .orderBy(desc(calls.startedAt))
       .limit(limit);
+  }
+
+  /**
+   * Закрывает вызовы, провисевшие открытыми дольше срока.
+   *
+   * Узел мог умереть, не прислав CDR. Резерв под такой вызов освободится сам по сроку,
+   * а **место на SIM — нет**: вызов остаётся открытым вечно, и при `max_concurrent_calls`
+   * равном единице эта SIM больше не примет ни одного звонка.
+   *
+   * Одним запросом, а не чтением с последующей записью: два экземпляра control plane
+   * иначе перетирали бы состояние друг друга. Возвращает число закрытых.
+   */
+  async closeAbandoned(deadline: Date, executor: Executor = this.db): Promise<number> {
+    const rows = await executor
+      .update(calls)
+      .set({ status: 'failed', failureReason: 'node_lost', endedAt: new Date() })
+      .where(and(inArray(calls.status, [...OPEN_CALL_STATUSES]), lt(calls.startedAt, deadline)))
+      .returning({ id: calls.id });
+    return rows.length;
   }
 }

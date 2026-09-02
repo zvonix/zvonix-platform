@@ -62,6 +62,7 @@ const SIP_RESPONSE: Readonly<Record<CallFailureReason, string>> = {
   no_sim_available: '503 Service Unavailable',
   recording_required: '503 Service Unavailable',
   no_coverage: '503 Service Unavailable',
+  node_lost: '503 Service Unavailable',
   internal_error: '503 Service Unavailable',
 };
 

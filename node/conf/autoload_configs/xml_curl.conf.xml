@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Узел спрашивает control plane на каждый вызов (ADR-0009, docs/api/node.md).
+
+  Значения в @@ФИГУРНЫХ@@ скобках подставляет скрипт установки после регистрации узла.
+  Файл версионируется в репозитории и раскатывается агентом; править его руками
+  на сервере нельзя — правка потеряется при следующем обновлении.
+
+  ВНИМАНИЕ. Три значения здесь заданы явно не для красоты, и менять их нельзя,
+  не прочитав, почему они такие:
+
+    timeout            — по умолчанию у модуля 0, то есть БЕЗ ОГРАНИЧЕНИЯ. Неотвечающий
+                         control plane тогда держит вызов до тайм-аута SIP, и абонент
+                         слушает тишину вместо отбоя;
+    enable-post-var    — без него FreeSWITCH шлёт ВСЕ переменные канала: сотни полей
+                         на каждый вызов в горячем пути, включая те, которых control
+                         plane знать не должен;
+    gateway-credentials — единственный способ аутентификации, который умеет этот модуль.
+                         Произвольный заголовок задать нельзя (ADR-0019).
+-->
+<configuration name="xml_curl.conf" description="Запрос конфигурации у control plane">
+  <bindings>
+
+    <!--
+      Учётные записи SIP: шлюзы партнёров и каналы клиентов.
+
+      Смысл в том, чтобы на узле не осталось НИ ОДНОГО ПАРОЛЯ В ФАЙЛЕ: заблокировали
+      партнёра — его шлюз перестал регистрироваться при следующей же попытке, без
+      раскатки конфигурации и без перезапуска. Пароли не приходят и сюда: control plane
+      отдаёт a1-hash, то есть MD5(имя:realm:пароль), — этого digest-проверке достаточно.
+    -->
+    <binding name="zvonix-directory">
+      <param name="gateway-url" value="@@CONTROL_PLANE@@/node/directory" bindings="directory"/>
+      <param name="gateway-credentials" value="@@KEY_ID@@:@@KEY_SECRET@@"/>
+      <param name="auth-scheme" value="basic"/>
+      <param name="timeout" value="3"/>
+      <param name="enable-cacert-check" value="true"/>
+      <param name="enable-ssl-verifyhost" value="true"/>
+    </binding>
+
+    <!--
+      Маршрут на вызов. Главный обработчик системы и единственный в горячем пути
+      телефонии: выполняется столько раз в секунду, сколько начинается звонков.
+
+      Состав переменных ограничен намеренно. `Unique-ID` — идентификатор вызова,
+      он же ключ идемпотентности CDR; `zvonix_channel` проставляет каталог на учётную
+      запись, поэтому знания о каналах на узле нет вовсе.
+    -->
+    <binding name="zvonix-dialplan">
+      <param name="gateway-url" value="@@CONTROL_PLANE@@/node/dialplan" bindings="dialplan"/>
+      <param name="gateway-credentials" value="@@KEY_ID@@:@@KEY_SECRET@@"/>
+      <param name="auth-scheme" value="basic"/>
+      <param name="timeout" value="3"/>
+      <param name="enable-cacert-check" value="true"/>
+      <param name="enable-ssl-verifyhost" value="true"/>
+      <param name="enable-post-var" value="Unique-ID"/>
+      <param name="enable-post-var" value="Caller-Destination-Number"/>
+      <param name="enable-post-var" value="Caller-Caller-ID-Number"/>
+      <param name="enable-post-var" value="variable_zvonix_channel"/>
+    </binding>
+
+  </bindings>
+</configuration>

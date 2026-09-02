@@ -263,6 +263,36 @@ describe('одновременность на SIM', () => {
     );
   });
 
+  it('вызов без CDR не занимает SIM вечно', async () => {
+    const env = await scenario();
+    const first = await route(env.channel, env.destination);
+    expect(first.json<Preview>().outcome).toBe('routed');
+    // Место занято: узел ещё не отчитался.
+    expect((await route(env.channel, env.destination)).json<Preview>().reason).toBe(
+      'no_sim_available',
+    );
+
+    // Узел умер, не прислав CDR: отматываем начало вызова за предельную длительность.
+    await withDatabase(async (execute) => {
+      await execute(sql`update calls set started_at = now() - interval '3 hours'
+                         where id = ${first.json<Preview>().call_id}`);
+    });
+
+    // Резерв освободился бы по сроку сам, а место на SIM — нет: без уборки
+    // эта SIM больше не приняла бы ни одного звонка.
+    expect((await route(env.channel, env.destination)).json<Preview>().outcome).toBe('routed');
+
+    const closed = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select status, failure_reason from calls where id = ${first.json<Preview>().call_id}`,
+      );
+      return result.rows[0] as { status: string; failure_reason: string };
+    });
+    expect(closed.status).toBe('failed');
+    // Отдельная причина, а не общая внутренняя ошибка: это диагноз узла.
+    expect(closed.failure_reason).toBe('node_lost');
+  });
+
   it('завершённый вызов освобождает место', async () => {
     const env = await scenario();
     const first = await route(env.channel, env.destination);

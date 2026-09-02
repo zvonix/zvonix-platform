@@ -29,6 +29,8 @@
     "@types/node": "^22.10.0",
     "concurrently": "^10.0.5",
     "eslint": "^9.17.0",
+    "fast-xml-parser": "^5.11.1",
+    "fast-xml-validator": "^1.4.2",
     "knip": "^6.33.0",
     "prettier": "^3.4.0",
     "typescript": "^5.7.0",
