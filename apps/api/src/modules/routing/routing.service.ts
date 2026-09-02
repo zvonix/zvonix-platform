@@ -14,6 +14,7 @@ import { ReservationService } from '../billing/reservation.service.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { CallRepository, type CallRow } from '../telephony/call.repository.js';
+import { CdrService } from '../telephony/cdr.service.js';
 import { TelephonyRepository, type SimCandidate } from '../telephony/telephony.repository.js';
 
 /**
@@ -24,14 +25,6 @@ import { TelephonyRepository, type SimCandidate } from '../telephony/telephony.r
  * звонок на этот номер пройдёт (docs/api/node.md, «Бюджет времени»).
  */
 const OPERATOR_LOOKUP_BUDGET_MS = 800;
-
-/**
- * Запас поверх предельной длительности, после которого открытый вызов считается брошенным.
- *
- * Разговор не может законно идти дольше предельной длительности: узел обрывает его сам.
- * Всё, что висит дольше вместе с запасом, — это вызов, по которому не пришёл CDR.
- */
-const ABANDONED_CALL_MARGIN_MS = 5 * 60 * 1000;
 
 export interface RouteRequest {
   readonly externalId: string;
@@ -61,6 +54,7 @@ export class RoutingService {
     private readonly resolver: OperatorResolverService,
     private readonly tariffs: TariffService,
     private readonly reservations: ReservationService,
+    private readonly cdr: CdrService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -126,13 +120,8 @@ export class RoutingService {
       // занимают место на SIM вечно, и без уборки такая SIM больше не примет звонков.
       // Уборка здесь, а не в горячем пути: отказ — редкий случай, и лишний запрос
       // на нём не мешает, а на каждом успешном вызове мешал бы.
-      const closed = await this.callsRepository.closeAbandoned(
-        new Date(
-          Date.now() - this.config.MAX_CALL_DURATION_SECONDS * 1000 - ABANDONED_CALL_MARGIN_MS,
-        ),
-      );
+      const closed = await this.cdr.closeCallsWithoutCdr();
       if (closed > 0) {
-        this.logger.warn('Закрыты вызовы без CDR, место на SIM освобождено', { count: closed });
         claimed = await this.claimSim(request, channel.id, operatorId, region, candidates);
       }
     }

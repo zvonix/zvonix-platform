@@ -24,7 +24,7 @@ import { RecordingsRepository, type RecordingRow } from './recordings.repository
 const UPLOAD_LINK_TTL_SECONDS = 600;
 
 /** Сколько записей удаляется за один проход уборки. */
-const RETENTION_SWEEP_LIMIT = 200;
+export const RETENTION_SWEEP_LIMIT = 200;
 
 export interface UploadTarget {
   readonly recordingId: Id<'recording'>;

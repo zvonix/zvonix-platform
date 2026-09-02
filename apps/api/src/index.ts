@@ -1,0 +1,36 @@
+/**
+ * Публичная поверхность control plane для других процессов монорепозитория.
+ *
+ * Нужна ровно одному потребителю — `apps/worker` (ADR-0020). Воркер поднимает контекст
+ * приложения над **теми же** модулями, что и API: проводки пишет тот же `billing`,
+ * объекты удаляет тот же `recordings`. Своя копия доменной логики в фоновом процессе —
+ * это способ получить две разные тарификации одного вызова.
+ *
+ * Здесь перечислено только то, что воркеру действительно нужно. Экспортировать модули
+ * целиком не следует: чем шире эта поверхность, тем легче фоновому процессу начать
+ * делать то, чего он делать не должен.
+ */
+
+export { InfraModule } from './infra/infra.module.js';
+export {
+  APP_CONFIG,
+  APP_LOGGER,
+  PROCESS_COMPONENT,
+  type Config,
+  type Logger,
+} from './infra/tokens.js';
+
+export { BillingModule } from './modules/billing/billing.module.js';
+export { ReservationService, EXPIRY_SWEEP_LIMIT } from './modules/billing/reservation.service.js';
+
+export { TelephonyModule } from './modules/telephony/telephony.module.js';
+export { CdrService } from './modules/telephony/cdr.service.js';
+
+export { NodesModule } from './modules/nodes/nodes.module.js';
+export { NodesService } from './modules/nodes/nodes.service.js';
+
+export { RecordingsModule } from './modules/recordings/recordings.module.js';
+export {
+  RecordingsService,
+  RETENTION_SWEEP_LIMIT,
+} from './modules/recordings/recordings.service.js';

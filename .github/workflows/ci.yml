@@ -32,8 +32,23 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # Расписание фоновых задач (ADR-0020). Версия совпадает с production.
+      # Политика вытеснения обязана быть noeviction: при любой другой Redis выбрасывает
+      # ключи заданий молча, и воркер отказывается запускаться — это проверяется.
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 6379:6379
+
     env:
       TEST_DATABASE_URL: postgresql://zvonix:zvonix@127.0.0.1:5432/zvonix_test
+      # База не нулевая: проверки очищают её целиком.
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
 
     steps:
       - uses: actions/checkout@v4

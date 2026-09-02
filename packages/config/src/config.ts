@@ -22,7 +22,13 @@ import { z } from 'zod';
  * проверяется тестом. Иначе новая переменная с паролем незаметно окажется
  * «несекретной» и её значение уйдёт в лог при первой же ошибке конфигурации.
  */
-const SECRET_VARIABLES = new Set(['DATABASE_URL', 'SECRET_KEY', 'S3_ACCESS_KEY', 'S3_SECRET_KEY']);
+const SECRET_VARIABLES = new Set([
+  'DATABASE_URL',
+  'REDIS_URL',
+  'SECRET_KEY',
+  'S3_ACCESS_KEY',
+  'S3_SECRET_KEY',
+]);
 
 const PUBLIC_VARIABLES = new Set([
   'APP_ENV',
@@ -192,6 +198,21 @@ export const configSchema = z.object({
       (value) => value.startsWith('postgres://') || value.startsWith('postgresql://'),
       'должен начинаться с postgres:// или postgresql://',
     ),
+
+  /**
+   * Адрес Redis: расписание и очередь фоновых задач (ADR-0020), в дальнейшем —
+   * счётчики лимитов по окнам.
+   *
+   * Состояния домена в Redis нет и не будет: источник истины — PostgreSQL. Потеря всей
+   * базы Redis означает пропуск нескольких проходов уборки, а не потерю данных.
+   */
+  REDIS_URL: z
+    .string()
+    .refine(
+      (value) => value.startsWith('redis://') || value.startsWith('rediss://'),
+      'должен начинаться с redis:// или rediss://',
+    )
+    .default('redis://127.0.0.1:6379'),
 
   /**
    * Верхняя граница соединений с базой у одного процесса.

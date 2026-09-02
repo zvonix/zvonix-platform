@@ -28,7 +28,7 @@ import { BillingRepository, type Executor } from './billing.repository.js';
 import { ReservationRepository, type ReservationRow } from './reservation.repository.js';
 
 /** Сколько просроченных резервов освобождается за один проход фоновой уборки. */
-const EXPIRY_SWEEP_LIMIT = 500;
+export const EXPIRY_SWEEP_LIMIT = 500;
 
 export interface AvailableFunds {
   readonly balance: MoneyAmount;

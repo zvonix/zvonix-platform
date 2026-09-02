@@ -3,6 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/harness.d.ts",
+      "default": "./dist/testing/harness.js"
+    }
+  },
   "scripts": {
     "typecheck": "tsc --build",
     "dev": "concurrently -n tsc,api -c blue,green \"tsc --build --watch --preserveWatchOutput ../../tsconfig.json\" \"node --watch --enable-source-maps dist/main.js\"",

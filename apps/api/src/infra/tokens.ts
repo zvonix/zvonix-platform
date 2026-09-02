@@ -12,4 +12,13 @@ import type { Logger } from '@zvonix/logger';
 export const APP_CONFIG = Symbol('APP_CONFIG');
 export const APP_LOGGER = Symbol('APP_LOGGER');
 
+/**
+ * Имя процесса в логах: `api`, `worker`, дальше — `esl`.
+ *
+ * Без него записи двух процессов неразличимы: оба поднимают одни и те же доменные
+ * модули, и строка «резерв освобождён» выглядит одинаково независимо от того, кто
+ * её написал — обработчик запроса или проход уборки (ADR-0020).
+ */
+export const PROCESS_COMPONENT = Symbol('PROCESS_COMPONENT');
+
 export type { Config, Logger };

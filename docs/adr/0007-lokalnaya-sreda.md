@@ -124,6 +124,23 @@ $PG/pgsql/bin/pg_ctl.exe -D $PG/data status
 $PG/pgsql/bin/pg_ctl.exe -D $PG/data stop
 ```
 
+**Управление локальной Redis** (добавлено 2026-09-02 вместе с [ADR-0020](0020-fonovye-zadachi.md)).
+Тем же способом, что и PostgreSQL: переносимые бинарники без установщика, службы и прав
+администратора, в `C:\Users\admin\.local\redis`. Версия 7.4.11 — та же мажорная, что
+в CI (`redis:7`) и в проде. Сборка сообщества под Windows: официальных сборок Redis
+для Windows не существует, и это ещё один довод в пользу переноса разработки в WSL2.
+
+```bash
+cd /c/Users/admin/.local/redis
+./Redis-7.4.11-Windows-x64-msys2/redis-server.exe zvonix.conf --dir ./data --logfile ./redis.log &
+./Redis-7.4.11-Windows-x64-msys2/redis-cli.exe ping
+```
+
+Запускать **из своего каталога**: бинарник собран под MSYS и ожидает POSIX-пути, поэтому
+абсолютный путь Windows он не открывает. В `zvonix.conf` задана `maxmemory-policy noeviction` —
+без неё воркер отказывается запускаться ([ADR-0020](0020-fonovye-zadachi.md)). Проверки
+используют базу 15 (`TEST_REDIS_URL`), потому что очищают её целиком.
+
 Заведены роль `zvonix` с паролем `zvonix` и базы `zvonix` (разработка) и `zvonix_test`
 (интеграционные тесты). Кодировка UTF8, локаль `C` — детерминированная сортировка,
 которая не ломается при смене версии glibc на сервере. Пароль суперпользователя

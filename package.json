@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc --build",
     "dev": "pnpm --filter @zvonix/api dev",
+    "worker": "pnpm --filter @zvonix/worker start",
     "check": "bash scripts/check.sh",
     "verify": "bash scripts/check.sh",
     "lint": "eslint .",

@@ -12,13 +12,23 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import { Money, notFound, validationFailed, type Id } from '@zvonix/shared';
-import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { BillingService } from '../billing/billing.service.js';
 import { ReservationService } from '../billing/reservation.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { CallRepository, type CallRow } from './call.repository.js';
 import { parseCdr, statusFromHangupCause, type ParsedCdr } from './cdr-parse.js';
 import { TelephonyRepository } from './telephony.repository.js';
+
+/**
+ * Запас поверх предельной длительности, после которого открытый вызов считается брошенным.
+ *
+ * Разговор не может законно идти дольше предельной длительности: узел обрывает его сам.
+ * Всё, что висит дольше вместе с запасом, — это вызов, по которому не пришёл CDR.
+ * Запас нужен, чтобы не закрыть разговор, который как раз завершается: узел кладёт трубку,
+ * формирует CDR и доставляет его не мгновенно.
+ */
+const ABANDONED_CALL_MARGIN_MS = 5 * 60 * 1000;
 
 /** Что случилось с принятым CDR. Возвращается узлу только как код ответа. */
 export type CdrOutcome =
@@ -36,6 +46,7 @@ export class CdrService {
     private readonly tariffs: TariffService,
     private readonly billing: BillingService,
     private readonly reservations: ReservationService,
+    @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('cdr');
@@ -144,6 +155,33 @@ export class CdrService {
       call: updated,
       clientAmount: Money.format(priced.charge.clientAmount),
     };
+  }
+
+  /**
+   * Закрывает вызовы, по которым CDR так и не пришёл.
+   *
+   * Узел мог умереть посреди разговора. Тогда вызов остаётся открытым **навсегда**,
+   * а открытый вызов занимает место на SIM: она числится занятой и больше не примет
+   * звонков. Без этой уборки потеря одного узла постепенно выводит из оборота все SIM,
+   * через которые он звонил.
+   *
+   * Считается по сроку, а не «с прошлого запуска»: проход идемпотентен и догоняющий,
+   * пропущенный тик ничего не теряет (ADR-0020).
+   *
+   * Деньги здесь не движутся: резерв по такому вызову освобождается своим проходом
+   * по собственному сроку, и списывать нечего — разговора мы не наблюдали.
+   */
+  async closeCallsWithoutCdr(now: Date = new Date()): Promise<number> {
+    const deadline = new Date(
+      now.getTime() - this.config.MAX_CALL_DURATION_SECONDS * 1000 - ABANDONED_CALL_MARGIN_MS,
+    );
+    const closed = await this.calls.closeAbandoned(deadline);
+    if (closed > 0) {
+      // Это не норма: рост числа таких закрытий — повод разбираться с узлом,
+      // а не с вызовами.
+      this.logger.warn('Закрыты вызовы без CDR, место на SIM освобождено', { count: closed });
+    }
+    return closed;
   }
 
   /** Вызовы клиента — для разбора «за что списали». */

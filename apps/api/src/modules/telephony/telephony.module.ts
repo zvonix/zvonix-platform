@@ -15,6 +15,8 @@ import { TelephonyService } from './telephony.service.js';
   controllers: [TelephonyController, NodeDirectoryController, CdrController],
   providers: [TelephonyService, TelephonyRepository, CallRepository, CdrService],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.
-  exports: [TelephonyService, TelephonyRepository, CallRepository],
+  // `CdrService` — ради уборки вызовов без CDR: она нужна и маршрутизации на пути
+  // отказа, и воркеру по расписанию (ADR-0020), и повторять её нельзя.
+  exports: [TelephonyService, TelephonyRepository, CallRepository, CdrService],
 })
 export class TelephonyModule {}

@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+
+    // Те же две опции, что у API, и по той же причине: контейнер NestJS читает типы
+    // параметров конструктора из метаданных, которые генерирует компилятор (ADR-0017).
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/config" },
+    { "path": "../../packages/logger" },
+    { "path": "../api" }
+  ]
+}
