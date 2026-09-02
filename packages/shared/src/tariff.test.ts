@@ -14,6 +14,8 @@ import {
   chargeForCall,
   maxCharge,
   partnerCost,
+  referenceCost,
+  REFERENCE_CALL_SECONDS,
   TariffError,
   type CommissionRule,
   type TariffRule,
@@ -196,5 +198,39 @@ describe('сумма резерва', () => {
 
   it('нулевая предельная длительность бессмысленна и отвергается', () => {
     expect(() => maxCharge(0, rule(), noCommission)).toThrow(TariffError);
+  });
+});
+
+describe('стоимость эталонного вызова', () => {
+  it('у простого тарифа равна цене за минуту', () => {
+    // Ради этого свойства эталон и выбран в минуту: коридор «от 1 до 3» читается
+    // администратором как рубли за минуту, а не как отдельная величина.
+    expect(referenceCost(rule({ pricePerMinute: rub('2.50') }))).toBe(rub('2.50'));
+  });
+
+  it('учитывает плату за соединение', () => {
+    // Иначе коридор обходится тарифом «1 рубль за минуту плюс сто за соединение».
+    const cost = referenceCost(rule({ pricePerMinute: rub('1'), connectionFee: rub('100') }));
+    expect(cost).toBe(rub('101'));
+  });
+
+  it('учитывает минимальную длительность', () => {
+    // Тариф с минимумом в десять минут делает любой вызов вызовом на десять минут.
+    const cost = referenceCost(
+      rule({ pricePerMinute: rub('1'), minimumDurationSeconds: 600, billingIncrementSeconds: 60 }),
+    );
+    expect(cost).toBe(rub('10'));
+  });
+
+  it('учитывает шаг тарификации', () => {
+    const cost = referenceCost(rule({ pricePerMinute: rub('1'), billingIncrementSeconds: 3600 }));
+    expect(cost).toBe(rub('60'));
+  });
+
+  it('считается той же функцией, что и настоящий вызов', () => {
+    // Отдельная формула «примерно так же» означала бы, что коридор проверяет не то,
+    // за что заплатит клиент (ADR-0023).
+    const r = rule({ pricePerMinute: rub('3.33'), connectionFee: rub('0.25') });
+    expect(referenceCost(r)).toBe(partnerCost(REFERENCE_CALL_SECONDS, r));
   });
 });

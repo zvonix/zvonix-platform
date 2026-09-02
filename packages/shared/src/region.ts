@@ -55,3 +55,16 @@ export function normalizeRegion(value: string): string {
       .trim()
   );
 }
+
+/**
+ * Ключ региона или `null` — «региона нет».
+ *
+ * Одна функция на всех, кто сравнивает регионы: покрытие партнёра, цена партнёра
+ * и коридор цен. Пустой результат приведения означает, что строка региона не называет
+ * («область», «край»), и такой ключ хранить нельзя — он совпал бы с другим пустым.
+ */
+export function regionKeyOf(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const key = normalizeRegion(value);
+  return key === '' ? null : key;
+}

@@ -92,6 +92,13 @@
       "when": 1788360241748,
       "tag": "0012_pokrytie_regionov",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788363105983,
+      "tag": "0013_koridory_cen",
+      "breakpoints": true
     }
   ]
 }

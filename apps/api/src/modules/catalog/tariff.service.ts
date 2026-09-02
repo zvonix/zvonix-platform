@@ -13,10 +13,15 @@ import { Injectable } from '@nestjs/common';
 import {
   chargeForCall,
   maxCharge,
+  Money,
   notFound,
+  referenceCost,
+  REFERENCE_CALL_SECONDS,
+  validationFailed,
   type CallCharge,
   type CommissionRule,
   type Id,
+  type MoneyAmount,
   type TariffRule,
 } from '@zvonix/shared';
 import { AuditService } from '../audit/audit.service.js';
@@ -24,6 +29,7 @@ import {
   TariffRepository,
   type CommissionRuleRow,
   type PartnerRateRow,
+  type PriceBandRow,
 } from './tariff.repository.js';
 
 /** Направление вызова: то, что вернул резолвер. Префикс номера здесь не участвует. */
@@ -39,6 +45,19 @@ export interface AppliedTariff {
   readonly commissionRuleId: Id<'commissionRule'>;
   readonly rule: TariffRule;
   readonly commission: CommissionRule;
+}
+
+/**
+ * Действующая цена, оказавшаяся вне действующего коридора (ADR-0023).
+ *
+ * Возникает не от ошибки при вводе, а от **сужения коридора после** назначения цены:
+ * строка тарифа неизменяема, и переписывать её значило бы переоценивать прошлое. Без
+ * этого списка правило тихо перестало бы выполняться, и узнать об этом было бы неоткуда.
+ */
+export interface BandViolation {
+  readonly rate: PartnerRateRow;
+  readonly band: PriceBandRow;
+  readonly referenceCost: MoneyAmount;
 }
 
 @Injectable()
@@ -133,6 +152,8 @@ export class TariffService {
     actorUserId: Id<'user'>,
     actorRole: 'admin' | 'support' | 'client' | 'partner',
   ): Promise<PartnerRateRow> {
+    await this.assertWithinBand(draft);
+
     const row = await this.repository.insertPartnerRate(draft);
     await this.audit.record({
       action: 'partner_rate.added',
@@ -173,6 +194,115 @@ export class TariffService {
     return row;
   }
 
+  // --- Коридоры цен (ADR-0023) -------------------------------------------------
+
+  async addPriceBand(
+    draft: Parameters<TariffRepository['insertPriceBand']>[0],
+    actorUserId: Id<'user'>,
+    actorRole: 'admin' | 'support' | 'client' | 'partner',
+  ): Promise<PriceBandRow> {
+    const row = await this.repository.insertPriceBand(draft);
+    await this.audit.record({
+      action: 'price_band.added',
+      entityType: 'price_band',
+      entityId: row.id,
+      actorUserId,
+      actorRole,
+      after: {
+        operator_id: row.operatorId,
+        region: row.region,
+        min_price: row.minPrice.toString(),
+        max_price: row.maxPrice.toString(),
+        effective_from: row.effectiveFrom.toISOString(),
+      },
+    });
+    return row;
+  }
+
+  async listPriceBands(operatorId?: Id<'operator'>): Promise<PriceBandRow[]> {
+    return this.repository.listPriceBands(operatorId);
+  }
+
+  /**
+   * Действующие цены, оказавшиеся вне действующего коридора.
+   *
+   * Считается в памяти, а не запросом: стоимость эталонного вызова обязана считаться
+   * **той же функцией**, которой считается настоящий вызов, — формула, переписанная
+   * в SQL, проверяла бы не то, за что заплатит клиент (ADR-0023).
+   */
+  async findBandViolations(at: Date): Promise<BandViolation[]> {
+    const [rates, bands] = await Promise.all([
+      this.repository.listActivePartnerRates(at),
+      this.repository.listActivePriceBands(at),
+    ]);
+
+    const general = new Map<string, PriceBandRow>();
+    const regional = new Map<string, PriceBandRow>();
+    for (const band of bands) {
+      const target = band.regionKey === null ? general : regional;
+      target.set(bandKey(band.operatorId, band.regionKey), band);
+    }
+
+    const violations: BandViolation[] = [];
+    for (const rate of rates) {
+      // Цена без региона ограничивается только общим коридором: коридор конкретного
+      // региона к направлению «любой регион» отношения не имеет.
+      const band =
+        (rate.regionKey === null
+          ? undefined
+          : regional.get(bandKey(rate.operatorId, rate.regionKey))) ??
+        general.get(bandKey(rate.operatorId, null));
+      if (band === undefined) continue;
+
+      const cost = referenceCost(toTariffRule(rate));
+      if (Money.compare(cost, band.minPrice) < 0 || Money.compare(cost, band.maxPrice) > 0) {
+        violations.push({ rate, band, referenceCost: cost });
+      }
+    }
+    return violations;
+  }
+
+  /**
+   * Цена обязана укладываться в коридор, действующий по этому направлению.
+   *
+   * Сравнивается **стоимость эталонного вызова**, а не цена за минуту: тариф — это пять
+   * чисел, и коридор, ограничивающий одно из них, обходится платой за соединение или
+   * минимальной длительностью в десять минут (ADR-0023). Коридора нет — ограничения нет.
+   */
+  private async assertWithinBand(
+    draft: Parameters<TariffRepository['insertPartnerRate']>[0],
+  ): Promise<void> {
+    const band = await this.repository.findPriceBand(
+      draft.operatorId,
+      draft.region,
+      draft.effectiveFrom,
+    );
+    if (band === undefined) return;
+
+    const cost = referenceCost({
+      pricePerMinute: draft.pricePerMinute,
+      billingIncrementSeconds: draft.billingIncrementSeconds,
+      minimumDurationSeconds: draft.minimumDurationSeconds,
+      connectionFee: draft.connectionFee,
+      rounding: draft.rounding,
+    });
+
+    if (Money.compare(cost, band.minPrice) < 0 || Money.compare(cost, band.maxPrice) > 0) {
+      throw validationFailed('Цена вне коридора, заданного для этого направления', {
+        details: {
+          reference_call_seconds: REFERENCE_CALL_SECONDS,
+          // Именно стоимость эталонного вызова, а не цена за минуту: у тарифа с платой
+          // за соединение это разные числа, и показать не то значит оставить человека
+          // с вопросом «почему 2 рубля не помещаются в коридор от 1 до 3».
+          reference_cost: Money.format(cost),
+          min_price: Money.format(band.minPrice),
+          max_price: Money.format(band.maxPrice),
+          price_band_id: band.id,
+        },
+      });
+    }
+  }
+
   async listPartnerRates(partnerId: Id<'partner'>): Promise<PartnerRateRow[]> {
     return this.repository.listPartnerRates(partnerId);
   }
@@ -194,4 +324,11 @@ function toTariffRule(row: PartnerRateRow): TariffRule {
 
 function toCommissionRule(row: CommissionRuleRow): CommissionRule {
   return { fixedFee: row.fixedFee, percentBasisPoints: row.percentBasisPoints };
+}
+
+/** Ключ направления для сопоставления коридоров с ценами в памяти. */
+function bandKey(operatorId: Id<'operator'>, regionKey: string | null): string {
+  // Идентификатор оператора — UUID постоянной длины, поэтому разделитель
+  // не может склеить два разных направления в один ключ.
+  return `${operatorId}|${regionKey ?? ''}`;
 }

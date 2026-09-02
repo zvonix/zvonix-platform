@@ -7,14 +7,22 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
-import { commissionRules, partnerRates } from '@zvonix/db/schema';
-import { newId, type BasisPoints, type Id, type MoneyAmount, type Rounding } from '@zvonix/shared';
+import { commissionRules, partnerRates, priceBands } from '@zvonix/db/schema';
+import {
+  newId,
+  regionKeyOf,
+  type BasisPoints,
+  type Id,
+  type MoneyAmount,
+  type Rounding,
+} from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type PartnerRateRow = typeof partnerRates.$inferSelect;
 export type CommissionRuleRow = typeof commissionRules.$inferSelect;
+export type PriceBandRow = typeof priceBands.$inferSelect;
 
 @Injectable()
 export class TariffRepository {
@@ -38,7 +46,13 @@ export class TariffRepository {
     try {
       const [row] = await this.db
         .insert(partnerRates)
-        .values({ id: newId<'partnerRate'>(), ...draft })
+        .values({
+          id: newId<'partnerRate'>(),
+          ...draft,
+          // Ключ выводится здесь, а не приходит снаружи: пара «регион без ключа»
+          // недостижима при отборе, и забыть его не должно быть возможно.
+          regionKey: regionKeyOf(draft.region),
+        })
         .returning();
       if (row === undefined) throw new Error('Вставка не вернула строку');
       return row;
@@ -53,6 +67,10 @@ export class TariffRepository {
    * Запись с указанным регионом побеждает запись без него: частный случай уточняет общий,
    * а не спорит с ним. Отсюда сортировка — сначала по наличию региона, потом по свежести.
    *
+   * Регион сравнивается **по приведённому написанию** (ADR-0022, ADR-0023). Сравнение
+   * строкой означало бы, что цена, заведённая как `Красноярский кр.`, для вызова
+   * в `Красноярский край` не находится и молча подменяется общей ценой партнёра.
+   *
    * Порядок именно такой, а не «свежесть, потом регион»: иначе новая общая цена вытеснила бы
    * действующую региональную, и партнёр, поднявший цену по стране, молча потерял бы
    * договорённость по конкретному региону.
@@ -63,10 +81,11 @@ export class TariffRepository {
     region: string | null,
     at: Date,
   ): Promise<PartnerRateRow | undefined> {
+    const key = regionKeyOf(region);
     const regionMatches =
-      region === null
-        ? isNull(partnerRates.region)
-        : or(isNull(partnerRates.region), eq(partnerRates.region, region));
+      key === null
+        ? isNull(partnerRates.regionKey)
+        : or(isNull(partnerRates.regionKey), eq(partnerRates.regionKey, key));
 
     const [row] = await this.db
       .select()
@@ -80,7 +99,7 @@ export class TariffRepository {
         ),
       )
       .orderBy(
-        sql`case when ${partnerRates.region} is null then 1 else 0 end`,
+        sql`case when ${partnerRates.regionKey} is null then 1 else 0 end`,
         desc(partnerRates.effectiveFrom),
       )
       .limit(1);
@@ -94,6 +113,104 @@ export class TariffRepository {
       .from(partnerRates)
       .where(eq(partnerRates.partnerId, partnerId))
       .orderBy(desc(partnerRates.effectiveFrom));
+  }
+
+  // --- Коридоры цен (ADR-0023) -------------------------------------------------
+
+  async insertPriceBand(draft: {
+    operatorId: Id<'operator'>;
+    region: string | null;
+    minPrice: MoneyAmount;
+    maxPrice: MoneyAmount;
+    effectiveFrom: Date;
+  }): Promise<PriceBandRow> {
+    try {
+      const [row] = await this.db
+        .insert(priceBands)
+        .values({ id: newId<'priceBand'>(), ...draft, regionKey: regionKeyOf(draft.region) })
+        .returning();
+      if (row === undefined) throw new Error('Вставка не вернула строку');
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /**
+   * Коридор, действующий по направлению на указанный момент.
+   *
+   * Старшинство то же, что у цен: коридор с регионом побеждает коридор без него,
+   * среди равных — самый свежий из действующих. Момент передаётся явно: цена проверяется
+   * коридором **того времени, с которого она начинает действовать**, иначе история цен
+   * зависела бы от того, в какой день их ввели.
+   */
+  async findPriceBand(
+    operatorId: Id<'operator'>,
+    region: string | null,
+    at: Date,
+  ): Promise<PriceBandRow | undefined> {
+    const key = regionKeyOf(region);
+    const regionMatches: SQL | undefined =
+      key === null
+        ? isNull(priceBands.regionKey)
+        : or(isNull(priceBands.regionKey), eq(priceBands.regionKey, key));
+
+    const [row] = await this.db
+      .select()
+      .from(priceBands)
+      .where(
+        and(
+          eq(priceBands.operatorId, operatorId),
+          lte(priceBands.effectiveFrom, at),
+          regionMatches,
+        ),
+      )
+      .orderBy(
+        sql`case when ${priceBands.regionKey} is null then 1 else 0 end`,
+        desc(priceBands.effectiveFrom),
+      )
+      .limit(1);
+
+    return row;
+  }
+
+  async listPriceBands(operatorId?: Id<'operator'>): Promise<PriceBandRow[]> {
+    const query = this.db.select().from(priceBands);
+    return operatorId === undefined
+      ? query.orderBy(desc(priceBands.effectiveFrom))
+      : query.where(eq(priceBands.operatorId, operatorId)).orderBy(desc(priceBands.effectiveFrom));
+  }
+
+  /**
+   * Действующие сейчас коридоры — по одному на направление.
+   *
+   * `distinct on` вместо выборки всей истории: сравнивать цены с отменёнными коридорами
+   * незачем, а история коридоров растёт быстрее, чем их число.
+   */
+  async listActivePriceBands(at: Date): Promise<PriceBandRow[]> {
+    return this.db
+      .selectDistinctOn([priceBands.operatorId, priceBands.regionKey])
+      .from(priceBands)
+      .where(lte(priceBands.effectiveFrom, at))
+      .orderBy(
+        asc(priceBands.operatorId),
+        sql`${priceBands.regionKey} asc nulls last`,
+        desc(priceBands.effectiveFrom),
+      );
+  }
+
+  /** Действующие сейчас цены — по одной на пару «партнёр и направление». */
+  async listActivePartnerRates(at: Date): Promise<PartnerRateRow[]> {
+    return this.db
+      .selectDistinctOn([partnerRates.partnerId, partnerRates.operatorId, partnerRates.regionKey])
+      .from(partnerRates)
+      .where(lte(partnerRates.effectiveFrom, at))
+      .orderBy(
+        asc(partnerRates.partnerId),
+        asc(partnerRates.operatorId),
+        sql`${partnerRates.regionKey} asc nulls last`,
+        desc(partnerRates.effectiveFrom),
+      );
   }
 
   async insertCommissionRule(draft: {

@@ -17,7 +17,7 @@ import {
 } from '@zvonix/db/schema';
 import {
   newId,
-  normalizeRegion,
+  regionKeyOf,
   USABLE_PORT_STATES,
   USABLE_SIM_STATUSES,
   type ChannelStatus,
@@ -588,10 +588,9 @@ export class TelephonyRepository {
  * это гарантированное расхождение, которого не поймает ни один тест ниже сквозного.
  */
 function coversRegion(region: string | null): SQL {
-  const normalized = region === null ? '' : normalizeRegion(region);
   // Пустой ключ — это не регион: строка вроде «область» ничего не называет, и считать
   // её известным регионом значит выдать маршрут по несуществующему покрытию.
-  const key = normalized === '' ? null : normalized;
+  const key = regionKeyOf(region);
 
   return sql`coalesce((select bool_or(${partnerCoverage.regionKey} is not distinct from ${key}::text) from ${partnerCoverage} where ${partnerCoverage.partnerId} = ${simCards.partnerId}), true)`;
 }

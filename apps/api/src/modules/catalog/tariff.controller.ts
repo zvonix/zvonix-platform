@@ -6,15 +6,20 @@
  */
 
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
-import { Money, parseId } from '@zvonix/shared';
+import { Money, parseId, REFERENCE_CALL_SECONDS } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
-import { addCommissionRuleSchema, addPartnerRateSchema, priceCallSchema } from './schemas.js';
-import type { CommissionRuleRow, PartnerRateRow } from './tariff.repository.js';
-import { TariffService } from './tariff.service.js';
+import {
+  addCommissionRuleSchema,
+  addPartnerRateSchema,
+  addPriceBandSchema,
+  priceCallSchema,
+} from './schemas.js';
+import type { CommissionRuleRow, PartnerRateRow, PriceBandRow } from './tariff.repository.js';
+import { TariffService, type BandViolation } from './tariff.service.js';
 
 interface PartnerRateView {
   readonly id: string;
@@ -26,6 +31,15 @@ interface PartnerRateView {
   readonly minimum_duration_seconds: number;
   readonly connection_fee: string;
   readonly rounding: string;
+  readonly effective_from: string;
+}
+
+interface PriceBandView {
+  readonly id: string;
+  readonly operator_id: string;
+  readonly region: string | null;
+  readonly min_price: string;
+  readonly max_price: string;
   readonly effective_from: string;
 }
 
@@ -72,6 +86,66 @@ export class TariffController {
   ): Promise<{ rates: PartnerRateView[] }> {
     const rows = await this.tariffs.listPartnerRates(parseId(partnerId, 'partner'));
     return { rates: rows.map(toRateView) };
+  }
+
+  // --- Коридоры цен (ADR-0023) -------------------------------------------------
+
+  /**
+   * Границы — стоимость эталонного вызова, а не цена за минуту.
+   *
+   * Коридор по одной цене за минуту обходится платой за соединение или минимальной
+   * длительностью в десять минут, то есть не ограничивает ничего.
+   */
+  @Roles('admin')
+  @Post('price-bands')
+  async addPriceBand(
+    @Body(zodBody(addPriceBandSchema)) body: z.infer<typeof addPriceBandSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ band: PriceBandView }> {
+    const row = await this.tariffs.addPriceBand(
+      {
+        operatorId: parseId(body.operatorId, 'operator'),
+        region: body.region ?? null,
+        minPrice: body.minPrice,
+        maxPrice: body.maxPrice,
+        effectiveFrom: body.effectiveFrom === undefined ? new Date() : new Date(body.effectiveFrom),
+      },
+      actor.userId,
+      actor.role,
+    );
+    return { band: toBandView(row) };
+  }
+
+  @Roles('admin', 'support')
+  @Get('price-bands')
+  async listPriceBands(
+    @Query('operatorId') operatorId?: string,
+  ): Promise<{ bands: PriceBandView[] }> {
+    const rows = await this.tariffs.listPriceBands(
+      operatorId === undefined ? undefined : parseId(operatorId, 'operator'),
+    );
+    return { bands: rows.map(toBandView) };
+  }
+
+  /**
+   * Действующие цены, оказавшиеся вне действующего коридора.
+   *
+   * Возникает от **сужения коридора после** назначения цены: строка тарифа неизменяема,
+   * и переписывать её значило бы переоценивать прошлое. Без этого списка правило тихо
+   * перестало бы выполняться, и узнать об этом было бы неоткуда.
+   */
+  @Roles('admin', 'support')
+  @Get('price-bands/violations')
+  async bandViolations(): Promise<{
+    violations: {
+      rate: PartnerRateView;
+      band: PriceBandView;
+      reference_cost: string;
+      reference_call_seconds: number;
+    }[];
+  }> {
+    const found = await this.tariffs.findBandViolations(new Date());
+    return { violations: found.map(toViolationView) };
   }
 
   @Roles('admin')
@@ -149,6 +223,31 @@ function toRateView(row: PartnerRateRow): PartnerRateView {
     connection_fee: Money.format(row.connectionFee),
     rounding: row.rounding,
     effective_from: row.effectiveFrom.toISOString(),
+  };
+}
+
+function toBandView(row: PriceBandRow): PriceBandView {
+  return {
+    id: row.id,
+    operator_id: row.operatorId,
+    region: row.region,
+    min_price: Money.format(row.minPrice),
+    max_price: Money.format(row.maxPrice),
+    effective_from: row.effectiveFrom.toISOString(),
+  };
+}
+
+function toViolationView(violation: BandViolation): {
+  rate: PartnerRateView;
+  band: PriceBandView;
+  reference_cost: string;
+  reference_call_seconds: number;
+} {
+  return {
+    rate: toRateView(violation.rate),
+    band: toBandView(violation.band),
+    reference_cost: Money.format(violation.referenceCost),
+    reference_call_seconds: REFERENCE_CALL_SECONDS,
   };
 }
 

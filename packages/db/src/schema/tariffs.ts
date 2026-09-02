@@ -51,6 +51,14 @@ export const partnerRates = pgTable(
      */
     region: text(),
 
+    /**
+     * Приведённое написание региона (`normalizeRegion`). **По нему идёт сравнение**,
+     * а не по `region`: раньше сравнивалась строка, и цена, заведённая как
+     * `Красноярский кр.`, для вызова в `Красноярский край` не находилась — молча
+     * подменялась общей ценой партнёра ([ADR-0023](../../../docs/adr/0023-koridory-cen.md)).
+     */
+    regionKey: text(),
+
     /** Цена за полную минуту разговора. */
     pricePerMinute: money().notNull(),
 
@@ -81,8 +89,61 @@ export const partnerRates = pgTable(
     check('partner_rates_connection_fee_non_negative', sql`${t.connectionFee} >= 0`),
     check('partner_rates_increment_positive', sql`${t.billingIncrementSeconds} >= 1`),
     check('partner_rates_minimum_non_negative', sql`${t.minimumDurationSeconds} >= 0`),
+    // Ключ есть тогда и только тогда, когда есть регион: ключ без региона нечего
+    // показывать человеку, регион без ключа недостижим при отборе.
+    check('partner_rates_region_key_paired', sql`(${t.region} is null) = (${t.regionKey} is null)`),
     // Горячий путь: действующий тариф партнёра по направлению на момент вызова.
-    index('partner_rates_lookup_idx').on(t.partnerId, t.operatorId, t.region, t.effectiveFrom),
+    index('partner_rates_lookup_idx').on(t.partnerId, t.operatorId, t.regionKey, t.effectiveFrom),
+  ],
+);
+
+/**
+ * Коридор цены по направлению ([ADR-0023](../../../docs/adr/0023-koridory-cen.md)).
+ *
+ * Границы сравниваются со **стоимостью эталонного вызова** по тарифу партнёра
+ * (`referenceCost`), а не с одной лишь ценой за минуту: тариф — это пять чисел, и коридор,
+ * ограничивающий одно из них, обходится платой за соединение или минимальной длительностью
+ * в десять минут. Для простого тарифа стоимость эталонного вызова равна цене за минуту.
+ *
+ * Проверяется **при назначении цены**, а не при звонке: вызов не должен срываться из-за
+ * того, что администратор сузил коридор, а цена, применённая к вызову, фиксируется в CDR
+ * на его момент. Отсюда следствие — сужение коридора оставляет снаружи уже назначенные
+ * цены; их показывает список нарушений.
+ *
+ * Версионирование то же, что у тарифов: строка не редактируется, добавляется новая
+ * с `effective_from`.
+ */
+export const priceBands = pgTable(
+  'price_bands',
+  {
+    id: primaryId<'priceBand'>(),
+
+    operatorId: idRef<'operator'>()
+      .notNull()
+      .references(() => operators.id, { onDelete: 'restrict' }),
+
+    /** Регион назначения. Пусто — «любой регион», как и у цены партнёра. */
+    region: text(),
+
+    /** Приведённое написание региона (`normalizeRegion`). По нему идёт сравнение. */
+    regionKey: text(),
+
+    /** Нижняя граница стоимости эталонного вызова. */
+    minPrice: money().notNull(),
+
+    /** Верхняя граница стоимости эталонного вызова. */
+    maxPrice: money().notNull(),
+
+    effectiveFrom: timestamptz().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check('price_bands_min_non_negative', sql`${t.minPrice} >= 0`),
+    // Пустой коридор (`max < min`) не запрещает цену, а делает невозможной любую:
+    // такую опечатку лучше поймать вставкой, чем разбором «почему цена не заводится».
+    check('price_bands_bounds', sql`${t.maxPrice} >= ${t.minPrice}`),
+    check('price_bands_region_key_paired', sql`(${t.region} is null) = (${t.regionKey} is null)`),
+    index('price_bands_lookup_idx').on(t.operatorId, t.regionKey, t.effectiveFrom),
   ],
 );
 
