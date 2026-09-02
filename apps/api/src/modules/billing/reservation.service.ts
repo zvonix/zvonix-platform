@@ -189,4 +189,14 @@ export class ReservationService {
     }
     return released;
   }
+
+  /**
+   * Резерв по вызову, если он есть.
+   *
+   * Отсутствие — не всегда ошибка: вызов мог не дойти до резервирования, отказавшись
+   * раньше. Поэтому приёму CDR нужен вопрос «есть ли резерв», а не только требование.
+   */
+  async findByCall(callId: Id<'call'>): Promise<ReservationRow | undefined> {
+    return this.reservations.findByCall(callId);
+  }
 }

@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
 import { calls, simCards } from '@zvonix/db/schema';
 import {
@@ -111,5 +111,15 @@ export class CallRepository {
     } catch (cause) {
       throw toDatabaseError(cause);
     }
+  }
+
+  /** Вызовы канала, свежие сверху: по ним разбирают «за что списали». */
+  async listByChannel(channelId: Id<'channel'>, limit: number): Promise<CallRow[]> {
+    return this.db
+      .select()
+      .from(calls)
+      .where(eq(calls.channelId, channelId))
+      .orderBy(desc(calls.startedAt))
+      .limit(limit);
   }
 }

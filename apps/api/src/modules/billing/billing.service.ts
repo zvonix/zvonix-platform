@@ -24,6 +24,7 @@ import {
   type AccountId,
   type AccountRow,
   type ClientId,
+  type PartnerId,
   type LedgerEntryRow,
   type LedgerTransactionRow,
   type UserId,
@@ -204,6 +205,68 @@ export class BillingService {
     }
 
     return posted;
+  }
+
+  /**
+   * Списание за состоявшийся вызов.
+   *
+   * Одна операция из трёх проводок: клиент платит, партнёр зарабатывает, платформа
+   * удерживает наценку. Сумма трёх равна нулю — деньги не возникают и не исчезают.
+   *
+   * Ключ идемпотентности — `charge:<идентификатор вызова>`. Повторный CDR не создаёт
+   * вторых проводок: узел может прислать его дважды, и это штатный режим, а не сбой
+   * ([ADR-0010](../../../../../docs/adr/0010-model-billinga.md)).
+   */
+  async chargeCall(input: {
+    callId: string;
+    clientId: ClientId;
+    partnerId: PartnerId;
+    clientAmount: MoneyAmount;
+    partnerAmount: MoneyAmount;
+    commissionAmount: MoneyAmount;
+    description: string;
+    occurredAt: Date;
+  }): Promise<PostedTransaction> {
+    const total = Money.add(input.partnerAmount, input.commissionAmount);
+    if (Money.compare(total, input.clientAmount) !== 0) {
+      // Сумма для клиента — не самостоятельное значение, а следствие двух других.
+      // Расхождение означает ошибку расчёта, и проводить её нельзя ни при каких условиях.
+      throw validationFailed('Доля партнёра и наценка не складываются в сумму для клиента', {
+        details: {
+          client: Money.format(input.clientAmount),
+          partner: Money.format(input.partnerAmount),
+          commission: Money.format(input.commissionAmount),
+        },
+      });
+    }
+
+    const clientAccount = await this.accountOf('client', input.clientId);
+    const partnerAccount = await this.accountOf('partner', input.partnerId);
+    const revenue = await this.accountOf('revenue', null);
+
+    // Нулевые проводки не создаются: запись на ноль ничего не значит и только засоряет
+    // журнал — база её и не примет.
+    const lines: PostingLine[] = [
+      { accountId: clientAccount.id, amount: Money.negate(input.clientAmount) },
+    ];
+    if (!Money.isZero(input.partnerAmount)) {
+      lines.push({ accountId: partnerAccount.id, amount: input.partnerAmount });
+    }
+    if (!Money.isZero(input.commissionAmount)) {
+      lines.push({ accountId: revenue.id, amount: input.commissionAmount });
+    }
+
+    return this.post({
+      kind: 'charge',
+      idempotencyKey: `charge:${input.callId}`,
+      description: input.description,
+      referenceType: 'call',
+      referenceId: input.callId,
+      // Тарификацию выполняет система, а не человек: приписывать её администратору
+      // значило бы соврать журналу о том, кто действовал.
+      occurredAt: input.occurredAt,
+      lines,
+    });
   }
 
   /** Счёт участника или системный. Заводится при первом обращении. */
