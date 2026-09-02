@@ -11,6 +11,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { DomainError, type CallFailureReason, type Id, type Msisdn } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { ReservationService } from '../billing/reservation.service.js';
+import { BlockedNumberService } from '../catalog/blocked-numbers.service.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { CallRepository, type CallRow } from '../telephony/call.repository.js';
@@ -56,6 +57,7 @@ export class RoutingService {
     private readonly telephony: TelephonyRepository,
     private readonly callsRepository: CallRepository,
     private readonly resolver: OperatorResolverService,
+    private readonly blocked: BlockedNumberService,
     private readonly tariffs: TariffService,
     private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
@@ -93,7 +95,22 @@ export class RoutingService {
     }
     const channel = routable.channel;
 
-    // 1. Оператор. Гадать запрещено: неверный оператор — платный звонок с денег
+    // 1. Чёрный список. До определения оператора: тратить бюджет определения (до 800 мс
+    //    и запрос во внешний сервис) на номер, звонить на который запрещено, незачем —
+    //    и сообщать этот номер внешнему источнику тоже незачем (ADR-0024).
+    const block = await this.blocked.findBlock(request.destination);
+    if (block !== undefined) {
+      // Номер в журнал не пишется — он персональные данные абонента; пишется правило,
+      // по которому отказано, и по нему разбор находится сразу.
+      this.logger.info('Вызов на запрещённый номер', {
+        channel_id: channel.id,
+        blocked_number_id: block.id,
+        prefix: block.prefix,
+      });
+      return this.reject(request, channel.id, null, null, 'destination_blocked');
+    }
+
+    // 2. Оператор. Гадать запрещено: неверный оператор — платный звонок с денег
     //    партнёра, а промежуточного варианта нет (ADR-0013).
     const resolution = await this.resolveWithinBudget(request.destination);
     if (!resolution.confirmed || resolution.serving === undefined) {
@@ -102,7 +119,7 @@ export class RoutingService {
     const operatorId = resolution.serving.id;
     const region = resolution.region ?? null;
 
-    // 2. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
+    // 3. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
     //    регион — партнёров, которые в него не звонят (ADR-0022).
     const candidates = await this.telephony.findSimCandidates(operatorId, {
       channelId: channel.id,
@@ -114,7 +131,7 @@ export class RoutingService {
       return this.reject(request, channel.id, operatorId, region, reason);
     }
 
-    // 3. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM.
+    // 4. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM.
     let claimed = await this.claimSim(request, channel.id, operatorId, region, candidates);
     if (claimed === undefined) {
       // Прежде чем отказать, убираем вызовы, по которым узел не прислал CDR: они
@@ -130,7 +147,7 @@ export class RoutingService {
       return this.reject(request, channel.id, operatorId, region, 'no_sim_available');
     }
 
-    // 4. Деньги. Считается стоимость разговора предельной длительности: резерв обязан
+    // 5. Деньги. Считается стоимость разговора предельной длительности: резерв обязан
     //    покрывать любой исход, иначе он не защищает ни от чего.
     try {
       const priced = await this.tariffs.priceReservation(

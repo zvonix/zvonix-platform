@@ -2,16 +2,18 @@
  * HTTP-контракт справочника операторов и определения оператора номера.
  */
 
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { parseId, parseMsisdn } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
+import { BlockedNumberService } from './blocked-numbers.service.js';
+import type { BlockedNumberRow } from './blocked-numbers.repository.js';
 import { CatalogService, type OperatorView } from './catalog.service.js';
 import { OperatorResolverService } from './operator-resolver.service.js';
-import { addAliasSchema, createOperatorSchema } from './schemas.js';
+import { addAliasSchema, blockNumberSchema, createOperatorSchema } from './schemas.js';
 
 /** Оператор в ответе. Идентификаторы — строки: по проводу тип сущности не выражается. */
 interface OperatorBrief {
@@ -42,11 +44,19 @@ function brief(
     : { id: operator.id, name: operator.name, mnc: operator.mnc, is_mvno: operator.isMvno };
 }
 
+interface BlockedNumberView {
+  readonly id: string;
+  readonly prefix: string;
+  readonly note: string;
+  readonly created_at: string;
+}
+
 @Controller()
 export class CatalogController {
   constructor(
     private readonly catalog: CatalogService,
     private readonly resolver: OperatorResolverService,
+    private readonly blocked: BlockedNumberService,
   ) {}
 
   @Roles('admin')
@@ -114,4 +124,48 @@ export class CatalogController {
   async invalidate(@Param('msisdn') msisdn: string): Promise<{ invalidated: boolean }> {
     return { invalidated: await this.resolver.invalidate(parseMsisdn(msisdn)) };
   }
+
+  // --- Чёрный список номеров (ADR-0024) ----------------------------------------
+
+  /**
+   * Запретить номер или диапазон.
+   *
+   * Правило — это префикс; точный номер есть префикс длиной одиннадцать. Префикс
+   * принимается так, как его пишет человек: `8-809` приводится к `7809`.
+   */
+  @Roles('admin')
+  @Post('blocked-numbers')
+  async block(
+    @Body(zodBody(blockNumberSchema)) body: z.infer<typeof blockNumberSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ rule: BlockedNumberView }> {
+    const row = await this.blocked.block(body, actor.userId, actor.role);
+    return { rule: toBlockedView(row) };
+  }
+
+  @Roles('admin', 'support')
+  @Get('blocked-numbers')
+  async listBlocked(): Promise<{ rules: BlockedNumberView[] }> {
+    const rows = await this.blocked.list();
+    return { rules: rows.map(toBlockedView) };
+  }
+
+  @Roles('admin')
+  @Delete('blocked-numbers/:id')
+  async unblock(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ rule: BlockedNumberView }> {
+    const row = await this.blocked.unblock(parseId(id, 'blockedNumber'), actor.userId, actor.role);
+    return { rule: toBlockedView(row) };
+  }
+}
+
+function toBlockedView(row: BlockedNumberRow): BlockedNumberView {
+  return {
+    id: row.id,
+    prefix: row.prefix,
+    note: row.note,
+    created_at: row.createdAt.toISOString(),
+  };
 }

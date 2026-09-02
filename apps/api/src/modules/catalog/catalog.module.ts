@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
+import { BlockedNumberRepository } from './blocked-numbers.repository.js';
+import { BlockedNumberService } from './blocked-numbers.service.js';
 import { CatalogController } from './catalog.controller.js';
 import { CatalogRepository } from './catalog.repository.js';
 import { CatalogService } from './catalog.service.js';
@@ -15,6 +17,8 @@ import { TariffService } from './tariff.service.js';
   providers: [
     CatalogService,
     CatalogRepository,
+    BlockedNumberService,
+    BlockedNumberRepository,
     OperatorResolverService,
     TariffService,
     TariffRepository,
@@ -22,6 +26,6 @@ import { TariffService } from './tariff.service.js';
     { provide: OPERATOR_LOOKUP, useClass: VoxlinkOperatorLookup },
   ],
   // Резолвер понадобится маршрутизации и тарификации на следующих этапах.
-  exports: [OperatorResolverService, CatalogRepository, TariffService],
+  exports: [OperatorResolverService, CatalogRepository, TariffService, BlockedNumberService],
 })
 export class CatalogModule {}
