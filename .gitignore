@@ -43,3 +43,4 @@ desktop.ini
 
 # --- Claude Code (локальные, не общие настройки) ---
 .claude/settings.local.json
+start.md
