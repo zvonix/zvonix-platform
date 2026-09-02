@@ -22,7 +22,7 @@ import { z } from 'zod';
  * проверяется тестом. Иначе новая переменная с паролем незаметно окажется
  * «несекретной» и её значение уйдёт в лог при первой же ошибке конфигурации.
  */
-const SECRET_VARIABLES = new Set(['DATABASE_URL', 'SECRET_KEY']);
+const SECRET_VARIABLES = new Set(['DATABASE_URL', 'SECRET_KEY', 'S3_ACCESS_KEY', 'S3_SECRET_KEY']);
 
 const PUBLIC_VARIABLES = new Set([
   'APP_ENV',
@@ -33,6 +33,11 @@ const PUBLIC_VARIABLES = new Set([
   'SIP_REALM',
   'MAX_CALL_DURATION_SECONDS',
   'RESERVATION_TTL_SECONDS',
+  'S3_ENDPOINT',
+  'S3_BUCKET',
+  'S3_REGION',
+  'RECORDING_RETENTION_DAYS',
+  'RECORDING_LINK_TTL_SECONDS',
   'LOG_LEVEL',
   'LOG_FORMAT',
   'DATABASE_POOL_MAX',
@@ -132,6 +137,51 @@ export const configSchema = z.object({
     .min(300, 'слишком короткий срок: резерв истечёт посреди разговора')
     .max(86_400, 'слишком долгий срок заморозки средств')
     .default(7200),
+
+  /**
+   * Объектное хранилище записей разговоров.
+   *
+   * Записи не лежат ни в базе, ни на узле: объём растёт линейно и бесконечно,
+   * а узел одноразов и заменяем (ARCHITECTURE.md).
+   */
+  S3_ENDPOINT: z.url('должен быть адресом').default('http://127.0.0.1:9000'),
+  S3_BUCKET: z
+    .string()
+    .min(3, 'слишком короткое')
+    .max(63, 'слишком длинное')
+    .regex(/^[a-z0-9.-]+$/, 'имя корзины — строчные буквы, цифры, точка и дефис')
+    .default('zvonix-recordings'),
+  S3_REGION: z.string().min(1, 'не может быть пустым').default('us-east-1'),
+  S3_ACCESS_KEY: z.string().min(1, 'не может быть пустым').default(''),
+  S3_SECRET_KEY: z.string().min(1, 'не может быть пустым').default(''),
+
+  /**
+   * Сколько хранится запись разговора, в сутках.
+   *
+   * Записи — персональные данные абонента, и «навсегда» здесь не нейтральное значение,
+   * а решение хранить чужие разговоры бессрочно. Срок задаётся явно и по истечении
+   * запись удаляется вместе с объектом в хранилище.
+   */
+  RECORDING_RETENTION_DAYS: z.coerce
+    .number()
+    .int('должно быть целым числом')
+    .min(1, 'должно быть больше нуля')
+    .max(3650, 'слишком долгий срок хранения персональных данных')
+    .default(90),
+
+  /**
+   * Срок жизни подписанной ссылки на запись, в секундах.
+   *
+   * Короткий намеренно: ссылка даёт доступ к разговору без всякой проверки прав,
+   * поэтому пересланная в мессенджере она должна протухнуть раньше, чем её откроют
+   * посторонние. Пятнадцать минут хватает послушать, но не хватает разослать.
+   */
+  RECORDING_LINK_TTL_SECONDS: z.coerce
+    .number()
+    .int('должно быть целым числом')
+    .min(60, 'слишком короткий срок: ссылку не успеют открыть')
+    .max(3600, 'слишком долгий срок жизни ссылки на персональные данные')
+    .default(900),
 
   LOG_LEVEL: logLevel.default('info'),
   LOG_FORMAT: logFormat.default('json'),

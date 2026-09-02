@@ -57,6 +57,11 @@ export class CallRepository {
     }
   }
 
+  async findById(id: CallId): Promise<CallRow | undefined> {
+    const [row] = await this.db.select().from(calls).where(eq(calls.id, id));
+    return row;
+  }
+
   async findByExternalId(externalId: string): Promise<CallRow | undefined> {
     const [row] = await this.db.select().from(calls).where(eq(calls.externalId, externalId));
     return row;

@@ -27,6 +27,8 @@
   [ADR-0009](../adr/0009-programmnaya-ats.md).
 - [routing.md](routing.md) — решение по вызову: шлюз, SIM, резерв средств.
   Обоснование — [ARCHITECTURE.md](../ARCHITECTURE.md) и [ADR-0010](../adr/0010-model-billinga.md).
+- [recordings.md](recordings.md) — записи разговоров: выгрузка узлом, подписанные ссылки,
+  срок хранения. Основание — правило о персональных данных в [CLAUDE.md](../../CLAUDE.md).
 - [node.md](node.md) — узел АТС → control plane: учётные записи SIP, запрос маршрута
   на каждый вызов, CDR, регистрация узла, heartbeat. Обоснование —
   [ADR-0009](../adr/0009-programmnaya-ats.md) и [ADR-0019](../adr/0019-dostup-mashin.md).

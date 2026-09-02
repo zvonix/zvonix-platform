@@ -10,6 +10,7 @@ import { HealthModule } from './modules/health/health.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { MachineModule } from './modules/machine/machine.module.js';
 import { NodesModule } from './modules/nodes/nodes.module.js';
+import { RecordingsModule } from './modules/recordings/recordings.module.js';
 import { RoutingModule } from './modules/routing/routing.module.js';
 import { TelephonyModule } from './modules/telephony/telephony.module.js';
 
@@ -22,6 +23,7 @@ import { TelephonyModule } from './modules/telephony/telephony.module.js';
     NodesModule,
     TelephonyModule,
     RoutingModule,
+    RecordingsModule,
     CatalogModule,
     BillingModule,
     HealthModule,
