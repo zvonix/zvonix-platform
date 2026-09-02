@@ -129,6 +129,10 @@ describe('вход', () => {
         error: { details: { retry_after_seconds: expect.any(Number) as number } },
       },
     );
+
+    // `Retry-After` — часть протокола: клиент, которому не сказали, когда возвращаться,
+    // возвращается наугад и создаёт ровно ту нагрузку, из-за которой его и отклонили.
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
   }, 60_000);
 
   it('удачный вход прощает накопленные неудачи', async () => {
@@ -156,6 +160,51 @@ describe('вход', () => {
 
     expect((await login(uniqueEmail(), 'неверный пароль', blocked)).statusCode).toBe(429);
     expect((await login(uniqueEmail(), 'неверный пароль', innocent)).statusCode).toBe(401);
+  }, 60_000);
+});
+
+describe('подмена адреса заголовком', () => {
+  it('не верит X-Forwarded-For от недоверенного источника', async () => {
+    // От `request.ip` зависят список разрешённых адресов машинного ключа (ADR-0019),
+    // это ограничение и журнал аудита. Заголовок ставит клиент, поэтому доверять ему
+    // от кого угодно нельзя: иначе предел обходится сменой одной строки в запросе.
+    const ip = nextAddress();
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      await login(uniqueEmail(), 'неверный пароль', ip);
+    }
+    expect((await login(uniqueEmail(), 'неверный пароль', ip)).statusCode).toBe(429);
+
+    const spoofed = await api().inject({
+      method: 'POST',
+      url: '/auth/login',
+      remoteAddress: ip,
+      headers: { 'x-forwarded-for': nextAddress() },
+      payload: { email: uniqueEmail(), password: 'неверный пароль' },
+    });
+    expect(spoofed.statusCode).toBe(429);
+  }, 60_000);
+
+  it('верит заголовку от доверенного прокси', async () => {
+    // `TRUSTED_PROXIES` по умолчанию — локальные адреса: обратный прокси на той же
+    // машине. Пришедший от него заголовок и есть настоящий адрес клиента.
+    const behindProxy = nextAddress();
+
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      await api().inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: { 'x-forwarded-for': behindProxy },
+        payload: { email: uniqueEmail(), password: 'неверный пароль' },
+      });
+    }
+
+    const blocked = await api().inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: { 'x-forwarded-for': behindProxy },
+      payload: { email: uniqueEmail(), password: 'неверный пароль' },
+    });
+    expect(blocked.statusCode).toBe(429);
   }, 60_000);
 });
 

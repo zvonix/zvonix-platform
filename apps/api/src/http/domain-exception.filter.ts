@@ -9,7 +9,7 @@
 import { Catch, Inject, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
 import { HttpException } from '@nestjs/common';
 import { currentCorrelationId } from '@zvonix/logger';
-import { toDomainError, toPublicPayload, type ErrorCode } from '@zvonix/shared';
+import { toDomainError, toPublicPayload, type DomainError, type ErrorCode } from '@zvonix/shared';
 import type { FastifyReply } from 'fastify';
 import { APP_LOGGER, type Logger } from '../infra/tokens.js';
 
@@ -75,6 +75,12 @@ export class DomainExceptionFilter implements ExceptionFilter {
       this.logger.warn('Запрос отклонён', { code: error.code, status, message: error.message });
     }
 
+    // `Retry-After` — часть протокола, а не украшение: клиент, которому не сказали,
+    // когда возвращаться, возвращается наугад, то есть создаёт ровно ту нагрузку,
+    // из-за которой его и отклонили.
+    const retryAfter = retryAfterSeconds(error);
+    if (retryAfter !== undefined) void reply.header('Retry-After', String(retryAfter));
+
     void reply.status(status).send({
       error: {
         ...toPublicPayload(error),
@@ -82,4 +88,10 @@ export class DomainExceptionFilter implements ExceptionFilter {
       },
     });
   }
+}
+
+/** Срок ожидания из подробностей ошибки, если он там есть. */
+function retryAfterSeconds(error: DomainError): number | undefined {
+  const value = error.details?.['retry_after_seconds'];
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }

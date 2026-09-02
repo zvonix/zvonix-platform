@@ -39,8 +39,9 @@ const nextSubject = (): string => {
 };
 
 beforeAll(() => {
-  redis = new RedisService(loadConfig(), logger);
-  limits = new LimitsService(redis, logger);
+  const config = loadConfig();
+  redis = new RedisService(config, logger);
+  limits = new LimitsService(redis, config, logger);
 });
 
 beforeEach(async () => {
@@ -131,11 +132,9 @@ describe('недоступный Redis', () => {
   it('пропускает и не роняет запрос', async () => {
     // Довод целиком — в `limits.service.ts`: блокировка учётной записи остаётся,
     // а отказ здесь закрыл бы вход всем, включая того, кому чинить Redis.
-    const unreachable = new RedisService(
-      { ...loadConfig(), REDIS_URL: 'redis://127.0.0.1:1/0' },
-      logger,
-    );
-    const isolated = new LimitsService(unreachable, logger);
+    const config = { ...loadConfig(), REDIS_URL: 'redis://127.0.0.1:1/0' };
+    const unreachable = new RedisService(config, logger);
+    const isolated = new LimitsService(unreachable, config, logger);
 
     try {
       const verdict = await isolated.hit(rule, nextSubject());

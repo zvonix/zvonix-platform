@@ -19,7 +19,7 @@
 import { Inject, Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { isRedisReady, RedisService } from '../../infra/redis.js';
-import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 
 /** Правило: сколько событий с одним ключом допустимо за окно. */
 export interface LimitRule {
@@ -63,6 +63,7 @@ export class LimitsService implements OnApplicationBootstrap {
 
   constructor(
     private readonly redis: RedisService,
+    @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('limits');
@@ -78,6 +79,18 @@ export class LimitsService implements OnApplicationBootstrap {
    */
   onApplicationBootstrap(): void {
     void this.redis.connection;
+
+    if (!this.config.AUTH_RATE_LIMIT_ENABLED) {
+      // Выключенная защита обязана быть заметна. В production это не настройка,
+      // а снятый рубеж обороны, и узнать о нём из переменной окружения через полгода —
+      // не то же самое, что увидеть в журнале при каждом запуске.
+      const message = 'Ограничение частоты входа выключено: защита от перебора по адресу снята';
+      const fields = { variable: 'AUTH_RATE_LIMIT_ENABLED', env: this.config.APP_ENV };
+      // Уровни различаются, а сигнатуры — нет: у `error` второй аргумент это причина,
+      // и общая ссылка на метод уложила бы поля в запись как разобранную ошибку.
+      if (this.config.APP_ENV === 'production') this.logger.error(message, undefined, fields);
+      else this.logger.warn(message, fields);
+    }
   }
 
   /**

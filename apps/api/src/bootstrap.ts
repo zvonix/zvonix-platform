@@ -8,6 +8,7 @@
 
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import { loadConfig } from '@zvonix/config';
 import type { Logger } from '@zvonix/logger';
 import { AppModule } from './app.module.js';
 import { registerCorrelationId } from './http/correlation-id.hook.js';
@@ -23,11 +24,23 @@ export interface BuiltApplication {
 }
 
 export async function buildApplication(): Promise<BuiltApplication> {
+  // Конфигурация нужна до сборки контейнера: адаптер создаётся раньше него, а настройка
+  // доверия прокси задаётся именно при создании. Чтение дешёвое и без побочных действий,
+  // так что второе обращение здесь — это повторная работа, а не второй источник истины.
+  const settings = loadConfig();
+
   const adapter = new FastifyAdapter({
     bodyLimit: MAX_BODY_BYTES,
-    // Приложение работает за обратным прокси, и без этого `request.ip` — адрес прокси.
-    // В журнал аудита попадал бы один и тот же адрес у всех действий.
-    trustProxy: true,
+    /**
+     * Кому верить, когда в запросе есть `X-Forwarded-For`.
+     *
+     * Раньше здесь стояло `true`, то есть «верить всем». От `request.ip` зависят список
+     * разрешённых адресов машинного ключа (ADR-0019), ограничение частоты входа и адрес
+     * в журнале аудита — и заголовок ставит клиент. Значит, украденный ключ узла работал
+     * бы откуда угодно, ограничение обходилось бы сменой заголовка, а в журнал попадал бы
+     * адрес, выбранный тем, кого мы записываем. ADR-0019 это прямо запрещает.
+     */
+    trustProxy: settings.TRUSTED_PROXIES,
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
