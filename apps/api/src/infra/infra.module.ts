@@ -1,5 +1,5 @@
 /**
- * Инфраструктура приложения: конфигурация, логгер, база.
+ * Инфраструктура приложения: конфигурация, логгер, база, Redis.
  *
  * Модуль глобальный: эти три вещи нужны почти каждому доменному модулю, и импорт
  * инфраструктуры в каждый из них был бы шумом без смысла. Глобальность здесь —
@@ -10,6 +10,7 @@ import { Global, Module, type DynamicModule } from '@nestjs/common';
 import { loadConfig } from '@zvonix/config';
 import { createLogger } from '@zvonix/logger';
 import { DatabaseService } from './database.service.js';
+import { RedisService } from './redis.js';
 import { APP_CONFIG, APP_LOGGER, PROCESS_COMPONENT, type Config } from './tokens.js';
 
 @Global()
@@ -35,8 +36,9 @@ import { APP_CONFIG, APP_LOGGER, PROCESS_COMPONENT, type Config } from './tokens
         }),
     },
     DatabaseService,
+    RedisService,
   ],
-  exports: [APP_CONFIG, APP_LOGGER, DatabaseService],
+  exports: [APP_CONFIG, APP_LOGGER, DatabaseService, RedisService],
 })
 export class InfraModule {
   /**

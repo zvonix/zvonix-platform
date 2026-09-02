@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
+import { LimitsModule } from '../limits/limits.module.js';
 import { IdentityController } from './identity.controller.js';
 import { IdentityRepository } from './identity.repository.js';
 import { IdentityService } from './identity.service.js';
 
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, LimitsModule],
   controllers: [IdentityController],
   providers: [IdentityService, IdentityRepository],
   // Экспортируется для глобального защитника: он проверяет токен на каждом запросе.

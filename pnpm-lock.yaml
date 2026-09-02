@@ -92,6 +92,9 @@ importers:
       fastify:
         specifier: ^5.12.1
         version: 5.12.1
+      ioredis:
+        specifier: ^5.9.0
+        version: 5.11.1
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -126,9 +129,6 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2
     devDependencies:
-      '@zvonix/logger':
-        specifier: workspace:*
-        version: link:../../packages/logger
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)

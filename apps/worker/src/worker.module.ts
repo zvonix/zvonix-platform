@@ -9,6 +9,7 @@
 import { Module } from '@nestjs/common';
 import {
   BillingModule,
+  IdentityModule,
   InfraModule,
   NodesModule,
   RecordingsModule,
@@ -24,6 +25,7 @@ import { BackgroundTasks } from './tasks.js';
     InfraModule.forComponent('worker'),
     BillingModule,
     TelephonyModule,
+    IdentityModule,
     NodesModule,
     RecordingsModule,
   ],

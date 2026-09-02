@@ -29,6 +29,10 @@ process.env['SECRET_KEY'] = 'x'.repeat(32);
 process.env['APP_ENV'] = 'test';
 process.env['LOG_LEVEL'] = 'error';
 process.env['LOG_FORMAT'] = 'json';
+// Проверки заводят два десятка учётных записей с одного адреса и упирались бы
+// в предел, задуманный против перебора. Сам механизм проверяет
+// `auth-rate-limit.integration.test.ts`, где он включён.
+process.env['AUTH_RATE_LIMIT_ENABLED'] = 'false';
 
 const { buildApplication } = await import('./bootstrap.js');
 const { IdentityService } = await import('./modules/identity/identity.service.js');
@@ -408,6 +412,51 @@ describe('сессия', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('уборка просроченных сессий', () => {
+  it('удаляет истёкшие и не трогает действующие', async () => {
+    const email = uniqueEmail();
+    const userId = await register(email);
+    await activate(userId);
+    await login(email);
+
+    const handle = createDatabase({ url, poolMax: 1 });
+    let secondUser = '';
+    try {
+      const live = await handle.db.execute<{ count: number }>(
+        sql`select count(*)::int as count from sessions where user_id = ${userId}`,
+      );
+      expect(live.rows[0]?.count).toBe(1);
+
+      // Делаем её просроченной задним числом.
+      await handle.db.execute(
+        sql`update sessions set expires_at = now() - interval '1 day' where user_id = ${userId}`,
+      );
+
+      const secondEmail = uniqueEmail();
+      secondUser = await register(secondEmail);
+      await activate(secondUser);
+      await login(secondEmail);
+
+      const removed = await api().get(IdentityService).purgeExpiredSessions();
+      expect(removed).toBeGreaterThanOrEqual(1);
+
+      // Сессия хранит адрес и клиента — данные о человеке. Просроченная удаляется,
+      // действующая остаётся: иначе уборка выкидывала бы людей из системы.
+      const expired = await handle.db.execute<{ count: number }>(
+        sql`select count(*)::int as count from sessions where user_id = ${userId}`,
+      );
+      expect(expired.rows[0]?.count).toBe(0);
+
+      const alive = await handle.db.execute<{ count: number }>(
+        sql`select count(*)::int as count from sessions where user_id = ${secondUser}`,
+      );
+      expect(alive.rows[0]?.count).toBe(1);
+    } finally {
+      await handle.close();
+    }
   });
 });
 

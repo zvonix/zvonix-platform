@@ -12,7 +12,7 @@
 
 import 'reflect-metadata';
 import type { INestApplicationContext } from '@nestjs/common';
-import { PROCESS_COMPONENT } from '@zvonix/api';
+import { createProbeConnection, PROCESS_COMPONENT, redisConnectionOptions } from '@zvonix/api';
 import { prepareEnvironment, resetDatabase, withDatabase } from '@zvonix/api/testing';
 import { newId } from '@zvonix/shared';
 import { Queue } from 'bullmq';
@@ -20,7 +20,6 @@ import { sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWorker } from './bootstrap.js';
-import { createProbeConnection, redisConnectionOptions } from './redis.js';
 import { QUEUE_NAME, QUEUE_PREFIX, type SchedulerService } from './scheduler.service.js';
 
 const TEST_REDIS_URL = process.env['TEST_REDIS_URL'] ?? 'redis://127.0.0.1:6379/15';
@@ -77,7 +76,7 @@ afterAll(async () => {
 });
 
 describe('реестр фоновых задач', () => {
-  it('собирается: все четыре службы разрешаются контейнером', () => {
+  it('собирается: все службы расписания разрешаются контейнером', () => {
     expect(
       service()
         .registeredTasks()
@@ -87,6 +86,7 @@ describe('реестр фоновых задач', () => {
       'calls.close-without-cdr',
       'nodes.retire-silent',
       'recordings.remove-expired',
+      'sessions.purge-expired',
     ]);
   });
 
@@ -118,7 +118,7 @@ describe('реестр фоновых задач', () => {
 });
 
 describe('проходы на живой базе', () => {
-  it('выполняются все четыре и не падают на пустой базе', async () => {
+  it('выполняются все и не падают на пустой базе', async () => {
     for (const task of service().registeredTasks()) {
       await expect(service().runTask(task.name), task.name).resolves.toBeGreaterThanOrEqual(0);
     }

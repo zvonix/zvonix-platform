@@ -16,10 +16,12 @@ import { Injectable } from '@nestjs/common';
 import {
   CdrService,
   EXPIRY_SWEEP_LIMIT,
+  IdentityService,
   NodesService,
   RecordingsService,
   ReservationService,
   RETENTION_SWEEP_LIMIT,
+  SESSION_SWEEP_LIMIT,
 } from '@zvonix/api';
 import { NODE_HEARTBEAT_INTERVAL_MS } from '@zvonix/shared';
 
@@ -82,6 +84,15 @@ const SILENT_NODE_SWEEP_SECONDS = Math.round(NODE_HEARTBEAT_INTERVAL_MS / 2 / 10
  */
 const RETENTION_SWEEP_SECONDS = 300;
 
+/**
+ * Как часто удаляются просроченные сессии.
+ *
+ * Срочности нет: работающему доступу просроченная сессия не мешает — `authenticate`
+ * и так проверяет срок. Убирается она потому, что хранит адрес и клиента, то есть
+ * данные о человеке, и держать их без причины не следует. Часа достаточно.
+ */
+const SESSION_SWEEP_SECONDS = 3600;
+
 @Injectable()
 export class BackgroundTasks {
   constructor(
@@ -89,6 +100,7 @@ export class BackgroundTasks {
     private readonly cdr: CdrService,
     private readonly nodes: NodesService,
     private readonly recordings: RecordingsService,
+    private readonly identity: IdentityService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -114,6 +126,12 @@ export class BackgroundTasks {
         everySeconds: RETENTION_SWEEP_SECONDS,
         batchLimit: RETENTION_SWEEP_LIMIT,
         run: (now) => this.recordings.removeExpired(now),
+      },
+      {
+        name: 'sessions.purge-expired',
+        everySeconds: SESSION_SWEEP_SECONDS,
+        batchLimit: SESSION_SWEEP_LIMIT,
+        run: (now) => this.identity.purgeExpiredSessions(now),
       },
     ];
   }

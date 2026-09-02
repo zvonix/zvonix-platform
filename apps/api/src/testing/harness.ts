@@ -44,6 +44,10 @@ export function prepareEnvironment(overrides: Record<string, string> = {}): void
   // ни от сети, ни от чужой доступности (ADR-0006). Заглушка на границе —
   // допустима и подставляется через переопределение адреса.
   process.env['OPERATOR_LOOKUP_ENABLED'] = 'false';
+  // Проверки создают десятки учётных записей с одного адреса — с включённым
+  // ограничением они упирались бы в предел, задуманный против перебора, а не против них.
+  // Сам механизм проверяется отдельным набором, который включает его обратно.
+  process.env['AUTH_RATE_LIMIT_ENABLED'] = 'false';
   Object.assign(process.env, overrides);
 }
 

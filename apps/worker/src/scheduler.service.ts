@@ -7,10 +7,15 @@
  */
 
 import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
-import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '@zvonix/api';
+import {
+  APP_CONFIG,
+  APP_LOGGER,
+  redisConnectionOptions,
+  type Config,
+  type Logger,
+} from '@zvonix/api';
 import { internal } from '@zvonix/shared';
 import { Queue, Worker, type Job } from 'bullmq';
-import { redisConnectionOptions } from './redis.js';
 import { BackgroundTasks, type BackgroundTask } from './tasks.js';
 
 /** Пространство имён ключей в Redis. Отделяет очередь от всего остального в той же базе. */

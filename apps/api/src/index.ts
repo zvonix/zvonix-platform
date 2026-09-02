@@ -13,6 +13,13 @@
 
 export { InfraModule } from './infra/infra.module.js';
 export {
+  assertNoEvictionPolicy,
+  createProbeConnection,
+  redisConnectionOptions,
+  RedisService,
+  type ConfigReader,
+} from './infra/redis.js';
+export {
   APP_CONFIG,
   APP_LOGGER,
   PROCESS_COMPONENT,
@@ -25,6 +32,9 @@ export { ReservationService, EXPIRY_SWEEP_LIMIT } from './modules/billing/reserv
 
 export { TelephonyModule } from './modules/telephony/telephony.module.js';
 export { CdrService } from './modules/telephony/cdr.service.js';
+
+export { IdentityModule } from './modules/identity/identity.module.js';
+export { IdentityService, SESSION_SWEEP_LIMIT } from './modules/identity/identity.service.js';
 
 export { NodesModule } from './modules/nodes/nodes.module.js';
 export { NodesService } from './modules/nodes/nodes.service.js';

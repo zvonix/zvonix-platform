@@ -137,12 +137,13 @@ async function main() {
     check('собранный воркер поднялся и завёл расписание', true);
 
     check(
-      'в расписании все четыре прохода',
+      'в расписании все проходы',
       [
         'reservations.release-expired',
         'calls.close-without-cdr',
         'nodes.retire-silent',
         'recordings.remove-expired',
+        'sessions.purge-expired',
       ].every((task) => output.join('').includes(task)),
     );
 

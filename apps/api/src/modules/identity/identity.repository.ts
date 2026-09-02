@@ -7,7 +7,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { sessions, users } from '@zvonix/db/schema';
 import { toDatabaseError } from '@zvonix/db';
 import type { Id, UserRole, UserStatus } from '@zvonix/shared';
@@ -154,6 +154,37 @@ export class IdentityRepository {
       .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
       .returning({ id: sessions.id });
     return revoked.length;
+  }
+
+  /**
+   * Удаляет сессии, срок которых истёк.
+   *
+   * Удаляет, а не помечает: сессия хранит адрес и клиента, то есть данные о человеке,
+   * и держать их после того, как сессия перестала действовать, незачем. След о входе
+   * и выходе остаётся в журнале аудита — там он и нужен.
+   *
+   * Партиями: одна `DELETE` по нескольким миллионам строк держит блокировки и раздувает
+   * журнал упреждающей записи. Фоновый проход догоняющий и заберёт остаток следующим тиком.
+   */
+  async deleteExpiredSessions(now: Date, limit: number): Promise<number> {
+    const doomed = await this.database.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(lt(sessions.expiresAt, now))
+      .limit(limit);
+
+    if (doomed.length === 0) return 0;
+
+    const removed = await this.database.db
+      .delete(sessions)
+      .where(
+        inArray(
+          sessions.id,
+          doomed.map((row) => row.id),
+        ),
+      )
+      .returning({ id: sessions.id });
+    return removed.length;
   }
 
   async listLiveSessions(userId: UserId, now: Date): Promise<SessionRow[]> {

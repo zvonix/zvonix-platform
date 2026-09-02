@@ -8,9 +8,15 @@
 
 import { NestFactory } from '@nestjs/core';
 import type { INestApplicationContext } from '@nestjs/common';
-import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '@zvonix/api';
+import {
+  APP_CONFIG,
+  APP_LOGGER,
+  assertNoEvictionPolicy,
+  createProbeConnection,
+  type Config,
+  type Logger,
+} from '@zvonix/api';
 import { dependencyUnavailable } from '@zvonix/shared';
-import { assertNoEvictionPolicy, createProbeConnection } from './redis.js';
 import { SchedulerService } from './scheduler.service.js';
 import { WorkerModule } from './worker.module.js';
 
