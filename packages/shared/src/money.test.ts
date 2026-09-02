@@ -97,8 +97,8 @@ describe('доля от суммы', () => {
   });
 
   it('отбрасывает дробь при явном указании', () => {
-    expect(toMicros(applyBasisPoints(fromMicros(1n), 5000n, 'toward-zero'))).toBe(0n);
-    expect(toMicros(applyBasisPoints(fromMicros(-1n), 5000n, 'toward-zero'))).toBe(0n);
+    expect(toMicros(applyBasisPoints(fromMicros(1n), 5000n, 'toward_zero'))).toBe(0n);
+    expect(toMicros(applyBasisPoints(fromMicros(-1n), 5000n, 'toward_zero'))).toBe(0n);
   });
 
   it('доля и остаток в сумме дают исходную сумму', () => {
