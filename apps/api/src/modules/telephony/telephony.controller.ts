@@ -17,6 +17,7 @@ import {
   createGatewaySchema,
   createSimSchema,
   gatewayStatusSchema,
+  partnerCoverageSchema,
   partnerPrioritiesSchema,
   simConcurrencySchema,
   simStatusSchema,
@@ -25,6 +26,7 @@ import type { ChannelRow, GatewayPortRow, GatewayRow, SimCardRow } from './telep
 import {
   TelephonyService,
   type IssuedSipAccount,
+  type PartnerCoverageView,
   type PartnerPriorityView,
 } from './telephony.service.js';
 
@@ -38,6 +40,17 @@ interface SipAccountView {
   readonly username: string;
   readonly password: string;
   readonly realm: string;
+}
+
+/**
+ * Регион в покрытии партнёра.
+ *
+ * Ключ отдаётся рядом с названием: по нему видно, во что превратилось написание,
+ * и почему `Красноярский кр.` и `Красноярский край` — один регион, а не два.
+ */
+interface CoverageView {
+  readonly region: string;
+  readonly region_key: string;
 }
 
 interface GatewayView {
@@ -269,6 +282,43 @@ export class TelephonyController {
     return { priorities: rows.map(toPriorityView) };
   }
 
+  // --- Покрытие партнёра по регионам ------------------------------------------
+
+  /**
+   * В какие регионы партнёр принимает вызовы (ADR-0022).
+   *
+   * Клиенту не показывается ни в каком виде: покрытие — свойство партнёра, а партнёра
+   * клиент знает только под псевдонимом (ADR-0014).
+   */
+  @Roles('admin', 'support')
+  @Get('partners/:id/coverage')
+  async listCoverage(@Param('id') id: string): Promise<{ regions: CoverageView[] }> {
+    const rows = await this.telephony.listPartnerCoverage(parseId(id, 'partner'));
+    return { regions: rows.map(toCoverageView) };
+  }
+
+  /**
+   * Задаёт список регионов целиком.
+   *
+   * `PUT`, а не `POST`: список заменяется. Пустой список означает «все регионы» —
+   * то есть снятие ограничения, а не запрет всего.
+   */
+  @Roles('admin')
+  @Put('partners/:id/coverage')
+  async setCoverage(
+    @Param('id') id: string,
+    @Body(zodBody(partnerCoverageSchema)) body: z.infer<typeof partnerCoverageSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ regions: CoverageView[] }> {
+    const rows = await this.telephony.setPartnerCoverage(
+      parseId(id, 'partner'),
+      body.regions,
+      actor.userId,
+      actor.role,
+    );
+    return { regions: rows.map(toCoverageView) };
+  }
+
   // --- SIM-карты --------------------------------------------------------------
 
   @Roles('admin')
@@ -391,10 +441,14 @@ export class TelephonyController {
   async simCandidates(
     @Query('operatorId') operatorId: string,
     @Query('recording') recording?: string,
+    @Query('region') region?: string,
   ): Promise<{ candidates: CandidateView[] }> {
     const found = await this.telephony.findSimCandidates(
       parseId(operatorId, 'operator'),
       recording === 'true',
+      // Без региона — все подходящие SIM; с регионом — ровно то, что увидит
+      // маршрутизация, вместе с отсевом по покрытию партнёра (ADR-0022).
+      region,
     );
     return {
       candidates: found.map((item) => ({
@@ -408,6 +462,10 @@ export class TelephonyController {
       })),
     };
   }
+}
+
+function toCoverageView(row: PartnerCoverageView): CoverageView {
+  return { region: row.region, region_key: row.regionKey };
 }
 
 function toSimView(row: SimCardRow): SimView {

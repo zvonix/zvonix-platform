@@ -299,3 +299,40 @@ export const channelPartnerPriorities = pgTable(
     index('channel_partner_priorities_order_idx').on(t.channelId, t.priority, t.lastRoutedAt),
   ],
 );
+
+/**
+ * Регионы, в которые партнёр готов принимать вызовы ([ADR-0022](../../../docs/adr/0022-pokrytie-regionov.md)).
+ *
+ * **Отсутствие строк означает «все регионы».** Появилась хоть одна — список закрыт:
+ * регион, которого в нём нет, к этому партнёру не маршрутизируется. Отдельного поля
+ * «режим» нет намеренно: режим выражается наличием строк, как и у приоритетов канала.
+ *
+ * Регион хранится дважды: `region` — как написал партнёр, для показа; `region_key` —
+ * приведённое написание, по которому идёт сравнение. Источники пишут регион по-разному
+ * (`Красноярский край`, `Красноярский кр.`), и сравнение строк напрямую означало бы,
+ * что партнёр объявил покрытие, а вызовов не получает.
+ */
+export const partnerCoverage = pgTable(
+  'partner_coverage',
+  {
+    id: primaryId<'partnerCoverage'>(),
+
+    partnerId: idRef<'partner'>()
+      .notNull()
+      // Покрытие удалённого партнёра не значит ничего и никому не нужно.
+      .references(() => partners.id, { onDelete: 'cascade' }),
+
+    /** Название так, как его ввёл партнёр. Показывается ему же. */
+    region: text().notNull(),
+
+    /** Приведённое написание (`normalizeRegion`). По нему идёт сравнение с регионом номера. */
+    regionKey: text().notNull(),
+
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // Пустой ключ совпал бы с другим пустым и связал два разных региона.
+    check('partner_coverage_key_not_empty', sql`length(${t.regionKey}) > 0`),
+    uniqueIndex('partner_coverage_partner_region_key').on(t.partnerId, t.regionKey),
+  ],
+);

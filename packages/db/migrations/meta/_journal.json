@@ -85,6 +85,13 @@
       "when": 1788355466155,
       "tag": "0011_prioritety_partnyorov",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788360241748,
+      "tag": "0012_pokrytie_regionov",
+      "breakpoints": true
     }
   ]
 }

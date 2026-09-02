@@ -15,7 +15,11 @@ import { OperatorResolverService } from '../catalog/operator-resolver.service.js
 import { TariffService } from '../catalog/tariff.service.js';
 import { CallRepository, type CallRow } from '../telephony/call.repository.js';
 import { CdrService } from '../telephony/cdr.service.js';
-import { TelephonyRepository, type SimCandidate } from '../telephony/telephony.repository.js';
+import {
+  TelephonyRepository,
+  type ChannelRow,
+  type SimCandidate,
+} from '../telephony/telephony.repository.js';
 
 /**
  * Сколько ждать внешнего определения оператора.
@@ -98,19 +102,15 @@ export class RoutingService {
     const operatorId = resolution.serving.id;
     const region = resolution.region ?? null;
 
-    // 2. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012).
+    // 2. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
+    //    регион — партнёров, которые в него не звонят (ADR-0022).
     const candidates = await this.telephony.findSimCandidates(operatorId, {
       channelId: channel.id,
       excludeRecordingIncapable: channel.recordingRequired,
+      region,
     });
     if (candidates.length === 0) {
-      // Различаем «нет SIM вовсе» и «есть, но все без записи»: для поддержки это
-      // два разных разговора с партнёром.
-      const reason: CallFailureReason = channel.recordingRequired
-        ? (await this.telephony.findSimCandidates(operatorId, { channelId: channel.id })).length > 0
-          ? 'recording_required'
-          : 'no_sim_available'
-        : 'no_sim_available';
+      const reason = await this.explainEmptyCandidates(operatorId, channel, region);
       return this.reject(request, channel.id, operatorId, region, reason);
     }
 
@@ -166,6 +166,36 @@ export class RoutingService {
       recordingRequired: channel.recordingRequired,
       callerId: channel.callerId,
     };
+  }
+
+  /**
+   * Почему кандидатов не оказалось.
+   *
+   * «Нет SIM вовсе», «есть, но все без записи» и «есть, но регион не покрыт» — три
+   * разных разговора с партнёром, а для абонента ещё и три разных кода SIP. Различить
+   * их можно только повторив отбор без соответствующего условия.
+   *
+   * Лишние запросы здесь допустимы: это путь отказа, а не горячий путь. На успешном
+   * вызове не выполняется ни один из них.
+   */
+  private async explainEmptyCandidates(
+    operatorId: Id<'operator'>,
+    channel: ChannelRow,
+    region: string | null,
+  ): Promise<CallFailureReason> {
+    if (channel.recordingRequired) {
+      const withoutRecording = await this.telephony.findSimCandidates(operatorId, {
+        channelId: channel.id,
+        region,
+      });
+      if (withoutRecording.length > 0) return 'recording_required';
+    }
+
+    const anyRegion = await this.telephony.findSimCandidates(operatorId, {
+      channelId: channel.id,
+      excludeRecordingIncapable: channel.recordingRequired,
+    });
+    return anyRegion.length > 0 ? 'no_coverage' : 'no_sim_available';
   }
 
   /**

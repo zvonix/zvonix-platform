@@ -9,6 +9,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   internal as internalError,
+  normalizeRegion,
   notFound,
   parseId,
   validationFailed,
@@ -60,6 +61,18 @@ export interface PartnerPriorityView {
   readonly displayName: string;
   readonly priority: number;
   readonly lastRoutedAt: Date | null;
+}
+
+/**
+ * Регион в покрытии партнёра.
+ *
+ * Ключ отдаётся вместе с названием намеренно: по нему видно, во что превратилось
+ * написание, и почему `Красноярский кр.` и `Красноярский край` — один и тот же регион.
+ * Разбор «партнёр объявил, а вызовов нет» начинается именно отсюда.
+ */
+export interface PartnerCoverageView {
+  readonly region: string;
+  readonly regionKey: string;
 }
 
 /** Учётная запись вместе с паролем. Пароль существует только здесь и только один раз. */
@@ -467,9 +480,14 @@ export class TelephonyService {
   async findSimCandidates(
     operatorId: Id<'operator'>,
     requiresRecording: boolean,
+    region?: string,
   ): Promise<SimCandidate[]> {
     return this.repository.findSimCandidates(operatorId, {
       excludeRecordingIncapable: requiresRecording,
+      // Без региона покрытие не проверяется: вопрос «какие SIM вообще подходят»
+      // задаётся и тогда, когда номера ещё нет. С регионом — то же, что увидит
+      // маршрутизация (ADR-0022).
+      ...(region === undefined ? {} : { region }),
     });
   }
 
@@ -593,6 +611,68 @@ export class TelephonyService {
     });
 
     return this.listPartnerPriorities(channelId, requester);
+  }
+
+  // --- Покрытие партнёра по регионам (ADR-0022) ---------------------------------
+
+  /** Регионы, в которые партнёр готов принимать вызовы. Пустой список означает «все». */
+  async listPartnerCoverage(partnerId: Id<'partner'>): Promise<PartnerCoverageView[]> {
+    const partner = await this.billing.findPartner(partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+
+    const rows = await this.repository.listCoverage(partnerId);
+    return rows.map((row) => ({ region: row.region, regionKey: row.regionKey }));
+  }
+
+  /**
+   * Задаёт список регионов партнёра целиком.
+   *
+   * Замена, а не дополнение: пустой список означает «все регионы», и «дописать один
+   * регион» к пустому списку означало бы не расширение, а внезапное ограничение
+   * до единственного региона.
+   */
+  async setPartnerCoverage(
+    partnerId: Id<'partner'>,
+    regions: readonly string[],
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<PartnerCoverageView[]> {
+    const partner = await this.billing.findPartner(partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+
+    const seen = new Set<string>();
+    const entries: { region: string; regionKey: string }[] = [];
+
+    for (const region of regions) {
+      const regionKey = normalizeRegion(region);
+      // «Область» или «край» сами по себе региона не называют, а пустой ключ совпал бы
+      // с другим пустым и связал два разных региона.
+      if (regionKey === '') {
+        throw validationFailed(`Не похоже на название региона: «${region}»`);
+      }
+      // Дубликат — не мелочь: «Красноярский край» и «Красноярский кр.» дают один ключ,
+      // и молча схлопнуть их значит вернуть партнёру не тот список, который он задал.
+      if (seen.has(regionKey)) {
+        throw validationFailed(`Регион указан дважды: «${region}»`);
+      }
+      seen.add(regionKey);
+      entries.push({ region: region.trim(), regionKey });
+    }
+
+    const before = await this.repository.listCoverage(partnerId);
+    const after = await this.repository.replaceCoverage(partnerId, entries);
+
+    await this.audit.record({
+      action: 'partner.coverage_set',
+      entityType: 'partner',
+      entityId: partnerId,
+      actorUserId,
+      actorRole,
+      before: { regions: before.map((row) => row.region) },
+      after: { regions: after.map((row) => row.region) },
+    });
+
+    return after.map((row) => ({ region: row.region, regionKey: row.regionKey }));
   }
 
   /**

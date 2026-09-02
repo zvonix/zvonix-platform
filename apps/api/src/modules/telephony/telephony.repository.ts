@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
 import {
   channelPartnerPriorities,
@@ -11,11 +11,13 @@ import {
   clients,
   gatewayPorts,
   gateways,
+  partnerCoverage,
   partners,
   simCards,
 } from '@zvonix/db/schema';
 import {
   newId,
+  normalizeRegion,
   USABLE_PORT_STATES,
   USABLE_SIM_STATUSES,
   type ChannelStatus,
@@ -37,6 +39,7 @@ export type ChannelRow = typeof channels.$inferSelect;
 export type SimCardRow = typeof simCards.$inferSelect;
 export type GatewayPortRow = typeof gatewayPorts.$inferSelect;
 export type PartnerPriorityRow = typeof channelPartnerPriorities.$inferSelect;
+export type PartnerCoverageRow = typeof partnerCoverage.$inferSelect;
 export type PartnerId = Id<'partner'>;
 
 /** Исполнитель запроса: пул или транзакция. */
@@ -322,7 +325,8 @@ export class TelephonyRepository {
   // --- Отбор для маршрутизации --------------------------------------------------
 
   /**
-   * Кандидаты на терминацию: SIM нужного оператора, годная к вызову.
+   * Кандидаты на терминацию: годная SIM нужного оператора — сразу в том порядке,
+   * в котором их надо перебирать.
    *
    * Главный запрос маршрутизации. Всё проверяется **одним запросом**: набор условий,
    * разложенный по нескольким чтениям, разъезжается между ними, и вызов уходит на SIM,
@@ -335,9 +339,6 @@ export class TelephonyRepository {
    * Одновременность на SIM здесь **не** проверяется: счётчик активных вызовов —
    * состояние времени выполнения, оно живёт не в этой таблице (ARCHITECTURE.md,
    * счётчики лимитов). Этот запрос отвечает на вопрос «какие SIM вообще подходят».
-   */
-  /**
-   * Кандидаты на терминацию — сразу в том порядке, в котором их надо перебирать.
    *
    * Порядок задаёт клиент приоритетами партнёров в канале (ADR-0014), а **не цена**:
    * цена определяет, сколько клиент заплатит, но не то, к кому вызов пойдёт первым.
@@ -346,10 +347,22 @@ export class TelephonyRepository {
    * Список приоритетов **закрытый**: партнёра, которого в нём нет, канал не использует.
    * Но пустой список означает «все партнёры» — иначе новый канал не смог бы позвонить,
    * пока кто-то не заполнит список, и это выглядело бы поломкой, а не настройкой.
+   *
+   * Регион номера отсекает партнёров, которые в него не звонят (ADR-0022). Правило то же:
+   * список закрытый, пустой означает «все регионы».
    */
   async findSimCandidates(
     operatorId: Id<'operator'>,
-    options: { channelId?: ChannelId; excludeRecordingIncapable?: boolean } = {},
+    options: {
+      channelId?: ChannelId;
+      excludeRecordingIncapable?: boolean;
+      /**
+       * Регион номера. Отсутствие поля и `null` — **разные** вещи: без поля покрытие
+       * не проверяется вовсе (так спрашивает разбор «какие SIM вообще подходят»),
+       * а `null` означает «регион неизвестен» и оставляет только партнёров без списка.
+       */
+      region?: string | null;
+    } = {},
   ): Promise<SimCandidate[]> {
     const channelId = options.channelId;
     // Спрашивается именно наличие строк у канала, а не наличие приоритета у кандидата:
@@ -367,6 +380,9 @@ export class TelephonyRepository {
     ];
     if (options.excludeRecordingIncapable === true) {
       conditions.push(ne(gateways.type, 'android'));
+    }
+    if (options.region !== undefined) {
+      conditions.push(coversRegion(options.region));
     }
     if (configured) {
       conditions.push(isNotNull(channelPartnerPriorities.id));
@@ -473,6 +489,47 @@ export class TelephonyRepository {
     });
   }
 
+  // --- Покрытие партнёра по регионам (ADR-0022) ---------------------------------
+
+  /** Регионы партнёра в том виде, в котором он их ввёл. */
+  async listCoverage(partnerId: PartnerId): Promise<PartnerCoverageRow[]> {
+    return this.db
+      .select()
+      .from(partnerCoverage)
+      .where(eq(partnerCoverage.partnerId, partnerId))
+      .orderBy(asc(partnerCoverage.region));
+  }
+
+  /**
+   * Заменяет список регионов партнёра целиком.
+   *
+   * Замена, а не правка по одному: пустой список означает «все регионы», и промежуточное
+   * состояние из одной строки — это не «список ещё не дописан», а работающее ограничение,
+   * которого партнёр не задавал. Одной транзакцией по той же причине.
+   */
+  async replaceCoverage(
+    partnerId: PartnerId,
+    entries: readonly { region: string; regionKey: string }[],
+  ): Promise<PartnerCoverageRow[]> {
+    return this.db.transaction(async (tx) => {
+      await tx.delete(partnerCoverage).where(eq(partnerCoverage.partnerId, partnerId));
+
+      if (entries.length === 0) return [];
+
+      return tx
+        .insert(partnerCoverage)
+        .values(
+          entries.map((entry) => ({
+            id: newId<'partnerCoverage'>(),
+            partnerId,
+            region: entry.region,
+            regionKey: entry.regionKey,
+          })),
+        )
+        .returning();
+    });
+  }
+
   /** SIM, не установленные ни в один порт: партнёру они видны как «лежит в столе». */
   async listUnassignedSims(partnerId: Id<'partner'>): Promise<SimCardRow[]> {
     const rows = await this.db
@@ -517,4 +574,24 @@ export class TelephonyRepository {
       );
     return row?.channel;
   }
+}
+
+/**
+ * Условие «партнёр этой SIM принимает вызовы в этот регион» ([ADR-0022](../../../../../docs/adr/0022-pokrytie-regionov.md)).
+ *
+ * `bool_or` по пустому множеству — `NULL`, поэтому `coalesce` выражает правило «списка нет →
+ * подходит любой регион» ровно так, как оно записано словами. Сравнение `is not distinct from`,
+ * а не `=`: у неизвестного региона `=` дало бы `NULL` на каждой строке, снова `NULL` после
+ * `bool_or` — и партнёр со списком принял бы вызов, регион которого неизвестен.
+ *
+ * Ключ считается **той же функцией**, что и при записи покрытия: две разные нормализации —
+ * это гарантированное расхождение, которого не поймает ни один тест ниже сквозного.
+ */
+function coversRegion(region: string | null): SQL {
+  const normalized = region === null ? '' : normalizeRegion(region);
+  // Пустой ключ — это не регион: строка вроде «область» ничего не называет, и считать
+  // её известным регионом значит выдать маршрут по несуществующему покрытию.
+  const key = normalized === '' ? null : normalized;
+
+  return sql`coalesce((select bool_or(${partnerCoverage.regionKey} is not distinct from ${key}::text) from ${partnerCoverage} where ${partnerCoverage.partnerId} = ${simCards.partnerId}), true)`;
 }

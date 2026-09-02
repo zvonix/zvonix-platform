@@ -6,6 +6,7 @@ export * from './errors.js';
 export * from './id.js';
 export * from './enums.js';
 export * from './msisdn.js';
+export * from './region.js';
 export * from './catalog.js';
 export * from './billing.js';
 export * from './machine.js';
