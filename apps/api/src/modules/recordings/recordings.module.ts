@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
+import { BillingModule } from '../billing/billing.module.js';
 import { TelephonyModule } from '../telephony/telephony.module.js';
 import { NodeRecordingsController } from './node-recordings.controller.js';
 import { OBJECT_STORAGE, S3ObjectStorage } from './object-storage.js';
@@ -8,7 +9,7 @@ import { RecordingsRepository } from './recordings.repository.js';
 import { RecordingsService } from './recordings.service.js';
 
 @Module({
-  imports: [AuditModule, TelephonyModule],
+  imports: [AuditModule, BillingModule, TelephonyModule],
   controllers: [RecordingsController, NodeRecordingsController],
   providers: [
     RecordingsService,

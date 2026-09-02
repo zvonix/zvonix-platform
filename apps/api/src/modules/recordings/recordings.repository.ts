@@ -5,7 +5,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, eq, isNull, lte } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
-import { clients, recordings } from '@zvonix/db/schema';
+import { recordings } from '@zvonix/db/schema';
 import { newId, type Id } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
@@ -86,11 +86,4 @@ export class RecordingsRepository {
    * Нужен для проверки владения записью: роль `client` сама по себе не говорит,
    * какому клиенту принадлежит человек (ADR-0018).
    */
-  async findClientOwnedBy(userId: Id<'user'>): Promise<{ id: Id<'client'> } | undefined> {
-    const [row] = await this.db
-      .select({ id: clients.id })
-      .from(clients)
-      .where(eq(clients.ownerUserId, userId));
-    return row;
-  }
 }

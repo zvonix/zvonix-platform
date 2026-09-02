@@ -100,13 +100,14 @@ export class RoutingService {
 
     // 2. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012).
     const candidates = await this.telephony.findSimCandidates(operatorId, {
+      channelId: channel.id,
       excludeRecordingIncapable: channel.recordingRequired,
     });
     if (candidates.length === 0) {
       // Различаем «нет SIM вовсе» и «есть, но все без записи»: для поддержки это
       // два разных разговора с партнёром.
       const reason: CallFailureReason = channel.recordingRequired
-        ? (await this.telephony.findSimCandidates(operatorId)).length > 0
+        ? (await this.telephony.findSimCandidates(operatorId, { channelId: channel.id })).length > 0
           ? 'recording_required'
           : 'no_sim_available'
         : 'no_sim_available';
@@ -204,6 +205,17 @@ export class RoutingService {
           },
           tx,
         );
+
+        // Той же транзакцией: отметка о выданном маршруте задаёт очередь среди равных
+        // приоритетов, и потерять её при сбое значит раздать очередь одному и тому же
+        // партнёру (ADR-0021).
+        await this.telephony.markPartnerRouted(
+          channelId,
+          candidate.gateway.partnerId,
+          call.startedAt,
+          tx,
+        );
+
         return { call, candidate };
       }
       return undefined;

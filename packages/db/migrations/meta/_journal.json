@@ -78,6 +78,13 @@
       "when": 1788336633338,
       "tag": "0010_zapisi_razgovorov",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788355466155,
+      "tag": "0011_prioritety_partnyorov",
+      "breakpoints": true
     }
   ]
 }

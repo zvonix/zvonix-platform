@@ -15,6 +15,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { conflict, notFound, permissionDenied, type Id, type UserRole } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
+import { BillingRepository } from '../billing/billing.repository.js';
 import { CallRepository } from '../telephony/call.repository.js';
 import { TelephonyRepository } from '../telephony/telephony.repository.js';
 import { OBJECT_STORAGE, recordingObjectKey, type ObjectStorage } from './object-storage.js';
@@ -47,6 +48,7 @@ export class RecordingsService {
     private readonly repository: RecordingsRepository,
     private readonly calls: CallRepository,
     private readonly telephony: TelephonyRepository,
+    private readonly billing: BillingRepository,
     private readonly audit: AuditService,
     @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage,
     @Inject(APP_CONFIG) private readonly config: Config,
@@ -171,9 +173,7 @@ export class RecordingsService {
 
       const channel = await this.telephony.findChannel(call.channelId);
       const client =
-        channel === undefined
-          ? undefined
-          : await this.repository.findClientOwnedBy(requester.userId);
+        channel === undefined ? undefined : await this.billing.findClientOwnedBy(requester.userId);
 
       // Ответ `not_found`, а не `permission_denied`: иначе по разнице ответов
       // проверяется существование чужих записей.

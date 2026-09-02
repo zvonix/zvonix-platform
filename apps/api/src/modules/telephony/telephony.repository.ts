@@ -3,9 +3,17 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
-import { channels, clients, gatewayPorts, gateways, partners, simCards } from '@zvonix/db/schema';
+import {
+  channelPartnerPriorities,
+  channels,
+  clients,
+  gatewayPorts,
+  gateways,
+  partners,
+  simCards,
+} from '@zvonix/db/schema';
 import {
   newId,
   USABLE_PORT_STATES,
@@ -28,6 +36,11 @@ export type GatewayRow = typeof gateways.$inferSelect;
 export type ChannelRow = typeof channels.$inferSelect;
 export type SimCardRow = typeof simCards.$inferSelect;
 export type GatewayPortRow = typeof gatewayPorts.$inferSelect;
+export type PartnerPriorityRow = typeof channelPartnerPriorities.$inferSelect;
+export type PartnerId = Id<'partner'>;
+
+/** Исполнитель запроса: пул или транзакция. */
+export type Executor = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
 
 /**
  * Кандидат на терминацию вызова: годная SIM нужного оператора вместе с портом,
@@ -323,10 +336,28 @@ export class TelephonyRepository {
    * состояние времени выполнения, оно живёт не в этой таблице (ARCHITECTURE.md,
    * счётчики лимитов). Этот запрос отвечает на вопрос «какие SIM вообще подходят».
    */
+  /**
+   * Кандидаты на терминацию — сразу в том порядке, в котором их надо перебирать.
+   *
+   * Порядок задаёт клиент приоритетами партнёров в канале (ADR-0014), а **не цена**:
+   * цена определяет, сколько клиент заплатит, но не то, к кому вызов пойдёт первым.
+   * Равные приоритеты чередуются по давности последнего маршрута (ADR-0021).
+   *
+   * Список приоритетов **закрытый**: партнёра, которого в нём нет, канал не использует.
+   * Но пустой список означает «все партнёры» — иначе новый канал не смог бы позвонить,
+   * пока кто-то не заполнит список, и это выглядело бы поломкой, а не настройкой.
+   */
   async findSimCandidates(
     operatorId: Id<'operator'>,
-    options: { excludeRecordingIncapable: boolean } = { excludeRecordingIncapable: false },
+    options: { channelId?: ChannelId; excludeRecordingIncapable?: boolean } = {},
   ): Promise<SimCandidate[]> {
+    const channelId = options.channelId;
+    // Спрашивается именно наличие строк у канала, а не наличие приоритета у кандидата:
+    // клиент мог перечислить партнёров, у которых сейчас нет свободной SIM, и тогда
+    // среди кандидатов приоритетов не окажется вовсе. Считать это «список не заполнен»
+    // значит позвонить через партнёра, которого клиент из списка исключил.
+    const configured = channelId !== undefined && (await this.hasPartnerPriorities(channelId));
+
     const conditions = [
       eq(simCards.operatorId, operatorId),
       inArray(simCards.status, [...USABLE_SIM_STATUSES]),
@@ -334,8 +365,11 @@ export class TelephonyRepository {
       eq(gateways.status, 'active'),
       eq(partners.status, 'verified'),
     ];
-    if (options.excludeRecordingIncapable) {
+    if (options.excludeRecordingIncapable === true) {
       conditions.push(ne(gateways.type, 'android'));
+    }
+    if (configured) {
+      conditions.push(isNotNull(channelPartnerPriorities.id));
     }
 
     return this.db
@@ -344,8 +378,99 @@ export class TelephonyRepository {
       .innerJoin(gatewayPorts, eq(gatewayPorts.simCardId, simCards.id))
       .innerJoin(gateways, eq(gateways.id, gatewayPorts.gatewayId))
       .innerJoin(partners, eq(partners.id, simCards.partnerId))
+      .leftJoin(
+        channelPartnerPriorities,
+        channelId === undefined
+          ? sql`false`
+          : and(
+              eq(channelPartnerPriorities.channelId, channelId),
+              eq(channelPartnerPriorities.partnerId, simCards.partnerId),
+            ),
+      )
       .where(and(...conditions))
-      .orderBy(asc(simCards.msisdn));
+      .orderBy(
+        // Без приоритета партнёр идёт последним, а не первым: `NULL` в сортировке
+        // PostgreSQL по возрастанию оказался бы в конце и так, но полагаться на это
+        // молча — значит поменять порядок при первом же `desc`.
+        sql`coalesce(${channelPartnerPriorities.priority}, 2147483647) asc`,
+        sql`${channelPartnerPriorities.lastRoutedAt} asc nulls first`,
+        asc(simCards.msisdn),
+      );
+  }
+
+  /** Заполнен ли у канала список партнёров. */
+  async hasPartnerPriorities(channelId: ChannelId): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: channelPartnerPriorities.id })
+      .from(channelPartnerPriorities)
+      .where(eq(channelPartnerPriorities.channelId, channelId))
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /**
+   * Отмечает, что партнёру выдали маршрут по этому каналу.
+   *
+   * Обязательно **той же транзакцией**, что занимает место на SIM (ADR-0021): отдельным
+   * запросом после — значит потерять отметку при сбое и раздавать очередь одному и тому же
+   * партнёру. У канала без списка отмечать нечего, и отсутствие строки здесь не ошибка.
+   */
+  async markPartnerRouted(
+    channelId: ChannelId,
+    partnerId: PartnerId,
+    at: Date,
+    executor: Executor = this.db,
+  ): Promise<void> {
+    await executor
+      .update(channelPartnerPriorities)
+      .set({ lastRoutedAt: at })
+      .where(
+        and(
+          eq(channelPartnerPriorities.channelId, channelId),
+          eq(channelPartnerPriorities.partnerId, partnerId),
+        ),
+      );
+  }
+
+  /** Список партнёров канала в порядке приоритета. */
+  async listPartnerPriorities(channelId: ChannelId): Promise<PartnerPriorityRow[]> {
+    return this.db
+      .select()
+      .from(channelPartnerPriorities)
+      .where(eq(channelPartnerPriorities.channelId, channelId))
+      .orderBy(asc(channelPartnerPriorities.priority));
+  }
+
+  /**
+   * Заменяет список партнёров канала целиком.
+   *
+   * Именно замена, а не правка по одному: список — это порядок, и менять его частями
+   * значит на время оставлять канал с порядком, которого клиент не задавал.
+   * Одной транзакцией по той же причине.
+   */
+  async replacePartnerPriorities(
+    channelId: ChannelId,
+    entries: readonly { partnerId: PartnerId; priority: number }[],
+  ): Promise<PartnerPriorityRow[]> {
+    return this.db.transaction(async (tx) => {
+      await tx
+        .delete(channelPartnerPriorities)
+        .where(eq(channelPartnerPriorities.channelId, channelId));
+
+      if (entries.length === 0) return [];
+
+      return tx
+        .insert(channelPartnerPriorities)
+        .values(
+          entries.map((entry) => ({
+            id: newId<'channelPartnerPriority'>(),
+            channelId,
+            partnerId: entry.partnerId,
+            priority: entry.priority,
+          })),
+        )
+        .returning();
+    });
   }
 
   /** SIM, не установленные ни в один порт: партнёру они видны как «лежит в столе». */

@@ -12,6 +12,9 @@ import { ReservationService } from './reservation.service.js';
   providers: [BillingService, BillingRepository, ReservationService, ReservationRepository],
   // Тарификация вызова на этапе 2 проводит списание через эту же службу:
   // другого пути изменить остаток в проекте нет и быть не должно.
-  exports: [BillingService, ReservationService],
+  // Репозиторий отдаётся ради двух вещей, которые больше нигде не живут: псевдонимы
+  // партнёров (ADR-0014) и «чей это клиент». Обе про таблицы биллинга, и вторая копия
+  // такого правила в чужом модуле разъедется с этой на первой же правке.
+  exports: [BillingService, ReservationService, BillingRepository],
 })
 export class BillingModule {}

@@ -2,7 +2,7 @@
  * Шлюзы партнёров и каналы клиентов: человеческая часть (ADR-0009).
  */
 
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
@@ -17,11 +17,16 @@ import {
   createGatewaySchema,
   createSimSchema,
   gatewayStatusSchema,
+  partnerPrioritiesSchema,
   simConcurrencySchema,
   simStatusSchema,
 } from './schemas.js';
 import type { ChannelRow, GatewayPortRow, GatewayRow, SimCardRow } from './telephony.repository.js';
-import { TelephonyService, type IssuedSipAccount } from './telephony.service.js';
+import {
+  TelephonyService,
+  type IssuedSipAccount,
+  type PartnerPriorityView,
+} from './telephony.service.js';
 
 /**
  * Учётные данные SIP в ответ на выдачу.
@@ -222,6 +227,48 @@ export class TelephonyController {
     return { channel: toChannelView(updated) };
   }
 
+  /**
+   * Порядок партнёров в канале (ADR-0014).
+   *
+   * Партнёры названы **псевдонимами**: клиент знает их только так, и приём `partner_id`
+   * означал бы, что личность партнёра ему где-то показали. Администратор смотрит тот же
+   * список — двух представлений у одного порядка быть не должно.
+   */
+  @Roles('admin', 'support', 'client')
+  @Get('channels/:id/partner-priorities')
+  async listPartnerPriorities(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ priorities: PartnerPriorityResponse[] }> {
+    const rows = await this.telephony.listPartnerPriorities(parseId(id, 'channel'), {
+      userId: actor.userId,
+      role: actor.role,
+    });
+    return { priorities: rows.map(toPriorityView) };
+  }
+
+  /**
+   * Задаёт порядок целиком.
+   *
+   * `PUT`, а не `POST`: список заменяется, а не дополняется. Правка по одному оставляла бы
+   * канал с порядком, которого клиент не задавал, — а порядок здесь и есть суть.
+   * Пустой список снимает ограничение: канал возвращается к перебору всех партнёров.
+   */
+  @Roles('admin', 'client')
+  @Put('channels/:id/partner-priorities')
+  async setPartnerPriorities(
+    @Param('id') id: string,
+    @Body(zodBody(partnerPrioritiesSchema)) body: z.infer<typeof partnerPrioritiesSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ priorities: PartnerPriorityResponse[] }> {
+    const rows = await this.telephony.setPartnerPriorities(
+      parseId(id, 'channel'),
+      body.priorities,
+      { userId: actor.userId, role: actor.role },
+    );
+    return { priorities: rows.map(toPriorityView) };
+  }
+
   // --- SIM-карты --------------------------------------------------------------
 
   @Roles('admin')
@@ -417,5 +464,22 @@ function toChannelView(row: ChannelRow): ChannelView {
     sip_username: row.sipUsername,
     recording_required: row.recordingRequired,
     caller_id: row.callerId,
+  };
+}
+
+/** Партнёр в порядке канала. Ни идентификатора партнёра, ни имени — только псевдоним. */
+interface PartnerPriorityResponse {
+  alias_id: string;
+  display_name: string;
+  priority: number;
+  last_routed_at: string | null;
+}
+
+function toPriorityView(row: PartnerPriorityView): PartnerPriorityResponse {
+  return {
+    alias_id: row.aliasId,
+    display_name: row.displayName,
+    priority: row.priority,
+    last_routed_at: row.lastRoutedAt?.toISOString() ?? null,
   };
 }

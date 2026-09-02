@@ -248,3 +248,54 @@ export const gatewayPorts = pgTable(
     index('gateway_ports_gateway_idx').on(t.gatewayId),
   ],
 );
+
+/**
+ * Приоритет партнёра в канале клиента (ADR-0014).
+ *
+ * Клиент видит партнёров только под псевдонимами и сам расставляет им порядок.
+ * Маршрутизация идёт по приоритетам сверху вниз, а **не по цене**: выбор клиента главнее,
+ * а цена влияет на то, сколько он заплатит, но не на порядок перебора.
+ *
+ * **Отсутствие строк у канала означает «все партнёры».** Иначе новый канал не смог бы
+ * позвонить, пока кто-то не заполнит список, и это выглядело бы поломкой, а не настройкой.
+ * Как только появилась хоть одна строка, список становится закрытым: партнёр, которого
+ * в нём нет, не используется — так выражается «этого партнёра я не хочу».
+ */
+export const channelPartnerPriorities = pgTable(
+  'channel_partner_priorities',
+  {
+    id: primaryId<'channelPartnerPriority'>(),
+
+    channelId: idRef<'channel'>()
+      .notNull()
+      // Приоритеты удалённого канала не значат ничего и никому не нужны.
+      .references(() => channels.id, { onDelete: 'cascade' }),
+
+    partnerId: idRef<'partner'>()
+      .notNull()
+      .references(() => partners.id, { onDelete: 'restrict' }),
+
+    /** Меньше — раньше. Единица — первый, к кому пойдёт вызов. */
+    priority: integer().notNull(),
+
+    /**
+     * Когда партнёру в последний раз выдавали маршрут по этому каналу.
+     *
+     * Равные приоритеты чередуются по давности: первым идёт тот, кто дольше всех
+     * не получал трафика (ADR-0021).
+     * Пусто — ещё ни разу, и такой партнёр идёт впереди всех.
+     */
+    lastRoutedAt: timestamptz(),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check('channel_partner_priorities_priority_positive', sql`${t.priority} > 0`),
+    // Один партнёр в канале ровно с одним приоритетом: два означали бы, что порядок
+    // перебора зависит от того, какую строку прочитали первой.
+    uniqueIndex('channel_partner_priorities_channel_partner_key').on(t.channelId, t.partnerId),
+    // Горячий путь: отбор кандидатов сразу в нужном порядке.
+    index('channel_partner_priorities_order_idx').on(t.channelId, t.priority, t.lastRoutedAt),
+  ],
+);

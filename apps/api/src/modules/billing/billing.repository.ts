@@ -39,6 +39,7 @@ export type UserId = Id<'user'>;
 export type AccountRow = typeof accounts.$inferSelect;
 export type ClientRow = typeof clients.$inferSelect;
 export type PartnerRow = typeof partners.$inferSelect;
+export type PartnerAliasRow = typeof partnerAliases.$inferSelect;
 export type LedgerEntryRow = typeof ledgerEntries.$inferSelect;
 export type LedgerTransactionRow = typeof ledgerTransactions.$inferSelect;
 
@@ -112,6 +113,65 @@ export class BillingRepository {
     } catch (cause) {
       throw toDatabaseError(cause);
     }
+  }
+
+  /**
+   * Псевдоним по его идентификатору.
+   *
+   * Клиентский контур оперирует **только** псевдонимами: возврат `partner_id` наружу —
+   * дефект уровня инварианта (ADR-0014). Поэтому и вход тоже по псевдониму: клиент
+   * называет партнёра тем единственным именем, которое о нём знает.
+   */
+  async findAliasById(id: Id<'partnerAlias'>): Promise<PartnerAliasRow | undefined> {
+    const [row] = await this.db.select().from(partnerAliases).where(eq(partnerAliases.id, id));
+    return row;
+  }
+
+  /**
+   * Партнёры, из которых клиенту есть что выбирать, — под псевдонимами.
+   *
+   * Только подтверждённые: показывать клиенту партнёра, который не может принять вызов,
+   * значит предложить построить порядок вокруг пустого места.
+   *
+   * Ни идентификатора партнёра, ни настоящего имени в результате нет и быть не может
+   * (ADR-0014): это единственное, что клиент о партнёре узнаёт.
+   */
+  async listOfferedAliases(): Promise<PartnerAliasRow[]> {
+    return this.db
+      .select({
+        id: partnerAliases.id,
+        partnerId: partnerAliases.partnerId,
+        displayName: partnerAliases.displayName,
+        createdAt: partnerAliases.createdAt,
+      })
+      .from(partnerAliases)
+      .innerJoin(partners, eq(partners.id, partnerAliases.partnerId))
+      .where(eq(partners.status, 'verified'))
+      .orderBy(asc(partnerAliases.displayName));
+  }
+
+  /** Псевдонимы перечисленных партнёров — одним запросом, а не по одному на партнёра. */
+  async listAliasesByPartners(ids: readonly PartnerId[]): Promise<PartnerAliasRow[]> {
+    if (ids.length === 0) return [];
+    return this.db
+      .select()
+      .from(partnerAliases)
+      .where(inArray(partnerAliases.partnerId, [...ids]));
+  }
+
+  /**
+   * Клиент, которым владеет этот пользователь.
+   *
+   * Живёт здесь, а не в модуле, которому понадобилось: `clients` — таблица биллинга,
+   * и читать её напрямую из чужого модуля значит завести вторую версию правила
+   * «чей это клиент» (ARCHITECTURE.md, границы модулей).
+   */
+  async findClientOwnedBy(userId: Id<'user'>): Promise<{ id: ClientId } | undefined> {
+    const [row] = await this.db
+      .select({ id: clients.id })
+      .from(clients)
+      .where(eq(clients.ownerUserId, userId));
+    return row;
   }
 
   async findPartnerAlias(partnerId: PartnerId): Promise<string | undefined> {

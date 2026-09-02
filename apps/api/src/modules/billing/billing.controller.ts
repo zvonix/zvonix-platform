@@ -167,6 +167,24 @@ export class BillingController {
   }
 
   /**
+   * Партнёры, из которых клиент выбирает, — под псевдонимами.
+   *
+   * Список, из которого строится порядок партнёров в канале. Ни идентификатора партнёра,
+   * ни настоящего имени: клиент знает о партнёре ровно псевдоним, и возврат чего-то ещё
+   * в клиентский контур ADR-0014 считает дефектом уровня инварианта.
+   */
+  @Roles('admin', 'support', 'client')
+  @Get('partner-aliases')
+  async listPartnerAliases(): Promise<{
+    partners: { alias_id: string; display_name: string }[];
+  }> {
+    const rows = await this.repository.listOfferedAliases();
+    return {
+      partners: rows.map((row) => ({ alias_id: row.id, display_name: row.displayName })),
+    };
+  }
+
+  /**
    * Сверка остатков с журналом.
    *
    * Пустой список — норма. Непустой означает, что какое-то движение прошло мимо

@@ -8,7 +8,9 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  internal as internalError,
   notFound,
+  parseId,
   validationFailed,
   type ChannelStatus,
   type GatewayStatus,
@@ -20,6 +22,7 @@ import {
 } from '@zvonix/shared';
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
+import { BillingRepository } from '../billing/billing.repository.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
 import { issueSipCredentials, type SipCredentials } from './sip-credentials.js';
@@ -46,6 +49,19 @@ function maskMsisdn(msisdn: string): string {
   return `${msisdn.slice(0, 4)}*****${msisdn.slice(-2)}`;
 }
 
+/**
+ * Партнёр в порядке канала — так, как его видит клиент.
+ *
+ * Ни `partner_id`, ни имени: клиент знает партнёра только под псевдонимом, и возврат
+ * чего-то ещё в клиентский контур ADR-0014 считает дефектом уровня инварианта.
+ */
+export interface PartnerPriorityView {
+  readonly aliasId: Id<'partnerAlias'>;
+  readonly displayName: string;
+  readonly priority: number;
+  readonly lastRoutedAt: Date | null;
+}
+
 /** Учётная запись вместе с паролем. Пароль существует только здесь и только один раз. */
 export interface IssuedSipAccount {
   readonly username: string;
@@ -57,6 +73,7 @@ export interface IssuedSipAccount {
 export class TelephonyService {
   constructor(
     private readonly repository: TelephonyRepository,
+    private readonly billing: BillingRepository,
     private readonly audit: AuditService,
     private readonly resolver: OperatorResolverService,
     @Inject(APP_CONFIG) private readonly config: Config,
@@ -497,6 +514,106 @@ export class TelephonyService {
   /** Ответ «записи нет» — он же ответ на всё, чего мы не обслуживаем. */
   directoryNotFound(): string {
     return notFoundDocument();
+  }
+
+  /**
+   * Порядок партнёров в канале.
+   *
+   * Отдаётся псевдонимами: клиент знает партнёра только так, а администратор смотрит
+   * тот же список — двух представлений у одного порядка быть не должно.
+   */
+  async listPartnerPriorities(
+    channelId: ChannelId,
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<PartnerPriorityView[]> {
+    await this.assertChannelAccess(channelId, requester);
+
+    const rows = await this.repository.listPartnerPriorities(channelId);
+    const aliases = await this.billing.listAliasesByPartners(rows.map((row) => row.partnerId));
+    const byPartner = new Map(aliases.map((alias) => [alias.partnerId, alias]));
+
+    return rows.map((row) => {
+      const alias = byPartner.get(row.partnerId);
+      if (alias === undefined) {
+        // Партнёр без псевдонима клиенту непредставим, а показать вместо него
+        // идентификатор — прямое нарушение ADR-0014. Такого быть не должно:
+        // псевдоним заводится вместе с партнёром.
+        throw internalError('У партнёра из списка канала нет псевдонима');
+      }
+      return {
+        aliasId: alias.id,
+        displayName: alias.displayName,
+        priority: row.priority,
+        lastRoutedAt: row.lastRoutedAt,
+      };
+    });
+  }
+
+  /**
+   * Задаёт порядок партнёров в канале целиком.
+   *
+   * Замена, а не правка по одному: список — это порядок, и менять его частями значит
+   * на время оставлять канал с порядком, которого клиент не задавал.
+   */
+  async setPartnerPriorities(
+    channelId: ChannelId,
+    entries: readonly { aliasId: string; priority: number }[],
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<PartnerPriorityView[]> {
+    await this.assertChannelAccess(channelId, requester);
+
+    const seen = new Set<string>();
+    const resolved: { partnerId: Id<'partner'>; priority: number }[] = [];
+
+    for (const entry of entries) {
+      if (seen.has(entry.aliasId)) {
+        throw validationFailed('Один и тот же партнёр указан дважды');
+      }
+      seen.add(entry.aliasId);
+
+      const alias = await this.billing.findAliasById(parseId(entry.aliasId, 'partnerAlias'));
+      // `not_found`, а не `validation_failed`: несуществующий псевдоним и чужой
+      // выглядят для вызывающего одинаково, и по разнице ответов их перебирать нельзя.
+      if (alias === undefined) throw notFound('Партнёр не найден');
+
+      resolved.push({ partnerId: alias.partnerId, priority: entry.priority });
+    }
+
+    const before = await this.repository.listPartnerPriorities(channelId);
+    await this.repository.replacePartnerPriorities(channelId, resolved);
+
+    await this.audit.record({
+      action: 'channel.partner_priorities_set',
+      entityType: 'channel',
+      entityId: channelId,
+      actorUserId: requester.userId,
+      actorRole: requester.role,
+      before: { count: before.length },
+      after: { count: resolved.length },
+    });
+
+    return this.listPartnerPriorities(channelId, requester);
+  }
+
+  /**
+   * Право распоряжаться каналом.
+   *
+   * Роль — первый рубеж, владение проверяется здесь (ADR-0018). Клиент видит и меняет
+   * порядок только в своих каналах; чужой канал отвечает `not_found`, а не `403`,
+   * иначе по разнице ответов проверяется его существование.
+   */
+  private async assertChannelAccess(
+    channelId: ChannelId,
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<void> {
+    const channel = await this.repository.findChannel(channelId);
+    if (channel === undefined) throw notFound('Канал не найден');
+    if (requester.role === 'admin' || requester.role === 'support') return;
+
+    const client = await this.billing.findClientOwnedBy(requester.userId);
+    if (client === undefined || client.id !== channel.clientId) {
+      throw notFound('Канал не найден');
+    }
   }
 
   private toAccount(credentials: SipCredentials): IssuedSipAccount {
