@@ -11,4 +11,5 @@ export * from './billing.js';
 export * from './machine.js';
 export * from './nodes.js';
 export * from './telephony.js';
+export * from './call.js';
 export * from './tariff.js';

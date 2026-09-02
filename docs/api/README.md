@@ -25,6 +25,8 @@
 - [telephony.md](telephony.md) — шлюзы партнёров, каналы клиентов и каталог SIP,
   который узел получает из control plane. Обоснование —
   [ADR-0009](../adr/0009-programmnaya-ats.md).
+- [routing.md](routing.md) — решение по вызову: шлюз, SIM, резерв средств.
+  Обоснование — [ARCHITECTURE.md](../ARCHITECTURE.md) и [ADR-0010](../adr/0010-model-billinga.md).
 - [node.md](node.md) — узел АТС → control plane: учётные записи SIP, запрос маршрута
   на каждый вызов, CDR, регистрация узла, heartbeat. Обоснование —
   [ADR-0009](../adr/0009-programmnaya-ats.md) и [ADR-0019](../adr/0019-dostup-mashin.md).

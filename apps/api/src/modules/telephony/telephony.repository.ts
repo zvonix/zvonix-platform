@@ -359,6 +359,24 @@ export class TelephonyRepository {
     return rows.map((row) => row.sim);
   }
 
+  /**
+   * Канал, годный для маршрутизации, по его идентификатору.
+   *
+   * Состояние клиента проверяется тем же запросом: клиент, которому закрыли доступ,
+   * не должен звонить, а отдельная проверка после чтения канала разъезжается с ним
+   * ровно в тот момент, когда доступ закрывают.
+   */
+  async findRoutableChannel(
+    id: ChannelId,
+  ): Promise<{ channel: ChannelRow; clientId: Id<'client'> } | undefined> {
+    const [row] = await this.db
+      .select({ channel: channels })
+      .from(channels)
+      .innerJoin(clients, eq(clients.id, channels.clientId))
+      .where(and(eq(channels.id, id), eq(channels.status, 'active'), eq(clients.status, 'active')));
+    return row === undefined ? undefined : { channel: row.channel, clientId: row.channel.clientId };
+  }
+
   /** То же для канала: клиент, у которого закрыт доступ, не должен звонить. */
   async findActiveChannel(sipUsername: string): Promise<ChannelRow | undefined> {
     const [row] = await this.db

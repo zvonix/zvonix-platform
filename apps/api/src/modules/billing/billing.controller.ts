@@ -14,6 +14,7 @@ import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import { BillingRepository } from './billing.repository.js';
 import { BillingService } from './billing.service.js';
+import { ReservationService } from './reservation.service.js';
 import { createClientSchema, createPartnerSchema, depositSchema } from './schemas.js';
 
 interface ClientView {
@@ -36,6 +37,7 @@ export class BillingController {
   constructor(
     private readonly billing: BillingService,
     private readonly repository: BillingRepository,
+    private readonly reservations: ReservationService,
   ) {}
 
   @Roles('admin')
@@ -114,6 +116,35 @@ export class BillingController {
         amount: Money.format(row.amount),
         created_at: row.createdAt.toISOString(),
       })),
+    };
+  }
+
+  /**
+   * Сколько клиент может потратить прямо сейчас.
+   *
+   * Остаток — не ответ на этот вопрос: часть средств придержана под идущие вызовы.
+   * Разбор «почему клиент не может звонить, деньги же есть» начинается именно отсюда.
+   *
+   * Заодно освобождает просроченные резервы. Пока нет фоновой задачи, это единственное
+   * место, где зависший из-за потерянного CDR резерв размораживается: иначе клиент
+   * перестаёт звонить, а причина не видна ниоткуда.
+   */
+  @Roles('admin', 'support')
+  @Get('clients/:id/funds')
+  async funds(@Param('id') id: string): Promise<{
+    balance: string;
+    overdraft_limit: string;
+    held: string;
+    available: string;
+  }> {
+    await this.reservations.releaseExpired();
+    const funds = await this.reservations.available(parseId(id, 'client'));
+
+    return {
+      balance: Money.format(funds.balance),
+      overdraft_limit: Money.format(funds.overdraftLimit),
+      held: Money.format(funds.held),
+      available: Money.format(funds.available),
     };
   }
 

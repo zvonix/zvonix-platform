@@ -31,6 +31,8 @@ const PUBLIC_VARIABLES = new Set([
   'APP_PORT',
   'PUBLIC_BASE_URL',
   'SIP_REALM',
+  'MAX_CALL_DURATION_SECONDS',
+  'RESERVATION_TTL_SECONDS',
   'LOG_LEVEL',
   'LOG_FORMAT',
   'DATABASE_POOL_MAX',
@@ -101,6 +103,35 @@ export const configSchema = z.object({
     .max(253, 'слишком длинный')
     .regex(/^[a-z0-9.-]+$/, 'должен быть именем в нижнем регистре, без схемы и порта')
     .default('sip.zvonix.local'),
+
+  /**
+   * Предельная длительность вызова в секундах.
+   *
+   * От неё считается сумма резерва: резервируется стоимость разговора этой длительности.
+   * Значение задаёт компромисс — слишком малое обрежет длинный разговор, слишком большое
+   * заморозит у клиента лишние деньги и сократит число одновременных вызовов, которые
+   * он может начать.
+   */
+  MAX_CALL_DURATION_SECONDS: z.coerce
+    .number()
+    .int('должно быть целым числом')
+    .min(60, 'меньше минуты — это не разговор')
+    .max(14_400, 'дольше четырёх часов — это зависший вызов, а не разговор')
+    .default(3600),
+
+  /**
+   * Через сколько секунд резерв освобождается сам.
+   *
+   * Страховка от потерянного CDR: без неё замороженный остаток не размораживается
+   * никогда, клиент перестаёт звонить, и причина не видна ниоткуда. Заведомо больше
+   * предельной длительности вызова — иначе резерв истечёт посреди разговора.
+   */
+  RESERVATION_TTL_SECONDS: z.coerce
+    .number()
+    .int('должно быть целым числом')
+    .min(300, 'слишком короткий срок: резерв истечёт посреди разговора')
+    .max(86_400, 'слишком долгий срок заморозки средств')
+    .default(7200),
 
   LOG_LEVEL: logLevel.default('info'),
   LOG_FORMAT: logFormat.default('json'),
@@ -203,10 +234,38 @@ export function loadConfig(
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): Config {
   const result = configSchema.safeParse(source);
-  if (result.success) {
-    return Object.freeze(result.data);
+  if (!result.success) {
+    throw new ConfigError(result.error.issues.map(describeIssue));
   }
-  throw new ConfigError(result.error.issues.map(describeIssue));
+
+  const problems = crossFieldProblems(result.data);
+  if (problems.length > 0) {
+    throw new ConfigError(problems);
+  }
+
+  return Object.freeze(result.data);
+}
+
+/**
+ * Проверки, связывающие несколько переменных.
+ *
+ * Вынесены из схемы отдельной функцией, а не выражены через `refine`: `refine`
+ * превращает объектную схему в обёртку и отбирает `shape`, по которому строится
+ * список переменных для сверки с `.env.example`.
+ */
+function crossFieldProblems(config: z.infer<typeof configSchema>): string[] {
+  const problems: string[] = [];
+
+  if (config.RESERVATION_TTL_SECONDS <= config.MAX_CALL_DURATION_SECONDS) {
+    // Иначе резерв истечёт посреди разговора: деньги освободятся, вызов продолжится,
+    // и клиент уйдёт в минус глубже разрешённого — ровно то, что резерв предотвращает.
+    problems.push(
+      'RESERVATION_TTL_SECONDS: должен быть больше MAX_CALL_DURATION_SECONDS, ' +
+        'иначе резерв истечёт посреди разговора',
+    );
+  }
+
+  return problems;
 }
 
 /**

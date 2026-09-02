@@ -20,3 +20,4 @@ export { machineCredentials } from './machine.js';
 export { nodes } from './nodes.js';
 export { gateways, channels, simCards, gatewayPorts } from './telephony.js';
 export { partnerRates, commissionRules } from './tariffs.js';
+export { calls, reservations } from './calls.js';

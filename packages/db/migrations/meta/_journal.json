@@ -57,6 +57,13 @@
       "when": 1788307780691,
       "tag": "0007_tarify_i_nacenka",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788316492325,
+      "tag": "0008_vyzovy_i_rezervy",
+      "breakpoints": true
     }
   ]
 }

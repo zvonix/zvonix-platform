@@ -22,6 +22,6 @@ import { TariffService } from './tariff.service.js';
     { provide: OPERATOR_LOOKUP, useClass: VoxlinkOperatorLookup },
   ],
   // Резолвер понадобится маршрутизации и тарификации на следующих этапах.
-  exports: [OperatorResolverService, CatalogRepository],
+  exports: [OperatorResolverService, CatalogRepository, TariffService],
 })
 export class CatalogModule {}
