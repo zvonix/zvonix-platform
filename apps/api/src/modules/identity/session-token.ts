@@ -30,12 +30,19 @@ export interface IssuedToken {
   readonly expiresAt: Date;
 }
 
-export function issueToken(now: Date = new Date()): IssuedToken {
+/**
+ * Выдаёт токен со сроком.
+ *
+ * Тем же способом выдаются и одноразовые ссылки из писем ([ADR-0029](../../../../../docs/adr/0029-pochta.md)):
+ * у них другой срок, но то же свойство — в базе лежит только хеш, сам токен существует
+ * ровно один раз, у получателя.
+ */
+export function issueToken(now: Date = new Date(), ttlMs: number = SESSION_TTL_MS): IssuedToken {
   const token = randomBytes(TOKEN_BYTES).toString('base64url');
   return {
     token,
     tokenHash: hashToken(token),
-    expiresAt: new Date(now.getTime() + SESSION_TTL_MS),
+    expiresAt: new Date(now.getTime() + ttlMs),
   };
 }
 

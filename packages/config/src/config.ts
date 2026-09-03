@@ -24,6 +24,7 @@ import { z } from 'zod';
  */
 const SECRET_VARIABLES = new Set([
   'DATABASE_URL',
+  'SMTP_PASSWORD',
   'REDIS_URL',
   'SECRET_KEY',
   'S3_ACCESS_KEY',
@@ -53,6 +54,12 @@ const PUBLIC_VARIABLES = new Set([
   'OPERATOR_LOOKUP_URL',
   'OPERATOR_LOOKUP_RPS',
   'NUMBER_RESOLUTION_TTL_DAYS',
+  'WEB_BASE_URL',
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_SECURE',
+  'SMTP_USER',
+  'SMTP_FROM',
 ]);
 
 /** Переменные, отнесённые к секретным. Экспортируется для проверки полноты классификации. */
@@ -309,6 +316,42 @@ export const configSchema = z.object({
     .min(1, 'должен быть больше нуля')
     .max(365, 'слишком долгий срок годности')
     .default(30),
+
+  /**
+   * Адрес кабинета: из него собираются ссылки в письмах
+   * ([ADR-0029](../../../docs/adr/0029-pochta.md)).
+   *
+   * Это **не** `PUBLIC_BASE_URL`: тот адрес control plane, куда ходят узлы АТС,
+   * а по ссылке из письма идёт человек — и приходит в кабинет.
+   */
+  WEB_BASE_URL: z
+    .url('должен быть адресом вида https://cabinet.example.com')
+    .default('http://127.0.0.1:3000'),
+
+  /**
+   * Почтовый сервер.
+   *
+   * Пусто — почта не настроена: приложение поднимается, письма копятся в таблице,
+   * воркер их не отправляет и предупреждает об этом каждым проходом (ADR-0029).
+   * Отказ запускаться связал бы телефонию с почтой, которые не связаны ничем.
+   */
+  SMTP_HOST: z.string().trim().default(''),
+  SMTP_PORT: z.coerce
+    .number()
+    .int('должен быть целым числом')
+    .min(1, 'вне диапазона портов')
+    .max(65_535, 'вне диапазона портов')
+    .default(587),
+  /** Шифрование с первого байта. `false` означает `STARTTLS` на 587-м порту, а не «без шифрования». */
+  SMTP_SECURE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  SMTP_USER: z.string().trim().default(''),
+  SMTP_PASSWORD: z.string().default(''),
+
+  /** Адрес отправителя: `Zvonix <no-reply@example.com>` либо просто адрес. */
+  SMTP_FROM: z.string().trim().default('Zvonix <no-reply@localhost>'),
 
   /**
    * Ключ приложения.

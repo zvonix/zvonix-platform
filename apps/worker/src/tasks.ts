@@ -18,6 +18,7 @@ import {
   EXPIRY_SWEEP_LIMIT,
   IdentityService,
   LimitService,
+  MailService,
   NodesService,
   QualityService,
   RecordingsService,
@@ -112,6 +113,23 @@ const LIMIT_COUNTER_SWEEP_SECONDS = 86_400;
  */
 const FAILURE_THRESHOLD_SWEEP_SECONDS = 60;
 
+/**
+ * Как часто уходят письма.
+ *
+ * Полминуты: человек, нажавший «восстановить пароль», смотрит в почту сразу, и минута
+ * ожидания читается как «не работает». Проход дешёвый — выборка по индексу, и когда
+ * писем нет, он ничего не делает.
+ */
+const MAIL_DELIVERY_SECONDS = 30;
+
+/**
+ * Как часто убираются отправленные письма и просроченные одноразовые токены.
+ *
+ * В теле письма лежит одноразовый токен: держать его дольше, чем нужно для разбора
+ * «дошло ли», незачем. Срочности нет — раз в час.
+ */
+const MAIL_CLEANUP_SECONDS = 3600;
+
 @Injectable()
 export class BackgroundTasks {
   constructor(
@@ -122,6 +140,7 @@ export class BackgroundTasks {
     private readonly identity: IdentityService,
     private readonly limits: LimitService,
     private readonly quality: QualityService,
+    private readonly mail: MailService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -163,6 +182,22 @@ export class BackgroundTasks {
         name: 'quality.suspend-over-threshold',
         everySeconds: FAILURE_THRESHOLD_SWEEP_SECONDS,
         run: (now) => this.quality.suspendOverThreshold(now),
+      },
+      {
+        name: 'mail.deliver-due',
+        everySeconds: MAIL_DELIVERY_SECONDS,
+        run: (now) => this.mail.deliverDue(now),
+      },
+      {
+        name: 'mail.purge-sent',
+        everySeconds: MAIL_CLEANUP_SECONDS,
+        run: (now) => this.mail.purgeSent(now),
+      },
+      {
+        name: 'auth-tokens.purge-expired',
+        everySeconds: MAIL_CLEANUP_SECONDS,
+        batchLimit: SESSION_SWEEP_LIMIT,
+        run: (now) => this.identity.purgeExpiredAuthTokens(now),
       },
     ];
   }

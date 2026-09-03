@@ -8,15 +8,25 @@
 
 import { Injectable } from '@nestjs/common';
 import { and, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
-import { sessions, users } from '@zvonix/db/schema';
-import { toDatabaseError } from '@zvonix/db';
-import type { Id, UserRole, UserStatus } from '@zvonix/shared';
+import { authTokens, sessions, users } from '@zvonix/db/schema';
+import { toDatabaseError, type Database } from '@zvonix/db';
+import {
+  newId,
+  type AuthTokenPurpose,
+  type Id,
+  type UserRole,
+  type UserStatus,
+} from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type UserId = Id<'user'>;
 export type SessionId = Id<'session'>;
 
 export type UserRow = typeof users.$inferSelect;
+export type AuthTokenRow = typeof authTokens.$inferSelect;
+
+/** Исполнитель запроса: пул или транзакция. */
+export type Executor = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
 export type SessionRow = typeof sessions.$inferSelect;
 
 export interface NewUser {
@@ -89,6 +99,135 @@ export class IdentityRepository {
       .update(users)
       .set({ failedLoginCount: 0, lockedUntil: null, lastLoginAt: at })
       .where(eq(users.id, id));
+  }
+
+  /** Пул: нужен службе, чтобы писать токен и письмо одной транзакцией (ADR-0029). */
+  get db(): Database {
+    return this.database.db;
+  }
+
+  /**
+   * Заводит одноразовый токен.
+   *
+   * `executor` передаётся всегда, когда токен пишется вместе с письмом о нём: иначе
+   * возможны «токен есть, письма нет» и «письмо ушло, токена нет».
+   */
+  async createAuthToken(
+    draft: {
+      userId: UserId;
+      purpose: AuthTokenPurpose;
+      tokenHash: string;
+      expiresAt: Date;
+    },
+    executor: Executor = this.database.db,
+  ): Promise<AuthTokenRow> {
+    try {
+      const [row] = await executor
+        .insert(authTokens)
+        .values({ id: newId<'authToken'>(), ...draft })
+        .returning();
+      if (row === undefined) throw new Error('Вставка не вернула строку');
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /**
+   * Гасит прежние токены того же назначения.
+   *
+   * Второй запрос восстановления делает первую ссылку недействительной: иначе письмо
+   * недельной давности, попавшее не в те руки, работает наравне со свежим.
+   */
+  async expireAuthTokens(
+    userId: UserId,
+    purpose: AuthTokenPurpose,
+    at: Date,
+    executor: Executor = this.database.db,
+  ): Promise<number> {
+    const updated = await executor
+      .update(authTokens)
+      .set({ usedAt: at })
+      .where(
+        and(
+          eq(authTokens.userId, userId),
+          eq(authTokens.purpose, purpose),
+          isNull(authTokens.usedAt),
+        ),
+      )
+      .returning({ id: authTokens.id });
+    return updated.length;
+  }
+
+  /** Действующий токен вместе с его пользователем. */
+  async findLiveAuthToken(
+    tokenHash: string,
+    purpose: AuthTokenPurpose,
+    now: Date,
+  ): Promise<{ token: AuthTokenRow; user: UserRow } | undefined> {
+    const [row] = await this.database.db
+      .select({ token: authTokens, user: users })
+      .from(authTokens)
+      .innerJoin(users, eq(users.id, authTokens.userId))
+      .where(
+        and(
+          eq(authTokens.tokenHash, tokenHash),
+          eq(authTokens.purpose, purpose),
+          isNull(authTokens.usedAt),
+          gt(authTokens.expiresAt, now),
+        ),
+      );
+    return row;
+  }
+
+  /**
+   * Отмечает токен использованным.
+   *
+   * Условие «ещё не использован» стоит в самом запросе: два одновременных перехода
+   * по одной ссылке иначе оба прошли бы проверку.
+   */
+  async useAuthToken(
+    id: Id<'authToken'>,
+    at: Date,
+    executor: Executor = this.database.db,
+  ): Promise<boolean> {
+    const updated = await executor
+      .update(authTokens)
+      .set({ usedAt: at })
+      .where(and(eq(authTokens.id, id), isNull(authTokens.usedAt)))
+      .returning({ id: authTokens.id });
+    return updated.length > 0;
+  }
+
+  /** Убирает просроченные токены: в них нет смысла, а строки копятся. */
+  async deleteExpiredAuthTokens(now: Date, limit: number): Promise<number> {
+    const stale = await this.database.db
+      .select({ id: authTokens.id })
+      .from(authTokens)
+      .where(lt(authTokens.expiresAt, now))
+      .limit(limit);
+    if (stale.length === 0) return 0;
+
+    const removed = await this.database.db
+      .delete(authTokens)
+      .where(
+        inArray(
+          authTokens.id,
+          stale.map((row) => row.id),
+        ),
+      )
+      .returning({ id: authTokens.id });
+    return removed.length;
+  }
+
+  /** Отметка о подтверждённом адресе. Доступ она не открывает — это дело админа. */
+  async setEmailConfirmed(id: UserId, at: Date): Promise<UserRow | undefined> {
+    const [row] = await this.database.db
+      .update(users)
+      .set({ emailConfirmedAt: at })
+      .where(eq(users.id, id))
+      .returning();
+    return row;
   }
 
   /** Новый пароль. Отдельным запросом: смена пароля не трогает ничего больше. */

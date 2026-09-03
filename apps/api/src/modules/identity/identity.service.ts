@@ -7,18 +7,19 @@ import {
   conflict,
   newId,
   notFound,
+  DomainError,
   internal as internalError,
   permissionDenied,
   rateLimited,
   unauthenticated,
   validationFailed,
-  type DomainError,
   type UserRole,
   type UserStatus,
 } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { RateLimitService, type LimitRule } from '../limits/rate-limit.service.js';
+import { MailService } from '../mail/mail.service.js';
 import {
   IdentityRepository,
   type SessionId,
@@ -27,6 +28,11 @@ import {
   type UserRow,
 } from './identity.repository.js';
 import { burnVerificationTime, hashPassword, verifyPassword } from './password.js';
+import {
+  emailVerificationLetter,
+  passwordResetLetter,
+  registrationAttemptLetter,
+} from './letters.js';
 import { decryptSecret, encryptSecret } from './secret-box.js';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js';
 import type { LoginInput, RegisterInput } from './schemas.js';
@@ -84,6 +90,29 @@ const PASSWORD_CHANGE_RULE: LimitRule = {
   name: 'auth.password.change',
   limit: 10,
   windowSeconds: 15 * 60,
+};
+
+/**
+ * Сколько живёт ссылка восстановления пароля.
+ *
+ * Два часа: человек читает почту не мгновенно, но письмо недельной давности, попавшее
+ * не в те руки, не должно открывать вход.
+ */
+const PASSWORD_RESET_TTL_HOURS = 2;
+
+/** Сколько живёт ссылка подтверждения адреса. Сутки: спешить тут некуда. */
+const EMAIL_VERIFICATION_TTL_HOURS = 24;
+
+/**
+ * Сколько запросов восстановления принимается с адреса за час.
+ *
+ * Каждый запрос — письмо, и без предела чужой почтовый ящик заваливается письмами
+ * от нашего имени.
+ */
+const PASSWORD_RESET_RULE: LimitRule = {
+  name: 'auth.password.reset',
+  limit: 5,
+  windowSeconds: 60 * 60,
 };
 
 /** Имя площадки в ссылке `otpauth://`: под ним запись видна в аутентификаторе. */
@@ -155,6 +184,7 @@ export class IdentityService {
     private readonly repository: IdentityRepository,
     private readonly audit: AuditService,
     private readonly limits: RateLimitService,
+    private readonly mail: MailService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -199,27 +229,62 @@ export class IdentityService {
    * а клиенту баланс заводит администратор. Роли `admin` и `support` этим путём
    * не создаются — схема запроса их не принимает.
    */
-  async register(input: RegisterInput, meta: RequestMeta): Promise<PublicUser> {
+  /**
+   * Самостоятельная регистрация.
+   *
+   * Ничего не возвращает и отвечает одинаково независимо от того, был ли адрес занят
+   * ([ADR-0029](../../../../../docs/adr/0029-pochta.md)). Разница уходит в письмо:
+   * новому адресу — подтверждение, занятому — «на ваш адрес пытались
+   * зарегистрироваться». Так человек, чей адрес взяли чужие, об этом узнаёт,
+   * а перебор адресов перестаёт работать.
+   */
+  async register(input: RegisterInput, meta: RequestMeta): Promise<void> {
     // До обращения к базе: смысл ограничения в том, чтобы поток регистраций не доходил
     // до работы, а не в том, чтобы её сосчитать.
     await this.assertWithinRate(REGISTRATION_RULE, meta.ip);
 
+    const now = new Date();
     const existing = await this.repository.findByEmail(input.email);
+
     if (existing !== undefined) {
-      // Отдельная проверка до вставки — ради понятного сообщения. Гонку двух
-      // одновременных регистраций она не закрывает; это делает уникальный индекс,
-      // и его нарушение придёт сюда же как `conflict`.
-      throw conflict('Учётная запись с таким адресом уже существует');
+      // Пароль всё равно хешируется: без этого ответ на занятый адрес приходит заметно
+      // быстрее, и адреса перебираются по времени ответа, а не по коду.
+      await burnVerificationTime(input.password);
+      await this.mail.enqueue({
+        recipient: existing.email,
+        ...registrationAttemptLetter(this.config.WEB_BASE_URL),
+      });
+
+      await this.audit.record({
+        action: 'user.registration_attempt',
+        entityType: 'user',
+        entityId: existing.id,
+        actorUserId: null,
+        actorRole: null,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      return;
     }
 
-    const created = await this.repository.createUser({
-      id: newId<'user'>(),
-      email: input.email,
-      passwordHash: await hashPassword(input.password),
-      fullName: input.fullName,
-      role: input.role,
-      status: 'pending',
-    });
+    let created: UserRow;
+    try {
+      created = await this.repository.createUser({
+        id: newId<'user'>(),
+        email: input.email,
+        passwordHash: await hashPassword(input.password),
+        fullName: input.fullName,
+        role: input.role,
+        status: 'pending',
+      });
+    } catch (cause) {
+      // Гонку двух одновременных регистраций закрывает уникальный индекс. Наружу
+      // она тоже не должна быть видна: ответ обязан не зависеть от занятости адреса.
+      if (cause instanceof DomainError && cause.code === 'conflict') return;
+      throw cause;
+    }
+
+    await this.sendEmailVerification(created, now);
 
     await this.audit.record({
       action: 'user.registered',
@@ -231,8 +296,6 @@ export class IdentityService {
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
-
-    return toPublicUser(created);
   }
 
   /**
@@ -391,6 +454,166 @@ export class IdentityService {
       });
       throw internalError('Второй фактор не работает: обратитесь к администратору');
     }
+  }
+
+  // --- Восстановление пароля и подтверждение адреса (ADR-0029) ----------------------
+
+  /**
+   * Запрос восстановления пароля.
+   *
+   * Отвечает одинаково независимо от того, есть ли такая запись: разница в ответе —
+   * это способ перебрать адреса, а он закрыт везде, включая вход.
+   *
+   * Токен и письмо о нём пишутся **одной транзакцией**: иначе возможны «токен есть,
+   * письма нет» и «письмо ушло, токена нет».
+   */
+  async requestPasswordReset(email: string, meta: RequestMeta): Promise<void> {
+    await this.assertWithinRate(PASSWORD_RESET_RULE, meta.ip);
+
+    const user = await this.repository.findByEmail(email);
+    // Записи нет или доступ к ней закрыт — молчим. Письмо о том, что «такого адреса
+    // у нас нет», сообщало бы ровно то, что мы скрываем.
+    if (user === undefined || user.status === 'disabled') return;
+
+    const now = new Date();
+    const issued = issueToken(now, PASSWORD_RESET_TTL_HOURS * 3_600_000);
+    const letter = passwordResetLetter(
+      this.config.WEB_BASE_URL,
+      issued.token,
+      PASSWORD_RESET_TTL_HOURS,
+    );
+
+    await this.repository.db.transaction(async (tx) => {
+      // Прежние ссылки гаснут: письмо недельной давности не должно работать наравне
+      // со свежим.
+      await this.repository.expireAuthTokens(user.id, 'password_reset', now, tx);
+      await this.repository.createAuthToken(
+        {
+          userId: user.id,
+          purpose: 'password_reset',
+          tokenHash: issued.tokenHash,
+          expiresAt: issued.expiresAt,
+        },
+        tx,
+      );
+      await this.mail.enqueue({ recipient: user.email, ...letter }, tx);
+    });
+
+    await this.audit.record({
+      action: 'user.password_reset_requested',
+      entityType: 'user',
+      entityId: user.id,
+      actorUserId: user.id,
+      actorRole: user.role,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+  }
+
+  /**
+   * Смена пароля по ссылке из письма.
+   *
+   * Закрываются **все** сессии, включая текущую: пароль восстанавливают, когда доступ
+   * потерян, и оставить живой чужую сессию значит не сделать ничего.
+   */
+  async confirmPasswordReset(token: string, newPassword: string, meta: RequestMeta): Promise<void> {
+    const now = new Date();
+    const found = await this.repository.findLiveAuthToken(hashToken(token), 'password_reset', now);
+    // Просроченный, использованный и выдуманный токен отвечают одинаково: разница
+    // сообщала бы, что такой токен когда-то существовал.
+    if (found === undefined) throw unauthenticated('Ссылка недействительна или устарела');
+
+    const used = await this.repository.useAuthToken(found.token.id, now);
+    // Два одновременных перехода по одной ссылке: второй проиграл гонку и получает
+    // тот же ответ, что и по недействительной ссылке.
+    if (!used) throw unauthenticated('Ссылка недействительна или устарела');
+
+    await this.repository.setPasswordHash(found.user.id, await hashPassword(newPassword));
+    const revoked = await this.repository.revokeAllSessions(found.user.id, now);
+
+    await this.audit.record({
+      action: 'user.password_reset',
+      entityType: 'user',
+      entityId: found.user.id,
+      actorUserId: found.user.id,
+      actorRole: found.user.role,
+      after: { revoked_sessions: revoked },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+  }
+
+  /**
+   * Подтверждение адреса.
+   *
+   * Ставит отметку и **не** открывает доступ: партнёра допускает администратор,
+   * и связать это с почтой значило бы пустить в систему любого, у кого есть ящик.
+   */
+  async confirmEmail(token: string, meta: RequestMeta): Promise<void> {
+    const now = new Date();
+    const found = await this.repository.findLiveAuthToken(
+      hashToken(token),
+      'email_verification',
+      now,
+    );
+    if (found === undefined) throw unauthenticated('Ссылка недействительна или устарела');
+    if (!(await this.repository.useAuthToken(found.token.id, now))) {
+      throw unauthenticated('Ссылка недействительна или устарела');
+    }
+
+    await this.repository.setEmailConfirmed(found.user.id, now);
+    await this.audit.record({
+      action: 'user.email_confirmed',
+      entityType: 'user',
+      entityId: found.user.id,
+      actorUserId: found.user.id,
+      actorRole: found.user.role,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+  }
+
+  /** Повторное письмо с подтверждением — тому, кто уже вошёл. */
+  async resendEmailVerification(principal: Principal): Promise<void> {
+    const user = await this.repository.findById(principal.userId);
+    if (user === undefined) throw notFound('Пользователь не найден');
+    if (user.emailConfirmedAt !== null) throw conflict('Адрес уже подтверждён');
+
+    await this.sendEmailVerification(user, new Date());
+  }
+
+  /**
+   * Заводит токен подтверждения и письмо о нём — одной транзакцией.
+   *
+   * Отдельным методом, потому что вызывается и при регистрации, и повторно по просьбе
+   * человека: два места, где это делается по-разному, разъедутся на первой же правке.
+   */
+  private async sendEmailVerification(user: UserRow, now: Date): Promise<void> {
+    const issued = issueToken(now, EMAIL_VERIFICATION_TTL_HOURS * 3_600_000);
+    const letter = emailVerificationLetter(
+      this.config.WEB_BASE_URL,
+      issued.token,
+      EMAIL_VERIFICATION_TTL_HOURS,
+    );
+
+    await this.repository.db.transaction(async (tx) => {
+      await this.repository.expireAuthTokens(user.id, 'email_verification', now, tx);
+      await this.repository.createAuthToken(
+        {
+          userId: user.id,
+          purpose: 'email_verification',
+          tokenHash: issued.tokenHash,
+          expiresAt: issued.expiresAt,
+        },
+        tx,
+      );
+      await this.mail.enqueue({ recipient: user.email, ...letter }, tx);
+    });
+  }
+
+  /** Убирает просроченные одноразовые токены: смысла в них нет, а строки копятся. */
+  async purgeExpiredAuthTokens(now: Date = new Date()): Promise<number> {
+    return this.repository.deleteExpiredAuthTokens(now, SESSION_SWEEP_LIMIT);
   }
 
   // --- Пароль и второй фактор ------------------------------------------------------

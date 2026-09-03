@@ -22,3 +22,22 @@ export type UserRole = (typeof USER_ROLES)[number];
  */
 export const USER_STATUSES = ['pending', 'active', 'suspended', 'disabled'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
+
+/**
+ * Назначение одноразового токена, который уходит человеку письмом
+ * ([ADR-0029](../../../docs/adr/0029-pochta.md)).
+ *
+ * Одна таблица на оба назначения: у них одинаковый жизненный цикл — выдан, использован
+ * один раз, протух по сроку, — и две таблицы отличались бы только именем.
+ */
+export const AUTH_TOKEN_PURPOSES = ['password_reset', 'email_verification'] as const;
+export type AuthTokenPurpose = (typeof AUTH_TOKEN_PURPOSES)[number];
+
+/**
+ * Состояние письма в очереди ([ADR-0029](../../../docs/adr/0029-pochta.md)).
+ *
+ * `failed` — не «письмо потеряно», а «попытки кончились»: строка остаётся с текстом
+ * ошибки, и её видно запросом, а не в логах недельной давности.
+ */
+export const OUTBOX_STATUSES = ['pending', 'sent', 'failed'] as const;
+export type OutboxStatus = (typeof OUTBOX_STATUSES)[number];

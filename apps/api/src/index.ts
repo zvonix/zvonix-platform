@@ -37,6 +37,9 @@ export { QualityService } from './modules/telephony/quality.service.js';
 export { IdentityModule } from './modules/identity/identity.module.js';
 export { IdentityService, SESSION_SWEEP_LIMIT } from './modules/identity/identity.service.js';
 
+export { MailModule } from './modules/mail/mail.module.js';
+export { MailService } from './modules/mail/mail.service.js';
+
 export { LimitsModule } from './modules/limits/limits.module.js';
 export { LimitService, COUNTER_RETENTION_DAYS } from './modules/limits/limit.service.js';
 

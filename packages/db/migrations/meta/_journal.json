@@ -134,6 +134,13 @@
       "when": 1788414707750,
       "tag": "0018_vtoroy_faktor",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788418918927,
+      "tag": "0019_pochta",
+      "breakpoints": true
     }
   ]
 }

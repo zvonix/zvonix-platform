@@ -74,7 +74,7 @@ async function register(email: string, ip: string) {
 async function activeUser(ip: string): Promise<string> {
   const email = uniqueEmail();
   const created = await register(email, ip);
-  expect(created.statusCode).toBe(201);
+  expect(created.statusCode).toBe(202);
   await withDatabase(async (execute) => {
     await execute(sql`update users set status = 'active' where email = ${email}`);
   });
@@ -216,7 +216,7 @@ describe('регистрация', () => {
     for (let attempt = 1; attempt <= 15 && blockedAt === 0; attempt += 1) {
       const response = await register(uniqueEmail(), ip);
       if (response.statusCode === 429) blockedAt = attempt;
-      else expect(response.statusCode, `попытка ${String(attempt)}`).toBe(201);
+      else expect(response.statusCode, `попытка ${String(attempt)}`).toBe(202);
     }
 
     // Считаются все попытки, а не неудачные: блокировать здесь нечего — записи,

@@ -49,14 +49,27 @@ const uniqueEmail = (): string => `user${String(++counter)}.${String(Date.now())
 
 const PASSWORD = 'достаточно длинный пароль';
 
+/**
+ * Регистрирует и возвращает идентификатор записи.
+ *
+ * Идентификатор читается из базы, а не из ответа: ответ его больше не содержит —
+ * он одинаков и для нового адреса, и для занятого (ADR-0029).
+ */
 async function register(email: string, role: 'client' | 'partner' = 'client'): Promise<string> {
   const response = await api().inject({
     method: 'POST',
     url: '/auth/register',
     payload: { email, password: PASSWORD, fullName: 'Иван Петров', role },
   });
-  expect(response.statusCode).toBe(201);
-  return response.json<{ user: { id: string } }>().user.id;
+  expect(response.statusCode).toBe(202);
+
+  const handle = createDatabase({ url, poolMax: 1 });
+  try {
+    const found = await handle.db.execute(sql`select id from users where email = ${email}`);
+    return (found.rows[0] as { id: string }).id;
+  } finally {
+    await handle.close();
+  }
 }
 
 /**
@@ -211,21 +224,25 @@ describe('регистрация', () => {
       payload: { email, password: PASSWORD, fullName: 'Иван Петров', role: 'partner' },
     });
 
-    expect(response.statusCode).toBe(201);
-    expect(response.json()).toMatchObject({ user: { email, role: 'partner', status: 'pending' } });
+    // Ответ ничего не рассказывает о записи: он одинаков и для нового адреса,
+    // и для занятого (ADR-0029). Что создалось — видно в базе.
+    expect(response.statusCode).toBe(202);
+    expect(response.body).toBe('');
+
+    const handle = createDatabase({ url, poolMax: 1 });
+    try {
+      const found = await handle.db.execute(
+        sql`select role, status from users where email = ${email}`,
+      );
+      expect(found.rows[0]).toMatchObject({ role: 'partner', status: 'pending' });
+    } finally {
+      await handle.close();
+    }
   });
 
-  it('не отдаёт хеш пароля', async () => {
-    const response = await api().inject({
-      method: 'POST',
-      url: '/auth/register',
-      payload: { email: uniqueEmail(), password: PASSWORD, fullName: 'Иван', role: 'client' },
-    });
-    expect(response.body).not.toContain('argon2');
-    expect(response.body).not.toContain('passwordHash');
-  });
-
-  it('отвергает повторный адрес', async () => {
+  it('занятый адрес отвечает так же, как свободный', async () => {
+    // Разница в ответе — это способ перебрать адреса. Что адрес занят, человек
+    // узнаёт письмом, а не кодом ответа.
     const email = uniqueEmail();
     await register(email);
 
@@ -234,8 +251,36 @@ describe('регистрация', () => {
       url: '/auth/register',
       payload: { email, password: PASSWORD, fullName: 'Другой', role: 'client' },
     });
-    expect(response.statusCode).toBe(409);
-    expect(response.json()).toMatchObject({ error: { code: 'conflict' } });
+    expect(response.statusCode).toBe(202);
+    expect(response.body).toBe('');
+  });
+
+  it('о занятом адресе уходит письмо, а вторая запись не создаётся', async () => {
+    const email = uniqueEmail();
+    await register(email);
+    await api().inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: { email, password: PASSWORD, fullName: 'Другой', role: 'client' },
+    });
+
+    const handle = createDatabase({ url, poolMax: 1 });
+    try {
+      const users = await handle.db.execute(
+        sql`select count(*)::int as count from users where email = ${email}`,
+      );
+      expect(users.rows[0]).toMatchObject({ count: 1 });
+
+      const letters = await handle.db.execute(
+        sql`select kind from outbox_messages where recipient = ${email} order by created_at`,
+      );
+      expect(letters.rows.map((row) => (row as { kind: string }).kind)).toEqual([
+        'email_verification',
+        'registration_attempt',
+      ]);
+    } finally {
+      await handle.close();
+    }
   });
 
   it('отвергает роль администратора', async () => {

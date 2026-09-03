@@ -86,3 +86,13 @@ export const disableTotpSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+
+/** Запрос восстановления пароля. Ответ одинаков независимо от того, есть ли запись. */
+export const passwordResetRequestSchema = z.object({ email });
+
+/** Одноразовый токен из письма. */
+export const tokenSchema = z.object({
+  token: z.string().trim().min(20, 'не похоже на ссылку из письма').max(200, 'слишком длинный'),
+});
+
+export const passwordResetConfirmSchema = tokenSchema.extend({ newPassword: password });

@@ -146,6 +146,9 @@ async function main() {
         'sessions.purge-expired',
         'limits.purge-closed-windows',
         'quality.suspend-over-threshold',
+        'mail.deliver-due',
+        'mail.purge-sent',
+        'auth-tokens.purge-expired',
       ].every((task) => output.join('').includes(task)),
     );
 

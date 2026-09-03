@@ -89,6 +89,9 @@ describe('реестр фоновых задач', () => {
       'sessions.purge-expired',
       'limits.purge-closed-windows',
       'quality.suspend-over-threshold',
+      'mail.deliver-due',
+      'mail.purge-sent',
+      'auth-tokens.purge-expired',
     ]);
   });
 

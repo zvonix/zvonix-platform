@@ -17,7 +17,10 @@ import {
   changePasswordSchema,
   disableTotpSchema,
   loginSchema,
+  passwordResetConfirmSchema,
+  passwordResetRequestSchema,
   registerSchema,
+  tokenSchema,
   totpCodeSchema,
 } from './schemas.js';
 
@@ -29,14 +32,71 @@ const statusSchema = z.object({
 export class IdentityController {
   constructor(private readonly identity: IdentityService) {}
 
+  /**
+   * Самостоятельная регистрация.
+   *
+   * Отвечает `202` всегда — и когда запись создана, и когда адрес занят: разница
+   * в ответе была бы способом перебрать адреса. Что произошло на самом деле, человек
+   * узнаёт из письма ([ADR-0029](../../../../../docs/adr/0029-pochta.md)).
+   */
   @Public()
+  @HttpCode(202)
   @Post('auth/register')
   async register(
     @Body(zodBody(registerSchema)) body: z.infer<typeof registerSchema>,
     @Meta() meta: RequestMeta,
-  ): Promise<{ user: UserResponse }> {
-    const user = await this.identity.register(body, meta);
-    return { user };
+  ): Promise<void> {
+    await this.identity.register(body, meta);
+  }
+
+  /**
+   * Запрос восстановления пароля.
+   *
+   * `202` всегда: ответ не должен зависеть от того, есть ли такая запись, — иначе
+   * по нему перебирают адреса.
+   */
+  @Public()
+  @HttpCode(202)
+  @Post('auth/password-reset')
+  async requestPasswordReset(
+    @Body(zodBody(passwordResetRequestSchema)) body: z.infer<typeof passwordResetRequestSchema>,
+    @Meta() meta: RequestMeta,
+  ): Promise<void> {
+    await this.identity.requestPasswordReset(body.email, meta);
+  }
+
+  /**
+   * Смена пароля по ссылке из письма.
+   *
+   * Закрываются **все** сессии, включая текущую: пароль восстанавливают, когда доступ
+   * потерян.
+   */
+  @Public()
+  @HttpCode(204)
+  @Post('auth/password-reset/confirm')
+  async confirmPasswordReset(
+    @Body(zodBody(passwordResetConfirmSchema)) body: z.infer<typeof passwordResetConfirmSchema>,
+    @Meta() meta: RequestMeta,
+  ): Promise<void> {
+    await this.identity.confirmPasswordReset(body.token, body.newPassword, meta);
+  }
+
+  /** Подтверждение адреса по ссылке. Доступ не открывает — это дело администратора. */
+  @Public()
+  @HttpCode(204)
+  @Post('auth/email/confirm')
+  async confirmEmail(
+    @Body(zodBody(tokenSchema)) body: z.infer<typeof tokenSchema>,
+    @Meta() meta: RequestMeta,
+  ): Promise<void> {
+    await this.identity.confirmEmail(body.token, meta);
+  }
+
+  /** Повторное письмо с подтверждением — тому, кто уже вошёл. */
+  @HttpCode(202)
+  @Post('auth/email/resend')
+  async resendEmailVerification(@CurrentUser() principal: Principal): Promise<void> {
+    await this.identity.resendEmailVerification(principal);
   }
 
   @Public()
