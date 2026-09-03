@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
 import { outboxMessages } from '@zvonix/db/schema';
 import { newId, type Id } from '@zvonix/shared';
@@ -45,6 +45,35 @@ export class MailRepository {
     } catch (cause) {
       throw toDatabaseError(cause);
     }
+  }
+
+  /**
+   * Сколько писем ушло на адрес за окно и когда освободится место.
+   *
+   * Считается по самой очереди, а не отдельным счётчиком: защищается именно число писем,
+   * и счёт по факту не расходится с действительностью при аварии счётчика
+   * ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
+   *
+   * `retryAfterSeconds` — сколько ждать до освобождения места. Самое старое письмо окна
+   * выпадет из него через `min(created_at) - since`: это ровно то же, что
+   * `min(created_at) + окно - сейчас`, только без второго параметра в запросе.
+   */
+  async countRecent(
+    recipient: string,
+    since: Date,
+    executor: Executor = this.db,
+  ): Promise<{ count: number; retryAfterSeconds: number }> {
+    const [row] = await executor
+      .select({
+        count: sql<number>`count(*)::int`,
+        retryAfterSeconds: sql<
+          number | null
+        >`ceil(extract(epoch from (min(${outboxMessages.createdAt}) - ${since}::timestamptz)))::int`,
+      })
+      .from(outboxMessages)
+      .where(and(eq(outboxMessages.recipient, recipient), gte(outboxMessages.createdAt, since)));
+
+    return { count: row?.count ?? 0, retryAfterSeconds: Math.max(0, row?.retryAfterSeconds ?? 0) };
   }
 
   /**

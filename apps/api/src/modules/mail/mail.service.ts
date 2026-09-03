@@ -24,6 +24,21 @@ const RETRY_BASE_MS = 60_000;
 /** Сколько дней хранятся отправленные письма: в теле лежит одноразовый токен. */
 const SENT_RETENTION_DAYS = 14;
 
+/**
+ * Сколько писем принимается на один адрес получателя за окно
+ * ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
+ *
+ * Ограничение частоты по адресу источника от заваливания **одного** ящика не спасает:
+ * у того, кто это делает, адресов источника столько, сколько узлов в его ботнете,
+ * а цель одна. Платит за это не он: жалобы на письма от нашего имени сжигают репутацию
+ * отправителя, и перестают доходить письма настоящим людям.
+ *
+ * Десять в час — с большим запасом для человека, который зарегистрировался, подтвердил
+ * адрес, забыл пароль и попросил письмо заново.
+ */
+const RECIPIENT_LIMIT = 10;
+const RECIPIENT_WINDOW_MS = 3_600_000;
+
 @Injectable()
 export class MailService implements OnApplicationShutdown {
   private readonly logger: Logger;
@@ -43,20 +58,56 @@ export class MailService implements OnApplicationShutdown {
   }
 
   /**
-   * Кладёт письмо в очередь.
+   * Кладёт письмо в очередь. `false` — предел писем на адрес исчерпан, письмо не принято.
    *
    * `executor` передаётся тем, кто пишет письмо вместе с событием.
+   *
+   * Предел проверяется **здесь**, а не у вызывающего: письмо в очередь кладут несколько
+   * путей, и путь, добавленный завтра, обязан подчиняться правилу, не зная о нём
+   * ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
    */
   async enqueue(
     message: { recipient: string; subject: string; body: string; kind: string },
     executor?: Executor,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const quota = await this.canSendTo(message.recipient, new Date(), executor);
+    if (!quota.allowed) {
+      // Не исключение: два пути отправки обязаны отвечать одинаково независимо ни от чего
+      // (ADR-0029), и разница в ответе вернула бы перечисление адресов. След остаётся здесь.
+      this.logger.warn('Предел писем на адрес исчерпан: письмо не поставлено в очередь', {
+        kind: message.kind,
+        recipient: maskEmail(message.recipient),
+        limit: RECIPIENT_LIMIT,
+        retry_after_seconds: quota.retryAfterSeconds,
+      });
+      return false;
+    }
+
     // Тело письма в лог не попадает: в нём одноразовый токен, а лог живёт дольше письма.
     await this.repository.enqueue(message, executor);
     this.logger.info('Письмо поставлено в очередь', {
       kind: message.kind,
       recipient: maskEmail(message.recipient),
     });
+    return true;
+  }
+
+  /**
+   * Есть ли ещё место на этот адрес.
+   *
+   * Открыто тем, кто заводит **одноразовый токен вместе с письмом**: спросить надо
+   * до записи токена, иначе заявка, чьё письмо всё равно не уйдёт, погасит действующую
+   * ссылку человека — и заваливание ящика заодно лишит его возможности восстановить
+   * пароль ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
+   */
+  async canSendTo(
+    recipient: string,
+    now: Date,
+    executor?: Executor,
+  ): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+    const since = new Date(now.getTime() - RECIPIENT_WINDOW_MS);
+    const recent = await this.repository.countRecent(recipient, since, executor);
+    return { allowed: recent.count < RECIPIENT_LIMIT, retryAfterSeconds: recent.retryAfterSeconds };
   }
 
   /**

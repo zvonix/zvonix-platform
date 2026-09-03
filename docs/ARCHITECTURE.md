@@ -43,7 +43,7 @@
 | `telephony` | Учётные записи SIP шлюзов и каналов и их выдача узлу (привязка `directory`), приём CDR от узлов, состояние шлюзов и SIM, качество терминации и порог отключения ([ADR-0027](adr/0027-porog-otklyucheniya.md)) | `apps/api/src/modules/telephony` | `billing`, `limits` |
 | `recordings` | Приём, хранение, выдача записей по подписанным ссылкам | `apps/api/src/modules/recordings` | объектное хранилище |
 | `nodes` | Реестр узлов, генерация команды установки, health и метрики | `apps/api/src/modules/nodes` | БД |
-| `mail` | Очередь писем в базе и отправка по SMTP ([ADR-0029](adr/0029-pochta.md)). Контроллеров нет: письма пишут доменные службы вместе со своими событиями | `apps/api/src/modules/mail` | БД, SMTP |
+| `mail` | Очередь писем в базе и отправка по SMTP ([ADR-0029](adr/0029-pochta.md)). Контроллеров нет: письма пишут доменные службы вместе со своими событиями. Здесь же предел писем на адрес получателя ([ADR-0030](adr/0030-predel-pisem-na-adres.md)) — внутри `enqueue`, чтобы новый путь отправки подчинялся ему, не зная о нём | `apps/api/src/modules/mail` | БД, SMTP |
 | `payments` | Пополнения клиентов и выплаты партнёрам | `apps/api/src/modules/payments` | `billing` |
 | `identity` | Учётные записи, роли, права, 2FA, API-ключи | `apps/api/src/modules/identity` | БД |
 | `audit` | Неизменяемый журнал действий | `apps/api/src/modules/audit` | БД |

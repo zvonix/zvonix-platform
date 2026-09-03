@@ -141,6 +141,13 @@
       "when": 1788418918927,
       "tag": "0019_pochta",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788421479626,
+      "tag": "0020_predel_pisem_na_adres",
+      "breakpoints": true
     }
   ]
 }

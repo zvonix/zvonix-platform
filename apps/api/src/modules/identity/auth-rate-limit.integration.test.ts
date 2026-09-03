@@ -163,6 +163,30 @@ describe('вход', () => {
   }, 60_000);
 });
 
+describe('повторное письмо с подтверждением адреса', () => {
+  it('ограничено по записи, а не по адресу источника', async () => {
+    // Сюда приходят с действующей сессией, и каждое обращение — письмо. Смена адреса
+    // источника предела не снимает: считается запись
+    // ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
+    const ip = nextAddress();
+    const email = await activeUser(ip);
+    const session = (await login(email, PASSWORD, ip)).json<{ token: string }>().token;
+
+    const resend = async (from: string) =>
+      api().inject({
+        method: 'POST',
+        url: '/auth/email/resend',
+        remoteAddress: from,
+        headers: { authorization: `Bearer ${session}` },
+      });
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      expect((await resend(nextAddress())).statusCode, `письмо ${String(attempt)}`).toBe(202);
+    }
+    expect((await resend(nextAddress())).statusCode).toBe(429);
+  }, 90_000);
+});
+
 describe('подмена адреса заголовком', () => {
   it('не верит X-Forwarded-For от недоверенного источника', async () => {
     // От `request.ip` зависят список разрешённых адресов машинного ключа (ADR-0019),

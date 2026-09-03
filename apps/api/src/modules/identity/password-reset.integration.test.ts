@@ -230,6 +230,60 @@ describe('восстановление пароля', () => {
   }, 120_000);
 });
 
+describe('предел писем на один адрес', () => {
+  it('одиннадцатое письмо за час на адрес не уходит, а ответ не меняется', async () => {
+    // Ограничение частоты по адресу источника от заваливания одного ящика не спасает:
+    // адресов источника у ботнета много, а цель одна ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
+    const email = await registered();
+
+    for (let attempt = 1; attempt <= 15; attempt += 1) {
+      const response = await post('/auth/password-reset', { email });
+      expect(response.statusCode, `заявка ${String(attempt)}`).toBe(202);
+    }
+
+    // Регистрация уже отправила письмо с подтверждением — оно тоже в счёте.
+    expect(await letters(email)).toHaveLength(10);
+  }, 120_000);
+
+  it('исчерпанный предел не гасит действующую ссылку', async () => {
+    // Иначе заваливание ящика заодно лишало бы человека возможности восстановить пароль:
+    // каждая заявка гасит предыдущую ссылку, а письма с новой уже не приходит.
+    const email = await registered();
+
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      await post('/auth/password-reset', { email });
+    }
+    const queued = (await letters(email)).filter((row) => row.kind === 'password_reset');
+    expect(queued).toHaveLength(9);
+    const last = tokenFrom(queued[8]?.body ?? '');
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await post('/auth/password-reset', { email });
+    }
+    expect(await letters(email)).toHaveLength(10);
+
+    const confirmed = await post('/auth/password-reset/confirm', {
+      token: last,
+      newPassword: 'ещё один длинный пароль',
+    });
+    expect(confirmed.statusCode).toBe(204);
+  }, 120_000);
+
+  it('считает адреса по отдельности', async () => {
+    const flooded = await registered();
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      await post('/auth/password-reset', { email: flooded });
+    }
+
+    const innocent = await registered();
+    await post('/auth/password-reset', { email: innocent });
+    expect((await letters(innocent)).map((row) => row.kind)).toEqual([
+      'email_verification',
+      'password_reset',
+    ]);
+  }, 120_000);
+});
+
 describe('очередь писем', () => {
   it('при ненастроенной почте письма копятся, а не теряются', async () => {
     // Штатное состояние разработки и признак того, что почту забыли настроить:

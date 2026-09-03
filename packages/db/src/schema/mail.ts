@@ -59,6 +59,9 @@ export const outboxMessages = pgTable(
     check('outbox_messages_attempts_non_negative', sql`${t.attempts} >= 0`),
     // Горячий путь воркера: что пора отправлять.
     index('outbox_messages_due_idx').on(t.status, t.sendAfter),
+    // Предел писем на один адрес ([ADR-0030](../../../docs/adr/0030-predel-pisem-na-adres.md)):
+    // счёт писем на получателя за окно. Спрашивается на каждое письмо.
+    index('outbox_messages_recipient_idx').on(t.recipient, t.createdAt),
   ],
 );
 

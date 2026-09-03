@@ -115,6 +115,19 @@ const PASSWORD_RESET_RULE: LimitRule = {
   windowSeconds: 60 * 60,
 };
 
+/**
+ * Сколько раз можно попросить повторное письмо с подтверждением адреса.
+ *
+ * Считается по записи, а не по адресу источника: сюда приходят с действующей сессией.
+ * Без предела обработчик вызывается в цикле, и каждый вызов — письмо
+ * ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
+ */
+const EMAIL_RESEND_RULE: LimitRule = {
+  name: 'auth.email.resend',
+  limit: 5,
+  windowSeconds: 60 * 60,
+};
+
 /** Имя площадки в ссылке `otpauth://`: под ним запись видна в аутентификаторе. */
 const TOTP_ISSUER = 'Zvonix';
 
@@ -284,6 +297,9 @@ export class IdentityService {
       throw cause;
     }
 
+    // Исход не проверяется намеренно: ответ на регистрацию обязан быть одинаковым
+    // независимо ни от чего (ADR-0029). Не ушедшее письмо видно в журнале, а человек
+    // может попросить его заново.
     await this.sendEmailVerification(created, now);
 
     await this.audit.record({
@@ -483,7 +499,15 @@ export class IdentityService {
       PASSWORD_RESET_TTL_HOURS,
     );
 
-    await this.repository.db.transaction(async (tx) => {
+    // Исход возвращается из транзакции, а не через переменную снаружи: при внешней
+    // переменной проверка «письмо ушло?» неотличима от заведомо ложной — присваивание
+    // происходит в замыкании, и сузить её тип по нему нельзя.
+    const queued = await this.repository.db.transaction(async (tx) => {
+      // Место на адрес спрашивается ДО записи токена: заявка, чьё письмо всё равно
+      // не уйдёт, не должна гасить действующую ссылку человека
+      // ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
+      if (!(await this.mail.canSendTo(user.email, now, tx)).allowed) return false;
+
       // Прежние ссылки гаснут: письмо недельной давности не должно работать наравне
       // со свежим.
       await this.repository.expireAuthTokens(user.id, 'password_reset', now, tx);
@@ -496,8 +520,12 @@ export class IdentityService {
         },
         tx,
       );
-      await this.mail.enqueue({ recipient: user.email, ...letter }, tx);
+      return this.mail.enqueue({ recipient: user.email, ...letter }, tx);
     });
+
+    // Ответ при этом не меняется: он обязан не зависеть ни от существования записи,
+    // ни от того, сколько писем уже ушло на этот адрес (ADR-0029).
+    if (!queued) return;
 
     await this.audit.record({
       action: 'user.password_reset_requested',
@@ -573,13 +601,24 @@ export class IdentityService {
     });
   }
 
-  /** Повторное письмо с подтверждением — тому, кто уже вошёл. */
+  /**
+   * Повторное письмо с подтверждением — тому, кто уже вошёл.
+   *
+   * Единственный путь отправки, где отказ по частоте сообщается честно: сюда приходят
+   * с действующей сессией, скрывать нечего, а молчание человек прочтёт как «письмо ушло».
+   */
   async resendEmailVerification(principal: Principal): Promise<void> {
     const user = await this.repository.findById(principal.userId);
     if (user === undefined) throw notFound('Пользователь не найден');
     if (user.emailConfirmedAt !== null) throw conflict('Адрес уже подтверждён');
 
-    await this.sendEmailVerification(user, new Date());
+    await this.assertWithinRate(EMAIL_RESEND_RULE, principal.userId);
+
+    const now = new Date();
+    if (!(await this.sendEmailVerification(user, now))) {
+      const quota = await this.mail.canSendTo(user.email, now);
+      throw tooManyAttempts(quota.retryAfterSeconds);
+    }
   }
 
   /**
@@ -588,7 +627,7 @@ export class IdentityService {
    * Отдельным методом, потому что вызывается и при регистрации, и повторно по просьбе
    * человека: два места, где это делается по-разному, разъедутся на первой же правке.
    */
-  private async sendEmailVerification(user: UserRow, now: Date): Promise<void> {
+  private async sendEmailVerification(user: UserRow, now: Date): Promise<boolean> {
     const issued = issueToken(now, EMAIL_VERIFICATION_TTL_HOURS * 3_600_000);
     const letter = emailVerificationLetter(
       this.config.WEB_BASE_URL,
@@ -596,7 +635,11 @@ export class IdentityService {
       EMAIL_VERIFICATION_TTL_HOURS,
     );
 
-    await this.repository.db.transaction(async (tx) => {
+    return this.repository.db.transaction(async (tx) => {
+      // До записи токена: иначе исчерпанный предел гасил бы действующую ссылку впустую
+      // ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)).
+      if (!(await this.mail.canSendTo(user.email, now, tx)).allowed) return false;
+
       await this.repository.expireAuthTokens(user.id, 'email_verification', now, tx);
       await this.repository.createAuthToken(
         {
@@ -607,7 +650,7 @@ export class IdentityService {
         },
         tx,
       );
-      await this.mail.enqueue({ recipient: user.email, ...letter }, tx);
+      return this.mail.enqueue({ recipient: user.email, ...letter }, tx);
     });
   }
 
