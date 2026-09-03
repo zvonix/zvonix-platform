@@ -13,7 +13,13 @@ import { CurrentUser, Meta } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { IdentityService, type Principal, type RequestMeta } from './identity.service.js';
 import type { LoginResponse, SessionResponse, UserResponse } from './responses.js';
-import { loginSchema, registerSchema } from './schemas.js';
+import {
+  changePasswordSchema,
+  disableTotpSchema,
+  loginSchema,
+  registerSchema,
+  totpCodeSchema,
+} from './schemas.js';
 
 const statusSchema = z.object({
   status: z.enum(['pending', 'active', 'suspended', 'disabled']),
@@ -81,6 +87,73 @@ export class IdentityController {
   @HttpCode(204)
   async revokeSession(@CurrentUser() principal: Principal, @Param('id') id: string): Promise<void> {
     await this.identity.revokeSession(principal, parseId(id, 'session'));
+  }
+
+  /**
+   * Смена пароля из кабинета.
+   *
+   * Текущий пароль обязателен, прочие сессии закрываются, текущая остаётся
+   * ([ADR-0028](../../../../../docs/adr/0028-vtoroy-faktor.md)).
+   */
+  @Post('auth/password')
+  @HttpCode(200)
+  async changePassword(
+    @CurrentUser() principal: Principal,
+    @Body(zodBody(changePasswordSchema)) body: z.infer<typeof changePasswordSchema>,
+    @Meta() meta: RequestMeta,
+  ): Promise<{ revoked_sessions: number }> {
+    const result = await this.identity.changePassword(principal, body, meta);
+    return { revoked_sessions: result.revokedSessions };
+  }
+
+  /**
+   * Начинает подключение второго фактора.
+   *
+   * Секрет отдаётся **один раз** и только здесь: восстановить его неоткуда — в базе он
+   * лежит зашифрованным. До подтверждения кодом фактор не действует.
+   */
+  @Post('auth/totp')
+  @HttpCode(200)
+  async startTotp(
+    @CurrentUser() principal: Principal,
+  ): Promise<{ secret: string; otpauth_uri: string }> {
+    const enrolment = await this.identity.startTotpEnrolment(principal);
+    return { secret: enrolment.secret, otpauth_uri: enrolment.uri };
+  }
+
+  /** Подтверждает подключение кодом: без этого второй фактор не включается. */
+  @Post('auth/totp/confirm')
+  @HttpCode(204)
+  async confirmTotp(
+    @CurrentUser() principal: Principal,
+    @Body(zodBody(totpCodeSchema)) body: z.infer<typeof totpCodeSchema>,
+    @Meta() meta: RequestMeta,
+  ): Promise<void> {
+    await this.identity.confirmTotp(principal, body.code, meta);
+  }
+
+  /** Отключение: и пароль, и код — одной украденной сессии для снятия защиты мало. */
+  @Delete('auth/totp')
+  @HttpCode(204)
+  async disableTotp(
+    @CurrentUser() principal: Principal,
+    @Body(zodBody(disableTotpSchema)) body: z.infer<typeof disableTotpSchema>,
+    @Meta() meta: RequestMeta,
+  ): Promise<void> {
+    await this.identity.disableTotp(principal, body, meta);
+  }
+
+  /**
+   * Сброс второго фактора администратором — путь назад при потерянном телефоне.
+   *
+   * Кодов восстановления нет намеренно: это ещё один секрет, который люди хранят рядом
+   * с паролем. Здесь путь назад — человек, и его действие остаётся в журнале (ADR-0028).
+   */
+  @Roles('admin')
+  @Delete('users/:id/totp')
+  @HttpCode(204)
+  async resetTotp(@CurrentUser() actor: Principal, @Param('id') id: string): Promise<void> {
+    await this.identity.resetTotp(parseId(id, 'user'), actor.userId, actor.role);
   }
 
   @Roles('admin')

@@ -7,7 +7,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { sessions, users } from '@zvonix/db/schema';
 import { toDatabaseError } from '@zvonix/db';
 import type { Id, UserRole, UserStatus } from '@zvonix/shared';
@@ -91,6 +91,57 @@ export class IdentityRepository {
       .where(eq(users.id, id));
   }
 
+  /** Новый пароль. Отдельным запросом: смена пароля не трогает ничего больше. */
+  async setPasswordHash(id: UserId, passwordHash: string): Promise<UserRow | undefined> {
+    const [row] = await this.database.db
+      .update(users)
+      .set({ passwordHash })
+      .where(eq(users.id, id))
+      .returning();
+    return row;
+  }
+
+  /**
+   * Записывает секрет второго фактора.
+   *
+   * `confirmedAt` пустой означает «подключение начато, но не доведено»: до подтверждения
+   * кодом второй фактор не действует, иначе человек запер бы себя, не проверив,
+   * что аутентификатор вообще показывает верные коды.
+   */
+  async setTotpSecret(id: UserId, secret: string | null): Promise<UserRow | undefined> {
+    const [row] = await this.database.db
+      .update(users)
+      .set({ totpSecret: secret, totpConfirmedAt: null, totpLastStep: null })
+      .where(eq(users.id, id))
+      .returning();
+    return row;
+  }
+
+  async confirmTotp(id: UserId, at: Date, step: number): Promise<UserRow | undefined> {
+    const [row] = await this.database.db
+      .update(users)
+      .set({ totpConfirmedAt: at, totpLastStep: step })
+      .where(eq(users.id, id))
+      .returning();
+    return row;
+  }
+
+  /**
+   * Отмечает принятый шаг.
+   *
+   * Условие «шаг больше записанного» стоит в самом запросе: без него два одновременных
+   * входа с одним кодом оба прошли бы проверку и оба записали бы шаг — то есть
+   * повторное использование, ради запрета которого шаг и хранится.
+   */
+  async markTotpStep(id: UserId, step: number): Promise<boolean> {
+    const updated = await this.database.db
+      .update(users)
+      .set({ totpLastStep: step })
+      .where(and(eq(users.id, id), or(isNull(users.totpLastStep), lt(users.totpLastStep, step))))
+      .returning({ id: users.id });
+    return updated.length > 0;
+  }
+
   async setStatus(id: UserId, status: UserStatus): Promise<UserRow> {
     const [row] = await this.database.db
       .update(users)
@@ -147,11 +198,28 @@ export class IdentityRepository {
   }
 
   /** Закрывает все сессии пользователя: смена пароля, блокировка, действие администратора. */
-  async revokeAllSessions(userId: UserId, at: Date): Promise<number> {
+  /**
+   * Закрывает сессии пользователя.
+   *
+   * `keepSessionId` оставляет одну — ту, из которой действуют. Смена пароля закрывает
+   * прочие устройства, но не то, за которым человек сидит: иначе он научится пароли
+   * не менять ([ADR-0028](../../../../../docs/adr/0028-vtoroy-faktor.md)).
+   */
+  async revokeAllSessions(
+    userId: UserId,
+    at: Date,
+    options: { keepSessionId?: SessionId } = {},
+  ): Promise<number> {
     const revoked = await this.database.db
       .update(sessions)
       .set({ revokedAt: at })
-      .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))
+      .where(
+        and(
+          eq(sessions.userId, userId),
+          isNull(sessions.revokedAt),
+          ...(options.keepSessionId === undefined ? [] : [ne(sessions.id, options.keepSessionId)]),
+        ),
+      )
       .returning({ id: sessions.id });
     return revoked.length;
   }

@@ -49,9 +49,39 @@ export const registerSchema = z.object({
   role: z.enum(SELF_SERVICE_ROLES),
 });
 
+/**
+ * Код второго фактора: шесть цифр, возможно с пробелом посередине.
+ *
+ * Пробел терпится намеренно — аутентификаторы показывают код разбитым пополам,
+ * и человек переносит его вместе с пробелом (ADR-0028).
+ */
+const totpCode = z.string().trim().min(6, 'шесть цифр').max(10, 'шесть цифр');
+
 export const loginSchema = z.object({
   email,
   password: z.string().min(1, 'не может быть пустым').max(200, 'слишком длинный'),
+
+  /** Нужен только тем, у кого включён второй фактор. Спрашивается после сверки пароля. */
+  totpCode: totpCode.optional(),
+});
+
+/**
+ * Смена пароля из кабинета.
+ *
+ * Текущий пароль обязателен: украденная сессия иначе превращается в украденную
+ * учётную запись одним запросом.
+ */
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'не может быть пустым').max(200, 'слишком длинный'),
+  newPassword: password,
+});
+
+export const totpCodeSchema = z.object({ code: totpCode });
+
+/** Отключение второго фактора: и пароль, и код — это снятие защиты. */
+export const disableTotpSchema = z.object({
+  password: z.string().min(1, 'не может быть пустым').max(200, 'слишком длинный'),
+  code: totpCode,
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

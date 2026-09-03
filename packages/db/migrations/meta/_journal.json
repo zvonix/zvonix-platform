@@ -127,6 +127,13 @@
       "when": 1788409179840,
       "tag": "0017_porogi_otklyucheniya",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788414707750,
+      "tag": "0018_vtoroy_faktor",
+      "breakpoints": true
     }
   ]
 }

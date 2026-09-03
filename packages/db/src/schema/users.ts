@@ -8,7 +8,16 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { check, index, inet, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  check,
+  index,
+  inet,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import { USER_ROLES, USER_STATUSES, type UserRole, type UserStatus } from '@zvonix/shared';
 import { createdAt, idRef, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 
@@ -42,6 +51,16 @@ export const users = pgTable(
      */
     totpSecret: text(),
     totpConfirmedAt: timestamptz(),
+
+    /**
+     * Номер последнего принятого шага TOTP.
+     *
+     * RFC 6238 требует не принимать один код дважды: без этого подсмотренный код
+     * работает все свои тридцать секунд, а «подсмотренный» — не гипотеза: код диктуют
+     * по телефону и вставляют не в то окно
+     * ([ADR-0028](../../../docs/adr/0028-vtoroy-faktor.md)).
+     */
+    totpLastStep: bigint({ mode: 'number' }),
 
     /**
      * Счётчик неудачных входов подряд и блокировка до указанного момента.

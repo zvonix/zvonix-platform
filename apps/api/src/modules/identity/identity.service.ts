@@ -7,9 +7,11 @@ import {
   conflict,
   newId,
   notFound,
+  internal as internalError,
   permissionDenied,
   rateLimited,
   unauthenticated,
+  validationFailed,
   type DomainError,
   type UserRole,
   type UserStatus,
@@ -25,6 +27,8 @@ import {
   type UserRow,
 } from './identity.repository.js';
 import { burnVerificationTime, hashPassword, verifyPassword } from './password.js';
+import { decryptSecret, encryptSecret } from './secret-box.js';
+import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js';
 import type { LoginInput, RegisterInput } from './schemas.js';
 import { hashToken, issueToken, LAST_SEEN_REFRESH_MS, tokenHashEquals } from './session-token.js';
 
@@ -68,6 +72,22 @@ const REGISTRATION_RULE: LimitRule = {
   limit: 10,
   windowSeconds: 60 * 60,
 };
+
+/**
+ * Сколько раз можно ошибиться текущим паролем при его смене.
+ *
+ * Считается по пользователю, а не по адресу: сюда приходят с уже действующей сессией,
+ * и защищаемся мы не от перебора учётной записи, а от перебора **пароля** тем, кто
+ * завладел сессией, — и заодно от девятнадцати мегабайт на каждую попытку.
+ */
+const PASSWORD_CHANGE_RULE: LimitRule = {
+  name: 'auth.password.change',
+  limit: 10,
+  windowSeconds: 15 * 60,
+};
+
+/** Имя площадки в ссылке `otpauth://`: под ним запись видна в аутентификаторе. */
+const TOTP_ISSUER = 'Zvonix';
 
 /** Сколько просроченных сессий удаляется за один проход фоновой уборки. */
 export const SESSION_SWEEP_LIMIT = 1000;
@@ -272,6 +292,37 @@ export class IdentityService {
       });
     }
 
+    // Второй фактор спрашивается **после** верной сверки пароля: иначе по ответу видно,
+    // у кого он включён, то есть кого имеет смысл атаковать иначе (ADR-0028).
+    if (user.totpConfirmedAt !== null && user.totpSecret !== null) {
+      const step = await this.acceptTotp(user, input.totpCode, now);
+      if (step === undefined) {
+        // Неверный код — такая же неудача входа, как неверный пароль: и счётчик
+        // по адресу, и блокировка записи работают одинаково.
+        const attempts = user.failedLoginCount + 1;
+        const lockUntil =
+          attempts >= MAX_FAILED_LOGINS ? new Date(now.getTime() + LOCK_DURATION_MS) : null;
+        await this.repository.registerFailedLogin(user.id, lockUntil);
+        await this.countFailure(LOGIN_FAILURE_RULE, meta.ip);
+
+        await this.audit.record({
+          action: 'session.totp_failed',
+          entityType: 'user',
+          entityId: user.id,
+          actorUserId: user.id,
+          actorRole: user.role,
+          after: { provided: input.totpCode !== undefined, locked: lockUntil !== null },
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+
+        throw unauthenticated(
+          input.totpCode === undefined ? 'Нужен код второго фактора' : 'Неверный код',
+          { details: { totp_required: true } },
+        );
+      }
+    }
+
     const issued = issueToken(now);
     const session = await this.repository.createSession({
       id: newId<'session'>(),
@@ -298,6 +349,199 @@ export class IdentityService {
     });
 
     return { token: issued.token, expiresAt: issued.expiresAt, user: toPublicUser(user) };
+  }
+
+  /**
+   * Принимает код второго фактора и запоминает его шаг.
+   *
+   * Шаг записывается условием «больше записанного» в том же запросе: без этого два
+   * одновременных входа с одним кодом оба прошли бы проверку — то есть повторное
+   * использование, ради запрета которого шаг и хранится (ADR-0028).
+   */
+  private async acceptTotp(
+    user: UserRow,
+    code: string | undefined,
+    now: Date,
+  ): Promise<number | undefined> {
+    if (code === undefined || user.totpSecret === null) return undefined;
+
+    const secret = this.readTotpSecret(user);
+    const step = verifyTotp(secret, code, now, {
+      ...(user.totpLastStep === null ? {} : { minStep: user.totpLastStep }),
+    });
+    if (step === undefined) return undefined;
+
+    return (await this.repository.markTotpStep(user.id, step)) ? step : undefined;
+  }
+
+  /**
+   * Расшифровывает секрет второго фактора.
+   *
+   * Ошибка не проглатывается: невозможность расшифровать означает смену ключа или порчу
+   * данных, и в обоих случаях второй фактор у человека не работает. Пустить его без кода
+   * значило бы отключить защиту, о которой он не знает.
+   */
+  private readTotpSecret(user: UserRow): string {
+    if (user.totpSecret === null) throw internalError('У записи нет секрета второго фактора');
+    try {
+      return decryptSecret(user.totpSecret, this.config.SECRET_KEY);
+    } catch (cause) {
+      this.logger.error('Секрет второго фактора не расшифровывается', cause, {
+        user_id: user.id,
+      });
+      throw internalError('Второй фактор не работает: обратитесь к администратору');
+    }
+  }
+
+  // --- Пароль и второй фактор ------------------------------------------------------
+
+  /**
+   * Смена пароля из кабинета.
+   *
+   * Текущий пароль спрашивается обязательно: украденная сессия иначе превращается
+   * в украденную учётную запись одним запросом.
+   *
+   * Прочие сессии закрываются, текущая остаётся: пароль меняют, когда подозревают,
+   * что им завладели, и оставить чужую сессию живой значит не сделать ничего. А выкинуть
+   * человека из устройства, за которым он только что сменил пароль, — способ научить
+   * его пароли не менять.
+   */
+  async changePassword(
+    principal: Principal,
+    input: { currentPassword: string; newPassword: string },
+    meta: RequestMeta,
+  ): Promise<{ revokedSessions: number }> {
+    const user = await this.repository.findById(principal.userId);
+    if (user === undefined) throw notFound('Пользователь не найден');
+
+    await this.assertWithinFailureRate(PASSWORD_CHANGE_RULE, principal.userId);
+    if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+      await this.countFailure(PASSWORD_CHANGE_RULE, principal.userId);
+      throw unauthenticated('Неверный текущий пароль');
+    }
+    await this.forgetFailures(PASSWORD_CHANGE_RULE, principal.userId);
+
+    await this.repository.setPasswordHash(user.id, await hashPassword(input.newPassword));
+    const revoked = await this.repository.revokeAllSessions(user.id, new Date(), {
+      keepSessionId: principal.sessionId,
+    });
+
+    await this.audit.record({
+      action: 'user.password_changed',
+      entityType: 'user',
+      entityId: user.id,
+      actorUserId: user.id,
+      actorRole: user.role,
+      after: { revoked_sessions: revoked },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+
+    return { revokedSessions: revoked };
+  }
+
+  /**
+   * Начинает подключение второго фактора: выдаёт секрет и ссылку для аутентификатора.
+   *
+   * До подтверждения кодом фактор не действует — иначе человек запер бы себя, не проверив,
+   * что аутентификатор показывает верные коды. Повторный вызов заменяет неподтверждённый
+   * секрет новым: так выглядит «начал, бросил, начал заново».
+   */
+  async startTotpEnrolment(principal: Principal): Promise<{ secret: string; uri: string }> {
+    const user = await this.repository.findById(principal.userId);
+    if (user === undefined) throw notFound('Пользователь не найден');
+    if (user.totpConfirmedAt !== null) {
+      throw conflict('Второй фактор уже подключён: сначала отключите его');
+    }
+
+    const secret = generateTotpSecret();
+    await this.repository.setTotpSecret(user.id, encryptSecret(secret, this.config.SECRET_KEY));
+
+    // Секрет уходит в ответ ровно один раз и в журнал не попадает: в журнале он был бы
+    // вторым фактором, лежащим рядом с записью о том, чей он.
+    return { secret, uri: otpauthUri(secret, user.email, TOTP_ISSUER) };
+  }
+
+  /** Подтверждает подключение кодом: без этого второй фактор не включается. */
+  async confirmTotp(principal: Principal, code: string, meta: RequestMeta): Promise<void> {
+    const user = await this.repository.findById(principal.userId);
+    if (user === undefined) throw notFound('Пользователь не найден');
+    if (user.totpSecret === null) throw conflict('Подключение второго фактора не начато');
+    if (user.totpConfirmedAt !== null) throw conflict('Второй фактор уже подключён');
+
+    const now = new Date();
+    const step = verifyTotp(this.readTotpSecret(user), code, now);
+    if (step === undefined) throw validationFailed('Код не подходит');
+
+    await this.repository.confirmTotp(user.id, now, step);
+    await this.audit.record({
+      action: 'user.totp_enabled',
+      entityType: 'user',
+      entityId: user.id,
+      actorUserId: user.id,
+      actorRole: user.role,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+  }
+
+  /**
+   * Отключение второго фактора самим человеком.
+   *
+   * Спрашивается и пароль, и код: отключение — это снятие защиты, и одной украденной
+   * сессии для него быть недостаточно.
+   */
+  async disableTotp(
+    principal: Principal,
+    input: { password: string; code: string },
+    meta: RequestMeta,
+  ): Promise<void> {
+    const user = await this.repository.findById(principal.userId);
+    if (user === undefined) throw notFound('Пользователь не найден');
+    if (user.totpSecret === null || user.totpConfirmedAt === null) {
+      throw conflict('Второй фактор не подключён');
+    }
+
+    if (!(await verifyPassword(input.password, user.passwordHash))) {
+      throw unauthenticated('Неверный пароль');
+    }
+    const step = verifyTotp(this.readTotpSecret(user), input.code, new Date(), {
+      ...(user.totpLastStep === null ? {} : { minStep: user.totpLastStep }),
+    });
+    if (step === undefined) throw validationFailed('Код не подходит');
+
+    await this.repository.setTotpSecret(user.id, null);
+    await this.audit.record({
+      action: 'user.totp_disabled',
+      entityType: 'user',
+      entityId: user.id,
+      actorUserId: user.id,
+      actorRole: user.role,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+  }
+
+  /**
+   * Сброс второго фактора администратором — путь назад при потерянном телефоне.
+   *
+   * Кодов восстановления нет намеренно: это ещё один секрет, который люди хранят
+   * в заметках рядом с паролем (ADR-0028). Здесь путь назад — человек, и его действие
+   * остаётся в журнале.
+   */
+  async resetTotp(id: UserId, actorUserId: UserId, actorRole: UserRole): Promise<void> {
+    const user = await this.repository.findById(id);
+    if (user === undefined) throw notFound('Пользователь не найден');
+
+    await this.repository.setTotpSecret(id, null);
+    await this.audit.record({
+      action: 'user.totp_reset',
+      entityType: 'user',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: { totp_enabled: user.totpConfirmedAt !== null },
+    });
   }
 
   /**
