@@ -123,22 +123,16 @@ export class QualityService {
 
     const suspensions: Suspension[] = [];
 
-    for (const threshold of thresholds) {
-      const since = new Date(now.getTime() - threshold.windowMinutes * 60_000);
-
-      if (threshold.scope === 'sim') {
-        for (const found of await this.repository.simsOverThreshold(since, threshold.failures)) {
-          const updated = await this.telephony.setSimStatus(
-            found.subjectId as Id<'simCard'>,
-            'throttled',
-          );
-          if (updated === undefined) continue;
-          suspensions.push({ scope: 'sim', subjectId: found.subjectId, failures: found.failures });
-        }
-        continue;
-      }
-
-      for (const found of await this.repository.gatewaysOverThreshold(since, threshold.failures)) {
+    // Шлюзы раньше SIM намеренно: SIM неисправного шлюза отказывает не потому, что
+    // с ней что-то не так. Отключив шлюз первым, мы выводим его SIM из отбора того же
+    // прохода — иначе партнёру пришлось бы включать обратно два объекта вместо одного.
+    const gatewayThreshold = thresholds.find((row) => row.scope === 'gateway');
+    if (gatewayThreshold !== undefined) {
+      const since = new Date(now.getTime() - gatewayThreshold.windowMinutes * 60_000);
+      for (const found of await this.repository.gatewaysOverThreshold(
+        since,
+        gatewayThreshold.failures,
+      )) {
         const updated = await this.telephony.setGatewayStatus(
           found.subjectId as Id<'gateway'>,
           'suspended',
@@ -149,6 +143,19 @@ export class QualityService {
           subjectId: found.subjectId,
           failures: found.failures,
         });
+      }
+    }
+
+    const simThreshold = thresholds.find((row) => row.scope === 'sim');
+    if (simThreshold !== undefined) {
+      const since = new Date(now.getTime() - simThreshold.windowMinutes * 60_000);
+      for (const found of await this.repository.simsOverThreshold(since, simThreshold.failures)) {
+        const updated = await this.telephony.setSimStatus(
+          found.subjectId as Id<'simCard'>,
+          'throttled',
+        );
+        if (updated === undefined) continue;
+        suspensions.push({ scope: 'sim', subjectId: found.subjectId, failures: found.failures });
       }
     }
 

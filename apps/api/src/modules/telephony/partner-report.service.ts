@@ -1,0 +1,129 @@
+/**
+ * Обращения партнёра о своих вызовах ([ADR-0013](../../../../../docs/adr/0013-opredelenie-operatora.md)).
+ *
+ * Главное из них — «вызов ушёл не в мою сеть». Партнёр видит счёт от своего оператора
+ * и знает про неверное определение раньше нас: у него это деньги, у нас — строка в базе.
+ * Поэтому его обращение отменяет запись **немедленно**, независимо от срока годности.
+ */
+
+import { Injectable } from '@nestjs/common';
+import {
+  notFound,
+  parseMsisdn,
+  rateLimited,
+  type Id,
+  type Msisdn,
+  type UserRole,
+} from '@zvonix/shared';
+import { AuditService } from '../audit/audit.service.js';
+import { BillingRepository } from '../billing/billing.repository.js';
+import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
+import { RateLimitService, type LimitRule } from '../limits/rate-limit.service.js';
+import { CallRepository, type CallId, type CallRow } from './call.repository.js';
+
+/**
+ * Сколько обращений в час принимается от одного партнёра.
+ *
+ * Не про добросовестность, а про пропускную способность: каждая отмена отправляет номер
+ * на повторное определение, а внешний источник держит **два запроса в секунду на всю
+ * платформу** (ADR-0013). Партнёр, отменяющий всё подряд, оставил бы без определения
+ * чужие вызовы — и не по злому умыслу, а по ошибке в своей выгрузке.
+ */
+const WRONG_NETWORK_RULE: LimitRule = {
+  name: 'wrong-network',
+  limit: 50,
+  windowSeconds: 3600,
+};
+
+/** Сколько вызовов партнёр видит за раз. */
+const PARTNER_CALLS_LIMIT = 200;
+
+@Injectable()
+export class PartnerReportService {
+  constructor(
+    private readonly calls: CallRepository,
+    private readonly billing: BillingRepository,
+    private readonly resolver: OperatorResolverService,
+    private readonly rateLimit: RateLimitService,
+    private readonly audit: AuditService,
+  ) {}
+
+  /** Вызовы партнёра: по ним он сверяется со счётом своего оператора. */
+  async listCalls(
+    requester: { userId: Id<'user'>; role: UserRole },
+    partnerId?: Id<'partner'>,
+  ): Promise<CallRow[]> {
+    return this.calls.listByPartner(
+      await this.subjectOf(requester, partnerId),
+      PARTNER_CALLS_LIMIT,
+    );
+  }
+
+  /**
+   * «Этот вызов ушёл не в мою сеть».
+   *
+   * Обращение привязано к **вызову**, а не к номеру: по номеру партнёр мог бы отменить
+   * определение чего угодно, включая номера, которых он не обслуживал. Вызов же
+   * ограничивает обращение тем, что действительно ушло через его железо.
+   */
+  async reportWrongNetwork(
+    callId: CallId,
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<{ invalidated: boolean; destination: Msisdn }> {
+    const found = await this.calls.findWithPartner(callId);
+    // Чужой вызов и несуществующий отвечают одинаково: иначе по разнице ответов
+    // проверяется, обслуживал ли этот вызов кто-то другой.
+    if (found === undefined) throw notFound('Вызов не найден');
+
+    if (requester.role === 'partner') {
+      const partner = await this.billing.findPartnerOwnedBy(requester.userId);
+      if (partner === undefined || partner.id !== found.partnerId) {
+        throw notFound('Вызов не найден');
+      }
+
+      const verdict = await this.rateLimit.hit(WRONG_NETWORK_RULE, found.partnerId);
+      if (!verdict.allowed) {
+        throw rateLimited('Слишком много обращений за час', {
+          details: { retry_after_seconds: verdict.retryAfterSeconds },
+        });
+      }
+    }
+
+    const destination = parseMsisdn(found.call.destination);
+    const invalidated = await this.resolver.invalidate(destination);
+
+    await this.audit.record({
+      action: 'call.wrong_network_reported',
+      entityType: 'call',
+      entityId: callId,
+      actorUserId: requester.userId,
+      actorRole: requester.role,
+      // Номер в журнале не маскируется намеренно: это запись о конкретном номере,
+      // определённом неверно, и без него разбирать нечего. Читают журнал только
+      // администратор и поддержка.
+      after: { destination, partner_id: found.partnerId, invalidated },
+    });
+
+    return { invalidated, destination };
+  }
+
+  /**
+   * Чей это партнёр.
+   *
+   * Партнёр видит только свои вызовы, администратор и поддержка — вызовы названного
+   * партнёра. Роль здесь первый рубеж, а не единственный: роль `partner` говорит лишь
+   * о том, что человек партнёр, но не о том, какой.
+   */
+  private async subjectOf(
+    requester: { userId: Id<'user'>; role: UserRole },
+    partnerId: Id<'partner'> | undefined,
+  ): Promise<Id<'partner'>> {
+    if (requester.role === 'partner') {
+      const partner = await this.billing.findPartnerOwnedBy(requester.userId);
+      if (partner === undefined) throw notFound('Партнёр не найден');
+      return partner.id;
+    }
+    if (partnerId === undefined) throw notFound('Партнёр не назван');
+    return partnerId;
+  }
+}

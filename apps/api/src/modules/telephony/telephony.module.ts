@@ -7,6 +7,8 @@ import { CallRepository } from './call.repository.js';
 import { CdrController } from './cdr.controller.js';
 import { CdrService } from './cdr.service.js';
 import { NodeDirectoryController } from './node-directory.controller.js';
+import { PartnerReportController } from './partner-report.controller.js';
+import { PartnerReportService } from './partner-report.service.js';
 import { QualityController } from './quality.controller.js';
 import { QualityRepository } from './quality.repository.js';
 import { QualityService } from './quality.service.js';
@@ -16,7 +18,13 @@ import { TelephonyService } from './telephony.service.js';
 
 @Module({
   imports: [AuditModule, CatalogModule, BillingModule, LimitsModule],
-  controllers: [TelephonyController, NodeDirectoryController, CdrController, QualityController],
+  controllers: [
+    TelephonyController,
+    NodeDirectoryController,
+    CdrController,
+    QualityController,
+    PartnerReportController,
+  ],
   providers: [
     TelephonyService,
     TelephonyRepository,
@@ -24,6 +32,7 @@ import { TelephonyService } from './telephony.service.js';
     CdrService,
     QualityService,
     QualityRepository,
+    PartnerReportService,
   ],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.
   // `CdrService` — ради уборки вызовов без CDR: она нужна и маршрутизации на пути

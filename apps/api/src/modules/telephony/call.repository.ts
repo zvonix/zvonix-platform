@@ -5,7 +5,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
-import { calls, simCards } from '@zvonix/db/schema';
+import { calls, gateways, simCards } from '@zvonix/db/schema';
 import {
   newId,
   OPEN_CALL_STATUSES,
@@ -138,6 +138,40 @@ export class CallRepository {
    * Одним запросом, а не чтением с последующей записью: два экземпляра control plane
    * иначе перетирали бы состояние друг друга. Возвращает число закрытых.
    */
+  /**
+   * Вызовы, которые терминировал этот партнёр, свежие сверху.
+   *
+   * Отбор по шлюзу, а не по SIM: SIM переживает порт и может переехать к другому
+   * владельцу, а вызов ушёл через то железо, которое стояло тогда.
+   */
+  async listByPartner(partnerId: Id<'partner'>, limit: number): Promise<CallRow[]> {
+    const rows = await this.db
+      .select({ call: calls })
+      .from(calls)
+      .innerJoin(gateways, eq(gateways.id, calls.gatewayId))
+      .where(eq(gateways.partnerId, partnerId))
+      .orderBy(desc(calls.startedAt))
+      .limit(limit);
+    return rows.map((row) => row.call);
+  }
+
+  /**
+   * Вызов вместе с партнёром, через которого он ушёл.
+   *
+   * Одним запросом: «прочитать вызов, потом шлюз» — это две проверки владения там,
+   * где нужна одна, и промежуток между ними, в который шлюз может сменить хозяина.
+   */
+  async findWithPartner(
+    id: CallId,
+  ): Promise<{ call: CallRow; partnerId: Id<'partner'> } | undefined> {
+    const [row] = await this.db
+      .select({ call: calls, partnerId: gateways.partnerId })
+      .from(calls)
+      .innerJoin(gateways, eq(gateways.id, calls.gatewayId))
+      .where(eq(calls.id, id));
+    return row;
+  }
+
   async closeAbandoned(deadline: Date, executor: Executor = this.db): Promise<number> {
     const rows = await executor
       .update(calls)

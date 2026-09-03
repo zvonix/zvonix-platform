@@ -45,6 +45,15 @@ export interface FailureCount {
  */
 const NETWORK_FAILURE = and(eq(calls.status, 'failed'), isNull(calls.failureReason));
 
+/**
+ * Сколько объектов отдаётся в разборе качества.
+ *
+ * Разбор читает человек, а не машина: две сотни строк, отсортированных по отказам,
+ * отвечают на вопрос «у кого хуже всех», а полная выгрузка по тысяче SIM за месяц —
+ * это ответ, который никто не дочитает, и время, которое база потратит зря.
+ */
+const QUALITY_LIMIT = 200;
+
 @Injectable()
 export class QualityRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -72,7 +81,8 @@ export class QualityRepository {
           : and(gte(calls.startedAt, since), eq(simCards.partnerId, partnerId)),
       )
       .groupBy(simCards.id, simCards.partnerId)
-      .orderBy(sql`count(*) filter (where ${NETWORK_FAILURE}) desc`);
+      .orderBy(sql`count(*) filter (where ${NETWORK_FAILURE}) desc`)
+      .limit(QUALITY_LIMIT);
 
     return rows;
   }
@@ -96,7 +106,8 @@ export class QualityRepository {
           : and(gte(calls.startedAt, since), eq(gateways.partnerId, partnerId)),
       )
       .groupBy(gateways.id, gateways.partnerId)
-      .orderBy(sql`count(*) filter (where ${NETWORK_FAILURE}) desc`);
+      .orderBy(sql`count(*) filter (where ${NETWORK_FAILURE}) desc`)
+      .limit(QUALITY_LIMIT);
 
     return rows;
   }
@@ -108,16 +119,29 @@ export class QualityRepository {
    * её в строй — дело человека (ADR-0027).
    */
   async simsOverThreshold(since: Date, failures: number): Promise<FailureCount[]> {
-    return this.db
-      .select({
-        subjectId: simCards.id,
-        failures: sql<number>`count(*)::int`,
-      })
-      .from(calls)
-      .innerJoin(simCards, eq(simCards.id, calls.simCardId))
-      .where(and(gte(calls.startedAt, since), eq(simCards.status, 'active'), NETWORK_FAILURE))
-      .groupBy(simCards.id)
-      .having(sql`count(*) >= ${failures}`);
+    return (
+      this.db
+        .select({
+          subjectId: simCards.id,
+          failures: sql<number>`count(*)::int`,
+        })
+        .from(calls)
+        .innerJoin(simCards, eq(simCards.id, calls.simCardId))
+        // Шлюз проверяется тоже: SIM неисправного шлюза отказывает не потому, что
+        // с ней что-то не так, и отключать её отдельно значит заставить партнёра
+        // включать обратно два объекта вместо одного.
+        .innerJoin(gateways, eq(gateways.id, calls.gatewayId))
+        .where(
+          and(
+            gte(calls.startedAt, since),
+            eq(simCards.status, 'active'),
+            eq(gateways.status, 'active'),
+            NETWORK_FAILURE,
+          ),
+        )
+        .groupBy(simCards.id)
+        .having(sql`count(*) >= ${failures}`)
+    );
   }
 
   async gatewaysOverThreshold(since: Date, failures: number): Promise<FailureCount[]> {

@@ -280,6 +280,21 @@ describe('за что отключают', () => {
     expect(await simStatus(env.sim)).toBe('active');
   }, 120_000);
 
+  it('SIM неисправного шлюза отдельно не отключается', async () => {
+    // Иначе партнёру пришлось бы включать обратно два объекта вместо одного, хотя
+    // виновато железо, а не пластик.
+    const env = await environment();
+    await setThreshold('gateway', 2, 60);
+    await setThreshold('sim', 2, 60);
+
+    await recordCall(env, 'failed');
+    await recordCall(env, 'failed');
+    await sweep();
+
+    expect(await gatewayStatus(env.gateway)).toBe('suspended');
+    expect(await simStatus(env.sim)).toBe('active');
+  }, 120_000);
+
   it('отключённое обратно не включает', async () => {
     // Отключённая SIM вызовов не получает, её окно опустеет само — автоматический
     // возврат превратился бы в мигание (ADR-0027).

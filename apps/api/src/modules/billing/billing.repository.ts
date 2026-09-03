@@ -174,6 +174,20 @@ export class BillingRepository {
     return row;
   }
 
+  /**
+   * Партнёр, которым владеет этот пользователь.
+   *
+   * Роль — первый рубеж, владение проверяет служба ([ADR-0018](../../../../../docs/adr/0018-autentifikaciya.md)):
+   * роль `partner` говорит лишь о том, что человек партнёр, а не о том, **какой**.
+   */
+  async findPartnerOwnedBy(userId: Id<'user'>): Promise<{ id: PartnerId } | undefined> {
+    const [row] = await this.db
+      .select({ id: partners.id })
+      .from(partners)
+      .where(eq(partners.ownerUserId, userId));
+    return row;
+  }
+
   async findPartnerAlias(partnerId: PartnerId): Promise<string | undefined> {
     const [row] = await this.db
       .select({ displayName: partnerAliases.displayName })
