@@ -32,6 +32,7 @@ export { ReservationService, EXPIRY_SWEEP_LIMIT } from './modules/billing/reserv
 
 export { TelephonyModule } from './modules/telephony/telephony.module.js';
 export { CdrService } from './modules/telephony/cdr.service.js';
+export { QualityService } from './modules/telephony/quality.service.js';
 
 export { IdentityModule } from './modules/identity/identity.module.js';
 export { IdentityService, SESSION_SWEEP_LIMIT } from './modules/identity/identity.service.js';

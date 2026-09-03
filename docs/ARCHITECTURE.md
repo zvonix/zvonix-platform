@@ -40,14 +40,14 @@
 | `billing` | Резервы, проводки, тарификация CDR, комиссия, балансы | `apps/api/src/modules/billing` | `packages/db` |
 | `limits` | Два разных ограничения: доменные квоты клиента, канала, партнёра и SIM (счётчик в PostgreSQL, [ADR-0026](adr/0026-limity-po-oknam.md)) и защита от перебора при входе (счётчик в Redis) | `apps/api/src/modules/limits` | БД + Redis |
 | `catalog` | Направления, коридоры цен, тарифы, операторы и MVNO, `OperatorResolver` и база `NumberResolution` ([ADR-0013](adr/0013-opredelenie-operatora.md)) | `apps/api/src/modules/catalog` | БД, внешний lookup |
-| `telephony` | Учётные записи SIP шлюзов и каналов и их выдача узлу (привязка `directory`), приём CDR от узлов, состояние шлюзов и SIM | `apps/api/src/modules/telephony` | `billing` |
+| `telephony` | Учётные записи SIP шлюзов и каналов и их выдача узлу (привязка `directory`), приём CDR от узлов, состояние шлюзов и SIM, качество терминации и порог отключения ([ADR-0027](adr/0027-porog-otklyucheniya.md)) | `apps/api/src/modules/telephony` | `billing`, `limits` |
 | `recordings` | Приём, хранение, выдача записей по подписанным ссылкам | `apps/api/src/modules/recordings` | объектное хранилище |
 | `nodes` | Реестр узлов, генерация команды установки, health и метрики | `apps/api/src/modules/nodes` | БД |
 | `payments` | Пополнения клиентов и выплаты партнёрам | `apps/api/src/modules/payments` | `billing` |
 | `identity` | Учётные записи, роли, права, 2FA, API-ключи | `apps/api/src/modules/identity` | БД |
 | `audit` | Неизменяемый журнал действий | `apps/api/src/modules/audit` | БД |
 | `web` | Админка и кабинеты клиента и партнёра | `apps/web` | `api` |
-| `worker` | Расписание фоновых задач ([ADR-0020](adr/0020-fonovye-zadachi.md)): уборка резервов, зависших вызовов, замолчавших узлов и записей по сроку. Дальше — сверка CDR, выплаты, агрегация ASR, обновление MNP | `apps/worker` | `billing`, `telephony`, `nodes`, `recordings` |
+| `worker` | Расписание фоновых задач ([ADR-0020](adr/0020-fonovye-zadachi.md)): уборка резервов, зависших вызовов, замолчавших узлов, записей по сроку и закрытых окон лимитов; снятие с маршрутизации по порогу отказов ([ADR-0027](adr/0027-porog-otklyucheniya.md)). Дальше — сверка CDR, выплаты, обновление MNP | `apps/worker` | `billing`, `telephony`, `nodes`, `recordings`, `limits` |
 | `esl` | Долгоживущее соединение с узлами, события вызовов в реальном времени | `apps/esl` | `telephony` |
 | `agent` | На узле: установка, обновление, метрики, выгрузка записей | `apps/agent` | control plane |
 

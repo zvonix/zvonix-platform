@@ -118,3 +118,26 @@ export const USABLE_PORT_STATES: readonly GatewayPortState[] = ['unknown', 'idle
  */
 export const DEFAULT_MAX_CONCURRENT_CALLS = 1;
 export const MAX_CONCURRENT_CALLS_LIMIT = 8;
+
+/**
+ * Область действия порога отключения
+ * ([ADR-0027](../../../docs/adr/0027-porog-otklyucheniya.md)).
+ *
+ * Канала здесь нет намеренно: вызовы канала срываются, как правило, из-за номерной базы
+ * клиента, а не из-за неисправности, и автоматически отключить платящего клиента —
+ * решение с прямыми последствиями для выручки.
+ */
+export const FAILURE_SCOPES = ['sim', 'gateway'] as const;
+export type FailureScope = (typeof FAILURE_SCOPES)[number];
+
+/**
+ * Состояние, в которое порог переводит объект своей области.
+ *
+ * Оба обратимы и снимают объект с маршрутизации. Настраиваемого действия у порога нет:
+ * возможность выбрать `retired` означала бы, что администратор одним неверным полем
+ * выводит SIM из эксплуатации навсегда.
+ */
+export const SCOPE_SUSPENDED_STATUS: Readonly<Record<FailureScope, string>> = {
+  sim: 'throttled',
+  gateway: 'suspended',
+};

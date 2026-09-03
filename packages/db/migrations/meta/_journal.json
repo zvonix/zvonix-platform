@@ -120,6 +120,13 @@
       "when": 1788404798186,
       "tag": "0016_limity_po_oknam",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788409179840,
+      "tag": "0017_porogi_otklyucheniya",
+      "breakpoints": true
     }
   ]
 }

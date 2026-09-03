@@ -19,6 +19,16 @@ import { rejectDocument, routeDocument, sipResponseFor } from './dialplan-xml.js
 import { dialplanRequestSchema, previewSchema } from './schemas.js';
 import { RoutingService } from './routing.service.js';
 
+/**
+ * Когда решение о маршруте считается медленным.
+ *
+ * Секунда — не бюджет, а признак неисправности: внутри решения уже есть внешнее
+ * определение оператора со своим пределом в 800 мс (docs/api/node.md), а всё остальное —
+ * чтения по индексам. Дольше секунды означает, что медленно что-то ещё, и знать об этом
+ * надо раньше, чем узел начнёт отваливаться по своему тайм-ауту.
+ */
+const SLOW_DECISION_MS = 1000;
+
 @Controller()
 export class RoutingController {
   private readonly logger: Logger;
@@ -56,12 +66,14 @@ export class RoutingController {
       return rejectDocument('operator_unconfirmed');
     }
 
+    const startedAt = performance.now();
     const decision = await this.routing.route({
       externalId: parsed.data['Unique-ID'],
       channelId: parseId(parsed.data['variable_zvonix_channel'], 'channel'),
       nodeId: parseId(machine.ownerId, 'node'),
       destination,
     });
+    this.warnIfSlow(startedAt, parsed.data['Unique-ID']);
 
     if (decision.outcome === 'rejected') {
       this.logger.info('Вызов отклонён', {
@@ -100,14 +112,19 @@ export class RoutingController {
     reason: string | null;
     sip_response: string | null;
     call_id: string | null;
+    decision_ms: number;
     candidates: { gateway_id: string; sip_username: string; sim_card_id: string }[];
   }> {
+    const startedAt = performance.now();
     const decision = await this.routing.route({
       externalId: body.callId,
       channelId: parseId(body.channelId, 'channel'),
       nodeId: parseId(body.nodeId, 'node'),
       destination: body.destination,
     });
+    // Сколько заняло решение — единственный способ узнать это, не заводя нагрузочный
+    // стенд: разбор выполняет ровно тот же путь, что и настоящий вызов.
+    const decisionMs = this.warnIfSlow(startedAt, body.callId);
 
     if (decision.outcome === 'rejected') {
       return {
@@ -115,6 +132,7 @@ export class RoutingController {
         reason: decision.reason,
         sip_response: sipResponseFor(decision.reason),
         call_id: decision.call?.id ?? null,
+        decision_ms: decisionMs,
         candidates: [],
       };
     }
@@ -124,11 +142,31 @@ export class RoutingController {
       reason: null,
       sip_response: null,
       call_id: decision.call.id,
+      decision_ms: decisionMs,
       candidates: decision.candidates.map((candidate) => ({
         gateway_id: candidate.gateway.id,
         sip_username: candidate.gateway.sipUsername,
         sim_card_id: candidate.sim.id,
       })),
     };
+  }
+
+  /**
+   * Замечает медленное решение и возвращает его длительность.
+   *
+   * Каждое решение в лог не пишется: их столько же, сколько вызовов. Пишется только то,
+   * что вышло за признак неисправности, — иначе о замедлении узнают от узла, когда он
+   * начнёт отваливаться по своему тайм-ауту.
+   */
+  private warnIfSlow(startedAt: number, externalId: string): number {
+    const durationMs = Math.round(performance.now() - startedAt);
+    if (durationMs > SLOW_DECISION_MS) {
+      this.logger.warn('Решение о маршруте заняло дольше ожидаемого', {
+        duration_ms: durationMs,
+        slow_after_ms: SLOW_DECISION_MS,
+        external_id: externalId,
+      });
+    }
+    return durationMs;
   }
 }

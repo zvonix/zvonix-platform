@@ -145,6 +145,7 @@ async function main() {
         'recordings.remove-expired',
         'sessions.purge-expired',
         'limits.purge-closed-windows',
+        'quality.suspend-over-threshold',
       ].every((task) => output.join('').includes(task)),
     );
 

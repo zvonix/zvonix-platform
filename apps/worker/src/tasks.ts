@@ -19,6 +19,7 @@ import {
   IdentityService,
   LimitService,
   NodesService,
+  QualityService,
   RecordingsService,
   ReservationService,
   RETENTION_SWEEP_LIMIT,
@@ -102,6 +103,15 @@ const SESSION_SWEEP_SECONDS = 3600;
  */
 const LIMIT_COUNTER_SWEEP_SECONDS = 86_400;
 
+/**
+ * Как часто ищутся объекты, набравшие отказов сверх порога.
+ *
+ * Минута: каждый вызов на неисправную SIM — это несостоявшаяся поездка у клиента
+ * и лишний повод оператору счесть профиль трафика машинным. Проход дешёвый —
+ * агрегат по индексу, и только если порог вообще задан.
+ */
+const FAILURE_THRESHOLD_SWEEP_SECONDS = 60;
+
 @Injectable()
 export class BackgroundTasks {
   constructor(
@@ -111,6 +121,7 @@ export class BackgroundTasks {
     private readonly recordings: RecordingsService,
     private readonly identity: IdentityService,
     private readonly limits: LimitService,
+    private readonly quality: QualityService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -147,6 +158,11 @@ export class BackgroundTasks {
         name: 'limits.purge-closed-windows',
         everySeconds: LIMIT_COUNTER_SWEEP_SECONDS,
         run: (now) => this.limits.purgeClosedWindows(now),
+      },
+      {
+        name: 'quality.suspend-over-threshold',
+        everySeconds: FAILURE_THRESHOLD_SWEEP_SECONDS,
+        run: (now) => this.quality.suspendOverThreshold(now),
       },
     ];
   }
