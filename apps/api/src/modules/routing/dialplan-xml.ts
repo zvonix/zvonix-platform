@@ -56,6 +56,7 @@ const SIP_RESPONSE: Readonly<Record<CallFailureReason, string>> = {
   channel_unknown: '403 Forbidden',
   operator_unconfirmed: '404 Not Found',
   destination_blocked: '403 Forbidden',
+  operator_not_allowed: '403 Forbidden',
   no_tariff: '503 Service Unavailable',
   insufficient_funds: '402 Payment Required',
   limit_exceeded: '503 Service Unavailable',

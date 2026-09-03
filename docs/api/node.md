@@ -206,6 +206,7 @@ Basic поверх TLS: имя — идентификатор ключа, пар
 | `channel_unknown` — канал неизвестен или не активен | `respond 403 Forbidden` | 403 |
 | `operator_unconfirmed` — оператор номера не подтверждён | `respond 404 Not Found` | 404 |
 | `destination_blocked` — номер в чёрном списке | `respond 403 Forbidden` | 403 |
+| `operator_not_allowed` — оператор номера не разрешён каналом | `respond 403 Forbidden` | 403 |
 | `insufficient_funds` — овердрафт исчерпан | `respond 402 Payment Required` | 402 |
 | `limit_exceeded` — окно лимита исчерпано | `respond 503 Service Unavailable` | 503 |
 | `no_sim_available` — нет свободной SIM нужного оператора | `respond 503 Service Unavailable` | 503 |

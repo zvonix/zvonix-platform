@@ -6,6 +6,7 @@ import { Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNotNull, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
 import {
+  channelAllowedOperators,
   channelPartnerPriorities,
   channels,
   clients,
@@ -40,6 +41,7 @@ export type SimCardRow = typeof simCards.$inferSelect;
 export type GatewayPortRow = typeof gatewayPorts.$inferSelect;
 export type PartnerPriorityRow = typeof channelPartnerPriorities.$inferSelect;
 export type PartnerCoverageRow = typeof partnerCoverage.$inferSelect;
+export type AllowedOperatorRow = typeof channelAllowedOperators.$inferSelect;
 export type PartnerId = Id<'partner'>;
 
 /** Исполнитель запроса: пул или транзакция. */
@@ -483,6 +485,71 @@ export class TelephonyRepository {
             channelId,
             partnerId: entry.partnerId,
             priority: entry.priority,
+          })),
+        )
+        .returning();
+    });
+  }
+
+  // --- Разрешённые операторы канала (ADR-0025) ----------------------------------
+
+  /**
+   * Разрешён ли каналу вызов на этого оператора.
+   *
+   * Спрашивается сразу и наличие списка, и попадание в него: два отдельных чтения
+   * разъезжались бы между собой ровно в тот момент, когда клиент правит список.
+   * Пустой список означает «все операторы» — иначе новый канал не смог бы позвонить,
+   * пока кто-то его не заполнит.
+   */
+  async isOperatorAllowed(channelId: ChannelId, operatorId: Id<'operator'>): Promise<boolean> {
+    const [row] = await this.db
+      .select({
+        // `bool_or` по пустому множеству — `NULL`, и это ровно то, что нужно различить:
+        // «список не заведён» и «заведён, оператора в нём нет» — разные ответы.
+        configured: sql<boolean | null>`bool_or(true)`,
+        allowed: sql<
+          boolean | null
+        >`bool_or(${channelAllowedOperators.operatorId} = ${operatorId})`,
+      })
+      .from(channelAllowedOperators)
+      .where(eq(channelAllowedOperators.channelId, channelId));
+
+    if (row === undefined || row.configured !== true) return true;
+    return row.allowed === true;
+  }
+
+  async listAllowedOperators(channelId: ChannelId): Promise<AllowedOperatorRow[]> {
+    return this.db
+      .select()
+      .from(channelAllowedOperators)
+      .where(eq(channelAllowedOperators.channelId, channelId))
+      .orderBy(asc(channelAllowedOperators.operatorId));
+  }
+
+  /**
+   * Заменяет список операторов канала целиком.
+   *
+   * Замена, а не правка по одному: пустой список означает «все операторы», и дописать
+   * к нему один оператор значило бы не расширение, а внезапное ограничение до одного.
+   */
+  async replaceAllowedOperators(
+    channelId: ChannelId,
+    operatorIds: readonly Id<'operator'>[],
+  ): Promise<AllowedOperatorRow[]> {
+    return this.db.transaction(async (tx) => {
+      await tx
+        .delete(channelAllowedOperators)
+        .where(eq(channelAllowedOperators.channelId, channelId));
+
+      if (operatorIds.length === 0) return [];
+
+      return tx
+        .insert(channelAllowedOperators)
+        .values(
+          operatorIds.map((operatorId) => ({
+            id: newId<'channelAllowedOperator'>(),
+            channelId,
+            operatorId,
           })),
         )
         .returning();

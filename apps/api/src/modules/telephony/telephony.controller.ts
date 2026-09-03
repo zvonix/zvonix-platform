@@ -11,6 +11,7 @@ import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import {
   addPortSchema,
+  allowedOperatorsSchema,
   assignSimSchema,
   channelStatusSchema,
   createChannelSchema,
@@ -22,7 +23,13 @@ import {
   simConcurrencySchema,
   simStatusSchema,
 } from './schemas.js';
-import type { ChannelRow, GatewayPortRow, GatewayRow, SimCardRow } from './telephony.repository.js';
+import type {
+  AllowedOperatorRow,
+  ChannelRow,
+  GatewayPortRow,
+  GatewayRow,
+  SimCardRow,
+} from './telephony.repository.js';
 import {
   TelephonyService,
   type IssuedSipAccount,
@@ -282,6 +289,40 @@ export class TelephonyController {
     return { priorities: rows.map(toPriorityView) };
   }
 
+  /**
+   * Операторы, на которых каналу разрешено звонить (ADR-0025).
+   *
+   * Пустой список означает «все операторы»: иначе новый канал не смог бы позвонить,
+   * пока кто-то его не заполнит.
+   */
+  @Roles('admin', 'support', 'client')
+  @Get('channels/:id/allowed-operators')
+  async listAllowedOperators(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ operators: string[] }> {
+    const rows = await this.telephony.listAllowedOperators(parseId(id, 'channel'), {
+      userId: actor.userId,
+      role: actor.role,
+    });
+    return { operators: rows.map(toOperatorId) };
+  }
+
+  /** `PUT`, а не `POST`: список заменяется целиком. Пустой снимает ограничение. */
+  @Roles('admin', 'client')
+  @Put('channels/:id/allowed-operators')
+  async setAllowedOperators(
+    @Param('id') id: string,
+    @Body(zodBody(allowedOperatorsSchema)) body: z.infer<typeof allowedOperatorsSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ operators: string[] }> {
+    const rows = await this.telephony.setAllowedOperators(parseId(id, 'channel'), body.operators, {
+      userId: actor.userId,
+      role: actor.role,
+    });
+    return { operators: rows.map(toOperatorId) };
+  }
+
   // --- Покрытие партнёра по регионам ------------------------------------------
 
   /**
@@ -462,6 +503,10 @@ export class TelephonyController {
       })),
     };
   }
+}
+
+function toOperatorId(row: AllowedOperatorRow): string {
+  return row.operatorId;
 }
 
 function toCoverageView(row: PartnerCoverageView): CoverageView {

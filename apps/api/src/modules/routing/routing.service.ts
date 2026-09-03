@@ -119,7 +119,14 @@ export class RoutingService {
     const operatorId = resolution.serving.id;
     const region = resolution.region ?? null;
 
-    // 3. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
+    // 3. Разрешён ли этот оператор каналом (ADR-0025). Проверяется **определённый**
+    //    оператор, а не префикс: из-за переносимости номеров префикс называет не того,
+    //    и «разрешён» было бы вычислено для оператора, который номер уже не обслуживает.
+    if (!(await this.telephony.isOperatorAllowed(channel.id, operatorId))) {
+      return this.reject(request, channel.id, operatorId, region, 'operator_not_allowed');
+    }
+
+    // 4. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
     //    регион — партнёров, которые в него не звонят (ADR-0022).
     const candidates = await this.telephony.findSimCandidates(operatorId, {
       channelId: channel.id,
@@ -131,7 +138,7 @@ export class RoutingService {
       return this.reject(request, channel.id, operatorId, region, reason);
     }
 
-    // 4. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM.
+    // 5. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM.
     let claimed = await this.claimSim(request, channel.id, operatorId, region, candidates);
     if (claimed === undefined) {
       // Прежде чем отказать, убираем вызовы, по которым узел не прислал CDR: они
@@ -147,7 +154,7 @@ export class RoutingService {
       return this.reject(request, channel.id, operatorId, region, 'no_sim_available');
     }
 
-    // 5. Деньги. Считается стоимость разговора предельной длительности: резерв обязан
+    // 6. Деньги. Считается стоимость разговора предельной длительности: резерв обязан
     //    покрывать любой исход, иначе он не защищает ни от чего.
     try {
       const priced = await this.tariffs.priceReservation(

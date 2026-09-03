@@ -49,7 +49,7 @@
 | Ссылки в документации  | `node scripts/docs-links.mjs` — битые цели и несовпадение регистра |
 | Конфигурация узла      | `node scripts/node-config.mjs` — XML в `node/`, синтаксис `install.sh` |
 | **Полная проверка**    | `pnpm verify` (то же — `pnpm check`, `bash scripts/check.sh`). Тот же скрипт гоняет CI |
-| Сгенерировать миграцию | `pnpm db:generate` |
+| Сгенерировать миграцию | `pnpm db:generate` — **после `pnpm build`**: читается собранная схема |
 | Применить миграции     | `pnpm db:migrate` |
 | Создать администратора | `ADMIN_EMAIL=… ADMIN_PASSWORD=… pnpm admin:create` (после `pnpm build`) |
 | Разрешить список номеров | `pnpm numbers:resolve <файл> [отчёт.csv]` — замер доли перенесённых |
@@ -214,6 +214,11 @@ MCP-серверы (`.mcp.json`), использовать по назначен
 
 - **Деньги — только `BigInt` в микроединицах** (1 руб = 1 000 000). `number` в денежных
   вычислениях — ошибка линтера, а не замечание. Округление — только при фиксации CDR.
+- **Миграция генерируется по собранной схеме.** `pnpm db:generate` читает `dist`
+  ([ADR-0017](docs/adr/0017-sborka-paketov-monorepozitoriya.md)), поэтому изменение
+  перечисления в `packages/shared` без `pnpm build` в миграцию не попадёт: таблица
+  создастся, а ограничение `CHECK` останется прежним. Ловится шагом «Миграции» —
+  но дешевле собрать сразу.
 - **Схема БД меняется только миграцией** ([ADR-0005](docs/adr/0005-migracii.md)), а соглашения
   схемы заданы в [ADR-0016](docs/adr/0016-soglasheniya-shemy-bd.md): идентификатор — `uuid`
   без `DEFAULT`, перечисление — `text` с `CHECK` (не тип `enum`), время — только `timestamptz`.

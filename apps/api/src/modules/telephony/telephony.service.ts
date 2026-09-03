@@ -24,11 +24,13 @@ import {
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingRepository } from '../billing/billing.repository.js';
+import { CatalogRepository } from '../catalog/catalog.repository.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
 import { issueSipCredentials, type SipCredentials } from './sip-credentials.js';
 import {
   TelephonyRepository,
+  type AllowedOperatorRow,
   type ChannelId,
   type ChannelRow,
   type GatewayId,
@@ -89,6 +91,7 @@ export class TelephonyService {
     private readonly billing: BillingRepository,
     private readonly audit: AuditService,
     private readonly resolver: OperatorResolverService,
+    private readonly catalog: CatalogRepository,
     @Inject(APP_CONFIG) private readonly config: Config,
   ) {}
 
@@ -611,6 +614,64 @@ export class TelephonyService {
     });
 
     return this.listPartnerPriorities(channelId, requester);
+  }
+
+  // --- Разрешённые операторы канала (ADR-0025) ----------------------------------
+
+  /** Пустой список означает «все операторы», а не «ни одного». */
+  async listAllowedOperators(
+    channelId: ChannelId,
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<AllowedOperatorRow[]> {
+    await this.assertChannelAccess(channelId, requester);
+    return this.repository.listAllowedOperators(channelId);
+  }
+
+  /**
+   * Задаёт список операторов канала целиком.
+   *
+   * Замена, а не дополнение: пустой список означает «все операторы», и «дописать одного»
+   * к пустому списку означало бы не расширение, а ограничение до единственного оператора.
+   */
+  async setAllowedOperators(
+    channelId: ChannelId,
+    operatorIds: readonly string[],
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<AllowedOperatorRow[]> {
+    await this.assertChannelAccess(channelId, requester);
+
+    const seen = new Set<string>();
+    const resolved: Id<'operator'>[] = [];
+
+    for (const raw of operatorIds) {
+      const operatorId = parseId(raw, 'operator');
+      if (seen.has(operatorId)) {
+        throw validationFailed('Один и тот же оператор указан дважды');
+      }
+      seen.add(operatorId);
+
+      // Несуществующий оператор в списке означал бы, что клиент считает направление
+      // разрешённым, а оно недостижимо: список закрытый, и лишней строки в нём не видно.
+      const operator = await this.catalog.findOperator(operatorId);
+      if (operator === undefined) throw notFound('Оператор не найден');
+
+      resolved.push(operatorId);
+    }
+
+    const before = await this.repository.listAllowedOperators(channelId);
+    const after = await this.repository.replaceAllowedOperators(channelId, resolved);
+
+    await this.audit.record({
+      action: 'channel.allowed_operators_set',
+      entityType: 'channel',
+      entityId: channelId,
+      actorUserId: requester.userId,
+      actorRole: requester.role,
+      before: { operators: before.map((row) => row.operatorId) },
+      after: { operators: after.map((row) => row.operatorId) },
+    });
+
+    return after;
   }
 
   // --- Покрытие партнёра по регионам (ADR-0022) ---------------------------------

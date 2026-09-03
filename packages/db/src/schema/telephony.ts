@@ -336,3 +336,35 @@ export const partnerCoverage = pgTable(
     uniqueIndex('partner_coverage_partner_region_key').on(t.partnerId, t.regionKey),
   ],
 );
+
+/**
+ * Операторы, на которых каналу разрешено звонить
+ * ([ADR-0025](../../../docs/adr/0025-razreshyonnye-operatory-kanala.md)).
+ *
+ * **Отсутствие строк означает «все операторы».** Правило то же, что у приоритетов
+ * партнёров и покрытия партнёра по регионам, и по той же причине: новый канал, не смогший
+ * позвонить до заполнения списка, выглядел бы поломкой платформы, а не своей настройкой.
+ *
+ * Сравнивается **определённый** оператор номера, а не префикс: из-за переносимости
+ * номеров префикс называет не того оператора (ADR-0013).
+ */
+export const channelAllowedOperators = pgTable(
+  'channel_allowed_operators',
+  {
+    id: primaryId<'channelAllowedOperator'>(),
+
+    channelId: idRef<'channel'>()
+      .notNull()
+      // Список удалённого канала не значит ничего и никому не нужен.
+      .references(() => channels.id, { onDelete: 'cascade' }),
+
+    operatorId: idRef<'operator'>()
+      .notNull()
+      // Оператор, на которого кто-то ссылается, не удаляется: иначе список молча
+      // расширился бы, а звонки пошли бы туда, куда клиент их не разрешал.
+      .references(() => operators.id, { onDelete: 'restrict' }),
+
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('channel_allowed_operators_key').on(t.channelId, t.operatorId)],
+);

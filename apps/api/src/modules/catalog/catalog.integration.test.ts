@@ -72,31 +72,43 @@ describe('доступ к справочнику', () => {
     expect((await api().inject({ method: 'GET', url: '/operators' })).statusCode).toBe(401);
   });
 
-  it('клиенту не разрешён', async () => {
-    const email = uniqueEmail();
-    const { IdentityService } = await import('../identity/identity.service.js');
-    await api().get(IdentityService).createByAdmin({
-      email,
-      password: TEST_PASSWORD,
-      fullName: 'Клиент',
-      role: 'client',
-      status: 'active',
-    });
-    const login = await api().inject({
-      method: 'POST',
-      url: '/auth/login',
-      payload: { email, password: TEST_PASSWORD },
-    });
-    const token = login.json<{ token: string }>().token;
+  it('клиенту открыт: из него он выбирает разрешённых операторов канала', async () => {
+    // Роль появилась вместе с разрешёнными операторами канала (ADR-0025): выбирать
+    // операторов, не видя справочника, нельзя. Анонимность партнёра это не задевает —
+    // оператор связи не партнёр.
+    expect((await roleSees('client')).statusCode).toBe(200);
+  });
 
-    const response = await api().inject({
-      method: 'GET',
-      url: '/operators',
-      headers: { authorization: `Bearer ${token}` },
-    });
-    expect(response.statusCode).toBe(403);
+  it('партнёру не разрешён', async () => {
+    // Партнёру справочник назначения не нужен: его SIM заводит администратор,
+    // а направления вызовов — не его дело.
+    expect((await roleSees('partner')).statusCode).toBe(403);
   });
 });
+
+/** Ответ справочника пользователю с этой ролью. */
+async function roleSees(role: 'client' | 'partner') {
+  const email = uniqueEmail();
+  const { IdentityService } = await import('../identity/identity.service.js');
+  await api().get(IdentityService).createByAdmin({
+    email,
+    password: TEST_PASSWORD,
+    fullName: 'Проверка доступа',
+    role,
+    status: 'active',
+  });
+  const login = await api().inject({
+    method: 'POST',
+    url: '/auth/login',
+    payload: { email, password: TEST_PASSWORD },
+  });
+
+  return api().inject({
+    method: 'GET',
+    url: '/operators',
+    headers: { authorization: `Bearer ${login.json<{ token: string }>().token}` },
+  });
+}
 
 describe('операторы', () => {
   it('заводится и находится по собственному названию', async () => {

@@ -72,7 +72,14 @@ export class CatalogController {
     return { operator };
   }
 
-  @Roles('admin', 'support')
+  /**
+   * Справочник операторов.
+   *
+   * Клиенту он тоже нужен: из него он выбирает разрешённых операторов канала (ADR-0025).
+   * Ограничений ADR-0014 это не нарушает — оператор связи не партнёр, и связь
+   * «оператор → партнёр» наружу не выходит.
+   */
+  @Roles('admin', 'support', 'client')
   @Get('operators')
   async list(): Promise<{ operators: OperatorView[] }> {
     return { operators: await this.catalog.listOperators() };

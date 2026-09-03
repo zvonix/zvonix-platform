@@ -30,6 +30,7 @@ export {
   simCards,
   gatewayPorts,
   channelPartnerPriorities,
+  channelAllowedOperators,
   partnerCoverage,
 } from './telephony.js';
 export { partnerRates, priceBands, commissionRules } from './tariffs.js';
