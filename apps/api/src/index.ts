@@ -36,6 +36,9 @@ export { CdrService } from './modules/telephony/cdr.service.js';
 export { IdentityModule } from './modules/identity/identity.module.js';
 export { IdentityService, SESSION_SWEEP_LIMIT } from './modules/identity/identity.service.js';
 
+export { LimitsModule } from './modules/limits/limits.module.js';
+export { LimitService, COUNTER_RETENTION_DAYS } from './modules/limits/limit.service.js';
+
 export { NodesModule } from './modules/nodes/nodes.module.js';
 export { NodesService } from './modules/nodes/nodes.service.js';
 

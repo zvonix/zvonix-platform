@@ -24,6 +24,7 @@ import {
   type AccountId,
   type AccountRow,
   type ClientId,
+  type Executor,
   type PartnerId,
   type LedgerEntryRow,
   type LedgerTransactionRow,
@@ -50,6 +51,17 @@ export interface TransactionDraft {
   readonly referenceId?: string;
   readonly createdByUserId?: UserId;
   readonly occurredAt?: Date;
+
+  /**
+   * Что выполнить **в той же транзакции**, если проводка действительно создана.
+   *
+   * Нужно тому, чьё состояние обязано меняться вместе с деньгами и ровно один раз:
+   * счётчик минут в лимитах ([ADR-0026](../../../../../docs/adr/0026-limity-po-oknam.md))
+   * наследует отсюда идемпотентность по ключу — повторный CDR не начислит минуты дважды.
+   *
+   * На повторной доставке не вызывается: проводки нет, значит и делать нечего.
+   */
+  readonly alsoInTransaction?: (executor: Executor) => Promise<void>;
 }
 
 export interface PostedTransaction {
@@ -148,6 +160,10 @@ export class BillingService {
         if (account !== undefined) await this.assertWithinOverdraft(account, balance);
       }
 
+      if (draft.alsoInTransaction !== undefined) {
+        await draft.alsoInTransaction(tx);
+      }
+
       return { transaction, entries, alreadyPosted: false };
     });
   }
@@ -226,6 +242,8 @@ export class BillingService {
     commissionAmount: MoneyAmount;
     description: string;
     occurredAt: Date;
+    /** Что сделать той же транзакцией: см. `TransactionDraft.alsoInTransaction`. */
+    alsoInTransaction?: (executor: Executor) => Promise<void>;
   }): Promise<PostedTransaction> {
     const total = Money.add(input.partnerAmount, input.commissionAmount);
     if (Money.compare(total, input.clientAmount) !== 0) {
@@ -266,6 +284,9 @@ export class BillingService {
       // значило бы соврать журналу о том, кто действовал.
       occurredAt: input.occurredAt,
       lines,
+      ...(input.alsoInTransaction === undefined
+        ? {}
+        : { alsoInTransaction: input.alsoInTransaction }),
     });
   }
 

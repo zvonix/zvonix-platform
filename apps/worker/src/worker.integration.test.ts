@@ -87,6 +87,7 @@ describe('реестр фоновых задач', () => {
       'nodes.retire-silent',
       'recordings.remove-expired',
       'sessions.purge-expired',
+      'limits.purge-closed-windows',
     ]);
   });
 

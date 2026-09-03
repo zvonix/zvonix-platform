@@ -11,7 +11,7 @@ import { loadConfig } from '@zvonix/config';
 import { createLogger } from '@zvonix/logger';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { RedisService } from '../../infra/redis.js';
-import { counterKey, LimitsService, type LimitRule } from './limits.service.js';
+import { counterKey, RateLimitService, type LimitRule } from './rate-limit.service.js';
 
 const TEST_REDIS_URL = process.env['TEST_REDIS_URL'] ?? 'redis://127.0.0.1:6379/15';
 
@@ -22,9 +22,9 @@ process.env['REDIS_URL'] = TEST_REDIS_URL;
 const logger = createLogger({ level: 'error', format: 'json', component: 'проверка' });
 
 let redis: RedisService | undefined;
-let limits: LimitsService | undefined;
+let limits: RateLimitService | undefined;
 
-function service(): LimitsService {
+function service(): RateLimitService {
   if (limits === undefined) throw new Error('Счётчики не подняты');
   return limits;
 }
@@ -41,7 +41,7 @@ const nextSubject = (): string => {
 beforeAll(() => {
   const config = loadConfig();
   redis = new RedisService(config, logger);
-  limits = new LimitsService(redis, config, logger);
+  limits = new RateLimitService(redis, config, logger);
 });
 
 beforeEach(async () => {
@@ -134,7 +134,7 @@ describe('недоступный Redis', () => {
     // а отказ здесь закрыл бы вход всем, включая того, кому чинить Redis.
     const config = { ...loadConfig(), REDIS_URL: 'redis://127.0.0.1:1/0' };
     const unreachable = new RedisService(config, logger);
-    const isolated = new LimitsService(unreachable, config, logger);
+    const isolated = new RateLimitService(unreachable, config, logger);
 
     try {
       const verdict = await isolated.hit(rule, nextSubject());

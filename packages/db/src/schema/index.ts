@@ -36,3 +36,4 @@ export {
 export { partnerRates, priceBands, commissionRules } from './tariffs.js';
 export { calls, reservations } from './calls.js';
 export { recordings } from './recordings.js';
+export { limitRules, limitCounters } from './limits.js';

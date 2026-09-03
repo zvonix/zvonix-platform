@@ -113,6 +113,13 @@
       "when": 1788395470183,
       "tag": "0015_razreshyonnye_operatory",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788404798186,
+      "tag": "0016_limity_po_oknam",
+      "breakpoints": true
     }
   ]
 }

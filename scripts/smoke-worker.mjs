@@ -144,6 +144,7 @@ async function main() {
         'nodes.retire-silent',
         'recordings.remove-expired',
         'sessions.purge-expired',
+        'limits.purge-closed-windows',
       ].every((task) => output.join('').includes(task)),
     );
 

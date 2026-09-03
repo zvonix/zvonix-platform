@@ -12,6 +12,8 @@ import { DomainError, type CallFailureReason, type Id, type Msisdn } from '@zvon
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { ReservationService } from '../billing/reservation.service.js';
 import { BlockedNumberService } from '../catalog/blocked-numbers.service.js';
+import type { LimitRuleRow } from '../limits/limit.repository.js';
+import { LimitBreach, LimitService } from '../limits/limit.service.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { CallRepository, type CallRow } from '../telephony/call.repository.js';
@@ -58,6 +60,7 @@ export class RoutingService {
     private readonly callsRepository: CallRepository,
     private readonly resolver: OperatorResolverService,
     private readonly blocked: BlockedNumberService,
+    private readonly limits: LimitService,
     private readonly tariffs: TariffService,
     private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
@@ -126,7 +129,25 @@ export class RoutingService {
       return this.reject(request, channel.id, operatorId, region, 'operator_not_allowed');
     }
 
-    // 4. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
+    // 4. Лимиты клиента и канала: исчерпаны — отказ сразу, без отбора SIM и расчёта
+    //    тарифа (ADR-0026).
+    const at = new Date();
+    const subjectLimits = await this.limits.usage(
+      { clientId: routable.clientId, channelId: channel.id },
+      at,
+    );
+    const breached = subjectLimits.find((usage) => usage.exceeded);
+    if (breached !== undefined) {
+      this.logger.info('Вызов отклонён лимитом', {
+        channel_id: channel.id,
+        limit_rule_id: breached.rule.id,
+        metric: breached.rule.metric,
+        window: breached.rule.window,
+      });
+      return this.reject(request, channel.id, operatorId, region, 'limit_exceeded');
+    }
+
+    // 5. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
     //    регион — партнёров, которые в него не звонят (ADR-0022).
     const candidates = await this.telephony.findSimCandidates(operatorId, {
       channelId: channel.id,
@@ -138,17 +159,67 @@ export class RoutingService {
       return this.reject(request, channel.id, operatorId, region, reason);
     }
 
-    // 5. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM.
-    let claimed = await this.claimSim(request, channel.id, operatorId, region, candidates);
-    if (claimed === undefined) {
-      // Прежде чем отказать, убираем вызовы, по которым узел не прислал CDR: они
-      // занимают место на SIM вечно, и без уборки такая SIM больше не примет звонков.
-      // Уборка здесь, а не в горячем пути: отказ — редкий случай, и лишний запрос
-      // на нём не мешает, а на каждом успешном вызове мешал бы.
-      const closed = await this.cdr.closeCallsWithoutCdr();
-      if (closed > 0) {
-        claimed = await this.claimSim(request, channel.id, operatorId, region, candidates);
+    // 6. Лимиты партнёров и SIM отсеивают кандидатов, а не отклоняют вызов: лимит
+    //    партнёра — защита его SIM, и он не должен мешать позвонить через другого.
+    const candidateLimits = await this.limits.usage(
+      {
+        partnerIds: [...new Set(candidates.map((candidate) => candidate.gateway.partnerId))],
+        simCardIds: [...new Set(candidates.map((candidate) => candidate.sim.id))],
+      },
+      at,
+    );
+    const exhausted = new Set(
+      candidateLimits
+        .filter((usage) => usage.exceeded)
+        .map((usage) => usage.rule.partnerId ?? usage.rule.simCardId),
+    );
+    const available = candidates.filter(
+      (candidate) =>
+        !exhausted.has(candidate.gateway.partnerId) && !exhausted.has(candidate.sim.id),
+    );
+    if (available.length === 0) {
+      // Отдельная причина: «все исчерпали лимит» и «SIM нет вовсе» — разные разговоры
+      // с партнёром.
+      return this.reject(request, channel.id, operatorId, region, 'limit_exceeded');
+    }
+
+    const applicableLimits = [
+      ...subjectLimits.map((usage) => usage.rule),
+      ...candidateLimits.map((usage) => usage.rule),
+    ];
+
+    // 7. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM
+    //    и инкрементом счётчиков лимитов.
+    let claimed: { call: CallRow; candidate: SimCandidate } | undefined;
+    try {
+      claimed = await this.claimSim(request, channel, operatorId, region, available, {
+        rules: applicableLimits,
+        at,
+      });
+      if (claimed === undefined) {
+        // Прежде чем отказать, убираем вызовы, по которым узел не прислал CDR: они
+        // занимают место на SIM вечно, и без уборки такая SIM больше не примет звонков.
+        // Уборка здесь, а не в горячем пути: отказ — редкий случай, и лишний запрос
+        // на нём не мешает, а на каждом успешном вызове мешал бы.
+        const closed = await this.cdr.closeCallsWithoutCdr();
+        if (closed > 0) {
+          claimed = await this.claimSim(request, channel, operatorId, region, available, {
+            rules: applicableLimits,
+            at,
+          });
+        }
       }
+    } catch (cause) {
+      if (cause instanceof LimitBreach) {
+        // Счётчик перешагнул предел уже внутри транзакции: две одновременные заявки
+        // обе прошли проверку до неё. Транзакция откачена — ни вызова, ни счёта.
+        this.logger.info('Вызов отклонён лимитом на записи', {
+          channel_id: channel.id,
+          limit_rule_id: cause.rule.id,
+        });
+        return this.reject(request, channel.id, operatorId, region, 'limit_exceeded');
+      }
+      throw cause;
     }
     if (claimed === undefined) {
       return this.reject(request, channel.id, operatorId, region, 'no_sim_available');
@@ -185,7 +256,7 @@ export class RoutingService {
       // Выбранная SIM первой: узел пробует кандидатов по порядку.
       candidates: [
         claimed.candidate,
-        ...candidates.filter((c) => c.sim.id !== claimed.candidate.sim.id),
+        ...available.filter((c) => c.sim.id !== claimed.candidate.sim.id),
       ],
       recordingRequired: channel.recordingRequired,
       callerId: channel.callerId,
@@ -231,11 +302,13 @@ export class RoutingService {
    */
   private async claimSim(
     request: RouteRequest,
-    channelId: Id<'channel'>,
+    channel: ChannelRow,
     operatorId: Id<'operator'>,
     region: string | null,
     candidates: readonly SimCandidate[],
+    limits: { rules: readonly LimitRuleRow[]; at: Date },
   ): Promise<{ call: CallRow; candidate: SimCandidate } | undefined> {
+    const channelId = channel.id;
     return this.callsRepository.db.transaction(async (tx) => {
       for (const candidate of candidates) {
         const locked = await this.callsRepository.lockSim(candidate.sim.id, tx);
@@ -269,6 +342,13 @@ export class RoutingService {
           call.startedAt,
           tx,
         );
+
+        // Той же транзакцией: счётчик и вызов не должны расходиться ни в одну сторону,
+        // а повторная проверка после инкремента — единственное, что держит лимит
+        // при одновременных заявках (ADR-0026).
+        await this.limits.consume(limitsFor(candidate, limits.rules), 'calls', 0, limits.at, tx, {
+          verify: true,
+        });
 
         return { call, candidate };
       }
@@ -377,4 +457,20 @@ function failureReasonFor(cause: unknown): CallFailureReason {
     if (cause.code === 'conflict') return 'insufficient_funds';
   }
   return 'internal_error';
+}
+
+/**
+ * Лимиты, относящиеся к этому кандидату.
+ *
+ * Клиент и канал — всегда, партнёр и SIM — только свои: считать чужой лимит значит
+ * закрыть партнёру трафик за соседа.
+ */
+function limitsFor(candidate: SimCandidate, rules: readonly LimitRuleRow[]): LimitRuleRow[] {
+  return rules.filter(
+    (rule) =>
+      rule.clientId !== null ||
+      rule.channelId !== null ||
+      rule.partnerId === candidate.gateway.partnerId ||
+      rule.simCardId === candidate.sim.id,
+  );
 }

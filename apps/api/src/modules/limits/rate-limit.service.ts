@@ -1,5 +1,9 @@
 /**
- * Счётчики по окнам (ARCHITECTURE.md, компонент `limits`).
+ * Ограничение частоты событий по ключу (ARCHITECTURE.md, компонент `limits`).
+ *
+ * Не путать с доменными лимитами клиента, канала, партнёра и SIM: те считаются
+ * в PostgreSQL той же транзакцией, что создаёт вызов ([ADR-0026](../../../../../docs/adr/0026-limity-po-oknam.md)).
+ * Здесь — защита от перебора: короткое окно, высокая частота, потеря счётчика допустима.
  *
  * Считает, сколько раз произошло событие с данным ключом за окно времени, и говорит,
  * не превышен ли предел. Хранилище — Redis: инкременты нужны атомарные и частые,
@@ -58,7 +62,7 @@ return {redis.call('GET', KEYS[1]) or '0', redis.call('PTTL', KEYS[1])}
 `;
 
 @Injectable()
-export class LimitsService implements OnApplicationBootstrap {
+export class RateLimitService implements OnApplicationBootstrap {
   private readonly logger: Logger;
 
   constructor(

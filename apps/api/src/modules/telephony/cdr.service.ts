@@ -16,6 +16,7 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { BillingService } from '../billing/billing.service.js';
 import { ReservationService } from '../billing/reservation.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
+import { LimitService } from '../limits/limit.service.js';
 import { CallRepository, type CallRow } from './call.repository.js';
 import { parseCdr, statusFromHangupCause, type ParsedCdr } from './cdr-parse.js';
 import { TelephonyRepository } from './telephony.repository.js';
@@ -45,6 +46,7 @@ export class CdrService {
     private readonly telephony: TelephonyRepository,
     private readonly tariffs: TariffService,
     private readonly billing: BillingService,
+    private readonly limits: LimitService,
     private readonly reservations: ReservationService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
@@ -118,6 +120,15 @@ export class CdrService {
       call.startedAt,
     );
 
+    // Минуты засчитываются в окно **начала вызова**, а не приёма CDR: узел мог держать
+    // CDR на диске, и иначе разговор попал бы в чужие сутки (ADR-0026).
+    const limitRules = await this.limits.rules({
+      clientId: channel.clientId,
+      channelId: call.channelId,
+      partnerIds: [gateway.partnerId],
+      ...(call.simCardId === null ? {} : { simCardIds: [call.simCardId] }),
+    });
+
     const posted = await this.billing.chargeCall({
       callId: call.id,
       clientId: channel.clientId,
@@ -127,6 +138,21 @@ export class CdrService {
       commissionAmount: priced.charge.commissionAmount,
       description: `Вызов ${String(priced.charge.billedSeconds)} с`,
       occurredAt: call.startedAt,
+      // Той же транзакцией, что и деньги: повторный CDR не начислит минуты дважды,
+      // потому что и проводки второй раз не будет.
+      alsoInTransaction: async (tx) => {
+        await this.limits.consume(
+          limitRules,
+          'minutes',
+          cdr.billableSeconds,
+          call.startedAt,
+          tx,
+          // Разговор уже состоялся: отменить его нельзя, и проверять предел здесь
+          // не по чему. Квота может быть перебрана на длительность одного вызова —
+          // это принятая цена (ADR-0026).
+          { verify: false },
+        );
+      },
     });
 
     const reservation = await this.reservations.findByCall(call.id);

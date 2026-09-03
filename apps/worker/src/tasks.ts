@@ -17,6 +17,7 @@ import {
   CdrService,
   EXPIRY_SWEEP_LIMIT,
   IdentityService,
+  LimitService,
   NodesService,
   RecordingsService,
   ReservationService,
@@ -93,6 +94,14 @@ const RETENTION_SWEEP_SECONDS = 300;
  */
 const SESSION_SWEEP_SECONDS = 3600;
 
+/**
+ * Как часто убираются счётчики закрытых окон лимитов.
+ *
+ * Срочности нет вовсе: закрытое окно квоте не мешает — она смотрит только в текущее.
+ * Это уборка строк, которые никто не читает, и раз в сутки её более чем достаточно.
+ */
+const LIMIT_COUNTER_SWEEP_SECONDS = 86_400;
+
 @Injectable()
 export class BackgroundTasks {
   constructor(
@@ -101,6 +110,7 @@ export class BackgroundTasks {
     private readonly nodes: NodesService,
     private readonly recordings: RecordingsService,
     private readonly identity: IdentityService,
+    private readonly limits: LimitService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -132,6 +142,11 @@ export class BackgroundTasks {
         everySeconds: SESSION_SWEEP_SECONDS,
         batchLimit: SESSION_SWEEP_LIMIT,
         run: (now) => this.identity.purgeExpiredSessions(now),
+      },
+      {
+        name: 'limits.purge-closed-windows',
+        everySeconds: LIMIT_COUNTER_SWEEP_SECONDS,
+        run: (now) => this.limits.purgeClosedWindows(now),
       },
     ];
   }

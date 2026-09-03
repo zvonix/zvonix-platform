@@ -16,7 +16,7 @@ import {
 } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
-import { LimitsService, type LimitRule } from '../limits/limits.service.js';
+import { RateLimitService, type LimitRule } from '../limits/rate-limit.service.js';
 import {
   IdentityRepository,
   type SessionId,
@@ -134,7 +134,7 @@ export class IdentityService {
   constructor(
     private readonly repository: IdentityRepository,
     private readonly audit: AuditService,
-    private readonly limits: LimitsService,
+    private readonly limits: RateLimitService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
