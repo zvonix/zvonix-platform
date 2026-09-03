@@ -15,6 +15,34 @@ import { CatalogService, type OperatorView } from './catalog.service.js';
 import { OperatorResolverService } from './operator-resolver.service.js';
 import { addAliasSchema, blockNumberSchema, createOperatorSchema } from './schemas.js';
 
+/**
+ * Оператор в ответе администратору и поддержке.
+ *
+ * Поля наружу — `snake_case`, как во всех остальных ответах API: внутренний `camelCase`
+ * службы наружу не выносится (CONVENTIONS.md).
+ */
+interface OperatorResponse {
+  readonly id: string;
+  readonly name: string;
+  readonly inn: string | null;
+  readonly mnc: string | null;
+  readonly is_mvno: boolean;
+  readonly host_operator_id: string | null;
+  readonly aliases: readonly string[];
+}
+
+/**
+ * Оператор в ответе клиенту: только то, из чего он выбирает.
+ *
+ * ИНН, MNC и связи MVNO клиенту не нужны ни для чего — он выбирает разрешённых
+ * операторов канала (ADR-0025), а не ведёт справочник. Отдавать больше нужного
+ * незачем: сузить ответ позже сложнее, чем не расширять его сейчас.
+ */
+interface OperatorChoice {
+  readonly id: string;
+  readonly name: string;
+}
+
 /** Оператор в ответе. Идентификаторы — строки: по проводу тип сущности не выражается. */
 interface OperatorBrief {
   readonly id: string;
@@ -64,12 +92,12 @@ export class CatalogController {
   async create(
     @Body(zodBody(createOperatorSchema)) body: z.infer<typeof createOperatorSchema>,
     @CurrentUser() actor: Principal,
-  ): Promise<{ operator: OperatorView }> {
+  ): Promise<{ operator: OperatorResponse }> {
     const operator = await this.catalog.createOperator(body, {
       userId: actor.userId,
       role: actor.role,
     });
-    return { operator };
+    return { operator: toOperatorResponse(operator) };
   }
 
   /**
@@ -78,11 +106,19 @@ export class CatalogController {
    * Клиенту он тоже нужен: из него он выбирает разрешённых операторов канала (ADR-0025).
    * Ограничений ADR-0014 это не нарушает — оператор связи не партнёр, и связь
    * «оператор → партнёр» наружу не выходит.
+   *
+   * Клиенту отдаётся **сокращённый** вид: ИНН, MNC и связи MVNO ему не нужны ни для чего.
    */
   @Roles('admin', 'support', 'client')
   @Get('operators')
-  async list(): Promise<{ operators: OperatorView[] }> {
-    return { operators: await this.catalog.listOperators() };
+  async list(
+    @CurrentUser() actor: Principal,
+  ): Promise<{ operators: OperatorResponse[] | OperatorChoice[] }> {
+    const operators = await this.catalog.listOperators();
+    if (actor.role === 'client') {
+      return { operators: operators.map((operator) => ({ id: operator.id, name: operator.name })) };
+    }
+    return { operators: operators.map(toOperatorResponse) };
   }
 
   @Roles('admin')
@@ -166,6 +202,18 @@ export class CatalogController {
     const row = await this.blocked.unblock(parseId(id, 'blockedNumber'), actor.userId, actor.role);
     return { rule: toBlockedView(row) };
   }
+}
+
+function toOperatorResponse(view: OperatorView): OperatorResponse {
+  return {
+    id: view.id,
+    name: view.name,
+    inn: view.inn,
+    mnc: view.mnc,
+    is_mvno: view.isMvno,
+    host_operator_id: view.hostOperatorId,
+    aliases: view.aliases,
+  };
 }
 
 function toBlockedView(row: BlockedNumberRow): BlockedNumberView {

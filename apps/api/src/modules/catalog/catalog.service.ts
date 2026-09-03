@@ -101,13 +101,11 @@ export class CatalogService {
   }
 
   async listOperators(): Promise<OperatorView[]> {
-    const rows = await this.repository.listOperators();
-    return Promise.all(
-      rows.map(async (row) => ({
-        ...toView(row),
-        aliases: await this.repository.listAliases(row.id),
-      })),
-    );
+    const [rows, aliases] = await Promise.all([
+      this.repository.listOperators(),
+      this.repository.listAliasesByOperators(),
+    ]);
+    return rows.map((row) => ({ ...toView(row), aliases: aliases.get(row.id) ?? [] }));
   }
 
   /** Добавляет написания, молча пропуская уже существующие: список приходит с повторами. */

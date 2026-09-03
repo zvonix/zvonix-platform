@@ -227,6 +227,38 @@ describe('успешный маршрут', () => {
   });
 });
 
+describe('повтор запроса по тому же вызову', () => {
+  it('возвращает тот же маршрут, даже если SIM успели заблокировать', async () => {
+    // Маршрут уже выдан, место на SIM занято, деньги придержаны. Отбирать кандидатов
+    // заново значит проверять состояния, которые с тех пор изменились, — и вернуть
+    // «маршрут» без единого кандидата, то есть диалплан, по которому некуда звонить.
+    const s = await scenario();
+    const callId = unique('call');
+
+    const first = (await route(s.channel, s.destination, callId)).json<Preview>();
+    expect(first.outcome).toBe('routed');
+
+    await post(`/sim-cards/${s.sim}/status`, { status: 'blocked' });
+
+    const second = (await route(s.channel, s.destination, callId)).json<Preview>();
+    expect(second.outcome).toBe('routed');
+    expect(second.candidates.map((candidate) => candidate.sim_card_id)).toEqual([s.sim]);
+  });
+
+  it('отвечает внутренней ошибкой, если SIM вынули из порта', async () => {
+    // Воспроизвести маршрут нечем: без порта неизвестно, через какой шлюз звонить.
+    const s = await scenario();
+    const callId = unique('call');
+    expect((await route(s.channel, s.destination, callId)).json<Preview>().outcome).toBe('routed');
+
+    await post(`/gateway-ports/${s.port}/sim`, { simCardId: null });
+
+    const second = (await route(s.channel, s.destination, callId)).json<Preview>();
+    expect(second.outcome).toBe('rejected');
+    expect(second.reason).toBe('internal_error');
+  });
+});
+
 describe('одновременность на SIM', () => {
   it('второй вызов на занятую SIM не проходит', async () => {
     const env = await scenario();

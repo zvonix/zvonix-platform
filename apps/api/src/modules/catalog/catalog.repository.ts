@@ -96,6 +96,27 @@ export class CatalogRepository {
     }
   }
 
+  /**
+   * Написания сразу у всех операторов.
+   *
+   * Одним запросом, а не по запросу на оператора: справочник читается целиком,
+   * и `N+1` здесь означал бы полсотни обращений к базе на один ответ.
+   */
+  async listAliasesByOperators(): Promise<Map<OperatorId, string[]>> {
+    const rows = await this.database.db
+      .select({ operatorId: operatorAliases.operatorId, alias: operatorAliases.alias })
+      .from(operatorAliases)
+      .orderBy(asc(operatorAliases.operatorId), asc(operatorAliases.alias));
+
+    const grouped = new Map<OperatorId, string[]>();
+    for (const row of rows) {
+      const existing = grouped.get(row.operatorId);
+      if (existing === undefined) grouped.set(row.operatorId, [row.alias]);
+      else existing.push(row.alias);
+    }
+    return grouped;
+  }
+
   async listAliases(operatorId: OperatorId): Promise<string[]> {
     const rows = await this.database.db
       .select({ alias: operatorAliases.alias })

@@ -79,6 +79,36 @@ describe('доступ к справочнику', () => {
     expect((await roleSees('client')).statusCode).toBe(200);
   });
 
+  it('клиенту отдаётся сокращённый вид: без ИНН и связей MVNO', async () => {
+    // Клиент выбирает разрешённых операторов канала, а не ведёт справочник. Сузить
+    // ответ позже сложнее, чем не расширять его сейчас.
+    const created = await createOperator({ name: `Сокращённый-${String(Date.now())}` });
+
+    const response = await roleSees('client');
+    const found = response
+      .json<{ operators: Record<string, unknown>[] }>()
+      .operators.find((operator) => operator['id'] === created.id);
+
+    expect(found).toEqual({ id: created.id, name: expect.any(String) as string });
+  });
+
+  it('администратору поля называются как во всех остальных ответах', async () => {
+    // Наружу — `snake_case`: внутренний `camelCase` службы в контракт не выносится.
+    const created = await createOperator({
+      name: `Написание-${String(Date.now())}`,
+      inn: '7740000076',
+      mnc: '01',
+    });
+
+    const list = await api().inject({ method: 'GET', url: '/operators', headers: auth() });
+    const found = list
+      .json<{ operators: Record<string, unknown>[] }>()
+      .operators.find((operator) => operator['id'] === created.id);
+
+    expect(found).toMatchObject({ is_mvno: false, host_operator_id: null, inn: '7740000076' });
+    expect(found).not.toHaveProperty('isMvno');
+  });
+
   it('партнёру не разрешён', async () => {
     // Партнёру справочник назначения не нужен: его SIM заводит администратор,
     // а направления вызовов — не его дело.

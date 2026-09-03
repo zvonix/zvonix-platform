@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNotNull, isNull, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
 import {
   channelAllowedOperators,
@@ -367,11 +367,6 @@ export class TelephonyRepository {
     } = {},
   ): Promise<SimCandidate[]> {
     const channelId = options.channelId;
-    // Спрашивается именно наличие строк у канала, а не наличие приоритета у кандидата:
-    // клиент мог перечислить партнёров, у которых сейчас нет свободной SIM, и тогда
-    // среди кандидатов приоритетов не окажется вовсе. Считать это «список не заполнен»
-    // значит позвонить через партнёра, которого клиент из списка исключил.
-    const configured = channelId !== undefined && (await this.hasPartnerPriorities(channelId));
 
     const conditions = [
       eq(simCards.operatorId, operatorId),
@@ -386,8 +381,18 @@ export class TelephonyRepository {
     if (options.region !== undefined) {
       conditions.push(coversRegion(options.region));
     }
-    if (configured) {
-      conditions.push(isNotNull(channelPartnerPriorities.id));
+    if (channelId !== undefined) {
+      // Спрашивается наличие строк **у канала**, а не наличие приоритета у кандидата:
+      // клиент мог перечислить партнёров, у которых сейчас нет свободной SIM, и тогда
+      // среди кандидатов приоритетов не окажется вовсе. Считать это «список не заполнен»
+      // значит позвонить через партнёра, которого клиент из списка исключил.
+      //
+      // Тем же запросом, а не отдельным чтением до него: два чтения разъезжаются ровно
+      // в тот момент, когда клиент правит список, и вызов уходит по порядку, которого
+      // уже нет. Подзапрос не зависит от строки и вычисляется планировщиком один раз.
+      conditions.push(
+        sql`(${channelPartnerPriorities.id} is not null or not exists (select 1 from ${channelPartnerPriorities} as configured where configured.channel_id = ${channelId}))`,
+      );
     }
 
     return this.db
@@ -416,14 +421,22 @@ export class TelephonyRepository {
       );
   }
 
-  /** Заполнен ли у канала список партнёров. */
-  async hasPartnerPriorities(channelId: ChannelId): Promise<boolean> {
+  /**
+   * Кандидат по уже выбранной SIM — для повтора запроса по тому же вызову.
+   *
+   * Состояния SIM, порта, шлюза и партнёра здесь **не** проверяются намеренно: маршрут
+   * уже выдан, место на SIM занято, и повтор обязан вернуть то же решение. Проверить
+   * их заново значит превратить повтор в новое решение — а вызов при этом идёт,
+   * и деньги под него придержаны.
+   */
+  async findCandidateBySim(simCardId: SimCardId): Promise<SimCandidate | undefined> {
     const [row] = await this.db
-      .select({ id: channelPartnerPriorities.id })
-      .from(channelPartnerPriorities)
-      .where(eq(channelPartnerPriorities.channelId, channelId))
-      .limit(1);
-    return row !== undefined;
+      .select({ sim: simCards, port: gatewayPorts, gateway: gateways })
+      .from(simCards)
+      .innerJoin(gatewayPorts, eq(gatewayPorts.simCardId, simCards.id))
+      .innerJoin(gateways, eq(gateways.id, gatewayPorts.gatewayId))
+      .where(eq(simCards.id, simCardId));
+    return row;
   }
 
   /**

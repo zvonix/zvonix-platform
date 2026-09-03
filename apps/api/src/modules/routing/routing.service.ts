@@ -345,16 +345,25 @@ export class RoutingService {
       return { outcome: 'rejected', reason: 'internal_error', call };
     }
 
+    // Берётся именно выбранная SIM, а не отбор кандидатов заново: отбор проверяет
+    // состояния, а они с момента выдачи маршрута могли измениться — и повтор вернул бы
+    // маршрут без единого кандидата, то есть диалплан, по которому некуда звонить.
+    const chosen = await this.telephony.findCandidateBySim(call.simCardId);
+    if (chosen === undefined) {
+      // SIM вынули из порта, пока вызов шёл. Воспроизвести маршрут нечем.
+      this.logger.warn('Повтор запроса по вызову, чью SIM уже не найти', {
+        call_id: call.id,
+        sim_card_id: call.simCardId,
+      });
+      return { outcome: 'rejected', reason: 'internal_error', call };
+    }
+
     const channel = await this.telephony.findChannel(call.channelId);
-    const candidates = await this.telephony.findSimCandidates(
-      call.operatorId ?? ('' as Id<'operator'>),
-    );
-    const chosen = candidates.filter((candidate) => candidate.sim.id === call.simCardId);
 
     return {
       outcome: 'routed',
       call,
-      candidates: chosen,
+      candidates: [chosen],
       recordingRequired: channel?.recordingRequired ?? false,
       callerId: channel?.callerId ?? null,
     };
