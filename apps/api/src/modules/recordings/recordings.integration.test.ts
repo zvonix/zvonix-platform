@@ -86,7 +86,9 @@ async function createUser(role: 'client' | 'partner'): Promise<string> {
   return created.id;
 }
 
-async function loginAs(role: 'client' | 'support'): Promise<{ userId: string; token: string }> {
+async function loginAs(
+  role: 'client' | 'support' | 'partner',
+): Promise<{ userId: string; token: string }> {
   const { IdentityService } = await import('../identity/identity.service.js');
   const email = uniqueEmail();
   const created = await api().get(IdentityService).createByAdmin({
@@ -141,6 +143,54 @@ async function uploadedRecording(options: { ownerUserId?: string } = {}) {
   expect(confirmed.statusCode).toBe(200);
 
   return { ...call, recordingId: confirmed.json<{ recording_id: string }>().recording_id };
+}
+
+/**
+ * Партнёр, его SIM и запись вызова, который эта SIM обслужила.
+ *
+ * Связь идёт через SIM: запись принадлежит вызову, вызов — SIM, SIM — партнёру.
+ * Другого способа сказать, что разговор «его», нет (ADR-0036).
+ */
+async function partnerWithRecording(): Promise<{
+  partnerId: string;
+  token: string;
+  userId: string;
+  recordingId: string;
+}> {
+  const owner = await loginAs('partner');
+  const partnerId = (
+    await post('/partners', {
+      ownerUserId: owner.userId,
+      name: unique('Партнёр'),
+      displayName: unique('Псевдоним'),
+    })
+  ).json<{ partner: { id: string } }>().partner.id;
+
+  const operatorId = (await post('/operators', { name: unique('Оператор'), isMvno: false })).json<{
+    operator: { id: string };
+  }>().operator.id;
+
+  const call = await uploadedRecording();
+  const simId = crypto.randomUUID();
+  await withDatabase(async (execute) => {
+    await execute(sql`
+      insert into sim_cards (id, partner_id, operator_id, msisdn, status)
+      values (${simId}::uuid, ${partnerId}::uuid, ${operatorId}::uuid, ${nextMsisdn()}, 'active')
+    `);
+    await execute(
+      sql`update calls set sim_card_id = ${simId}::uuid where id = ${call.callId}::uuid`,
+    );
+  });
+
+  return { partnerId, token: owner.token, userId: owner.userId, recordingId: call.recordingId };
+}
+
+async function listenAs(recordingId: string, token: string) {
+  return api().inject({
+    method: 'POST',
+    url: `/recordings/${recordingId}/link`,
+    headers: { authorization: `Bearer ${token}` },
+  });
 }
 
 async function enrollNode(): Promise<{ id: string; key: string }> {
@@ -377,14 +427,17 @@ describe('выдача человеку', () => {
       })
     ).json<{ token: string }>().token;
 
-    // Отдавать партнёру разговор пассажира — передача персональных данных
-    // третьему лицу. Решение вынесено в TASKS.md.
+    // Партнёр к этому вызову отношения не имеет — его SIM он не обслуживал. Ответ
+    // `404`, а не `403`: разница подтверждала бы существование чужой записи
+    // ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
+    // Свои вызовы партнёр слышит только объявив это или по разовому доступу —
+    // проверяется отдельным набором ниже.
     const response = await api().inject({
       method: 'POST',
       url: `/recordings/${recording.recordingId}/link`,
       headers: auth(token),
     });
-    expect(response.statusCode).toBe(403);
+    expect(response.statusCode).toBe(404);
   });
 
   it('поддержка получает ссылку', async () => {
@@ -463,5 +516,196 @@ describe('срок хранения', () => {
     // Обратный порядок оставил бы запись помеченной удалённой, а файл — на месте:
     // разговор продолжал бы храниться, и никто бы об этом не знал.
     expect(stored).toBeNull();
+  });
+});
+
+describe('доступ партнёра к записям', () => {
+  it('по умолчанию не слышит даже свои вызовы', async () => {
+    // Умолчание — нет доступа: партнёр, который ничего не сказал, записей не получает
+    // ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
+    const partner = await partnerWithRecording();
+
+    const response = await listenAs(partner.recordingId, partner.token);
+    // `404`, а не `403`: иначе по разнице ответов проверяется существование записи.
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('объявивший намерение слышит свои вызовы', async () => {
+    const partner = await partnerWithRecording();
+
+    const declared = await api().inject({
+      method: 'PUT',
+      url: `/partners/${partner.partnerId}/recordings-access`,
+      headers: { authorization: `Bearer ${partner.token}` },
+      payload: { listens: true },
+    });
+    expect(declared.statusCode).toBe(200);
+
+    const response = await listenAs(partner.recordingId, partner.token);
+    expect(response.statusCode).toBe(201);
+    expect(response.json<{ url: string }>().url).toContain('http');
+  });
+
+  it('чужой вызов не слышит, даже объявив намерение', async () => {
+    const mine = await partnerWithRecording();
+    const stranger = await partnerWithRecording();
+
+    await api().inject({
+      method: 'PUT',
+      url: `/partners/${mine.partnerId}/recordings-access`,
+      headers: { authorization: `Bearer ${mine.token}` },
+      payload: { listens: true },
+    });
+
+    expect((await listenAs(stranger.recordingId, mine.token)).statusCode).toBe(404);
+  });
+
+  it('намерение партнёра видно клиенту в списке псевдонимов', async () => {
+    // Клиент, которому это не подходит, такого партнёра в приоритеты канала не поставит.
+    const partner = await partnerWithRecording();
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update partners set status = 'verified' where id = ${partner.partnerId}::uuid`,
+      );
+    });
+    await api().inject({
+      method: 'PUT',
+      url: `/partners/${partner.partnerId}/recordings-access`,
+      headers: { authorization: `Bearer ${partner.token}` },
+      payload: { listens: true },
+    });
+
+    const listed = await api().inject({ method: 'GET', url: '/partner-aliases', headers: auth() });
+    const rows = listed.json<{ partners: { listens_to_recordings: boolean }[] }>().partners;
+    expect(rows.some((row) => row.listens_to_recordings)).toBe(true);
+  });
+
+  it('чужое намерение партнёр менять не может', async () => {
+    const mine = await partnerWithRecording();
+    const stranger = await partnerWithRecording();
+
+    const response = await api().inject({
+      method: 'PUT',
+      url: `/partners/${stranger.partnerId}/recordings-access`,
+      headers: { authorization: `Bearer ${mine.token}` },
+      payload: { listens: true },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+});
+
+describe('разовый доступ по спорному вызову', () => {
+  it('работает при выключенном намерении', async () => {
+    // Это и есть параллельный путь: разбор спора «моя SIM исправна» не требует
+    // постоянного прослушивания.
+    const partner = await partnerWithRecording();
+    expect((await listenAs(partner.recordingId, partner.token)).statusCode).toBe(404);
+
+    const granted = await post(`/recordings/${partner.recordingId}/grant`, {
+      reason: 'Обращение №17: партнёр оспаривает тарификацию',
+    });
+    expect(granted.statusCode).toBe(201);
+    expect(granted.json<{ grant: { partner_id: string } }>().grant.partner_id).toBe(
+      partner.partnerId,
+    );
+
+    expect((await listenAs(partner.recordingId, partner.token)).statusCode).toBe(201);
+  });
+
+  it('партнёр не называется в запросе, а выводится из вызова', async () => {
+    // Назвать его руками значит однажды назвать не того и выдать чужой разговор.
+    const partner = await partnerWithRecording();
+    const granted = await post(`/recordings/${partner.recordingId}/grant`, {
+      reason: 'Разбор жалобы',
+      hours: 1,
+    });
+
+    expect(granted.json<{ grant: { partner_id: string } }>().grant.partner_id).toBe(
+      partner.partnerId,
+    );
+  });
+
+  it('без причины доступ не выдаётся', async () => {
+    const partner = await partnerWithRecording();
+    expect((await post(`/recordings/${partner.recordingId}/grant`, {})).statusCode).toBe(400);
+    expect(
+      (await post(`/recordings/${partner.recordingId}/grant`, { reason: '  ' })).statusCode,
+    ).toBe(400);
+  });
+
+  it('дольше недели доступ не открывается', async () => {
+    // Доступ, который не истекает, перестаёт быть разовым.
+    const partner = await partnerWithRecording();
+    const response = await post(`/recordings/${partner.recordingId}/grant`, {
+      reason: 'Надолго',
+      hours: 999,
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('истёкший доступ не работает', async () => {
+    const partner = await partnerWithRecording();
+    await post(`/recordings/${partner.recordingId}/grant`, { reason: 'Разбор', hours: 1 });
+    expect((await listenAs(partner.recordingId, partner.token)).statusCode).toBe(201);
+
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update recording_grants set expires_at = now() - interval '1 minute'
+             where recording_id = ${partner.recordingId}::uuid`,
+      );
+    });
+
+    expect((await listenAs(partner.recordingId, partner.token)).statusCode).toBe(404);
+  });
+
+  it('отозванный доступ не работает, но след остаётся', async () => {
+    const partner = await partnerWithRecording();
+    await post(`/recordings/${partner.recordingId}/grant`, { reason: 'Разбор' });
+
+    const revoked = await api().inject({
+      method: 'DELETE',
+      url: `/recordings/${partner.recordingId}/grant`,
+      headers: auth(),
+    });
+    expect(revoked.json<{ revoked: number }>().revoked).toBe(1);
+    expect((await listenAs(partner.recordingId, partner.token)).statusCode).toBe(404);
+
+    const listed = await api().inject({
+      method: 'GET',
+      url: `/recordings/${partner.recordingId}/grants`,
+      headers: auth(),
+    });
+    const grants = listed.json<{ grants: { revoked_at: string | null }[] }>().grants;
+    expect(grants).toHaveLength(1);
+    expect(grants[0]?.revoked_at).not.toBeNull();
+  });
+
+  it('выдача и прослушивание попадают в журнал', async () => {
+    // Единственный способ ответить на вопрос «кто слушал разговор».
+    const partner = await partnerWithRecording();
+    await post(`/recordings/${partner.recordingId}/grant`, { reason: 'Обращение №42' });
+    await listenAs(partner.recordingId, partner.token);
+
+    const actions = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select action from audit_log where entity_id = ${partner.recordingId}
+             order by occurred_at`,
+      );
+      return result.rows.map((row) => (row as { action: string }).action);
+    });
+
+    expect(actions).toContain('recording.access_granted');
+    expect(actions).toContain('recording.link_issued');
+  });
+
+  it('партнёр открыть доступ себе не может', async () => {
+    const partner = await partnerWithRecording();
+    const response = await api().inject({
+      method: 'POST',
+      url: `/recordings/${partner.recordingId}/grant`,
+      headers: { authorization: `Bearer ${partner.token}` },
+      payload: { reason: 'Очень надо' },
+    });
+    expect(response.statusCode).toBe(403);
   });
 });

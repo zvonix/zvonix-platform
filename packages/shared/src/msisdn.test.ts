@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isDomainError } from './errors.js';
 import {
   defCode,
+  dialledDigits,
   fromNumeric,
   isMsisdn,
   normalizeMsisdn,
@@ -133,5 +134,25 @@ describe('числовое представление для границ диа
     const middle = toNumeric(parseMsisdn('79130424123'));
     const last = toNumeric(parseMsisdn('79130499999'));
     expect(first < middle && middle < last).toBe(true);
+  });
+});
+
+describe('цифры набранного', () => {
+  it('оставляет только цифры: в назначение вызова не должно попадать ничего другого', () => {
+    // Оттуда номер уходит в отчёты и в клиентский контур, поэтому `*` и `#` там не нужны.
+    expect(dialledDigits('*100#')).toBe('100');
+    expect(dialledDigits('112')).toBe('112');
+    expect(dialledDigits('+7 (913) 042-41-23')).toBe('79130424123');
+  });
+
+  it('не подрезает длину', () => {
+    // Обрезка пятнадцатизначного иностранного номера до одиннадцати сделала бы его
+    // похожим на российский — это хуже длинной строки (ADR-0042).
+    expect(dialledDigits('+1 202 555 0143')).toBe('12025550143');
+    expect(dialledDigits('+44 20 7946 0958')).toBe('442079460958');
+  });
+
+  it('на наборе без цифр отдаёт пустую строку, а не выдумывает номер', () => {
+    expect(dialledDigits('##')).toBe('');
   });
 });

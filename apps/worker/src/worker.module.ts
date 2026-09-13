@@ -9,12 +9,14 @@
 import { Module } from '@nestjs/common';
 import {
   BillingModule,
+  CatalogModule,
   IdentityModule,
   InfraModule,
   LimitsModule,
   MailModule,
   NodesModule,
   RecordingsModule,
+  SettingsModule,
   TelephonyModule,
 } from '@zvonix/api';
 import { SchedulerService } from './scheduler.service.js';
@@ -26,12 +28,15 @@ import { BackgroundTasks } from './tasks.js';
     // а оба поднимают одни и те же доменные модули.
     InfraModule.forComponent('worker'),
     BillingModule,
+    CatalogModule,
     TelephonyModule,
     IdentityModule,
     LimitsModule,
     MailModule,
     NodesModule,
     RecordingsModule,
+    // Почта берёт узел, порт и пароль отсюда (ADR-0031).
+    SettingsModule,
   ],
   providers: [BackgroundTasks, SchedulerService],
 })

@@ -6,7 +6,16 @@
  */
 
 import { z } from 'zod';
-import type { UserRole } from '@zvonix/shared';
+import { USER_ROLES, USER_STATUSES, type UserRole } from '@zvonix/shared';
+import { boundedLimit, boundedOffset } from '../../http/pagination.js';
+
+/**
+ * Потолок страницы списка учётных записей.
+ *
+ * Меньше общего потолка API: это таблица, которую читает человек, а не выгрузка.
+ * Тысяча строк на экране не помогает никому, а базу заставляет их отдать.
+ */
+const USER_PAGE_MAX = 200;
 
 /**
  * Адрес приводится к нижнему регистру здесь, на границе.
@@ -42,11 +51,21 @@ const password = z.string().min(12, 'не короче 12 символов').max
  */
 const SELF_SERVICE_ROLES = ['client', 'partner'] as const satisfies readonly UserRole[];
 
+/**
+ * Токен проверки «я не робот» ([ADR-0031](../../../../../docs/adr/0031-nastroyki-ploshchadki.md)).
+ *
+ * Необязателен в схеме, а не в правиле: обязательность зависит от настройки площадки,
+ * и вторая копия этого условия в схеме разъехалась бы с первой. Отсутствие токена
+ * при включённой капче отвергает служба.
+ */
+const captchaToken = z.string().trim().max(4096, 'слишком длинный').optional();
+
 export const registerSchema = z.object({
   email,
   password,
   fullName: z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное'),
   role: z.enum(SELF_SERVICE_ROLES),
+  captchaToken,
 });
 
 /**
@@ -63,6 +82,7 @@ export const loginSchema = z.object({
 
   /** Нужен только тем, у кого включён второй фактор. Спрашивается после сверки пароля. */
   totpCode: totpCode.optional(),
+  captchaToken,
 });
 
 /**
@@ -88,7 +108,7 @@ export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 
 /** Запрос восстановления пароля. Ответ одинаков независимо от того, есть ли запись. */
-export const passwordResetRequestSchema = z.object({ email });
+export const passwordResetRequestSchema = z.object({ email, captchaToken });
 
 /** Одноразовый токен из письма. */
 export const tokenSchema = z.object({
@@ -96,3 +116,30 @@ export const tokenSchema = z.object({
 });
 
 export const passwordResetConfirmSchema = tokenSchema.extend({ newPassword: password });
+
+/**
+ * Отбор для списка учётных записей.
+ *
+ * Пустое значение параметра приравнивается к отсутствию: форма отбора шлёт все свои
+ * поля, и `?role=` означает «любая роль», а не «роль с пустым именем». Без этого
+ * сброс фильтра в интерфейсе давал бы отказ вместо полного списка.
+ *
+ * Границы страницы разбираются общими правилами
+ * ([pagination.ts](../../http/pagination.ts)): мусор в адресе даёт умолчание,
+ * а не ошибку — список не то место, где опечатка должна прятать данные.
+ */
+const optionalParameter = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().optional(),
+);
+
+export const userListQuerySchema = z.object({
+  role: optionalParameter.pipe(z.enum(USER_ROLES).optional()),
+  status: optionalParameter.pipe(z.enum(USER_STATUSES).optional()),
+  email: optionalParameter.pipe(z.string().trim().max(254, 'слишком длинный').optional()),
+  limit: z
+    .string()
+    .optional()
+    .transform((raw) => boundedLimit(raw, USER_PAGE_MAX)),
+  offset: z.string().optional().transform(boundedOffset),
+});

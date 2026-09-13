@@ -16,7 +16,7 @@ import {
   type UserRole,
 } from '@zvonix/shared';
 import { AuditService } from '../audit/audit.service.js';
-import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import {
   CLIENT_KEY_TTL_MS,
   ENROLLMENT_TTL_MS,
@@ -85,6 +85,7 @@ export class MachineService {
   constructor(
     private readonly repository: MachineRepository,
     private readonly audit: AuditService,
+    @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('machine-access');
@@ -270,6 +271,72 @@ export class MachineService {
 
   async listByKind(kind: MachineKeyKind): Promise<MachineKeyRow[]> {
     return this.repository.listByKind(kind);
+  }
+
+  // --- Собственный контур клиента (ADR-0044) ----------------------------------
+
+  /**
+   * Клиент заводит себе ключ сам.
+   *
+   * Никто, кроме него, не знает, из какой системы он будет звонить и с каких адресов;
+   * администратор в этой цепочке — переписчик под диктовку, а выпущенный им секрет
+   * обязан дойти до клиента перепиской
+   * ([ADR-0044](../../../../../docs/adr/0044-klientskiy-api.md), тот же довод,
+   * что и в [ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md)).
+   *
+   * Предел на количество: отозванные не считаются — иначе ротация «завёл новый,
+   * отозвал старый» упиралась бы в него на второй же итерации.
+   */
+  async issueOwnClientKey(input: {
+    clientId: Id<'client'>;
+    label: string;
+    allowedIps: readonly string[];
+    actorUserId: Id<'user'>;
+    actorRole: UserRole;
+  }): Promise<IssuedCredential> {
+    const limit = this.config.CLIENT_API_KEY_LIMIT;
+    if (limit > 0) {
+      const live = await this.repository.listLiveByOwnerAndKind(input.clientId, 'client_api');
+      if (live.length >= limit) {
+        throw conflict('Больше ключей завести нельзя', {
+          details: { limit, remedy: 'Отзовите неиспользуемые.' },
+        });
+      }
+    }
+
+    return this.issue({
+      kind: 'client_api',
+      ownerId: input.clientId,
+      label: input.label,
+      allowedIps: input.allowedIps,
+      actorUserId: input.actorUserId,
+      actorRole: input.actorRole,
+    });
+  }
+
+  /** Свои ключи, включая отозванные: по ним разбирают, чем ходила система месяц назад. */
+  async listOwnClientKeys(clientId: Id<'client'>): Promise<MachineKeyRow[]> {
+    return this.repository.listByOwnerAndKind(clientId, 'client_api');
+  }
+
+  /**
+   * Отзыв своего ключа.
+   *
+   * Чужой отвечает `404`, а не `403`: клиент не должен узнавать даже того, что такой
+   * ключ существует ([ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md)
+   * держит ту же границу в контуре партнёра).
+   */
+  async revokeOwnClientKey(
+    id: MachineKeyId,
+    clientId: Id<'client'>,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<void> {
+    const existing = await this.repository.findById(id);
+    if (existing === undefined || existing.kind !== 'client_api' || existing.ownerId !== clientId) {
+      throw notFound('Ключ не найден');
+    }
+    await this.revoke(id, actorUserId, actorRole);
   }
 
   /**

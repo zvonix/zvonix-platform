@@ -5,17 +5,68 @@
 /**
  * Вид шлюза.
  *
- * `goip`    — аппаратный GSM-шлюз с портами под SIM;
- * `android` — телефон партнёра с приложением ([ADR-0012](../../docs/adr/0012-mobilnoe-prilozhenie.md)).
- *             **Запись разговора на нём технически невозможна**, поэтому канал
- *             с требованием записи на такой шлюз не маршрутизируется никогда.
+ * `goip`      — аппаратный GSM-шлюз с портами под SIM;
+ * `android`   — телефон партнёра с приложением ([ADR-0012](../../docs/adr/0012-mobilnoe-prilozhenie.md)).
+ *               **Запись разговора на нём технически невозможна**, поэтому канал
+ *               с требованием записи на такой шлюз не маршрутизируется никогда;
+ * `sip_trunk` — соединение с транзитным оператором
+ *               ([ADR-0039](../../docs/adr/0039-terminaciya-cherez-sip-trank.md)).
+ *               Ни SIM, ни портов: ёмкость меряется числом одновременных вызовов,
+ *               а регистрация идёт **в обратную сторону** — не он к нам, а мы к нему.
  */
-export const GATEWAY_TYPES = ['goip', 'android'] as const;
+export const GATEWAY_TYPES = ['goip', 'android', 'sip_trunk'] as const;
 export type GatewayType = (typeof GATEWAY_TYPES)[number];
 
-/** Шлюзы, на которых запись разговора возможна. */
+/**
+ * Шлюзы, на которых запись разговора возможна.
+ *
+ * Отображение, а не условие: новый вид шлюза не соберётся, пока про запись на нём
+ * не сказано прямо. Умолчание «можно» было бы опаснее — канал с обязательной записью
+ * ушёл бы туда, где её не будет, и узнали бы об этом при запросе записи.
+ *
+ * У транка запись возможна: её делает **узел**, а не оборудование партнёра.
+ */
+const RECORDING_BY_GATEWAY: Record<GatewayType, boolean> = {
+  goip: true,
+  android: false,
+  sip_trunk: true,
+};
+
 export function supportsRecording(type: GatewayType): boolean {
-  return type === 'goip';
+  return RECORDING_BY_GATEWAY[type];
+}
+
+/**
+ * Способ терминации — **через что вызов физически уходит с площадки**
+ * ([ADR-0040](../../docs/adr/0040-poryadok-terminacii-predlozhenie-i-cena.md)).
+ *
+ * `sim` — по воздуху через SIM партнёра в порту шлюза;
+ * `sip` — по интернету через транзитного оператора
+ *         ([ADR-0039](../../docs/adr/0039-terminaciya-cherez-sip-trank.md)).
+ *
+ * Это **измерение цены**, а не характеристика железа: внутри своей сети SIM почти
+ * бесплатна, транзит платный всегда, и разница между ними — в разы. Клиенту незачем
+ * знать, GOIP у партнёра или телефон, — это его оборудование; а «по воздуху или через
+ * интернет» знать нужно, потому что от этого зависит, сколько клиент платит.
+ */
+export const TERMINATION_KINDS = ['sim', 'sip'] as const;
+export type TerminationKind = (typeof TERMINATION_KINDS)[number];
+
+/**
+ * Каким способом терминирует шлюз этого вида.
+ *
+ * Отображение, а не условие: сегодня все виды шлюзов про SIM, и `if` здесь имел бы
+ * недостижимую ветвь. Запись через `Record` заодно **не даст забыть** про новый вид —
+ * добавление `sip_trunk` (ADR-0039) не соберётся, пока его сюда не внесли.
+ */
+const TERMINATION_BY_GATEWAY: Record<GatewayType, TerminationKind> = {
+  goip: 'sim',
+  android: 'sim',
+  sip_trunk: 'sip',
+};
+
+export function terminationKindOf(type: GatewayType): TerminationKind {
+  return TERMINATION_BY_GATEWAY[type];
 }
 
 /**
@@ -118,6 +169,21 @@ export const USABLE_PORT_STATES: readonly GatewayPortState[] = ['unknown', 'idle
  */
 export const DEFAULT_MAX_CONCURRENT_CALLS = 1;
 export const MAX_CONCURRENT_CALLS_LIMIT = 8;
+
+/**
+ * Сколько вызовов одновременно держит SIP-транк
+ * ([ADR-0039](../../docs/adr/0039-terminaciya-cherez-sip-trank.md)).
+ *
+ * Пределы у транка другие, чем у SIM, и по другой причине. У SIM ограничение
+ * от **оператора**: восемь одновременных вызовов с одной карты — уже нечеловеческий
+ * профиль, за который карту блокируют. У транка ограничение **договорное**: провайдер
+ * продаёт ёмкость каналами, и их бывает и тридцать, и триста.
+ *
+ * Умолчание намеренно скромное: превышение купленной ёмкости провайдер отвергает,
+ * и вызовы срываются молча.
+ */
+export const DEFAULT_TRUNK_CONCURRENT_CALLS = 10;
+export const MAX_TRUNK_CONCURRENT_CALLS = 1000;
 
 /**
  * Область действия порога отключения

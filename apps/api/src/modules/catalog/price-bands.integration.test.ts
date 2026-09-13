@@ -438,6 +438,65 @@ describe('список нарушений', () => {
     expect(mine).toMatchObject({ reference_cost: '8', band: { max_price: '3' } });
   });
 
+  it('проверяет обе цены направления: у транка своя, и она не должна теряться', async () => {
+    // Направление — это оператор, регион **и способ терминации** (ADR-0040). Пока ключ
+    // выборки действующих цен способ не различал, одна из двух строк молча исчезала,
+    // и цена транка не проверялась коридором вовсе — при том что коридор и есть
+    // единственное ограничение на цену партнёра.
+    const partner = await createPartner();
+    const operator = await createOperator();
+    await addBand({
+      operatorId: operator,
+      minPrice: '1',
+      maxPrice: '10',
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+    });
+    // Обе цены заводятся внутри широкого коридора: вне его вставка их не пропустит.
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: operator,
+          terminationKind: 'sim',
+          pricePerMinute: '2',
+          effectiveFrom: '2020-02-01T00:00:00.000Z',
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: operator,
+          terminationKind: 'sip',
+          pricePerMinute: '9',
+          effectiveFrom: '2020-02-01T00:00:00.000Z',
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    // Сужение оставляет снаружи ровно транк: SIM по-прежнему внутри.
+    await addBand({
+      operatorId: operator,
+      minPrice: '1',
+      maxPrice: '3',
+      effectiveFrom: '2020-03-01T00:00:00.000Z',
+    });
+
+    const listed = await api().inject({
+      method: 'GET',
+      url: '/price-bands/violations',
+      headers: auth(),
+    });
+    const violations = listed.json<{
+      violations: { rate: { partner_id: string; termination_kind: string } }[];
+    }>().violations;
+    const mine = violations.filter((row) => row.rate.partner_id === partner);
+
+    expect(mine).toHaveLength(1);
+    expect(mine[0]?.rate.termination_kind).toBe('sip');
+  });
+
   it('молчит, пока все цены внутри коридоров', async () => {
     const partner = await createPartner();
     const operator = await createOperator();

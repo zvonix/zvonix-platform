@@ -247,3 +247,113 @@ describe('устойчивость к поведению источника', ()
     expect(resolution.previous_operator).toBeNull();
   });
 });
+
+/** Свой номер у каждой проверки: записи живут в общей базе до конца файла. */
+let numbers = 0;
+const nextMsisdn = (): string => {
+  numbers += 1;
+  return `7913900${String(numbers).padStart(4, '0')}`;
+};
+
+describe('фоновое обновление просроченных записей', () => {
+  /** Служба резолвера напрямую: проход фоновой, обработчика у него нет. */
+  async function resolver() {
+    const { OperatorResolverService } = await import('./operator-resolver.service.js');
+    return api().get(OperatorResolverService);
+  }
+
+  async function storedRow(msisdn: string) {
+    return withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select use_count, invalidated_at, expires_at > now() as live
+              from number_resolutions where msisdn = ${msisdn}`,
+      );
+      return result.rows[0] as
+        { use_count: number; invalidated_at: string | null; live: boolean } | undefined;
+    });
+  }
+
+  /**
+   * Делает запись просроченной.
+   *
+   * Отодвигается и момент разрешения: база требует, чтобы срок годности был позже него
+   * (`number_resolutions_ttl`), и одна лишь просроченная отметка — состояние, которого
+   * не бывает. Здесь запись выглядит как разрешённая сорок дней назад при месячном сроке.
+   */
+  async function expire(msisdn: string): Promise<void> {
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update number_resolutions
+               set resolved_at = now() - interval '40 days',
+                   expires_at = now() - interval '10 days'
+             where msisdn = ${msisdn}`,
+      );
+    });
+  }
+
+  it('продлевает просроченную запись, не считая это обращением', async () => {
+    // Счётчик востребованности сам же и выбирает номера для обновления: расти
+    // от собственной работы он не должен, иначе порядок перестаёт что-то значить.
+    const suffix = String(Date.now()).slice(-6);
+    await createOperator({ name: `Обновляемый-${suffix}` });
+
+    const msisdn = nextMsisdn();
+    answer = { operator: `Обновляемый-${suffix}`, region: 'Москва' };
+    expect((await resolve(msisdn)).confirmed).toBe(true);
+
+    const before = await storedRow(msisdn);
+    expect(before?.live).toBe(true);
+    await expire(msisdn);
+
+    expect(await (await resolver()).refreshStale(new Date())).toBeGreaterThan(0);
+
+    const after = await storedRow(msisdn);
+    expect(after?.live).toBe(true);
+    expect(after?.use_count).toBe(before?.use_count);
+  }, 120_000);
+
+  it('снимает отметку об ошибке определения', async () => {
+    // Отменённая обращением партнёра запись обновляется наравне с просроченной:
+    // иначе номер остаётся неопределимым до следующего звонка по нему.
+    const suffix = String(Date.now()).slice(-6);
+    await createOperator({ name: `Отменяемый-${suffix}` });
+
+    const msisdn = nextMsisdn();
+    answer = { operator: `Отменяемый-${suffix}`, region: 'Москва' };
+    await resolve(msisdn);
+
+    const invalidated = await api().inject({
+      method: 'POST',
+      url: `/numbers/${msisdn}/invalidate`,
+      headers: auth(),
+    });
+    expect(invalidated.statusCode).toBe(200);
+    expect((await storedRow(msisdn))?.invalidated_at).not.toBeNull();
+
+    await (await resolver()).refreshStale(new Date());
+    expect((await storedRow(msisdn))?.invalidated_at).toBeNull();
+  }, 120_000);
+
+  it('молчание источника оставляет запись просроченной', async () => {
+    // Следующий проход попробует снова. Затирать известное неизвестным нельзя:
+    // недоступность источника не факт о номере.
+    const suffix = String(Date.now()).slice(-6);
+    await createOperator({ name: `Молчаливый-${suffix}` });
+
+    const msisdn = nextMsisdn();
+    answer = { operator: `Молчаливый-${suffix}`, region: 'Москва' };
+    await resolve(msisdn);
+    await expire(msisdn);
+
+    // Источник отвечает пустым: номер он не знает.
+    answer = {};
+    expect(await (await resolver()).refreshStale(new Date())).toBe(0);
+    expect((await storedRow(msisdn))?.live).toBe(false);
+  }, 120_000);
+
+  it('нечего обновлять — прохода нет', async () => {
+    const service = await resolver();
+    await service.refreshStale(new Date());
+    expect(await service.refreshStale(new Date())).toBe(0);
+  }, 120_000);
+});

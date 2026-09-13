@@ -89,6 +89,10 @@ export class PartnerReportService {
       }
     }
 
+    // Назначение здесь заведомо каноническое: у вызова, дошедшего до партнёра, есть шлюз,
+    // а у отказа `destination_invalid` шлюза нет — до отбора кандидатов он не доходит
+    // (ADR-0042). Разбор оставлен явным, чтобы связь не держалась на одном рассуждении:
+    // если она когда-нибудь порвётся, это будет отказ, а не молча неверный номер.
     const destination = parseMsisdn(found.call.destination);
     const invalidated = await this.resolver.invalidate(destination);
 

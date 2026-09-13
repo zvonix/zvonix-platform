@@ -13,7 +13,12 @@ import { BlockedNumberService } from './blocked-numbers.service.js';
 import type { BlockedNumberRow } from './blocked-numbers.repository.js';
 import { CatalogService, type OperatorView } from './catalog.service.js';
 import { OperatorResolverService } from './operator-resolver.service.js';
-import { addAliasSchema, blockNumberSchema, createOperatorSchema } from './schemas.js';
+import {
+  addAliasSchema,
+  blockNumberSchema,
+  createOperatorSchema,
+  verifyOperatorSchema,
+} from './schemas.js';
 
 /**
  * Оператор в ответе администратору и поддержке.
@@ -28,6 +33,12 @@ interface OperatorResponse {
   readonly mnc: string | null;
   readonly is_mvno: boolean;
   readonly host_operator_id: string | null;
+  /**
+   * `null` — запись завёл импорт плана нумерации и человек её не смотрел
+   * ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)).
+   * Вызов по такому оператору не совершается: `is_mvno` в ней не факт, а умолчание.
+   */
+  readonly verified_at: string | null;
   readonly aliases: readonly string[];
 }
 
@@ -97,6 +108,24 @@ export class CatalogController {
       userId: actor.userId,
       role: actor.role,
     });
+    return { operator: toOperatorResponse(operator) };
+  }
+
+  /**
+   * Человек подтверждает запись оператора, заведённую импортом
+   * ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)).
+   *
+   * До подтверждения по такому оператору не звонят: файл плана нумерации не сообщает,
+   * виртуальный он или нет, а ошибка в этом — деньги партнёра.
+   */
+  @Roles('admin')
+  @Post('operators/:id/verify')
+  async verify(
+    @Param('id') id: string,
+    @Body(zodBody(verifyOperatorSchema)) body: z.infer<typeof verifyOperatorSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ operator: OperatorResponse }> {
+    const operator = await this.catalog.verifyOperator(parseId(id, 'operator'), body, actor.userId);
     return { operator: toOperatorResponse(operator) };
   }
 
@@ -214,6 +243,7 @@ function toOperatorResponse(view: OperatorView): OperatorResponse {
     mnc: view.mnc,
     is_mvno: view.isMvno,
     host_operator_id: view.hostOperatorId,
+    verified_at: view.verifiedAt?.toISOString() ?? null,
     aliases: view.aliases,
   };
 }

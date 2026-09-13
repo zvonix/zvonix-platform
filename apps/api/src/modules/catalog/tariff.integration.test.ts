@@ -6,6 +6,7 @@
  * тут не падает — она берёт не ту цену, и обнаруживается это на сверке через месяц.
  */
 
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
@@ -14,6 +15,7 @@ import {
   startApi,
   TEST_PASSWORD,
   uniqueEmail,
+  withDatabase,
 } from '../../testing/harness.js';
 
 prepareEnvironment();
@@ -262,6 +264,82 @@ describe('подбор действующего тарифа', () => {
       at: '2026-08-01T00:00:00.000Z',
     });
     expect(other.json<Priced>().partner_amount).toBe('7');
+  });
+
+  it('неудачная запись в журнал отменяет назначенную цену', async () => {
+    // Главное свойство ADR-0034: «не записалось» означает «не произошло». Запись журнала
+    // ломается ссылкой на несуществующего человека — внешним ключом
+    // `audit_log.actor_user_id`, которого у самой цены нет. До этого решения цена
+    // осталась бы в базе, а строки о том, кто её поставил, не было бы, и спор
+    // «кто поднял цену» стал бы неразрешимым.
+    const partner = await createPartner();
+    const operator = await createOperator();
+
+    const { TariffService } = await import('./tariff.service.js');
+    const tariffs = api().get(TariffService);
+    type Draft = Parameters<typeof tariffs.addPartnerRate>[0];
+    type Actor = Parameters<typeof tariffs.addPartnerRate>[1];
+
+    const draft = {
+      partnerId: partner,
+      operatorId: operator,
+      region: null,
+      pricePerMinute: 5_000_000n,
+      billingIncrementSeconds: 60,
+      minimumDurationSeconds: 0,
+      connectionFee: 0n,
+      rounding: 'half_away_from_zero',
+      effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
+    } as unknown as Draft;
+
+    await expect(
+      tariffs.addPartnerRate(draft, '00000000-0000-7000-8000-000000000000' as Actor, 'admin'),
+    ).rejects.toThrow();
+
+    const rows = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select count(*)::int as count from partner_rates where partner_id = ${partner}`,
+      );
+      return (result.rows[0] as { count: number }).count;
+    });
+    expect(rows).toBe(0);
+  });
+
+  it('региональный тариф действует и когда диапазон выделен на два субъекта', async () => {
+    // Каждый седьмой диапазон плана нумерации назван парой субъектов, и в источнике
+    // они перечислены в произвольном порядке (ADR-0033). Сравнение строкой целиком
+    // молча подменяло бы региональную цену общей — ровно та ошибка, которую уже
+    // исправляли, когда регион сравнивался без приведения написания.
+    const partner = await createPartner();
+    const client = await createClient();
+    const operator = await createOperator();
+    await addCommission({ percentBasisPoints: 0, effectiveFrom: '2020-01-01T00:00:00.000Z' });
+
+    await addRate({
+      partnerId: partner,
+      operatorId: operator,
+      region: 'Москва',
+      pricePerMinute: '3',
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
+    });
+    await addRate({
+      partnerId: partner,
+      operatorId: operator,
+      pricePerMinute: '7',
+      effectiveFrom: '2026-01-01T00:00:00.000Z',
+    });
+
+    for (const region of ['Город Москва, Московская область', 'Московская область, Город Москва']) {
+      const priced = await price({
+        partnerId: partner,
+        clientId: client,
+        operatorId: operator,
+        region,
+        durationSeconds: 60,
+        at: '2026-08-01T00:00:00.000Z',
+      });
+      expect(priced.json<Priced>().partner_amount, region).toBe('3');
+    }
   });
 
   it('без действующего тарифа — отказ, а не бесплатный звонок', async () => {

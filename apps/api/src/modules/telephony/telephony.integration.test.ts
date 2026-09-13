@@ -243,6 +243,53 @@ describe('выдача учётных данных', () => {
     expect((await askDirectory(account.username)).body).toContain('not found');
     expect((await askDirectory(fresh.username)).body).toContain('<user id=');
   });
+
+  it('перевыпуск доступа канала отзывает старый пароль', async () => {
+    // Симметрично шлюзу. Утёкший пароль канала — это чужие вызовы **за счёт клиента**,
+    // и без перевыпуска единственным ответом на утечку было бы отключение канала целиком.
+    const client = await createClient();
+    await activateClient(client);
+
+    const created = await api().inject({
+      method: 'POST',
+      url: '/channels',
+      headers: auth(),
+      payload: { clientId: client, name: unique('Линия'), recordingRequired: false },
+    });
+    expect(created.statusCode).toBe(201);
+    const body = created.json<{ channel: { id: string }; account: SipAccount }>();
+
+    await api().inject({
+      method: 'POST',
+      url: `/channels/${body.channel.id}/status`,
+      headers: auth(),
+      payload: { status: 'active' },
+    });
+    expect((await askDirectory(body.account.username)).body).toContain('<user id=');
+
+    const reset = await api().inject({
+      method: 'POST',
+      url: `/channels/${body.channel.id}/credentials`,
+      headers: auth(),
+    });
+    expect(reset.statusCode).toBe(201);
+    const fresh = reset.json<{ account: SipAccount }>().account;
+
+    expect(fresh.username).not.toBe(body.account.username);
+    expect(fresh.password).not.toBe(body.account.password);
+    // Старое имя перестаёт находиться в каталоге — это и есть отзыв доступа.
+    expect((await askDirectory(body.account.username)).body).toContain('not found');
+    expect((await askDirectory(fresh.username)).body).toContain('<user id=');
+  });
+
+  it('перевыпуск несуществующего канала — 404', async () => {
+    const response = await api().inject({
+      method: 'POST',
+      url: '/channels/01890a5d-ac96-774b-bcce-b302099a8057/credentials',
+      headers: auth(),
+    });
+    expect(response.statusCode).toBe(404);
+  });
 });
 
 describe('каталог для узла', () => {
@@ -401,5 +448,111 @@ describe('доступ к каталогу', () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('xml');
     expect(response.body).toContain('<result status="not found"/>');
+  });
+});
+
+describe('правка настроек канала', () => {
+  /** Заводит активный канал и возвращает его вместе с выданной учётной записью. */
+  async function makeChannel(): Promise<{ id: string; account: SipAccount }> {
+    const client = await createClient();
+    await activateClient(client);
+
+    const created = await api().inject({
+      method: 'POST',
+      url: '/channels',
+      headers: auth(),
+      payload: { clientId: client, name: unique('Линия'), recordingRequired: false },
+    });
+    expect(created.statusCode).toBe(201);
+    const body = created.json<{ channel: { id: string }; account: SipAccount }>();
+
+    await api().inject({
+      method: 'POST',
+      url: `/channels/${body.channel.id}/status`,
+      headers: auth(),
+      payload: { status: 'active' },
+    });
+    return { id: body.channel.id, account: body.account };
+  }
+
+  async function patch(id: string, payload: Record<string, unknown>) {
+    return api().inject({ method: 'PATCH', url: `/channels/${id}`, headers: auth(), payload });
+  }
+
+  it('номер для показа меняется, а учётные данные остаются прежними', async () => {
+    // Ради этого обработчик и заведён: раньше смена номера означала новый канал,
+    // новый пароль SIP и перенастройку АТС у клиента.
+    const channel = await makeChannel();
+
+    const response = await patch(channel.id, { callerId: '79005554433' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ channel: { caller_id: string } }>().channel.caller_id).toBe(
+      '79005554433',
+    );
+
+    // Регистрация не должна пострадать от косметической правки.
+    expect((await askDirectory(channel.account.username)).body).toContain('<user id=');
+  });
+
+  it('требование записи меняется и видно узлу', async () => {
+    // Переменная в каталоге есть всегда — меняется её значение, и именно его
+    // читает диалплан, решая, писать ли разговор.
+    const channel = await makeChannel();
+    expect((await askDirectory(channel.account.username)).body).toContain(
+      'name="zvonix_recording_required" value="false"',
+    );
+
+    expect((await patch(channel.id, { recordingRequired: true })).statusCode).toBe(200);
+    expect((await askDirectory(channel.account.username)).body).toContain(
+      'name="zvonix_recording_required" value="true"',
+    );
+  });
+
+  it('непереданное поле не трогается, явный null очищает', async () => {
+    // «Поля нет» и «поле равно null» — разные намерения, и путать их на номере
+    // для показа значит однажды молча стереть настроенный номер.
+    const channel = await makeChannel();
+    expect((await patch(channel.id, { callerId: '79005554433' })).statusCode).toBe(200);
+
+    const renamed = await patch(channel.id, { name: unique('Другая линия') });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json<{ channel: { caller_id: string | null } }>().channel.caller_id).toBe(
+      '79005554433',
+    );
+
+    const cleared = await patch(channel.id, { callerId: null });
+    expect(cleared.json<{ channel: { caller_id: string | null } }>().channel.caller_id).toBeNull();
+  });
+
+  it('пустая правка — отказ, а не тихий успех', async () => {
+    const channel = await makeChannel();
+    expect((await patch(channel.id, {})).statusCode).toBe(400);
+  });
+
+  it('негодный номер для показа — отказ', async () => {
+    const channel = await makeChannel();
+    expect((await patch(channel.id, { callerId: 'не номер' })).statusCode).toBe(400);
+  });
+
+  it('несуществующий канал — 404', async () => {
+    const response = await patch('01890a5d-ac96-774b-bcce-b302099a8057', { name: 'Линия' });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('правка попадает в журнал целиком', async () => {
+    const channel = await makeChannel();
+    expect((await patch(channel.id, { callerId: '79005554433' })).statusCode).toBe(200);
+
+    const response = await api().inject({
+      method: 'GET',
+      url: `/audit?action=channel.updated&entityId=${channel.id}`,
+      headers: auth(),
+    });
+    const entries = response.json<{
+      entries: { before: { caller_id: string | null }; after: { caller_id: string | null } }[];
+    }>().entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.before.caller_id).toBeNull();
+    expect(entries[0]?.after.caller_id).toBe('79005554433');
   });
 });

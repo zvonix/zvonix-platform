@@ -15,7 +15,12 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import { maskPhone } from '@zvonix/logger';
-import { isConfirmedSource, type Msisdn, type ResolutionSource } from '@zvonix/shared';
+import {
+  isConfirmedSource,
+  normalizeMsisdn,
+  type Msisdn,
+  type ResolutionSource,
+} from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { CatalogRepository, type OperatorRow } from './catalog.repository.js';
 import { OPERATOR_LOOKUP, type LookupAnswer, type OperatorLookup } from './operator-lookup.js';
@@ -74,6 +79,22 @@ export interface OperatorResolution {
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Сколько номеров обновляется за один фоновый проход.
+ *
+ * Мало намеренно: темп обращений к источнику общий с горячим путём, и жадное
+ * обновление отбирало бы его у настоящих вызовов.
+ */
+export const STALE_SWEEP_LIMIT = 20;
+
+/**
+ * С какого размера прохода полное молчание источника считается его недоступностью.
+ *
+ * На одном-двух номерах молчание — обычное дело: источник не знает всякий номер.
+ * На пяти подряд — это уже он сам.
+ */
+const SILENT_SOURCE_THRESHOLD = 5;
 
 @Injectable()
 export class OperatorResolverService {
@@ -135,6 +156,7 @@ export class OperatorResolverService {
     msisdn: Msisdn,
     answer: LookupAnswer,
     now: Date,
+    countUse = true,
   ): Promise<OperatorResolution | undefined> {
     const serving = await this.repository.findOperatorByName(answer.operatorName);
     if (serving === undefined) {
@@ -170,7 +192,10 @@ export class OperatorResolverService {
       resolvedAt: now,
       expiresAt: new Date(now.getTime() + this.ttlMs),
     });
-    await this.repository.registerUse(msisdn, now);
+    // Фоновое обновление обращением не считается: иначе счётчик востребованности,
+    // по которому это же обновление и выбирает номера, растёт от собственной работы
+    // и перестаёт что-либо значить.
+    if (countUse) await this.repository.registerUse(msisdn, now);
 
     const resolution = await this.build(
       msisdn,
@@ -184,6 +209,63 @@ export class OperatorResolverService {
       portedBySource: answer.previousOperatorName !== undefined,
       ...(missingPrevious.length === 0 ? {} : { unknownOperatorNames: missingPrevious }),
     };
+  }
+
+  /**
+   * Фоновое обновление просроченных записей
+   * ([ADR-0013](../../../../../docs/adr/0013-opredelenie-operatora.md)).
+   *
+   * Смысл в том, чтобы обращение к внешнему сервису не попадало в цепочку вызова.
+   * Просроченная запись оператора не подтверждает, и вызов ждёт ответа источника —
+   * это до восьмисот миллисекунд тишины в трубке. Обновлённая заранее запись отвечает
+   * из своей базы мгновенно.
+   *
+   * Номера берутся **по востребованности**: сначала те, по которым звонят чаще.
+   * Номера, по которым не звонят, не обновляются никогда и не стоят ничего.
+   *
+   * Проход намеренно маленький. Темп обращений к источнику общий с горячим путём
+   * (два запроса в секунду на всю платформу), и жадное обновление отбирало бы его
+   * у настоящих вызовов. Двадцать номеров за пять минут — это 0,07 запроса в секунду,
+   * то есть ничего, и при этом четыре номера в минуту: базы в полтораста тысяч номеров
+   * при сроке годности в месяц хватает с запасом.
+   */
+  async refreshStale(now: Date = new Date(), limit = STALE_SWEEP_LIMIT): Promise<number> {
+    if (!this.lookup.enabled) return 0;
+
+    const stale = await this.repository.findStaleResolutions(now, limit);
+    if (stale.length === 0) return 0;
+
+    let refreshed = 0;
+    let answered = 0;
+
+    for (const row of stale) {
+      const msisdn = normalizeMsisdn(row.msisdn);
+      // Номер в базе хранится в каноническом виде — сюда не попадает. Молча
+      // пропустить всё же нельзя: это порча данных, а не редкий случай.
+      if (msisdn === undefined) {
+        this.logger.error('В базе разрешений номер не в каноническом виде', undefined, {
+          resolution_id: row.id,
+        });
+        continue;
+      }
+
+      const answer = await this.lookup.lookup(msisdn);
+      if (answer === undefined) continue;
+
+      answered += 1;
+      if ((await this.store(msisdn, answer, now, false)) !== undefined) refreshed += 1;
+    }
+
+    // Источник отвечал бы хоть на что-то: полное молчание на целом проходе означает,
+    // что он недоступен или сменил формат ответа. Пока это единственный сигнал —
+    // на пути вызова такие отказы теряются в общем шуме.
+    if (answered === 0 && stale.length >= SILENT_SOURCE_THRESHOLD) {
+      this.logger.error('Источник определения оператора не ответил ни на один номер', undefined, {
+        asked: stale.length,
+      });
+    }
+
+    return refreshed;
   }
 
   /** Последний рубеж: кому выделен диапазон. Оператора не подтверждает. */
@@ -236,6 +318,11 @@ export class OperatorResolverService {
     }
 
     // У виртуального оператора своей сети нет: физическая сеть — сеть хозяина.
+    // Виртуальным оператор становится **только по слову человека**
+    // ([ADR-0035](../../../../../docs/adr/0035-operator-vladeet-svoey-setyu.md)):
+    // это утверждение расширяет множество допустимых SIM, и ошибка в нём стоит денег
+    // партнёра. Обратное — «своя сеть» — расширяет ничего и потому берётся по умолчанию,
+    // в том числе у записей, заведённых импортом.
     const network = serving.isMvno
       ? serving.hostOperatorId === null
         ? undefined

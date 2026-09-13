@@ -50,7 +50,13 @@ export const calls = pgTable(
       .references(() => nodes.id, { onDelete: 'restrict' }),
 
     /**
-     * Номер назначения в нормализованном виде.
+     * Номер назначения в нормализованном виде — **кроме отказа `destination_invalid`**:
+     * там лежат цифры набранного, потому что канонического вида у него и не получилось
+     * ([ADR-0042](../../../../docs/adr/0042-diagnoz-po-nerazobrannomu-nomeru.md)).
+     * Ограничение формата в базе исключение называет прямо: у `destination_invalid`
+     * допускаются только цифры, у всего остального — одиннадцать, начиная с семёрки.
+     * В коде то же держит тип `CallDestination`: произвольная строка сюда
+     * не присваивается, только прошедшая разбор.
      *
      * Персональные данные абонента: в логах маскируется, в клиентский контур уходит
      * только своему клиенту.
@@ -98,12 +104,26 @@ export const calls = pgTable(
       'calls_duration_non_negative',
       sql`${t.durationSeconds} is null or ${t.durationSeconds} >= 0`,
     ),
-    check('calls_destination_format', sql`${t.destination} ~ '^7[0-9]{10}$'`),
+    // Канонический номер — и ровно одно исключение, названное здесь же: отказ
+    // `destination_invalid`, у которого канонического вида и не получилось
+    // (ADR-0042). Там допускаются только цифры: звёздочки и решётки из набора
+    // в это поле не попадают, оттуда оно уходит в отчёты и клиентский контур.
+    check(
+      'calls_destination_format',
+      sql`case when ${t.failureReason} = 'destination_invalid'
+            then ${t.destination} ~ '^[0-9]*$'
+            else ${t.destination} ~ '^7[0-9]{10}$'
+          end`,
+    ),
     uniqueIndex('calls_external_id_key').on(t.externalId),
     // Горячий путь: сколько вызовов сейчас открыто на этой SIM.
     index('calls_sim_status_idx').on(t.simCardId, t.status),
     index('calls_channel_started_idx').on(t.channelId, t.startedAt),
     index('calls_status_started_idx').on(t.status, t.startedAt),
+    // Разбор «почему не звонит»: свежие вызовы по всей площадке, без отбора по статусу.
+    // Составной индекс выше для такого порядка не годится — он начинается со статуса,
+    // и запрос без него уходит в полное чтение самой большой таблицы системы с сортировкой.
+    index('calls_started_idx').on(t.startedAt),
   ],
 );
 

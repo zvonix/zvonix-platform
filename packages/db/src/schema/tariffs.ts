@@ -19,7 +19,12 @@
 
 import { sql } from 'drizzle-orm';
 import { bigint, check, index, integer, pgTable, text } from 'drizzle-orm/pg-core';
-import { ROUNDING_MODES, type Rounding } from '@zvonix/shared';
+import {
+  ROUNDING_MODES,
+  TERMINATION_KINDS,
+  type Rounding,
+  type TerminationKind,
+} from '@zvonix/shared';
 import { createdAt, idRef, money, oneOf, primaryId, timestamptz } from '../columns.js';
 import { clients, partners } from './billing.js';
 import { operators } from './catalog.js';
@@ -52,12 +57,25 @@ export const partnerRates = pgTable(
     region: text(),
 
     /**
-     * Приведённое написание региона (`normalizeRegion`). **По нему идёт сравнение**,
+     * Приведённое написание региона (`regionKeyOf`). **По нему идёт сравнение**,
      * а не по `region`: раньше сравнивалась строка, и цена, заведённая как
      * `Красноярский кр.`, для вызова в `Красноярский край` не находилась — молча
      * подменялась общей ценой партнёра ([ADR-0023](../../../docs/adr/0023-koridory-cen.md)).
      */
     regionKey: text(),
+
+    /**
+     * Через что уходит вызов по этой цене
+     * ([ADR-0040](../../../docs/adr/0040-poryadok-terminacii-predlozhenie-i-cena.md)).
+     *
+     * У партнёра с SIM и SIP-транком два прайса, различающихся в разы: внутри своей
+     * сети SIM почти бесплатна, транзит платный всегда. Без этого измерения партнёр
+     * не может назначить транку свою цену — одна строка описывала бы оба случая.
+     *
+     * Умолчание `sim` нужно **миграции**: на момент её появления другого способа
+     * не существует. API требует значение явно.
+     */
+    terminationKind: text().$type<TerminationKind>().notNull().default('sim'),
 
     /** Цена за полную минуту разговора. */
     pricePerMinute: money().notNull(),
@@ -92,8 +110,17 @@ export const partnerRates = pgTable(
     // Ключ есть тогда и только тогда, когда есть регион: ключ без региона нечего
     // показывать человеку, регион без ключа недостижим при отборе.
     check('partner_rates_region_key_paired', sql`(${t.region} is null) = (${t.regionKey} is null)`),
+    check('partner_rates_termination_kind_check', oneOf(t.terminationKind, TERMINATION_KINDS)),
     // Горячий путь: действующий тариф партнёра по направлению на момент вызова.
-    index('partner_rates_lookup_idx').on(t.partnerId, t.operatorId, t.regionKey, t.effectiveFrom),
+    // Способ терминации — сразу после партнёра: отбор кандидатов спрашивает цены
+    // пачкой по способу, а не по одному направлению.
+    index('partner_rates_lookup_idx').on(
+      t.partnerId,
+      t.terminationKind,
+      t.operatorId,
+      t.regionKey,
+      t.effectiveFrom,
+    ),
   ],
 );
 
@@ -125,7 +152,7 @@ export const priceBands = pgTable(
     /** Регион назначения. Пусто — «любой регион», как и у цены партнёра. */
     region: text(),
 
-    /** Приведённое написание региона (`normalizeRegion`). По нему идёт сравнение. */
+    /** Приведённое написание региона (`regionKeyOf`). По нему идёт сравнение. */
     regionKey: text(),
 
     /** Нижняя граница стоимости эталонного вызова. */

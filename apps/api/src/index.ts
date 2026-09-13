@@ -37,6 +37,16 @@ export { QualityService } from './modules/telephony/quality.service.js';
 export { IdentityModule } from './modules/identity/identity.module.js';
 export { IdentityService, SESSION_SWEEP_LIMIT } from './modules/identity/identity.service.js';
 
+export { CatalogModule } from './modules/catalog/catalog.module.js';
+export {
+  OperatorResolverService,
+  STALE_SWEEP_LIMIT,
+} from './modules/catalog/operator-resolver.service.js';
+export { NumberingPlanService } from './modules/catalog/numbering-plan.service.js';
+
+export { SettingsModule } from './modules/settings/settings.module.js';
+export { SettingsService } from './modules/settings/settings.service.js';
+
 export { MailModule } from './modules/mail/mail.module.js';
 export { MailService } from './modules/mail/mail.service.js';
 

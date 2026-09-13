@@ -3,8 +3,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { toDatabaseError, type Database } from '@zvonix/db';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { orderByText, toDatabaseError, type Database } from '@zvonix/db';
 import { machineCredentials } from '@zvonix/db/schema';
 import { newId, type Id, type MachineKeyKind } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
@@ -110,12 +110,36 @@ export class MachineRepository {
       .orderBy(sql`${machineCredentials.createdAt} desc`);
   }
 
+  /** Неотозванные ключи владельца одного вида: собственный контур и его предел. */
+  async listLiveByOwnerAndKind(ownerId: string, kind: MachineKeyKind): Promise<MachineKeyRow[]> {
+    return this.db
+      .select()
+      .from(machineCredentials)
+      .where(
+        and(
+          eq(machineCredentials.ownerId, ownerId),
+          eq(machineCredentials.kind, kind),
+          isNull(machineCredentials.revokedAt),
+        ),
+      )
+      .orderBy(sql`${machineCredentials.createdAt} desc`);
+  }
+
+  /** Все ключи владельца одного вида, включая отозванные: их видно в кабинете. */
+  async listByOwnerAndKind(ownerId: string, kind: MachineKeyKind): Promise<MachineKeyRow[]> {
+    return this.db
+      .select()
+      .from(machineCredentials)
+      .where(and(eq(machineCredentials.ownerId, ownerId), eq(machineCredentials.kind, kind)))
+      .orderBy(sql`${machineCredentials.createdAt} desc`);
+  }
+
   /** Все ключи вида — для панели администратора. */
   async listByKind(kind: MachineKeyKind): Promise<MachineKeyRow[]> {
     return this.db
       .select()
       .from(machineCredentials)
       .where(eq(machineCredentials.kind, kind))
-      .orderBy(asc(machineCredentials.label));
+      .orderBy(orderByText(machineCredentials.label));
   }
 }

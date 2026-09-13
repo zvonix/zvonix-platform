@@ -20,10 +20,12 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { AuditService } from '../audit/audit.service.js';
 import { RateLimitService, type LimitRule } from '../limits/rate-limit.service.js';
 import { MailService } from '../mail/mail.service.js';
+import { CaptchaService } from './captcha.service.js';
 import {
   IdentityRepository,
   type SessionId,
   type SessionRow,
+  type UserFilter,
   type UserId,
   type UserRow,
 } from './identity.repository.js';
@@ -33,7 +35,7 @@ import {
   passwordResetLetter,
   registrationAttemptLetter,
 } from './letters.js';
-import { decryptSecret, encryptSecret } from './secret-box.js';
+import { decryptSecret, encryptSecret, TOTP_SECRET_PURPOSE } from '../../infra/secret-box.js';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js';
 import type { LoginInput, RegisterInput } from './schemas.js';
 import { hashToken, issueToken, LAST_SEEN_REFRESH_MS, tokenHashEquals } from './session-token.js';
@@ -153,6 +155,21 @@ export interface PublicUser {
   readonly createdAt: Date;
 }
 
+/**
+ * То же плюс то, что нужно администратору для решения «пускать или нет».
+ *
+ * Подтверждён ли адрес — главный вопрос при разборе заявки на регистрацию:
+ * подтверждение доступ не открывает, но неподтверждённый адрес означает, что
+ * заявку подал кто угодно ([ADR-0029](../../../../../docs/adr/0029-pochta.md)).
+ * Блокировка до срока отвечает на «почему человек не может войти, пароль верный».
+ */
+export interface AdminUser extends PublicUser {
+  readonly emailConfirmedAt: Date | null;
+  readonly totpEnabled: boolean;
+  readonly lastLoginAt: Date | null;
+  readonly lockedUntil: Date | null;
+}
+
 export interface RequestMeta {
   readonly ip: string | null;
   readonly userAgent: string | null;
@@ -174,6 +191,17 @@ function tooManyAttempts(retryAfterSeconds: number): DomainError {
   return rateLimited('Слишком много попыток. Повторите позже', {
     details: { retry_after_seconds: retryAfterSeconds },
   });
+}
+
+function toAdminUser(row: UserRow): AdminUser {
+  return {
+    ...toPublicUser(row),
+    emailConfirmedAt: row.emailConfirmedAt,
+    // Наружу уходит признак, а не секрет: сам он лежит зашифрованным (ADR-0028).
+    totpEnabled: row.totpConfirmedAt !== null,
+    lastLoginAt: row.lastLoginAt,
+    lockedUntil: row.lockedUntil,
+  };
 }
 
 function toPublicUser(row: UserRow): PublicUser {
@@ -198,6 +226,7 @@ export class IdentityService {
     private readonly audit: AuditService,
     private readonly limits: RateLimitService,
     private readonly mail: MailService,
+    private readonly captcha: CaptchaService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -255,6 +284,9 @@ export class IdentityService {
     // До обращения к базе: смысл ограничения в том, чтобы поток регистраций не доходил
     // до работы, а не в том, чтобы её сосчитать.
     await this.assertWithinRate(REGISTRATION_RULE, meta.ip);
+    // Капча — после предела частоты: иначе поток запросов оплачивался бы обращениями
+    // к чужому сервису, то есть защита сама становилась бы нагрузкой.
+    await this.captcha.assertHuman('register', input.captchaToken, meta.ip);
 
     const now = new Date();
     const existing = await this.repository.findByEmail(input.email);
@@ -329,6 +361,7 @@ export class IdentityService {
     // мегабайт и заметного времени, и раздавать её тому, кто уже исчерпал предел,
     // значит отдать ему же средство нагрузить систему.
     await this.assertWithinFailureRate(LOGIN_FAILURE_RULE, meta.ip);
+    await this.captcha.assertHuman('login', input.captchaToken, meta.ip);
 
     const user = await this.repository.findByEmail(input.email);
 
@@ -463,7 +496,7 @@ export class IdentityService {
   private readTotpSecret(user: UserRow): string {
     if (user.totpSecret === null) throw internalError('У записи нет секрета второго фактора');
     try {
-      return decryptSecret(user.totpSecret, this.config.SECRET_KEY);
+      return decryptSecret(user.totpSecret, this.config.SECRET_KEY, TOTP_SECRET_PURPOSE);
     } catch (cause) {
       this.logger.error('Секрет второго фактора не расшифровывается', cause, {
         user_id: user.id,
@@ -483,8 +516,13 @@ export class IdentityService {
    * Токен и письмо о нём пишутся **одной транзакцией**: иначе возможны «токен есть,
    * письма нет» и «письмо ушло, токена нет».
    */
-  async requestPasswordReset(email: string, meta: RequestMeta): Promise<void> {
+  async requestPasswordReset(
+    email: string,
+    meta: RequestMeta,
+    captchaToken?: string,
+  ): Promise<void> {
     await this.assertWithinRate(PASSWORD_RESET_RULE, meta.ip);
+    await this.captcha.assertHuman('password_reset', captchaToken, meta.ip);
 
     const user = await this.repository.findByEmail(email);
     // Записи нет или доступ к ней закрыт — молчим. Письмо о том, что «такого адреса
@@ -721,7 +759,10 @@ export class IdentityService {
     }
 
     const secret = generateTotpSecret();
-    await this.repository.setTotpSecret(user.id, encryptSecret(secret, this.config.SECRET_KEY));
+    await this.repository.setTotpSecret(
+      user.id,
+      encryptSecret(secret, this.config.SECRET_KEY, TOTP_SECRET_PURPOSE),
+    );
 
     // Секрет уходит в ответ ровно один раз и в журнал не попадает: в журнале он был бы
     // вторым фактором, лежащим рядом с записью о том, чей он.
@@ -902,6 +943,29 @@ export class IdentityService {
       this.logger.info('Удалены просроченные сессии', { count: removed });
     }
     return removed;
+  }
+
+  /**
+   * Учётные записи по отбору — для администратора и поддержки.
+   *
+   * Единственный способ увидеть заявку на самостоятельную регистрацию: она создаётся
+   * со статусом `pending`, и до этого списка её было неоткуда взять, кроме как из базы.
+   */
+  async listUsers(filter: UserFilter): Promise<{ users: AdminUser[]; total: number }> {
+    const { rows, total } = await this.repository.listUsers(filter);
+    return { users: rows.map(toAdminUser), total };
+  }
+
+  /**
+   * Кто эти люди — одним запросом.
+   *
+   * Нужно журналу действий: он хранит идентификатор исполнителя, а показывать обязан
+   * человека. Чужую таблицу журнал при этом не читает — правило границ модулей
+   * ([ARCHITECTURE.md](../../../../../docs/ARCHITECTURE.md)) держится ровно этим методом.
+   */
+  async namesOf(ids: readonly UserId[]): Promise<Map<string, PublicUser>> {
+    const rows = await this.repository.findByIds(ids);
+    return new Map(rows.map((row) => [row.id, toPublicUser(row)]));
   }
 
   async findPublicUser(id: UserId): Promise<PublicUser> {

@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   prepareEnvironment,
+  registerGateway,
   resetDatabase,
   startApi,
   TEST_PASSWORD,
@@ -23,6 +24,7 @@ prepareEnvironment();
 let app: NestFastifyApplication | undefined;
 let token = '';
 let nodeId = '';
+let nodeKey = '';
 
 function api(): NestFastifyApplication {
   if (app === undefined) throw new Error('Приложение не поднято');
@@ -95,6 +97,8 @@ async function scenario(
     })
   ).json<{ gateway: { id: string }; account: { username: string } }>();
   await post(`/gateways/${gateway.gateway.id}/status`, { status: 'active' });
+  // Маршрутизация выбирает только шлюзы, зарегистрированные на принявшем вызов узле.
+  await registerGateway(api(), nodeKey, gateway.gateway.id);
 
   const port = (await post(`/gateways/${gateway.gateway.id}/ports`, { portNumber: 1 })).json<{
     port: { id: string };
@@ -180,6 +184,18 @@ beforeAll(async () => {
 
   const node = await post('/nodes', { name: unique('Узел') });
   nodeId = node.json<{ node: { id: string } }>().node.id;
+
+  // Узел доводится до рабочего ключа: без него нечем отметить регистрацию шлюза,
+  // а без регистрации маршрутизация его не выберет.
+  const command = node.json<{ install: { command: string } }>().install.command;
+  const enrolled = await api().inject({
+    method: 'POST',
+    url: '/node/enroll',
+    headers: { authorization: `Bearer ${command.slice(command.lastIndexOf(' ') + 1)}` },
+    payload: { hostname: unique('node'), agentVersion: '1.0.0' },
+  });
+  const key = enrolled.json<{ key: { key_id: string; secret: string } }>().key;
+  nodeKey = `${key.key_id}.${key.secret}`;
 });
 
 afterAll(async () => {
@@ -462,6 +478,83 @@ describe('отказы', () => {
     });
     expect(stored.status).toBe('failed');
     expect(stored.failure_reason).toBe('operator_unconfirmed');
+  });
+
+  it('короткий номер получает свой диагноз, а не «оператор не подтверждён»', async () => {
+    const env = await scenario();
+    const decision = (await route(env.channel, '112')).json<Preview>();
+
+    // До определения оператора такой вызов не доходит, и называть отказ его именем
+    // значит отправлять поддержку разбирать резолвер, которого не спрашивали (ADR-0042).
+    expect(decision.reason).toBe('destination_invalid');
+    expect(decision.sip_response).toBe('404 Not Found');
+  });
+
+  it('вызов на короткий номер записывается — иначе причине не к чему относиться', async () => {
+    const env = await scenario();
+    const decision = (await route(env.channel, '112')).json<Preview>();
+    expect(decision.call_id).not.toBeNull();
+
+    const stored = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select status, failure_reason, destination, operator_id from calls where id = ${decision.call_id}`,
+      );
+      return result.rows[0] as {
+        status: string;
+        failure_reason: string;
+        destination: string;
+        operator_id: string | null;
+      };
+    });
+
+    expect(stored.status).toBe('failed');
+    expect(stored.failure_reason).toBe('destination_invalid');
+    // Единственное место, где в назначении не канонический номер: канонического
+    // вида у набранного и не получилось.
+    expect(stored.destination).toBe('112');
+    // Оператора не спрашивали: отказ произошёл раньше.
+    expect(stored.operator_id).toBeNull();
+  });
+
+  it('служебный набор доезжает до вызова одними цифрами', async () => {
+    const env = await scenario();
+    const decision = (await route(env.channel, '*100#')).json<Preview>();
+
+    expect(decision.reason).toBe('destination_invalid');
+    const stored = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select destination from calls where id = ${decision.call_id}`,
+      );
+      return result.rows[0] as { destination: string };
+    });
+    // Звёздочки и решётки в поле назначения не нужны: оттуда номер уходит в отчёты
+    // и в клиентский контур.
+    expect(stored.destination).toBe('100');
+  });
+
+  it('база держит исключение узким: ненормализованный номер разрешён только этому отказу', async () => {
+    const env = await scenario();
+    const invalid = (await route(env.channel, '112')).json<Preview>();
+
+    // Подменить причину, оставив короткий номер, не даст сама база: исключение
+    // из формата назначения названо в ограничении поимённо (ADR-0042).
+    await expect(
+      withDatabase(async (execute) => {
+        await execute(
+          sql`update calls set failure_reason = 'operator_unconfirmed' where id = ${invalid.call_id}`,
+        );
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('чёрный список короткий номер не ловит — и не должен', async () => {
+    // Правило чёрного списка это префикс одиннадцатизначного номера длиной не меньше
+    // четырёх цифр (ADR-0024). `112` таким префиксом не является ни при какой записи,
+    // поэтому диагноз обязан приходить раньше — от разбора номера.
+    const env = await scenario();
+    expect((await route(env.channel, '112')).json<Preview>().reason).not.toBe(
+      'destination_blocked',
+    );
   });
 
   it('отключённый канал не маршрутизируется', async () => {

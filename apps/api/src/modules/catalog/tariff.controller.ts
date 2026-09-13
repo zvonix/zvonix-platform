@@ -18,21 +18,9 @@ import {
   addPriceBandSchema,
   priceCallSchema,
 } from './schemas.js';
-import type { CommissionRuleRow, PartnerRateRow, PriceBandRow } from './tariff.repository.js';
+import type { CommissionRuleRow, PriceBandRow } from './tariff.repository.js';
 import { TariffService, type BandViolation } from './tariff.service.js';
-
-interface PartnerRateView {
-  readonly id: string;
-  readonly partner_id: string;
-  readonly operator_id: string;
-  readonly region: string | null;
-  readonly price_per_minute: string;
-  readonly billing_increment_seconds: number;
-  readonly minimum_duration_seconds: number;
-  readonly connection_fee: string;
-  readonly rounding: string;
-  readonly effective_from: string;
-}
+import { toRateView, type RateView } from './views.js';
 
 interface PriceBandView {
   readonly id: string;
@@ -60,11 +48,12 @@ export class TariffController {
   async addPartnerRate(
     @Body(zodBody(addPartnerRateSchema)) body: z.infer<typeof addPartnerRateSchema>,
     @CurrentUser() actor: Principal,
-  ): Promise<{ rate: PartnerRateView }> {
+  ): Promise<{ rate: RateView }> {
     const row = await this.tariffs.addPartnerRate(
       {
         partnerId: parseId(body.partnerId, 'partner'),
         operatorId: parseId(body.operatorId, 'operator'),
+        terminationKind: body.terminationKind,
         region: body.region ?? null,
         pricePerMinute: body.pricePerMinute,
         billingIncrementSeconds: body.billingIncrementSeconds,
@@ -81,9 +70,7 @@ export class TariffController {
 
   @Roles('admin', 'support')
   @Get('partner-rates')
-  async listPartnerRates(
-    @Query('partnerId') partnerId: string,
-  ): Promise<{ rates: PartnerRateView[] }> {
+  async listPartnerRates(@Query('partnerId') partnerId: string): Promise<{ rates: RateView[] }> {
     const rows = await this.tariffs.listPartnerRates(parseId(partnerId, 'partner'));
     return { rates: rows.map(toRateView) };
   }
@@ -138,7 +125,7 @@ export class TariffController {
   @Get('price-bands/violations')
   async bandViolations(): Promise<{
     violations: {
-      rate: PartnerRateView;
+      rate: RateView;
       band: PriceBandView;
       reference_cost: string;
       reference_call_seconds: number;
@@ -196,6 +183,7 @@ export class TariffController {
       parseId(body.partnerId, 'partner'),
       parseId(body.clientId, 'client'),
       { operatorId: parseId(body.operatorId, 'operator'), region: body.region ?? null },
+      body.terminationKind,
       body.durationSeconds,
       at,
     );
@@ -211,21 +199,6 @@ export class TariffController {
   }
 }
 
-function toRateView(row: PartnerRateRow): PartnerRateView {
-  return {
-    id: row.id,
-    partner_id: row.partnerId,
-    operator_id: row.operatorId,
-    region: row.region,
-    price_per_minute: Money.format(row.pricePerMinute),
-    billing_increment_seconds: row.billingIncrementSeconds,
-    minimum_duration_seconds: row.minimumDurationSeconds,
-    connection_fee: Money.format(row.connectionFee),
-    rounding: row.rounding,
-    effective_from: row.effectiveFrom.toISOString(),
-  };
-}
-
 function toBandView(row: PriceBandRow): PriceBandView {
   return {
     id: row.id,
@@ -238,7 +211,7 @@ function toBandView(row: PriceBandRow): PriceBandView {
 }
 
 function toViolationView(violation: BandViolation): {
-  rate: PartnerRateView;
+  rate: RateView;
   band: PriceBandView;
   reference_cost: string;
   reference_call_seconds: number;

@@ -8,10 +8,12 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  conflict,
   internal as internalError,
-  normalizeRegion,
+  regionKeyOf,
   notFound,
   parseId,
+  parseMsisdn,
   validationFailed,
   type ChannelStatus,
   type GatewayStatus,
@@ -19,15 +21,17 @@ import {
   type Id,
   type Msisdn,
   type SimStatus,
+  type TerminationKind,
   type UserRole,
 } from '@zvonix/shared';
-import { APP_CONFIG, type Config } from '../../infra/tokens.js';
+import { decryptSecret, encryptSecret, SIP_TRUNK_SECRET_PURPOSE } from '../../infra/secret-box.js';
+import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingRepository } from '../billing/billing.repository.js';
 import { CatalogRepository } from '../catalog/catalog.repository.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
-import { issueSipCredentials, type SipCredentials } from './sip-credentials.js';
+import { issueSipCredentials, issueSipUsername, type SipCredentials } from './sip-credentials.js';
 import {
   TelephonyRepository,
   type AllowedOperatorRow,
@@ -37,9 +41,11 @@ import {
   type GatewayPortId,
   type GatewayPortRow,
   type GatewayRow,
+  type PartnerId,
   type SimCandidate,
   type SimCardId,
   type SimCardRow,
+  type SipTrunkRow,
 } from './telephony.repository.js';
 
 /**
@@ -61,6 +67,8 @@ function maskMsisdn(msisdn: string): string {
 export interface PartnerPriorityView {
   readonly aliasId: Id<'partnerAlias'>;
   readonly displayName: string;
+  /** Через что уходит вызов по этому приоритету: SIM и транк — разные предложения. */
+  readonly terminationKind: TerminationKind;
   readonly priority: number;
   readonly lastRoutedAt: Date | null;
 }
@@ -86,6 +94,8 @@ export interface IssuedSipAccount {
 
 @Injectable()
 export class TelephonyService {
+  private readonly logger: Logger;
+
   constructor(
     private readonly repository: TelephonyRepository,
     private readonly billing: BillingRepository,
@@ -93,7 +103,10 @@ export class TelephonyService {
     private readonly resolver: OperatorResolverService,
     private readonly catalog: CatalogRepository,
     @Inject(APP_CONFIG) private readonly config: Config,
-  ) {}
+    @Inject(APP_LOGGER) logger: Logger,
+  ) {
+    this.logger = logger.child('telephony');
+  }
 
   get realm(): string {
     return this.config.SIP_REALM;
@@ -184,6 +197,10 @@ export class TelephonyService {
     const existing = await this.repository.findGateway(id);
     if (existing === undefined) throw notFound('Шлюз не найден');
 
+    if (status === 'retired' && existing.status !== 'retired') {
+      return this.retireGateway(existing, actorUserId, actorRole);
+    }
+
     const updated = await this.repository.setGatewayStatus(id, status);
     if (updated === undefined) throw notFound('Шлюз не найден');
 
@@ -198,6 +215,54 @@ export class TelephonyService {
     });
 
     return updated;
+  }
+
+  /**
+   * Списание шлюза освобождает его порты.
+   *
+   * Иначе карта в порту списанного шлюза становится неизвлекаемой: вынуть её нельзя —
+   * портов списанного шлюза в кабинете нет; списать нельзя — «стоит в порту»;
+   * поставить в другой порт нельзя — «уже стоит в другом». При этом она занимает
+   * место в пределе на количество, и партнёр ничего не может с этим сделать.
+   *
+   * Молчаливым это освобождение не выглядит, и в этом разница с картой: у карты порт
+   * остаётся, и её исчезновение оттуда было бы загадкой, а здесь порт уничтожает сам
+   * партнёр — необратимым действием, о котором кабинет спрашивает второй раз и там же
+   * называет число карт ([ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md)).
+   */
+  private async retireGateway(
+    existing: GatewayRow,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<GatewayRow> {
+    const result = await this.repository.retireGatewayFreeingPorts(existing.id);
+    if (result === undefined) throw notFound('Шлюз не найден');
+
+    // Каждая карта отдельной записью, а не числом в записи о шлюзе: искать историю
+    // карты будут по её порту, и «здесь сняли пять» на этот вопрос не отвечает.
+    for (const port of result.freed) {
+      await this.audit.record({
+        action: 'gateway_port.sim_removed',
+        entityType: 'gateway_port',
+        entityId: port.portId,
+        actorUserId,
+        actorRole,
+        before: { sim_card_id: port.simCardId },
+        after: { sim_card_id: null, reason: 'gateway.retired' },
+      });
+    }
+
+    await this.audit.record({
+      action: 'gateway.status_changed',
+      entityType: 'gateway',
+      entityId: existing.id,
+      actorUserId,
+      actorRole,
+      before: { status: existing.status },
+      after: { status: 'retired', freed_sims: result.freed.length },
+    });
+
+    return result.gateway;
   }
 
   async listGateways(partnerId?: Id<'partner'>): Promise<GatewayRow[]> {
@@ -241,6 +306,94 @@ export class TelephonyService {
     });
 
     return { channel, account: this.toAccount(credentials) };
+  }
+
+  /**
+   * Правка настроек канала.
+   *
+   * До появления метода название, требование записи и номер для показа задавались
+   * **только при заведении**. Сменить их можно было единственным способом — завести
+   * канал заново, а это новые учётные данные SIP и перенастройка АТС у клиента.
+   * То есть техническая цена косметической правки была непропорциональной.
+   *
+   * Учётных данных правка не касается: регистрация клиентской АТС от переименования
+   * канала падать не должна.
+   *
+   * Смена `recordingRequired` действует на **последующие** вызовы. Уже записанное
+   * никуда не девается, а включение записи сужает выбор партнёров: канал с записью
+   * не уходит на шлюзы типа `android`, где она технически невозможна
+   * ([ADR-0012](../../../../../docs/adr/0012-mobilnoe-prilozhenie.md)).
+   */
+  async updateChannel(
+    id: ChannelId,
+    changes: { name?: string; recordingRequired?: boolean; callerId?: string | null },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<ChannelRow> {
+    const existing = await this.repository.findChannel(id);
+    if (existing === undefined) throw notFound('Канал не найден');
+
+    const updated = await this.repository.updateChannel(id, changes);
+    if (updated === undefined) throw notFound('Канал не найден');
+
+    await this.audit.record({
+      action: 'channel.updated',
+      entityType: 'channel',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: {
+        name: existing.name,
+        recording_required: existing.recordingRequired,
+        caller_id: existing.callerId,
+      },
+      after: {
+        name: updated.name,
+        recording_required: updated.recordingRequired,
+        caller_id: updated.callerId,
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Перевыпуск учётных данных канала.
+   *
+   * Симметрично шлюзу, и по той же причине: пароль SIP восстановить неоткуда, а утёкший
+   * пароль канала — это чужие вызовы **за счёт клиента**. Без этого пути единственным
+   * ответом на утечку было бы отключение канала целиком.
+   *
+   * Меняется и имя, и пароль: имя уже засветилось в записи регистрации на узле
+   * и в логах, а перенастраивать АТС клиенту всё равно придётся — пусть меняется всё разом.
+   */
+  async resetChannelCredentials(
+    id: ChannelId,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<IssuedSipAccount> {
+    const existing = await this.repository.findChannel(id);
+    if (existing === undefined) throw notFound('Канал не найден');
+
+    const credentials = issueSipCredentials('channel', this.realm);
+    const updated = await this.repository.replaceChannelCredentials(
+      id,
+      credentials.username,
+      credentials.a1Hash,
+    );
+    if (updated === undefined) throw notFound('Канал не найден');
+
+    await this.audit.record({
+      action: 'channel.credentials_reset',
+      entityType: 'channel',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: { sip_username: existing.sipUsername },
+      after: { sip_username: updated.sipUsername },
+    });
+
+    return this.toAccount(credentials);
   }
 
   async setChannelStatus(
@@ -446,11 +599,29 @@ export class TelephonyService {
     const gateway = await this.repository.findGateway(port.gatewayId);
     if (gateway === undefined) throw notFound('Шлюз не найден');
 
+    // В порт списанного шлюза ставить нечего: порта больше нет. Вынуть (`null`)
+    // при этом можно всегда — иначе строка, оставшаяся от прежних правил, оказалась бы
+    // неисправимой.
+    if (simCardId !== null && gateway.status === 'retired') {
+      throw conflict('Шлюз списан: ставить карту в его порт некуда');
+    }
+
     if (simCardId !== null) {
       const sim = await this.repository.findSim(simCardId);
       if (sim === undefined) throw notFound('SIM не найдена');
       if (sim.partnerId !== gateway.partnerId) {
         throw validationFailed('SIM и шлюз принадлежат разным партнёрам');
+      }
+
+      // «Одна SIM в одном порту» держит частичный уникальный индекс, но он отвечает
+      // «такая запись уже существует» — по такому ответу непонятно ни что занято,
+      // ни где искать. Проверка здесь — ради названной причины, а не вместо индекса:
+      // гонку двух одновременных установок по-прежнему ловит он.
+      const occupied = await this.repository.findPortBySim(simCardId);
+      if (occupied !== undefined && occupied.id !== portId) {
+        throw conflict('Эта SIM уже стоит в другом порту', {
+          details: { port_id: occupied.id, gateway_id: occupied.gatewayId },
+        });
       }
     }
 
@@ -474,6 +645,11 @@ export class TelephonyService {
     return this.repository.listPorts(gatewayId);
   }
 
+  /** Все порты партнёра — для его кабинета, одним запросом вместо запроса на шлюз. */
+  async listPartnerPorts(partnerId: Id<'partner'>): Promise<GatewayPortRow[]> {
+    return this.repository.listPartnerPorts(partnerId);
+  }
+
   /**
    * Кандидаты на терминацию под конкретного оператора.
    *
@@ -494,6 +670,175 @@ export class TelephonyService {
     });
   }
 
+  // --- SIP-транки (ADR-0039) ---------------------------------------------------
+
+  /**
+   * Заводит транк партнёра.
+   *
+   * Транк привязывается к **узлу** сразу и обязательно: к провайдеру регистрируемся мы,
+   * и регистрация принадлежит конкретной машине. Транк без узла означал бы ёмкость,
+   * которую некому поднять.
+   *
+   * Пароль провайдера **шифруется**, а не хешируется: без открытого значения
+   * к провайдеру не зарегистрироваться. Это единственный пароль в проекте, который
+   * платформа обязана уметь предъявить наружу.
+   */
+  async createTrunk(
+    draft: {
+      partnerId: PartnerId;
+      nodeId: Id<'node'>;
+      name: string;
+      proxyHost: string;
+      registersOutbound: boolean;
+      outboundUsername: string | null;
+      outboundSecret: string | null;
+      maxConcurrentCalls: number;
+    },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
+    const created = await this.repository.createTrunk(
+      {
+        partnerId: draft.partnerId,
+        nodeId: draft.nodeId,
+        name: draft.name,
+        sipUsername: issueSipUsername('gateway'),
+      },
+      {
+        proxyHost: draft.proxyHost,
+        registersOutbound: draft.registersOutbound,
+        outboundUsername: draft.outboundUsername,
+        outboundSecret: this.sealSecret(draft.outboundSecret),
+        maxConcurrentCalls: draft.maxConcurrentCalls,
+      },
+    );
+
+    await this.audit.record({
+      action: 'sip_trunk.created',
+      entityType: 'gateway',
+      entityId: created.gateway.id,
+      actorUserId,
+      actorRole,
+      // Пароля провайдера в журнале нет ни в каком виде: остаётся факт, что он задан.
+      after: {
+        partner_id: draft.partnerId,
+        node_id: draft.nodeId,
+        name: draft.name,
+        proxy_host: draft.proxyHost,
+        registers_outbound: draft.registersOutbound,
+        max_concurrent_calls: draft.maxConcurrentCalls,
+        has_secret: draft.outboundSecret !== null,
+      },
+    });
+
+    return created;
+  }
+
+  async listTrunks(partnerId?: PartnerId): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }[]> {
+    return this.repository.listTrunks(partnerId);
+  }
+
+  /**
+   * Правит настройки транка.
+   *
+   * Пароль меняется только явной передачей: «поля нет» означает «не трогать», иначе
+   * правка одного лишь адреса стирала бы учётные данные, и транк переставал бы
+   * подниматься без единого сообщения.
+   */
+  async updateTrunk(
+    gatewayId: GatewayId,
+    changes: {
+      proxyHost?: string;
+      registersOutbound?: boolean;
+      outboundUsername?: string | null;
+      outboundSecret?: string | null;
+      maxConcurrentCalls?: number;
+    },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
+    const before = await this.repository.findTrunk(gatewayId);
+    if (before === undefined) throw notFound('Транк не найден');
+
+    const updated = await this.repository.updateTrunk(gatewayId, {
+      ...(changes.proxyHost === undefined ? {} : { proxyHost: changes.proxyHost }),
+      ...(changes.registersOutbound === undefined
+        ? {}
+        : { registersOutbound: changes.registersOutbound }),
+      ...(changes.outboundUsername === undefined
+        ? {}
+        : { outboundUsername: changes.outboundUsername }),
+      ...(changes.outboundSecret === undefined
+        ? {}
+        : { outboundSecret: this.sealSecret(changes.outboundSecret) }),
+      ...(changes.maxConcurrentCalls === undefined
+        ? {}
+        : { maxConcurrentCalls: changes.maxConcurrentCalls }),
+    });
+    if (updated === undefined) throw notFound('Транк не найден');
+
+    await this.audit.record({
+      action: 'sip_trunk.updated',
+      entityType: 'gateway',
+      entityId: gatewayId,
+      actorUserId,
+      actorRole,
+      before: toTrunkAudit(before.trunk),
+      after: toTrunkAudit(updated),
+    });
+
+    return { gateway: before.gateway, trunk: updated };
+  }
+
+  /**
+   * Транки, которые узел обязан поднять, — **с расшифрованными паролями**.
+   *
+   * Единственное место, где пароль провайдера покидает базу в открытом виде, и уходит
+   * он только узлу: без него зарегистрироваться нельзя. В ответ человеку он
+   * не попадает никогда.
+   */
+  async nodeTrunks(nodeId: Id<'node'>): Promise<
+    {
+      name: string;
+      proxyHost: string;
+      registersOutbound: boolean;
+      username: string | null;
+      password: string | null;
+    }[]
+  > {
+    const rows = await this.repository.listNodeTrunks(nodeId);
+    return rows.map((row) => ({
+      name: row.gateway.sipUsername,
+      proxyHost: row.trunk.proxyHost,
+      registersOutbound: row.trunk.registersOutbound,
+      username: row.trunk.outboundUsername,
+      password: this.openSecret(row.trunk.outboundSecret, row.gateway.id),
+    }));
+  }
+
+  /** Пароль провайдера в базе — только зашифрованным. Пусто остаётся пустым. */
+  private sealSecret(plain: string | null): string | null {
+    if (plain === null || plain === '') return null;
+    return encryptSecret(plain, this.config.SECRET_KEY, SIP_TRUNK_SECRET_PURPOSE);
+  }
+
+  /**
+   * Расшифровка пароля провайдера.
+   *
+   * Неудача не роняет ответ целиком: сменился `SECRET_KEY` или испорчены данные,
+   * и остальные транки узла при этом исправны. Молчать тоже нельзя — транк без пароля
+   * не поднимется, а причина иначе не видна ниоткуда.
+   */
+  private openSecret(stored: string | null, gatewayId: GatewayId): string | null {
+    if (stored === null) return null;
+    try {
+      return decryptSecret(stored, this.config.SECRET_KEY, SIP_TRUNK_SECRET_PURPOSE);
+    } catch (cause) {
+      this.logger.error('Пароль транка не расшифровывается', cause, { gateway_id: gatewayId });
+      return null;
+    }
+  }
+
   // --- Каталог для узла -------------------------------------------------------
 
   /**
@@ -507,7 +852,10 @@ export class TelephonyService {
    */
   async directory(username: string, nodeId: Id<'node'>): Promise<string> {
     const gateway = await this.repository.findRegistrableGateway(username);
-    if (gateway !== undefined) {
+    // Хеш пуст только у транка, а транк отбором уже отсеян. Проверка здесь не про
+    // ожидаемый случай, а про рассогласование данных: отдать каталог без хеша значит
+    // впустить кого угодно под этим именем.
+    if (gateway !== undefined && gateway.a1Hash !== null) {
       // Отметка о том, где шлюз сейчас: по ней видно, живой ли он и на каком узле.
       await this.repository.recordRegistration(gateway.id, nodeId, new Date());
       return directoryDocument(this.realm, {
@@ -564,6 +912,7 @@ export class TelephonyService {
       return {
         aliasId: alias.id,
         displayName: alias.displayName,
+        terminationKind: row.terminationKind,
         priority: row.priority,
         lastRoutedAt: row.lastRoutedAt,
       };
@@ -578,26 +927,38 @@ export class TelephonyService {
    */
   async setPartnerPriorities(
     channelId: ChannelId,
-    entries: readonly { aliasId: string; priority: number }[],
+    entries: readonly { aliasId: string; terminationKind: TerminationKind; priority: number }[],
     requester: { userId: Id<'user'>; role: UserRole },
   ): Promise<PartnerPriorityView[]> {
     await this.assertChannelAccess(channelId, requester);
 
     const seen = new Set<string>();
-    const resolved: { partnerId: Id<'partner'>; priority: number }[] = [];
+    const resolved: {
+      partnerId: Id<'partner'>;
+      terminationKind: TerminationKind;
+      priority: number;
+    }[] = [];
 
     for (const entry of entries) {
-      if (seen.has(entry.aliasId)) {
-        throw validationFailed('Один и тот же партнёр указан дважды');
+      // Ключ — предложение, а не партнёр: SIM и транк одного партнёра это две разные
+      // строки с разными ценами, и запрещать их вместе значило бы запретить сам смысл
+      // ([ADR-0040](../../../../../docs/adr/0040-poryadok-terminacii-predlozhenie-i-cena.md)).
+      const key = `${entry.aliasId}:${entry.terminationKind}`;
+      if (seen.has(key)) {
+        throw validationFailed('Одно и то же предложение указано дважды');
       }
-      seen.add(entry.aliasId);
+      seen.add(key);
 
       const alias = await this.billing.findAliasById(parseId(entry.aliasId, 'partnerAlias'));
       // `not_found`, а не `validation_failed`: несуществующий псевдоним и чужой
       // выглядят для вызывающего одинаково, и по разнице ответов их перебирать нельзя.
       if (alias === undefined) throw notFound('Партнёр не найден');
 
-      resolved.push({ partnerId: alias.partnerId, priority: entry.priority });
+      resolved.push({
+        partnerId: alias.partnerId,
+        terminationKind: entry.terminationKind,
+        priority: entry.priority,
+      });
     }
 
     const before = await this.repository.listPartnerPriorities(channelId);
@@ -705,10 +1066,13 @@ export class TelephonyService {
     const entries: { region: string; regionKey: string }[] = [];
 
     for (const region of regions) {
-      const regionKey = normalizeRegion(region);
+      // Основной ключ строки — первый из набора: партнёр объявляет регионы по одному,
+      // и написавший официальное «Кемеровская область - Кузбасс» получит `кемеровская`,
+      // которое совпадёт с набором диапазона (ADR-0033).
+      const regionKey = regionKeyOf(region);
       // «Область» или «край» сами по себе региона не называют, а пустой ключ совпал бы
       // с другим пустым и связал два разных региона.
-      if (regionKey === '') {
+      if (regionKey === null) {
         throw validationFailed(`Не похоже на название региона: «${region}»`);
       }
       // Дубликат — не мелочь: «Красноярский край» и «Красноярский кр.» дают один ключ,
@@ -757,6 +1121,222 @@ export class TelephonyService {
     }
   }
 
+  // --- Собственный контур партнёра (ADR-0043) --------------------------------
+
+  /**
+   * Шлюз принадлежит этому партнёру — иначе для него его не существует.
+   *
+   * Отказ `404`, а не `403`: `403` сообщил бы, что объект есть и он чужой, а партнёр
+   * не должен узнавать даже этого. Ту же границу с другой стороны держит
+   * [ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md).
+   */
+  async requireOwnGateway(id: GatewayId, partnerId: PartnerId): Promise<GatewayRow> {
+    const gateway = await this.repository.findGateway(id);
+    if (gateway === undefined || gateway.partnerId !== partnerId) throw notFound('Шлюз не найден');
+    return gateway;
+  }
+
+  async requireOwnSim(id: SimCardId, partnerId: PartnerId): Promise<SimCardRow> {
+    const sim = await this.repository.findSim(id);
+    if (sim === undefined || sim.partnerId !== partnerId) throw notFound('SIM не найдена');
+    return sim;
+  }
+
+  /** Порт свой, если свой шлюз, которому он принадлежит. */
+  async requireOwnPort(id: GatewayPortId, partnerId: PartnerId): Promise<GatewayPortRow> {
+    const port = await this.repository.findPort(id);
+    if (port === undefined) throw notFound('Порт не найден');
+
+    const gateway = await this.repository.findGateway(port.gatewayId);
+    // Отказ называется портом, а не шлюзом: спрашивали про порт, и чужой шлюз
+    // за ним — не то, о чём партнёру следует узнать.
+    if (gateway === undefined || gateway.partnerId !== partnerId) throw notFound('Порт не найден');
+    return port;
+  }
+
+  /**
+   * Заведение шлюза партнёром — с пределом на количество.
+   *
+   * Предел не про злой умысел: до собственного контура объём ограничивал
+   * администратор тем, что печатал руками, и с его уходом не осталось ничего
+   * ([ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md)).
+   * Списанное не считается — предел про то, что стоит у партнёра сейчас.
+   *
+   * Счёт и вставка идут разными запросами, поэтому предел ограничивает порядок,
+   * а не точное число: пачка одновременных обращений успевает сосчитать одно и то же
+   * и перескочить его на свою глубину — не больше, чем пропустит предел частоты
+   * изменений ([ADR-0041](../../../../../docs/adr/0041-predel-chastoty-izmeneniy.md)),
+   * и ровно один раз: следующий счёт уже видит перебор. Запирать заведение ради
+   * этого не стоит — предел здесь против сорвавшегося сценария, а тот упирается
+   * в порядок величины, а не в конкретное число.
+   */
+  async createOwnGateway(
+    input: {
+      partnerId: PartnerId;
+      name: string;
+      type: GatewayType;
+      model: string | null;
+      portCount: number;
+    },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; account: IssuedSipAccount }> {
+    const limit = this.config.PARTNER_GATEWAY_LIMIT;
+    if (limit > 0 && (await this.repository.countGateways(input.partnerId)) >= limit) {
+      throw conflict('Больше шлюзов завести нельзя', {
+        details: { limit, remedy: 'Спишите неиспользуемые или напишите площадке.' },
+      });
+    }
+    return this.createGateway(input, actorUserId, actorRole);
+  }
+
+  /** То же для карты: предел свой, потому что карт у партнёра на порядок больше. */
+  async createOwnSim(
+    input: {
+      partnerId: PartnerId;
+      operatorId: Id<'operator'>;
+      msisdn: Msisdn;
+      iccid: string | null;
+      activatedAt: Date | null;
+    },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<SimCardRow> {
+    const limit = this.config.PARTNER_SIM_LIMIT;
+    if (limit > 0 && (await this.repository.countSims(input.partnerId)) >= limit) {
+      throw conflict('Больше SIM завести нельзя', {
+        details: { limit, remedy: 'Спишите неиспользуемые или напишите площадке.' },
+      });
+    }
+    return this.createSim(input, actorUserId, actorRole);
+  }
+
+  /**
+   * Партнёр распоряжается **своим** оборудованием — но не снимает отключение,
+   * поставленное площадкой.
+   *
+   * Три правила, и каждое держит своё:
+   *
+   * - из `suspended` обратно в `active` переводит только администратор — иначе рычаг
+   *   площадки снимался бы тем, против кого он поставлен;
+   * - из `suspended` нельзя и **списать**: списал, завёл новый — и рычаг обойдён
+   *   так же, только длиннее;
+   * - `retired` необратим и потому доступен лишь оттуда, где шлюз работает или ещё
+   *   не запускался. Списывает партнёр сам: железо у него, и когда оно уехало,
+   *   знает об этом он ([ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md)).
+   */
+  async setOwnGatewayStatus(
+    id: GatewayId,
+    partnerId: PartnerId,
+    status: 'active' | 'suspended' | 'retired',
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<GatewayRow> {
+    const gateway = await this.requireOwnGateway(id, partnerId);
+    if (gateway.status === 'retired') {
+      throw conflict('Шлюз списан: заведите новый');
+    }
+    if (gateway.status === 'suspended') {
+      throw conflict('Шлюз отключён площадкой — распорядиться им может только администратор');
+    }
+    return this.setGatewayStatus(id, status, actorUserId, actorRole);
+  }
+
+  /**
+   * Списание своей карты.
+   *
+   * Стоящую в порту не списать: сначала выньте. Молча вынуть за партнёра было бы
+   * удобнее ровно один раз — и непонятно во все остальные, когда карта исчезла
+   * из порта сама.
+   *
+   * Заблокированную площадкой — тоже не списать: это её рычаг, и снимать его
+   * списанием значило бы обходить.
+   */
+  async retireOwnSim(
+    id: SimCardId,
+    partnerId: PartnerId,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<SimCardRow> {
+    const sim = await this.requireOwnSim(id, partnerId);
+    if (sim.status === 'retired') return sim;
+    if (sim.status === 'blocked') {
+      throw conflict('Карта заблокирована площадкой — распорядиться ею может только администратор');
+    }
+
+    const port = await this.repository.findPortBySim(id);
+    if (port !== undefined) {
+      throw conflict('Карта стоит в порту', {
+        details: { port_number: port.portNumber, remedy: 'Сначала выньте её из порта.' },
+      });
+    }
+    return this.setSimStatus(id, 'retired', actorUserId, actorRole);
+  }
+
+  /**
+   * Включение SIM партнёром: оператор обязан быть **подтверждён источником**
+   * по её собственному номеру ([ADR-0013](../../../../../docs/adr/0013-opredelenie-operatora.md)).
+   *
+   * Заявление партнёра не принимается на слово, и это не недоверие к нему, а защита
+   * его же денег: у всех партнёров тариф «безлимит внутри своей сети», и SIM, заявленная
+   * одним оператором, а на деле принадлежащая другому, превращает бесплатный вызов
+   * в платный за его счёт. Промежуточного варианта не существует.
+   *
+   * Прежняя модерация администратором эту ошибку не ловила вовсе: он принимал
+   * заявленного оператора на слово ровно так же.
+   *
+   * Подтверждённое при заведении не переспрашивается: `createSim` уже сверил номер
+   * с источником и отказал бы при расхождении. Источник дёргается только тогда, когда
+   * при заведении он промолчал, — и это единственный способ для партнёра повторить
+   * попытку, не заводя карту заново.
+   */
+  async activateOwnSim(
+    id: SimCardId,
+    partnerId: PartnerId,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<SimCardRow> {
+    const sim = await this.requireOwnSim(id, partnerId);
+    if (sim.status === 'blocked' || sim.status === 'retired') {
+      throw conflict('SIM отключена площадкой — включить её может только администратор');
+    }
+    if (sim.status === 'active') return sim;
+
+    if (sim.operatorConfirmedAt === null) {
+      // Номер в базе заведомо канонический — его держит `sim_cards_msisdn_format`.
+      const resolution = await this.resolver.resolve(parseMsisdn(sim.msisdn));
+      if (!resolution.confirmed || resolution.serving === undefined) {
+        throw validationFailed('Оператор SIM не подтверждён — повторите позже', {
+          details: {
+            reason: resolution.reason ?? 'источник не ответил',
+            remedy:
+              'Оператора определяет внешний источник. Пока он молчит, включить карту ' +
+              'может администратор.',
+          },
+        });
+      }
+      if (resolution.serving.id !== sim.operatorId) {
+        const declared = await this.catalog.findOperator(sim.operatorId);
+        // Оба названия в отказе: иначе партнёру нечего исправлять, кроме как гадать.
+        throw validationFailed('Оператор SIM не совпадает с заявленным', {
+          details: {
+            declared: declared?.name ?? 'неизвестен',
+            detected: resolution.serving.name,
+            remedy: 'Заведите карту заново, указав верного оператора.',
+          },
+        });
+      }
+      await this.repository.confirmSimOperator(id, new Date());
+    }
+
+    this.logger.info('SIM включена партнёром', {
+      sim_card_id: id,
+      operator_id: sim.operatorId,
+      msisdn: maskMsisdn(sim.msisdn),
+    });
+    return this.setSimStatus(id, 'active', actorUserId, actorRole);
+  }
+
   private toAccount(credentials: SipCredentials): IssuedSipAccount {
     return {
       username: credentials.username,
@@ -776,4 +1356,20 @@ function channelVariables(channel: ChannelRow): DirectoryUser['variables'] {
     variables['zvonix_caller_id'] = channel.callerId;
   }
   return variables;
+}
+
+/**
+ * Транк в журнале действий.
+ *
+ * Пароля провайдера здесь нет ни в каком виде — остаётся факт, что он задан. Журнал
+ * читают через месяцы и не всегда те, кому этот пароль предназначен.
+ */
+function toTrunkAudit(trunk: SipTrunkRow): Record<string, unknown> {
+  return {
+    proxy_host: trunk.proxyHost,
+    registers_outbound: trunk.registersOutbound,
+    outbound_username: trunk.outboundUsername,
+    has_secret: trunk.outboundSecret !== null,
+    max_concurrent_calls: trunk.maxConcurrentCalls,
+  };
 }

@@ -4,7 +4,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
-import { toDatabaseError, type Database } from '@zvonix/db';
+import { toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import { limitCounters, limitRules } from '@zvonix/db/schema';
 import { newId, type Id, type LimitMetric, type LimitWindow } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
@@ -13,7 +13,9 @@ export type LimitRuleId = Id<'limitRule'>;
 export type LimitRuleRow = typeof limitRules.$inferSelect;
 
 /** Исполнитель запроса: пул или транзакция. */
-export type Executor = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
+// Тип объявлен в `@zvonix/db` и переэкспортируется отсюда: вызывающий берёт его
+// там же, где метод, а определение остаётся одно на весь проект.
+export type { Executor };
 
 /**
  * Субъекты, чьи лимиты нужны.

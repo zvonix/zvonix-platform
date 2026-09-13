@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   prepareEnvironment,
+  registerGateway,
   resetDatabase,
   startApi,
   TEST_PASSWORD,
@@ -88,6 +89,8 @@ async function scenario(options: { pricePerMinute?: string; commissionBp?: numbe
     await post('/gateways', { partnerId: partner, name: unique('Шлюз'), type: 'goip' })
   ).json<{ gateway: { id: string } }>().gateway.id;
   await post(`/gateways/${gateway}/status`, { status: 'active' });
+  // Маршрутизация выбирает только шлюзы, зарегистрированные на принявшем вызов узле.
+  await registerGateway(api(), nodeKey, gateway);
 
   const port = (await post(`/gateways/${gateway}/ports`, { portNumber: 1 })).json<{
     port: { id: string };

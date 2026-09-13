@@ -7,6 +7,7 @@
 
 export { users, sessions } from './users.js';
 export { auditLog } from './audit-log.js';
+export { platformSettings } from './settings.js';
 export {
   operators,
   operatorAliases,
@@ -26,6 +27,7 @@ export { machineCredentials } from './machine.js';
 export { nodes } from './nodes.js';
 export {
   gateways,
+  sipTrunks,
   channels,
   simCards,
   gatewayPorts,
@@ -35,7 +37,7 @@ export {
 } from './telephony.js';
 export { partnerRates, priceBands, commissionRules } from './tariffs.js';
 export { calls, reservations } from './calls.js';
-export { recordings } from './recordings.js';
+export { recordings, recordingGrants } from './recordings.js';
 export { limitRules, limitCounters } from './limits.js';
 export { failureThresholds } from './quality.js';
 export { outboxMessages, authTokens } from './mail.js';

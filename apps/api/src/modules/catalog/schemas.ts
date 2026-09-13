@@ -2,7 +2,7 @@
  * Схемы входных данных справочника операторов и тарифов.
  */
 
-import { Money, ROUNDING_MODES, type MoneyAmount } from '@zvonix/shared';
+import { Money, ROUNDING_MODES, TERMINATION_KINDS, type MoneyAmount } from '@zvonix/shared';
 import { z } from 'zod';
 
 const name = z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное');
@@ -44,18 +44,54 @@ export const createOperatorSchema = z
     path: ['hostOperatorId'],
   });
 
+/**
+ * Подтверждение записи, заведённой импортом плана нумерации
+ * ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)).
+ *
+ * Те же три поля, что и при заведении вручную: подтвердить запись, не назвав признак
+ * MVNO и хозяина сети, невозможно — именно их файл и не сообщает.
+ */
+export const verifyOperatorSchema = z
+  .object({
+    isMvno: z.boolean(),
+    hostOperatorId: z.uuid('должен быть идентификатором').nullish(),
+    mnc: mnc.nullish().transform((value) => value ?? null),
+  })
+  .refine((value) => value.isMvno === (value.hostOperatorId != null), {
+    message: 'Хозяин сети указывается ровно для виртуального оператора',
+    path: ['hostOperatorId'],
+  });
+
 export const addAliasSchema = z.object({ alias: name });
 
 export type CreateOperatorInput = z.infer<typeof createOperatorSchema>;
+export type VerifyOperatorInput = z.infer<typeof verifyOperatorSchema>;
 
-/** Сумма в основных единицах: `1.20`, `0.000001`. Число здесь недопустимо (ADR-0010). */
+/**
+ * Сумма в основных единицах: `1.20`, `0.000001`. Число здесь недопустимо (ADR-0010).
+ *
+ * **Отрицательная отвергается на входе.** Дальше её всё равно не пропустят — расчёт
+ * тарифа проверяет знак сам, а в базе стоит `CHECK`, — но отказ оттуда приходит без
+ * имени поля: человек видит «отрицательная цена или плата за соединение» и гадает,
+ * какое из двух полей он испортил. Проверка на входе называет поле, и это тем важнее,
+ * что цену теперь вводит партнёр, а не только администратор
+ * ([ADR-0023](../../../../../docs/adr/0023-koridory-cen.md)).
+ *
+ * У всех денежных величин тарифа, коридора и наценки ограничение одно и то же —
+ * неотрицательность, — поэтому проверка стоит на общей величине, а не на каждом поле.
+ */
 const tariffAmount = z
   .string()
   .trim()
   .min(1, 'не может быть пустой')
   .transform((value, ctx): MoneyAmount => {
     try {
-      return Money.fromMajorUnits(value);
+      const amount = Money.fromMajorUnits(value);
+      if (Money.compare(amount, Money.ZERO) < 0) {
+        ctx.addIssue({ code: 'custom', message: 'не может быть отрицательной' });
+        return Money.ZERO;
+      }
+      return amount;
     } catch {
       ctx.addIssue({ code: 'custom', message: 'не похоже на денежную сумму' });
       return Money.ZERO;
@@ -67,6 +103,15 @@ export const addPartnerRateSchema = z.object({
 
   /** Оператор назначения. Из ответа резолвера, а не из префикса номера (ADR-0013). */
   operatorId: z.uuid('должен быть идентификатором'),
+
+  /**
+   * Через что уходит вызов по этой цене (ADR-0040).
+   *
+   * Умолчание `sim` — не удобство, а совместимость: на момент появления поля другого
+   * способа не существует, и обработчик без него продолжает работать как прежде.
+   * Появится транк — цену ему назовут явно.
+   */
+  terminationKind: z.enum(TERMINATION_KINDS).default('sim'),
 
   /** Регион назначения. Пусто — тариф на любой регион. */
   region: z.string().trim().min(2, 'слишком короткий').max(100, 'слишком длинный').optional(),
@@ -99,6 +144,26 @@ export const addPartnerRateSchema = z.object({
   /** Момент начала действия. По умолчанию — сейчас. Прошлое не переоценивается. */
   effectiveFrom: z.iso.datetime({ error: 'должен быть датой в формате ISO' }).optional(),
 });
+
+/**
+ * Цена, которую партнёр назначает себе сам ([ADR-0023](../../../../../docs/adr/0023-koridory-cen.md)).
+ *
+ * Отличий от административной схемы ровно два, и оба существенные:
+ *
+ * **Партнёра нет** — он выводится из сессии, как и во всём контуре `/partner/*`.
+ *
+ * **Момента начала действия нет.** Коридор проверяется тем, что действовал на этот
+ * момент, — значит, приняв его от партнёра, мы дали бы ему выбрать время, когда коридор
+ * был шире, то есть обойти ограничение, ради которого он и заведён. Цена партнёра
+ * начинает действовать сейчас.
+ *
+ * Способ терминации **обязателен**: умолчание `sim` в административной схеме —
+ * совместимость со списками, заведёнными до появления транков, а партнёр называет
+ * свою ёмкость с первого раза.
+ */
+export const partnerOwnRateSchema = addPartnerRateSchema
+  .omit({ partnerId: true, effectiveFrom: true })
+  .extend({ terminationKind: z.enum(TERMINATION_KINDS) });
 
 /**
  * Коридор цены по направлению (ADR-0023).
@@ -151,6 +216,9 @@ export const priceCallSchema = z.object({
   clientId: z.uuid('должен быть идентификатором'),
   operatorId: z.uuid('должен быть идентификатором'),
   region: z.string().trim().max(100, 'слишком длинный').optional(),
+
+  /** Через что уходит вызов: у SIM и транка цены разные (ADR-0040). */
+  terminationKind: z.enum(TERMINATION_KINDS).default('sim'),
 
   durationSeconds: z.coerce
     .number()

@@ -6,7 +6,7 @@
  * отказ выражается диалпланом, который кладёт трубку с внятным кодом SIP, а не кодом HTTP.
  */
 
-import type { CallFailureReason } from '@zvonix/shared';
+import type { CallFailureReason, TerminationKind } from '@zvonix/shared';
 import { escapeXmlAttribute } from '../telephony/sip-credentials.js';
 
 const HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>';
@@ -30,7 +30,18 @@ const CONTINUE_ON_FAIL = [
 ].join(',');
 
 interface RouteCandidate {
-  /** Имя учётной записи SIP шлюза: `gw-a1b2c3d4e5f6`. */
+  /**
+   * Через что набирать.
+   *
+   * `sim` — GOIP или телефон: он **зарегистрирован у нас**, и набор идёт через
+   * зарегистрированного пользователя.
+   * `sip` — транк: регистрируемся у провайдера **мы**, и набор идёт через исходящий
+   * sofia-gateway с тем же именем
+   * ([ADR-0039](../../../../../docs/adr/0039-terminaciya-cherez-sip-trank.md)).
+   */
+  readonly kind: TerminationKind;
+
+  /** Имя учётной записи SIP шлюза: `gw-a1b2c3d4e5f6`. У транка — имя sofia-gateway. */
   readonly gatewaySipUsername: string;
 }
 
@@ -54,6 +65,9 @@ export interface RoutePlan {
  */
 const SIP_RESPONSE: Readonly<Record<CallFailureReason, string>> = {
   channel_unknown: '403 Forbidden',
+  // «Такого номера у нас нет» — и для короткого, и для экстренного, и для мусора:
+  // код намеренно грубее причины, как и все остальные (ADR-0042).
+  destination_invalid: '404 Not Found',
   operator_unconfirmed: '404 Not Found',
   destination_blocked: '403 Forbidden',
   operator_not_allowed: '403 Forbidden',
@@ -61,6 +75,7 @@ const SIP_RESPONSE: Readonly<Record<CallFailureReason, string>> = {
   insufficient_funds: '402 Payment Required',
   limit_exceeded: '503 Service Unavailable',
   no_sim_available: '503 Service Unavailable',
+  gateway_unregistered: '503 Service Unavailable',
   recording_required: '503 Service Unavailable',
   no_coverage: '503 Service Unavailable',
   node_lost: '503 Service Unavailable',
@@ -83,12 +98,7 @@ export function sipResponseFor(reason: CallFailureReason): string {
  * регистрируемся мы, а GOIP партнёра регистрируется **на узле**.
  */
 export function routeDocument(plan: RoutePlan): string {
-  const bridge = plan.candidates
-    .map(
-      (candidate) =>
-        `user/${escapeXmlAttribute(candidate.gatewaySipUsername)}@${escapeXmlAttribute(plan.realm)}`,
-    )
-    .join('|');
+  const bridge = plan.candidates.map((candidate) => endpointOf(candidate, plan)).join('|');
 
   const actions: string[] = [
     action('set', 'hangup_after_bridge=true'),
@@ -108,6 +118,21 @@ export function routeDocument(plan: RoutePlan): string {
   actions.push(action('bridge', bridge), action('hangup'));
 
   return document('zvonix-route', actions);
+}
+
+/**
+ * Как набрать кандидата.
+ *
+ * Две записи, потому что стороны разные. GOIP регистрируется **у нас** — он значится
+ * в каталоге, и набор идёт через него как через пользователя. К провайдеру
+ * регистрируемся **мы** — он значится в конфигурации узла исходящим sofia-gateway,
+ * и набор идёт через шлюз с номером назначения.
+ */
+function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
+  const name = escapeXmlAttribute(candidate.gatewaySipUsername);
+  return candidate.kind === 'sim'
+    ? `user/${name}@${escapeXmlAttribute(plan.realm)}`
+    : `sofia/gateway/${name}/${escapeXmlAttribute(plan.destination)}`;
 }
 
 /** Отказ: тот же 200 и тот же XML, просто диалплан кладёт трубку. */

@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { isDomainError, type DomainError } from './errors.js';
 import * as Money from './money.js';
 import type { Money as MoneyAmount, Rounding } from './money.js';
 import {
@@ -37,6 +38,21 @@ function rule(overrides: Partial<TariffRule> = {}): TariffRule {
 const noCommission: CommissionRule = { fixedFee: Money.ZERO, percentBasisPoints: 0n };
 
 describe('оплачиваемая длительность', () => {
+  it('негодный тариф — доменная ошибка, а не внутренняя', () => {
+    // Иначе собственная защита расчёта отдаётся наружу как «внутренняя ошибка»:
+    // узел с негодным CDR получает 500 и повторяет его, а человек, ошибшийся в поле,
+    // видит поломку площадки вместо своей опечатки.
+    let caught: unknown;
+    try {
+      billedSeconds(60, rule({ billingIncrementSeconds: 0 }));
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(isDomainError(caught)).toBe(true);
+    expect((caught as DomainError).code).toBe('validation_failed');
+  });
+
   it('посекундная тарификация — это шаг, равный единице', () => {
     expect(billedSeconds(37, rule({ billingIncrementSeconds: 1 }))).toBe(37);
   });

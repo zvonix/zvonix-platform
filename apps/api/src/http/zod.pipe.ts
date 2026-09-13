@@ -43,3 +43,14 @@ export class ZodPipe<T> implements PipeTransform<unknown, T> {
 export function zodBody<T>(schema: ZodType<T>): ZodPipe<T> {
   return new ZodPipe(schema);
 }
+
+/**
+ * То же для строки запроса: `@Query(zodQuery(schema))`.
+ *
+ * Отдельное имя, а не тот же `zodBody`: у строки запроса все значения — строки,
+ * и схема обязана приводить их сама. Читающий вызов должен видеть, что здесь
+ * разбирается адрес, а не тело.
+ */
+export function zodQuery<T>(schema: ZodType<T>): ZodPipe<T> {
+  return new ZodPipe(schema);
+}

@@ -225,7 +225,7 @@ afterAll(async () => {
 });
 
 describe('заведение SIM', () => {
-  it('номер нормализуется: 8-ка и плюс-семёрка дают одну запись', async () => {
+  it('номер нормализуется: 8-ка и плюс-семёрка дают один и тот же номер', async () => {
     const partner = await createVerifiedPartner();
     const operator = await createOperator(unique('Оператор'));
 
@@ -233,10 +233,12 @@ describe('заведение SIM', () => {
     expect(created.statusCode).toBe(201);
     expect(created.json<{ sim: SimView }>().sim.msisdn).toBe('79161234567');
 
-    // Тот же номер в другой записи — конфликт: иначе вызовы разъедутся по двум SIM,
-    // и лимиты перестанут что-либо ограничивать.
+    // Проверяется сама нормализация, а не отказ по дублю: уникальность номера снята
+    // (ADR-0043, «Ревизия: номер SIM не уникален»), и две записи с одним номером —
+    // это теперь не ошибка, а разрешённое положение дел.
     const again = await createSim(partner, operator, '+7 (916) 123-45-67');
-    expect(again.statusCode).toBe(409);
+    expect(again.statusCode).toBe(201);
+    expect(again.json<{ sim: SimView }>().sim.msisdn).toBe('79161234567');
   });
 
   it('не номер отвергается схемой', async () => {
@@ -314,7 +316,26 @@ describe('порты шлюза', () => {
     expect((await installSim(first.id, sim.id)).statusCode).toBe(201);
     // Иначе она была бы «свободна» дважды, и одновременных вызовов на ней стало бы
     // вдвое больше разрешённого — прямой путь к блокировке оператором.
-    expect((await installSim(second.id, sim.id)).statusCode).toBe(409);
+    const taken = await installSim(second.id, sim.id);
+    expect(taken.statusCode).toBe(409);
+
+    // Отказ обязан называть причину: частичный уникальный индекс отвечает «такая запись
+    // уже существует», и по такому ответу непонятно ни что занято, ни где искать.
+    const body = taken.json<{ error: { message: string; details?: { port_id?: string } } }>();
+    expect(body.error.message).toContain('в другом порту');
+    expect(body.error.details?.port_id).toBe(first.id);
+  });
+
+  it('повторная установка той же SIM в тот же порт — не отказ', async () => {
+    // Иначе форма, отправленная дважды, ругалась бы на состояние, которое сама
+    // же и создала.
+    const partner = await createVerifiedPartner();
+    const gateway = await createActiveGateway(partner);
+    const port = await addPort(gateway, 1);
+    const sim = await createActiveSim(partner, await createOperator(unique('Оператор')));
+
+    expect((await installSim(port.id, sim.id)).statusCode).toBe(201);
+    expect((await installSim(port.id, sim.id)).statusCode).toBe(201);
   });
 
   it('номер порта уникален в пределах шлюза', async () => {

@@ -17,6 +17,18 @@ declare const msisdnBrand: unique symbol;
 /** Номер, прошедший приведение к каноническому виду. Произвольную строку присвоить нельзя. */
 export type Msisdn = string & { readonly [msisdnBrand]: true };
 
+declare const dialledBrand: unique symbol;
+
+/**
+ * Цифры набранного, **не** приведённые к каноническому виду.
+ *
+ * Свой тип, а не просто `string`: в назначение вызова попадает либо канонический
+ * номер, либо это — и ничего третьего. Произвольная строка из запроса туда
+ * не присваивается, хотя поле в базе текстовое
+ * ([ADR-0042](../../../docs/adr/0042-diagnoz-po-nerazobrannomu-nomeru.md)).
+ */
+export type DialledNumber = string & { readonly [dialledBrand]: true };
+
 const RUSSIAN_LENGTH = 11;
 const NATIONAL_LENGTH = 10;
 
@@ -46,6 +58,23 @@ export function normalizeMsisdn(value: string): Msisdn | undefined {
     return `7${digits.slice(1)}` as Msisdn;
   }
   return undefined;
+}
+
+/**
+ * Цифры набранного номера — то, что кладётся в вызов, который не удалось разобрать
+ * ([ADR-0042](../../../docs/adr/0042-diagnoz-po-nerazobrannomu-nomeru.md)).
+ *
+ * Только цифры: в поле назначения не должны попадать `*`, `#` и прочее, что оттуда
+ * уходит в отчёты и в клиентский контур. Длина не подрезается намеренно —
+ * обрезка пятнадцатизначного иностранного номера до одиннадцати сделала бы его
+ * похожим на российский, а это хуже длинной строки. Сверху длину держит схема
+ * запроса от узла.
+ *
+ * Отдельная функция, а не `replace` по месту: правило «в назначении только цифры»
+ * должно быть записано один раз и в том же файле, где живёт канонический вид.
+ */
+export function dialledDigits(value: string): DialledNumber {
+  return value.replace(/\D/g, '') as DialledNumber;
 }
 
 /** Разбор номера, пришедшего снаружи. Негодный — отказ валидации, а не исключение общего вида. */

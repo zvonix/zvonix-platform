@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   prepareEnvironment,
+  registerGateway,
   resetDatabase,
   startApi,
   TEST_PASSWORD,
@@ -27,6 +28,7 @@ prepareEnvironment();
 let app: NestFastifyApplication | undefined;
 let token = '';
 let nodeId = '';
+let nodeKey = '';
 
 function api(): NestFastifyApplication {
   if (app === undefined) throw new Error('Приложение не поднято');
@@ -100,6 +102,8 @@ async function createPartner(operatorId: string): Promise<Partner> {
     await post('/gateways', { partnerId: partner, name: unique('Шлюз'), type: 'goip' })
   ).json<{ gateway: { id: string } }>().gateway.id;
   await post(`/gateways/${gateway}/status`, { status: 'active' });
+  // Маршрутизация выбирает только шлюзы, зарегистрированные на принявшем вызов узле.
+  await registerGateway(api(), nodeKey, gateway);
 
   const port = (await post(`/gateways/${gateway}/ports`, { portNumber: 1 })).json<{
     port: { id: string };
@@ -210,8 +214,20 @@ beforeAll(async () => {
   });
   token = login.json<{ token: string }>().token;
 
-  nodeId = (await post('/nodes', { name: unique('Узел') })).json<{ node: { id: string } }>().node
-    .id;
+  const provisioned = await post('/nodes', { name: unique('Узел') });
+  nodeId = provisioned.json<{ node: { id: string } }>().node.id;
+
+  // Узел доводится до рабочего ключа: без него нечем отметить регистрацию шлюза,
+  // а без регистрации маршрутизация его не выберет.
+  const command = provisioned.json<{ install: { command: string } }>().install.command;
+  const enrolled = await api().inject({
+    method: 'POST',
+    url: '/node/enroll',
+    headers: { authorization: `Bearer ${command.slice(command.lastIndexOf(' ') + 1)}` },
+    payload: { hostname: unique('node'), agentVersion: '1.0.0' },
+  });
+  const key = enrolled.json<{ key: { key_id: string; secret: string } }>().key;
+  nodeKey = `${key.key_id}.${key.secret}`;
 }, 120_000);
 
 afterAll(async () => {
@@ -439,6 +455,72 @@ describe('управление покрытием', () => {
       payload: { regions: [] },
     });
     expect(changed.statusCode).toBe(403);
+  }, 120_000);
+
+  it('диапазон на два субъекта подходит объявившему любой из них', async () => {
+    // Каждый седьмой диапазон плана нумерации выделен на два субъекта, и в источнике
+    // они перечислены в произвольном порядке (ADR-0033). Партнёр, объявивший «Москва»,
+    // до этого не получал ни одного из 1042 московских диапазонов.
+    const operator = await createOperator();
+    const partner = await createPartner(operator);
+    await setCoverage(partner.id, ['Москва']);
+
+    for (const region of ['Город Москва, Московская область', 'Московская область, Город Москва']) {
+      const response = await get(
+        `/routing/sim-candidates?operatorId=${operator}&region=${encodeURIComponent(region)}`,
+      );
+      expect(response.json<{ candidates: unknown[] }>().candidates, region).toHaveLength(1);
+    }
+  }, 120_000);
+
+  it('объявивший второй субъект пары подходит тоже', async () => {
+    const operator = await createOperator();
+    const partner = await createPartner(operator);
+    await setCoverage(partner.id, ['Московская область']);
+
+    const response = await get(
+      `/routing/sim-candidates?operatorId=${operator}&region=${encodeURIComponent('Город Москва, Московская область')}`,
+    );
+    expect(response.json<{ candidates: unknown[] }>().candidates).toHaveLength(1);
+  }, 120_000);
+
+  it('альтернативное имя субъекта через тире совпадает с обычным', async () => {
+    // Официальные названия четырёх субъектов содержат два имени: «Кемеровская область -
+    // Кузбасс». Склеенные в один ключ, они не совпадали ни с одним написанием партнёра.
+    const operator = await createOperator();
+    const kemerovo = await createPartner(operator);
+    await setCoverage(kemerovo.id, ['Кемеровская область']);
+
+    const response = await get(
+      `/routing/sim-candidates?operatorId=${operator}&region=${encodeURIComponent('Кемеровская область - Кузбасс')}`,
+    );
+    expect(response.json<{ candidates: unknown[] }>().candidates).toHaveLength(1);
+  }, 120_000);
+
+  it('соседний субъект по-прежнему не подходит', async () => {
+    // Пересечение наборов не должно превратиться в «подходит всё»: диапазон,
+    // выделенный на Москву с областью, к красноярскому партнёру не идёт.
+    const operator = await createOperator();
+    const partner = await createPartner(operator);
+    await setCoverage(partner.id, ['Красноярский край']);
+
+    const response = await get(
+      `/routing/sim-candidates?operatorId=${operator}&region=${encodeURIComponent('Город Москва, Московская область')}`,
+    );
+    expect(response.json<{ candidates: unknown[] }>().candidates).toHaveLength(0);
+  }, 120_000);
+
+  it('вся страна регионом не считается: это «регион неизвестен»', async () => {
+    // 37 диапазонов выделены на «Российскую Федерацию». Партнёр со списком такой вызов
+    // не принимает — покрытие не доказано (правило 2 ADR-0022).
+    const operator = await createOperator();
+    const listed = await createPartner(operator);
+    await setCoverage(listed.id, ['Москва']);
+
+    const response = await get(
+      `/routing/sim-candidates?operatorId=${operator}&region=${encodeURIComponent('Российская Федерация')}`,
+    );
+    expect(response.json<{ candidates: unknown[] }>().candidates).toHaveLength(0);
   }, 120_000);
 
   it('разбор «какие SIM подходят» учитывает регион, если его назвали', async () => {

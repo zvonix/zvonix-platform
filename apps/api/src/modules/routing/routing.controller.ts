@@ -8,7 +8,7 @@
  */
 
 import { Body, Controller, Header, HttpCode, Inject, Post } from '@nestjs/common';
-import { normalizeMsisdn, parseId } from '@zvonix/shared';
+import { parseId, terminationKindOf } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Machine, Roles } from '../../http/auth.guard.js';
 import { CurrentMachine } from '../../http/request-context.js';
@@ -58,20 +58,15 @@ export class RoutingController {
       return rejectDocument('internal_error');
     }
 
-    const destination = normalizeMsisdn(parsed.data['Caller-Destination-Number']);
-    if (destination === undefined) {
-      // Номер, который мы не понимаем, — это не «оператор не подтверждён»,
-      // а неверный набор. Для поддержки это разные разговоры.
-      this.logger.warn('Номер назначения не разобран', { key_id: machine.keyId });
-      return rejectDocument('operator_unconfirmed');
-    }
-
+    // Номер уходит в решение **как набран**: приведение к каноническому виду делает
+    // маршрутизация, потому что отказ по неразобранному номеру пишется вызовом,
+    // а вызову нужен известный канал (ADR-0042).
     const startedAt = performance.now();
     const decision = await this.routing.route({
       externalId: parsed.data['Unique-ID'],
       channelId: parseId(parsed.data['variable_zvonix_channel'], 'channel'),
       nodeId: parseId(machine.ownerId, 'node'),
-      destination,
+      dialled: parsed.data['Caller-Destination-Number'],
     });
     this.warnIfSlow(startedAt, parsed.data['Unique-ID']);
 
@@ -86,13 +81,15 @@ export class RoutingController {
 
     return routeDocument({
       callId: decision.call.id,
-      destination,
+      // Из вызова, а не из запроса: в запросе набранное, а набирать надо канонический.
+      destination: decision.call.destination,
       realm: this.config.SIP_REALM,
       callerId: decision.callerId,
       recordingPath: decision.recordingRequired
         ? `$\${recordings_dir}/${decision.call.id}.wav`
         : null,
       candidates: decision.candidates.map((candidate) => ({
+        kind: terminationKindOf(candidate.gateway.type),
         gatewaySipUsername: candidate.gateway.sipUsername,
       })),
     });
@@ -113,14 +110,19 @@ export class RoutingController {
     sip_response: string | null;
     call_id: string | null;
     decision_ms: number;
-    candidates: { gateway_id: string; sip_username: string; sim_card_id: string }[];
+    candidates: {
+      gateway_id: string;
+      sip_username: string;
+      termination_kind: string;
+      sim_card_id: string | null;
+    }[];
   }> {
     const startedAt = performance.now();
     const decision = await this.routing.route({
       externalId: body.callId,
       channelId: parseId(body.channelId, 'channel'),
       nodeId: parseId(body.nodeId, 'node'),
-      destination: body.destination,
+      dialled: body.destination,
     });
     // Сколько заняло решение — единственный способ узнать это, не заводя нагрузочный
     // стенд: разбор выполняет ровно тот же путь, что и настоящий вызов.
@@ -146,7 +148,9 @@ export class RoutingController {
       candidates: decision.candidates.map((candidate) => ({
         gateway_id: candidate.gateway.id,
         sip_username: candidate.gateway.sipUsername,
-        sim_card_id: candidate.sim.id,
+        termination_kind: terminationKindOf(candidate.gateway.type),
+        // У транка SIM нет: ёмкость у него своя, и подставлять сюда нечего.
+        sim_card_id: candidate.kind === 'sim' ? candidate.sim.id : null,
       })),
     };
   }

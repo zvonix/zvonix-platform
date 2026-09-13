@@ -70,6 +70,9 @@ function launch(redisUrl) {
       // Конфигурация обязана быть полной: процесс с неполной не поднимается (ADR-0002).
       SECRET_KEY: 'смоук'.padEnd(32, '-'),
       APP_ENV: 'test',
+      // Смоук проверяет запуск, а не загрузку справочников: расписание заводит первый
+      // проход сразу, и без этого воркер полез бы в сеть за планом нумерации.
+      NUMBERING_PLAN_ENABLED: 'false',
       LOG_LEVEL: 'info',
       LOG_FORMAT: 'json',
     },
@@ -146,6 +149,8 @@ async function main() {
         'sessions.purge-expired',
         'limits.purge-closed-windows',
         'quality.suspend-over-threshold',
+        'resolutions.refresh-stale',
+        'numbering-plan.refresh',
         'mail.deliver-due',
         'mail.purge-sent',
         'auth-tokens.purge-expired',

@@ -13,13 +13,35 @@
 
 import type { UserRole, UserStatus } from '@zvonix/shared';
 
+/**
+ * Учётная запись по проводу.
+ *
+ * Имена полей — `snake_case`, как у всех ответов
+ * ([CONVENTIONS.md](../../../../../docs/CONVENTIONS.md)). До 2026-09-07 здесь были
+ * `fullName` и `createdAt`: правило есть, а два поля из него выпали, и заметить это
+ * можно было только глазами — расхождение вида ответа ничем не проверяется.
+ */
 export interface UserResponse {
   readonly id: string;
   readonly email: string;
-  readonly fullName: string;
+  readonly full_name: string;
   readonly role: UserRole;
   readonly status: UserStatus;
-  readonly createdAt: Date;
+  readonly created_at: string;
+}
+
+/**
+ * То же плюс то, что нужно администратору в списке.
+ *
+ * Подтверждён ли адрес, включён ли второй фактор, когда входил в последний раз
+ * и не закрыт ли вход блокировкой — четыре вопроса, ради которых на этот список
+ * и приходят.
+ */
+export interface AdminUserResponse extends UserResponse {
+  readonly email_confirmed_at: string | null;
+  readonly totp_enabled: boolean;
+  readonly last_login_at: string | null;
+  readonly locked_until: string | null;
 }
 
 export interface SessionResponse {

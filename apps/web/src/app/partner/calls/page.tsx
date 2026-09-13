@@ -1,0 +1,212 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { CallStatus } from '@zvonix/shared';
+import { ConsoleShell } from '@/components/console-shell';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { request } from '@/lib/api';
+import { duration, moment } from '@/lib/format';
+import { CALL_STATUS_NAME, callTone } from '@/lib/labels';
+import { simsOf, type Equipment, type Gateway, type Sim } from '../equipment/equipment';
+
+const COLUMNS = 6;
+
+/**
+ * Вызов так, как его видит партнёр.
+ *
+ * Ни клиента, ни линии: через чьё железо прошёл вызов — вопрос партнёра, кто его
+ * заказал — не его дело. Обратная сторона ADR-0014 работает так же.
+ */
+interface PartnerCall {
+  readonly id: string;
+  readonly destination: string;
+  readonly status: CallStatus;
+  readonly sim_card_id: string | null;
+  readonly gateway_id: string | null;
+  readonly operator_id: string | null;
+  readonly duration_seconds: number | null;
+  readonly started_at: string;
+}
+
+export default function PartnerCallsPage() {
+  return (
+    <ConsoleShell title="Вызовы через меня" requireRole="partner">
+      {() => <PartnerCalls />}
+    </ConsoleShell>
+  );
+}
+
+function PartnerCalls() {
+  const list = useQuery({
+    queryKey: ['partner', 'calls'],
+    queryFn: () => request<{ calls: PartnerCall[] }>('/partner/calls'),
+  });
+
+  // Названия железа берутся из того же ответа, что и раздел «оборудование»: второй
+  // список имён разъехался бы с первым, а идентификатор в таблице не говорит ничего.
+  const equipment = useQuery({
+    queryKey: ['partner', 'equipment'],
+    queryFn: () => request<Equipment>('/partner/equipment'),
+    staleTime: 60_000,
+  });
+
+  const gateways = new Map<string, Gateway>(
+    (equipment.data?.gateways ?? []).map((gateway) => [gateway.id, gateway]),
+  );
+  const trunks = new Map<string, string>(
+    (equipment.data?.trunks ?? []).map((trunk) => [trunk.id, trunk.name]),
+  );
+  const sims = new Map<string, Sim>(simsOf(equipment.data).map((sim) => [sim.id, sim]));
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="max-w-prose text-muted-foreground">
+        Вызовы, прошедшие через ваше оборудование. По ним сверяется счёт вашего оператора: если
+        разговора здесь нет, а оператор его посчитал, — он шёл не через площадку.
+      </p>
+
+      {list.error !== null && (
+        <p role="alert" className="text-crit">
+          {list.error.message}
+        </p>
+      )}
+
+      <div className="rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className="h-8">Когда</TableHead>
+              <TableHead className="h-8">Куда</TableHead>
+              <TableHead className="h-8">Через что</TableHead>
+              <TableHead className="h-8">Итог</TableHead>
+              <TableHead className="h-8 text-right">Длительность</TableHead>
+              <TableHead className="h-8" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.isPending && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={COLUMNS} className="text-muted-foreground">
+                  Загружаем…
+                </TableCell>
+              </TableRow>
+            )}
+
+            {list.data?.calls.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
+                  Вызовов через ваше оборудование пока не было. Если оно подключено и включено,
+                  посмотрите «Моё оборудование» и «Мои цены»: без регистрации на узле и без цены по
+                  направлению вызов не уйдёт вовсе.
+                </TableCell>
+              </TableRow>
+            )}
+
+            {list.data?.calls.map((call) => {
+              const sim = call.sim_card_id === null ? undefined : sims.get(call.sim_card_id);
+              const gateway = call.gateway_id === null ? undefined : gateways.get(call.gateway_id);
+              const trunk = call.gateway_id === null ? undefined : trunks.get(call.gateway_id);
+
+              return (
+                <TableRow key={call.id}>
+                  <TableCell className="num text-muted-foreground">
+                    {moment(call.started_at)}
+                  </TableCell>
+
+                  <TableCell className="num">{call.destination}</TableCell>
+
+                  <TableCell>
+                    {gateway?.name ?? trunk ?? <span className="text-faint">—</span>}
+                    {sim !== undefined && (
+                      <span className="num block text-faint">
+                        {sim.msisdn}
+                        {sim.operator_name !== null && ` · ${sim.operator_name}`}
+                      </span>
+                    )}
+                  </TableCell>
+
+                  <TableCell>
+                    <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
+                      {CALL_STATUS_NAME[call.status]}
+                    </span>
+                  </TableCell>
+
+                  <TableCell className="num text-right">
+                    {call.duration_seconds === null ? (
+                      <span className="text-faint">—</span>
+                    ) : (
+                      duration(call.duration_seconds)
+                    )}
+                  </TableCell>
+
+                  <TableCell className="text-right">
+                    <WrongNetwork call={call} />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * «Этот вызов ушёл не в мою сеть».
+ *
+ * Партнёр видит счёт своего оператора и знает об ошибке раньше площадки: у него это
+ * деньги, у нас строка в базе. Обращение отменяет определение оператора для номера
+ * немедленно, не дожидаясь срока годности записи
+ * ([ADR-0013](../../../../../docs/adr/0013-opredelenie-operatora.md)).
+ *
+ * Показывается только у состоявшихся разговоров: несостоявшийся вызов оператор
+ * не тарифицирует, и отменять по нему нечего.
+ */
+function WrongNetwork({ call }: { call: PartnerCall }) {
+  const queryClient = useQueryClient();
+
+  const report = useMutation({
+    mutationFn: () =>
+      request<{ invalidated: boolean; destination: string }>(`/calls/${call.id}/wrong-network`, {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['partner', 'calls'] });
+    },
+  });
+
+  if (call.status !== 'completed') return null;
+
+  if (report.isSuccess) {
+    return <span className="text-muted-foreground">принято</span>;
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        type="button"
+        onClick={() => {
+          report.mutate();
+        }}
+        disabled={report.isPending}
+        title="Оператор номера будет определён заново, а этот вызов мы разберём"
+        className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+      >
+        Ушёл не в мою сеть
+      </button>
+      {report.error !== null && (
+        <span role="alert" className="text-crit">
+          {report.error.message}
+        </span>
+      )}
+    </div>
+  );
+}

@@ -6,8 +6,9 @@
  * обнаруживается это на сверке через месяц, когда уже непонятно, где именно.
  */
 
-import { Money, type MoneyAmount } from '@zvonix/shared';
+import { CLIENT_STATUSES, Money, PARTNER_STATUSES, type MoneyAmount } from '@zvonix/shared';
 import { z } from 'zod';
+import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 
 const name = z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное');
 
@@ -58,3 +59,80 @@ export const depositSchema = z.object({
   idempotencyKey: z.string().trim().min(4, 'слишком короткий').max(200, 'слишком длинный'),
   description: z.string().trim().min(2, 'слишком короткое').max(500, 'слишком длинное'),
 });
+
+/**
+ * Объявление партнёра о том, слушает ли он записи своих вызовов
+ * ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
+ */
+export const recordingsAccessSchema = z.object({ listens: z.boolean() });
+
+/**
+ * Отбор клиентов.
+ *
+ * Пустое значение параметра — «любое», а не «пустое»: форма отбора шлёт все свои поля,
+ * и сброс фильтра не должен давать отказ. Границы страницы разбираются общими
+ * правилами ([pagination.ts](../../http/pagination.ts)).
+ */
+const optionalParameter = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().optional(),
+);
+
+const CLIENT_PAGE_MAX = 200;
+
+export const clientListQuerySchema = z.object({
+  status: optionalParameter.pipe(z.enum(CLIENT_STATUSES).optional()),
+  name: optionalParameter.pipe(z.string().trim().max(200, 'слишком длинное').optional()),
+  limit: z
+    .string()
+    .optional()
+    .transform((raw) => boundedLimit(raw, CLIENT_PAGE_MAX)),
+  offset: z.string().optional().transform(boundedOffset),
+});
+
+const PARTNER_PAGE_MAX = 200;
+
+/**
+ * Отбор партнёров. Правила те же, что и у клиентов: пустое поле — «любое».
+ */
+export const partnerListQuerySchema = z.object({
+  status: optionalParameter.pipe(z.enum(PARTNER_STATUSES).optional()),
+  /** Ищет и по настоящему имени, и по псевдониму: администратор помнит одно из двух. */
+  name: optionalParameter.pipe(z.string().trim().max(200, 'слишком длинное').optional()),
+  limit: z
+    .string()
+    .optional()
+    .transform((raw) => boundedLimit(raw, PARTNER_PAGE_MAX)),
+  offset: z.string().optional().transform(boundedOffset),
+});
+
+/**
+ * Смена состояния партнёра.
+ *
+ * `closed` в списке есть: закрыть партнёра — законное действие администратора.
+ * Необратимость этого перехода стережёт служба, а не схема, — здесь она выразилась бы
+ * только запретом самого значения, и закрыть партнёра стало бы нечем.
+ */
+export const partnerStatusSchema = z.object({ status: z.enum(PARTNER_STATUSES) });
+
+/**
+ * Смена состояния клиента. Правила те же, что и у партнёра: `closed` в списке есть,
+ * а необратимость этого перехода стережёт служба.
+ */
+export const clientStatusSchema = z.object({ status: z.enum(CLIENT_STATUSES) });
+
+/**
+ * Смена разрешённого минуса.
+ *
+ * Величина положительная: хранить предел со знаком минус — верный способ однажды
+ * перепутать направление и раздать бесконечный кредит.
+ */
+export const overdraftSchema = z.object({ overdraftLimit: amount });
+
+/**
+ * Переименование псевдонима партнёра (ADR-0014).
+ *
+ * Не должен намекать на личность: это единственное, что клиент о партнёре знает,
+ * и настоящее имя в клиентский контур не попадает ни в каком виде.
+ */
+export const partnerAliasSchema = z.object({ displayName: name });

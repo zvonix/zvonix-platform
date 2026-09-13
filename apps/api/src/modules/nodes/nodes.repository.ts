@@ -3,8 +3,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, lt, ne, sql } from 'drizzle-orm';
-import { toDatabaseError, type Database } from '@zvonix/db';
+import { and, eq, inArray, lt, ne, sql } from 'drizzle-orm';
+import { orderByText, toDatabaseError, type Database } from '@zvonix/db';
 import { nodes } from '@zvonix/db/schema';
 import { newId, ROUTABLE_NODE_STATUSES, type Id, type NodeStatus } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
@@ -39,7 +39,7 @@ export class NodesRepository {
   }
 
   async list(): Promise<NodeRow[]> {
-    return this.db.select().from(nodes).orderBy(asc(nodes.name));
+    return this.db.select().from(nodes).orderBy(orderByText(nodes.name));
   }
 
   /** Узлы, на которые допустимо направлять вызовы. */
@@ -48,7 +48,7 @@ export class NodesRepository {
       .select()
       .from(nodes)
       .where(inArray(nodes.status, [...ROUTABLE_NODE_STATUSES]))
-      .orderBy(asc(nodes.name));
+      .orderBy(orderByText(nodes.name));
   }
 
   /**

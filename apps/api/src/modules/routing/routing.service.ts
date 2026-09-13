@@ -8,7 +8,18 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { DomainError, type CallFailureReason, type Id, type Msisdn } from '@zvonix/shared';
+import {
+  DomainError,
+  TERMINATION_KINDS,
+  dialledDigits,
+  type CallDestination,
+  normalizeMsisdn,
+  terminationKindOf,
+  type CallFailureReason,
+  type Id,
+  type MoneyAmount,
+  type Msisdn,
+} from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { ReservationService } from '../billing/reservation.service.js';
 import { BlockedNumberService } from '../catalog/blocked-numbers.service.js';
@@ -16,12 +27,14 @@ import type { LimitRuleRow } from '../limits/limit.repository.js';
 import { LimitBreach, LimitService } from '../limits/limit.service.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
-import { CallRepository, type CallRow } from '../telephony/call.repository.js';
+import { CallRepository, type CallRow, type Executor } from '../telephony/call.repository.js';
 import { CdrService } from '../telephony/cdr.service.js';
 import {
   TelephonyRepository,
   type ChannelRow,
   type SimCandidate,
+  type TerminationCandidate,
+  type TrunkCandidate,
 } from '../telephony/telephony.repository.js';
 
 /**
@@ -37,7 +50,15 @@ export interface RouteRequest {
   readonly externalId: string;
   readonly channelId: Id<'channel'>;
   readonly nodeId: Id<'node'>;
-  readonly destination: Msisdn;
+  /**
+   * Набранное как есть, без приведения к каноническому виду.
+   *
+   * Приводит его `route`, а не вызывающий: отказ по неразобранному номеру пишется
+   * вызовом, а вызову нужен канал — значит разбор обязан идти **после** проверки
+   * канала, внутри решения
+   * ([ADR-0042](../../../../../docs/adr/0042-diagnoz-po-nerazobrannomu-nomeru.md)).
+   */
+  readonly dialled: string;
 }
 
 /** Решение по вызову: либо список кандидатов, либо причина отказа. */
@@ -45,7 +66,7 @@ export type RouteDecision =
   | {
       readonly outcome: 'routed';
       readonly call: CallRow;
-      readonly candidates: readonly SimCandidate[];
+      readonly candidates: readonly TerminationCandidate[];
       readonly recordingRequired: boolean;
       readonly callerId: string | null;
     }
@@ -84,6 +105,9 @@ export class RoutingService {
       return this.replay(existing);
     }
 
+    // 1. Канал. Нумерация шагов здесь та же, что в таблице проверок
+    //    в docs/api/routing.md: читать их приходится вместе, и расхождение номеров
+    //    сбивает с толку.
     const routable = await this.telephony.findRoutableChannel(request.channelId);
     if (routable === undefined) {
       // Канала нет, он отключён или клиенту закрыт доступ. Записать это как `Call`
@@ -98,10 +122,28 @@ export class RoutingService {
     }
     const channel = routable.channel;
 
-    // 1. Чёрный список. До определения оператора: тратить бюджет определения (до 800 мс
+    // 1а. Приведение номера к каноническому виду. Короткий, экстренный, служебный
+    //    и вовсе не номер отсекаются здесь: до определения оператора такой вызов
+    //    не доходит, и называть отказ «оператор не подтверждён» — ложный след
+    //    для поддержки (ADR-0042). Порядок обязателен: после канала, потому что
+    //    отказ пишется вызовом, и до чёрного списка, потому что его правила —
+    //    префиксы канонических номеров (ADR-0024).
+    const destination = normalizeMsisdn(request.dialled);
+    if (destination === undefined) {
+      const digits = dialledDigits(request.dialled);
+      // Само набранное в журнал не пишется — это персональные данные абонента;
+      // пишется его длина, по которой видно, короткий это номер или мусор.
+      this.logger.info('Вызов на неразобранный номер', {
+        channel_id: channel.id,
+        digits: digits.length,
+      });
+      return this.reject(request, digits, channel.id, null, null, 'destination_invalid');
+    }
+
+    // 2. Чёрный список. До определения оператора: тратить бюджет определения (до 800 мс
     //    и запрос во внешний сервис) на номер, звонить на который запрещено, незачем —
     //    и сообщать этот номер внешнему источнику тоже незачем (ADR-0024).
-    const block = await this.blocked.findBlock(request.destination);
+    const block = await this.blocked.findBlock(destination);
     if (block !== undefined) {
       // Номер в журнал не пишется — он персональные данные абонента; пишется правило,
       // по которому отказано, и по нему разбор находится сразу.
@@ -110,23 +152,30 @@ export class RoutingService {
         blocked_number_id: block.id,
         prefix: block.prefix,
       });
-      return this.reject(request, channel.id, null, null, 'destination_blocked');
+      return this.reject(request, destination, channel.id, null, null, 'destination_blocked');
     }
 
-    // 2. Оператор. Гадать запрещено: неверный оператор — платный звонок с денег
+    // 3. Оператор. Гадать запрещено: неверный оператор — платный звонок с денег
     //    партнёра, а промежуточного варианта нет (ADR-0013).
-    const resolution = await this.resolveWithinBudget(request.destination);
+    const resolution = await this.resolveWithinBudget(destination);
     if (!resolution.confirmed || resolution.serving === undefined) {
-      return this.reject(request, channel.id, null, null, 'operator_unconfirmed');
+      return this.reject(request, destination, channel.id, null, null, 'operator_unconfirmed');
     }
     const operatorId = resolution.serving.id;
     const region = resolution.region ?? null;
 
-    // 3. Разрешён ли этот оператор каналом (ADR-0025). Проверяется **определённый**
+    // 3а. Разрешён ли этот оператор каналом (ADR-0025). Проверяется **определённый**
     //    оператор, а не префикс: из-за переносимости номеров префикс называет не того,
     //    и «разрешён» было бы вычислено для оператора, который номер уже не обслуживает.
     if (!(await this.telephony.isOperatorAllowed(channel.id, operatorId))) {
-      return this.reject(request, channel.id, operatorId, region, 'operator_not_allowed');
+      return this.reject(
+        request,
+        destination,
+        channel.id,
+        operatorId,
+        region,
+        'operator_not_allowed',
+      );
     }
 
     // 4. Лимиты клиента и канала: исчерпаны — отказ сразу, без отбора SIM и расчёта
@@ -144,27 +193,43 @@ export class RoutingService {
         metric: breached.rule.metric,
         window: breached.rule.window,
       });
-      return this.reject(request, channel.id, operatorId, region, 'limit_exceeded');
+      return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
     }
 
     // 5. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
     //    регион — партнёров, которые в него не звонят (ADR-0022).
-    const candidates = await this.telephony.findSimCandidates(operatorId, {
-      channelId: channel.id,
-      excludeRecordingIncapable: channel.recordingRequired,
-      region,
-    });
+    const [simCandidates, trunkCandidates] = await Promise.all([
+      this.telephony.findSimCandidates(operatorId, {
+        channelId: channel.id,
+        excludeRecordingIncapable: channel.recordingRequired,
+        region,
+        // Только шлюзы **этого** узла: диалплан набирает их как зарегистрированных
+        // пользователей, и регистрация живёт там, куда шлюз пришёл.
+        nodeId: request.nodeId,
+      }),
+      // Транк — такой же кандидат, как SIM, без правила «сначала SIM»: разницу в цене
+      // клиент видит и учитывает сам (ADR-0039, ADR-0040). Отбор по узлу обязателен:
+      // регистрация у провайдера принадлежит конкретному узлу.
+      this.telephony.findTrunkCandidates(request.nodeId, { channelId: channel.id, region }),
+    ]);
+    const candidates: TerminationCandidate[] = [...simCandidates, ...trunkCandidates];
     if (candidates.length === 0) {
-      const reason = await this.explainEmptyCandidates(operatorId, channel, region);
-      return this.reject(request, channel.id, operatorId, region, reason);
+      const reason = await this.explainEmptyCandidates(operatorId, channel, region, request.nodeId);
+      return this.reject(request, destination, channel.id, operatorId, region, reason);
     }
 
-    // 6. Лимиты партнёров и SIM отсеивают кандидатов, а не отклоняют вызов: лимит
+    // 5в. Лимиты партнёров и SIM отсеивают кандидатов, а не отклоняют вызов: лимит
     //    партнёра — защита его SIM, и он не должен мешать позвонить через другого.
     const candidateLimits = await this.limits.usage(
       {
         partnerIds: [...new Set(candidates.map((candidate) => candidate.gateway.partnerId))],
-        simCardIds: [...new Set(candidates.map((candidate) => candidate.sim.id))],
+        simCardIds: [
+          ...new Set(
+            candidates
+              .filter((candidate) => candidate.kind === 'sim')
+              .map((candidate) => candidate.sim.id),
+          ),
+        ],
       },
       at,
     );
@@ -175,12 +240,13 @@ export class RoutingService {
     );
     const available = candidates.filter(
       (candidate) =>
-        !exhausted.has(candidate.gateway.partnerId) && !exhausted.has(candidate.sim.id),
+        !exhausted.has(candidate.gateway.partnerId) &&
+        (candidate.kind !== 'sim' || !exhausted.has(candidate.sim.id)),
     );
     if (available.length === 0) {
       // Отдельная причина: «все исчерпали лимит» и «SIM нет вовсе» — разные разговоры
       // с партнёром.
-      return this.reject(request, channel.id, operatorId, region, 'limit_exceeded');
+      return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
     }
 
     const applicableLimits = [
@@ -188,11 +254,23 @@ export class RoutingService {
       ...candidateLimits.map((usage) => usage.rule),
     ];
 
+    // 6. Порядок перебора: цена решает при равном приоритете
+    //    ([ADR-0040](../../../../../docs/adr/0040-poryadok-terminacii-predlozhenie-i-cena.md)).
+    //    Здесь же отсеиваются те, у кого цены по направлению нет вовсе: звонить через
+    //    них нельзя — тарифицировать будет нечем, — и держать их в очереди значит
+    //    обещать перебор, который упрётся в отказ.
+    const ordered = await this.orderByPrice(available, operatorId, region, at);
+    if (ordered.length === 0) {
+      // Кандидаты были, но ни у одного нет действующей цены по направлению. Это разговор
+      // с партнёром о его прайсе, а не с клиентом о свободных SIM.
+      return this.reject(request, destination, channel.id, operatorId, region, 'no_tariff');
+    }
+
     // 7. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM
     //    и инкрементом счётчиков лимитов.
-    let claimed: { call: CallRow; candidate: SimCandidate } | undefined;
+    let claimed: { call: CallRow; candidate: TerminationCandidate } | undefined;
     try {
-      claimed = await this.claimSim(request, channel, operatorId, region, available, {
+      claimed = await this.claimSim(request, destination, channel, operatorId, region, ordered, {
         rules: applicableLimits,
         at,
       });
@@ -203,10 +281,18 @@ export class RoutingService {
         // на нём не мешает, а на каждом успешном вызове мешал бы.
         const closed = await this.cdr.closeCallsWithoutCdr();
         if (closed > 0) {
-          claimed = await this.claimSim(request, channel, operatorId, region, available, {
-            rules: applicableLimits,
-            at,
-          });
+          claimed = await this.claimSim(
+            request,
+            destination,
+            channel,
+            operatorId,
+            region,
+            ordered,
+            {
+              rules: applicableLimits,
+              at,
+            },
+          );
         }
       }
     } catch (cause) {
@@ -217,21 +303,22 @@ export class RoutingService {
           channel_id: channel.id,
           limit_rule_id: cause.rule.id,
         });
-        return this.reject(request, channel.id, operatorId, region, 'limit_exceeded');
+        return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
       }
       throw cause;
     }
     if (claimed === undefined) {
-      return this.reject(request, channel.id, operatorId, region, 'no_sim_available');
+      return this.reject(request, destination, channel.id, operatorId, region, 'no_sim_available');
     }
 
-    // 6. Деньги. Считается стоимость разговора предельной длительности: резерв обязан
+    // 8. Деньги. Считается стоимость разговора предельной длительности: резерв обязан
     //    покрывать любой исход, иначе он не защищает ни от чего.
     try {
       const priced = await this.tariffs.priceReservation(
         claimed.candidate.gateway.partnerId,
         routable.clientId,
         { operatorId, region },
+        terminationKindOf(claimed.candidate.gateway.type),
         this.config.MAX_CALL_DURATION_SECONDS,
         new Date(),
       );
@@ -256,7 +343,7 @@ export class RoutingService {
       // Выбранная SIM первой: узел пробует кандидатов по порядку.
       candidates: [
         claimed.candidate,
-        ...available.filter((c) => c.sim.id !== claimed.candidate.sim.id),
+        ...ordered.filter((other) => !isSameCandidate(other, claimed.candidate)),
       ],
       recordingRequired: channel.recordingRequired,
       callerId: channel.callerId,
@@ -273,15 +360,81 @@ export class RoutingService {
    * Лишние запросы здесь допустимы: это путь отказа, а не горячий путь. На успешном
    * вызове не выполняется ни один из них.
    */
+  /**
+   * Выстраивает кандидатов в порядке перебора и отбрасывает тех, у кого нет цены.
+   *
+   * Порядок: приоритет предложения → цена по направлению → давность последнего вызова
+   * → номер SIM ([ADR-0040](../../../../../docs/adr/0040-poryadok-terminacii-predlozhenie-i-cena.md)).
+   *
+   * **Цена решает разницу по операторам сама.** Она берётся для фактического направления
+   * фактического вызова, поэтому партнёр, дешёвый на МТС и дорогой на Билайне, встаёт
+   * первым на МТС и последним на Билайне — без единой настройки у клиента. Списком
+   * приоритетов это невыразимо: список один на все направления.
+   *
+   * Сортируется **тариф партнёра**, а не цена клиента: наценка зависит от клиента,
+   * а не от партнёра, то есть переход между ними монотонный и порядок сохраняет.
+   * Считать полную цену каждому кандидату значило бы тянуть правило наценки на каждое
+   * решение о маршруте ради числа, которое ничего не переставит.
+   *
+   * Цены спрашиваются **одним запросом на всех**: по запросу на кандидата — это десяток
+   * обращений в горячем пути там, где хватает одного.
+   */
+  private async orderByPrice(
+    candidates: readonly TerminationCandidate[],
+    operatorId: Id<'operator'>,
+    region: string | null,
+    at: Date,
+  ): Promise<TerminationCandidate[]> {
+    // Цены спрашиваются по способу терминации: у одного партнёра с SIM и транком два
+    // прайса, различающихся в разы (ADR-0040). Два запроса, а не один на всех: способ —
+    // часть ключа цены, и смешивать их в одном ответе значило бы выбирать наугад.
+    const byKind = await Promise.all(
+      TERMINATION_KINDS.map(async (kind) => {
+        const partnerIds = [
+          ...new Set(
+            candidates
+              .filter((candidate) => terminationKindOf(candidate.gateway.type) === kind)
+              .map((candidate) => candidate.gateway.partnerId),
+          ),
+        ];
+        return [
+          kind,
+          await this.tariffs.effectiveRates(partnerIds, operatorId, kind, region, at),
+        ] as const;
+      }),
+    );
+    const rates = new Map(byKind);
+
+    const priced = candidates
+      .map((candidate) => ({
+        candidate,
+        price: rates
+          .get(terminationKindOf(candidate.gateway.type))
+          ?.get(candidate.gateway.partnerId)?.pricePerMinute,
+      }))
+      .filter(
+        (entry): entry is { candidate: TerminationCandidate; price: MoneyAmount } =>
+          entry.price !== undefined,
+      );
+
+    // Устойчивая сортировка: при полном равенстве остаётся порядок, заданный запросом,
+    // то есть по номеру SIM. Без него один и тот же отбор давал бы разный перебор.
+    return priced
+      .sort((left, right) => compareCandidates(left, right))
+      .map((entry) => entry.candidate);
+  }
+
   private async explainEmptyCandidates(
     operatorId: Id<'operator'>,
     channel: ChannelRow,
     region: string | null,
+    nodeId: Id<'node'>,
   ): Promise<CallFailureReason> {
     if (channel.recordingRequired) {
       const withoutRecording = await this.telephony.findSimCandidates(operatorId, {
         channelId: channel.id,
         region,
+        nodeId,
       });
       if (withoutRecording.length > 0) return 'recording_required';
     }
@@ -289,8 +442,19 @@ export class RoutingService {
     const anyRegion = await this.telephony.findSimCandidates(operatorId, {
       channelId: channel.id,
       excludeRecordingIncapable: channel.recordingRequired,
+      nodeId,
     });
-    return anyRegion.length > 0 ? 'no_coverage' : 'no_sim_available';
+    if (anyRegion.length > 0) return 'no_coverage';
+
+    // Тот же отбор, но по всей площадке. Нашлось — значит SIM есть, а не хватает
+    // регистрации: партнёр не включил оборудование, оно потеряло связь или пришло
+    // на соседний узел. Для поддержки это разговор о железе, а не о недостатке SIM,
+    // и смешивать их значит отправлять её не туда.
+    const anyNode = await this.telephony.findSimCandidates(operatorId, {
+      channelId: channel.id,
+      excludeRecordingIncapable: channel.recordingRequired,
+    });
+    return anyNode.length > 0 ? 'gateway_unregistered' : 'no_sim_available';
   }
 
   /**
@@ -302,30 +466,35 @@ export class RoutingService {
    */
   private async claimSim(
     request: RouteRequest,
+    /** Уже приведённый номер: в запросе лежит набранное, а в вызов идёт канонический. */
+    destination: Msisdn,
     channel: ChannelRow,
     operatorId: Id<'operator'>,
     region: string | null,
-    candidates: readonly SimCandidate[],
+    candidates: readonly TerminationCandidate[],
     limits: { rules: readonly LimitRuleRow[]; at: Date },
-  ): Promise<{ call: CallRow; candidate: SimCandidate } | undefined> {
+  ): Promise<{ call: CallRow; candidate: TerminationCandidate } | undefined> {
     const channelId = channel.id;
     return this.callsRepository.db.transaction(async (tx) => {
       for (const candidate of candidates) {
-        const locked = await this.callsRepository.lockSim(candidate.sim.id, tx);
-        if (!locked) continue;
-
-        const open = await this.callsRepository.countOpenOnSim(candidate.sim.id, tx);
-        if (open >= candidate.sim.maxConcurrentCalls) continue;
+        // Ёмкость у SIM и транка своя, но правило одно: блокировка строки, потом счёт
+        // открытых вызовов. У SIM предел ставит оператор, у транка — договор
+        // с провайдером, и превышение обоих одинаково кончается сорванными вызовами.
+        const claimed =
+          candidate.kind === 'sim'
+            ? await this.claimSlotOnSim(candidate, tx)
+            : await this.claimSlotOnTrunk(candidate, tx);
+        if (!claimed) continue;
 
         const call = await this.callsRepository.insert(
           {
             externalId: request.externalId,
             channelId,
             nodeId: request.nodeId,
-            destination: request.destination,
+            destination,
             operatorId,
             region,
-            simCardId: candidate.sim.id,
+            simCardId: candidate.kind === 'sim' ? candidate.sim.id : null,
             gatewayId: candidate.gateway.id,
             status: 'routing',
             failureReason: null,
@@ -339,6 +508,7 @@ export class RoutingService {
         await this.telephony.markPartnerRouted(
           channelId,
           candidate.gateway.partnerId,
+          terminationKindOf(candidate.gateway.type),
           call.startedAt,
           tx,
         );
@@ -354,6 +524,20 @@ export class RoutingService {
       }
       return undefined;
     });
+  }
+
+  /** Место на SIM: предел ставит оператор, и превышение блокирует карту. */
+  private async claimSlotOnSim(candidate: SimCandidate, tx: Executor): Promise<boolean> {
+    if (!(await this.callsRepository.lockSim(candidate.sim.id, tx))) return false;
+    const open = await this.callsRepository.countOpenOnSim(candidate.sim.id, tx);
+    return open < candidate.sim.maxConcurrentCalls;
+  }
+
+  /** Канал транка: предел договорной, и превышение провайдер отвергает. */
+  private async claimSlotOnTrunk(candidate: TrunkCandidate, tx: Executor): Promise<boolean> {
+    if (!(await this.callsRepository.lockTrunk(candidate.gateway.id, tx))) return false;
+    const open = await this.callsRepository.countOpenOnGateway(candidate.gateway.id, tx);
+    return open < candidate.trunk.maxConcurrentCalls;
   }
 
   /**
@@ -396,6 +580,12 @@ export class RoutingService {
   /** Отказ по известному каналу пишется вызовом: иначе разбирать нечего. */
   private async reject(
     request: RouteRequest,
+    /**
+     * Что записать назначением. Канонический номер везде, кроме отказа
+     * `destination_invalid`: там записываются цифры набранного — иначе причине
+     * отказа не к чему относиться (ADR-0042).
+     */
+    destination: CallDestination,
     channelId: Id<'channel'>,
     operatorId: Id<'operator'> | null,
     region: string | null,
@@ -405,7 +595,7 @@ export class RoutingService {
       externalId: request.externalId,
       channelId,
       nodeId: request.nodeId,
-      destination: request.destination,
+      destination,
       operatorId,
       region,
       simCardId: null,
@@ -421,19 +611,23 @@ export class RoutingService {
     if (call.status === 'failed') {
       return { outcome: 'rejected', reason: call.failureReason ?? 'internal_error', call };
     }
-    if (call.simCardId === null || call.gatewayId === null) {
+    if (call.gatewayId === null) {
       return { outcome: 'rejected', reason: 'internal_error', call };
     }
 
-    // Берётся именно выбранная SIM, а не отбор кандидатов заново: отбор проверяет
+    // Берётся именно выбранная ёмкость, а не отбор кандидатов заново: отбор проверяет
     // состояния, а они с момента выдачи маршрута могли измениться — и повтор вернул бы
     // маршрут без единого кандидата, то есть диалплан, по которому некуда звонить.
-    const chosen = await this.telephony.findCandidateBySim(call.simCardId);
+    const chosen =
+      call.simCardId === null
+        ? await this.telephony.findTrunkCandidate(call.gatewayId)
+        : await this.telephony.findCandidateBySim(call.simCardId);
     if (chosen === undefined) {
-      // SIM вынули из порта, пока вызов шёл. Воспроизвести маршрут нечем.
-      this.logger.warn('Повтор запроса по вызову, чью SIM уже не найти', {
+      // SIM вынули из порта или транк удалили, пока вызов шёл. Воспроизвести нечем.
+      this.logger.warn('Повтор запроса по вызову, чью ёмкость уже не найти', {
         call_id: call.id,
         sim_card_id: call.simCardId,
+        gateway_id: call.gatewayId,
       });
       return { outcome: 'rejected', reason: 'internal_error', call };
     }
@@ -465,12 +659,57 @@ function failureReasonFor(cause: unknown): CallFailureReason {
  * Клиент и канал — всегда, партнёр и SIM — только свои: считать чужой лимит значит
  * закрыть партнёру трафик за соседа.
  */
-function limitsFor(candidate: SimCandidate, rules: readonly LimitRuleRow[]): LimitRuleRow[] {
+function limitsFor(
+  candidate: TerminationCandidate,
+  rules: readonly LimitRuleRow[],
+): LimitRuleRow[] {
   return rules.filter(
     (rule) =>
       rule.clientId !== null ||
       rule.channelId !== null ||
       rule.partnerId === candidate.gateway.partnerId ||
-      rule.simCardId === candidate.sim.id,
+      // Лимит на SIM транка не касается: карты у него нет, и правило про чужую карту
+      // не должно его задевать.
+      (candidate.kind === 'sim' && rule.simCardId === candidate.sim.id),
   );
+}
+
+/**
+ * Один ли это кандидат.
+ *
+ * По шлюзу и SIM вместе: у транка SIM нет, а у GOIP один шлюз несёт много карт,
+ * и сравнение по одному только шлюзу выбросило бы из перебора все остальные.
+ */
+function isSameCandidate(left: TerminationCandidate, right: TerminationCandidate): boolean {
+  if (left.gateway.id !== right.gateway.id) return false;
+  if (left.kind === 'sim' && right.kind === 'sim') return left.sim.id === right.sim.id;
+  return left.kind === right.kind;
+}
+
+/** Приоритет не задан — идёт после всех названных, а не впереди них. */
+const WITHOUT_PRIORITY = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Порядок двух кандидатов: приоритет предложения, затем цена, затем давность.
+ *
+ * Давность работает **между равноценными**, а не между всеми равноприоритетными
+ * ([ADR-0021](../../../../../docs/adr/0021-ravnomernoe-raspredelenie.md), уточнён
+ * [ADR-0040](../../../../../docs/adr/0040-poryadok-terminacii-predlozhenie-i-cena.md)):
+ * делить трафик поровну между дешёвым и дорогим значит половину вызовов делать дороже
+ * без причины.
+ */
+function compareCandidates(
+  left: { candidate: TerminationCandidate; price: MoneyAmount },
+  right: { candidate: TerminationCandidate; price: MoneyAmount },
+): number {
+  const byPriority =
+    (left.candidate.priority ?? WITHOUT_PRIORITY) - (right.candidate.priority ?? WITHOUT_PRIORITY);
+  if (byPriority !== 0) return byPriority;
+
+  if (left.price !== right.price) return left.price < right.price ? -1 : 1;
+
+  // Ни разу не звонивший идёт первым: у него отметки нет вовсе.
+  const leftAt = left.candidate.lastRoutedAt?.getTime() ?? 0;
+  const rightAt = right.candidate.lastRoutedAt?.getTime() ?? 0;
+  return leftAt - rightAt;
 }

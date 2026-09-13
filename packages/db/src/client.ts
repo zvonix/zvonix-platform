@@ -21,6 +21,15 @@ import * as schema from './schema/index.js';
 
 export type Database = NodePgDatabase<typeof schema>;
 
+/**
+ * Исполнитель запроса: пул или открытая транзакция.
+ *
+ * Объявлен один раз здесь, а не в каждом репозитории: тип выводится из `Database`,
+ * и шесть его копий разъехались бы на первой же смене версии drizzle. Репозитории
+ * его переэкспортируют, чтобы вызывающий брал тип оттуда же, откуда метод.
+ */
+export type Executor = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
+
 /** Приёмник журнала запросов. Значения параметров не передаются намеренно. */
 export type QueryLogger = (query: string, parameterCount: number) => void;
 

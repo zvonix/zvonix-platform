@@ -15,11 +15,15 @@ import { Inject, Injectable } from '@nestjs/common';
 import { conflict, notFound, permissionDenied, type Id, type UserRole } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
-import { BillingRepository } from '../billing/billing.repository.js';
+import { BillingRepository, type PartnerRow } from '../billing/billing.repository.js';
 import { CallRepository } from '../telephony/call.repository.js';
 import { TelephonyRepository } from '../telephony/telephony.repository.js';
 import { OBJECT_STORAGE, recordingObjectKey, type ObjectStorage } from './object-storage.js';
-import { RecordingsRepository, type RecordingRow } from './recordings.repository.js';
+import {
+  RecordingsRepository,
+  type RecordingGrantRow,
+  type RecordingRow,
+} from './recordings.repository.js';
 
 /** Сколько живёт ссылка на выгрузку. Короче ссылки на прослушивание: узел выгружает сразу. */
 const UPLOAD_LINK_TTL_SECONDS = 600;
@@ -156,34 +160,150 @@ export class RecordingsService {
   /**
    * Право слушать запись.
    *
-   * Администратор и поддержка — по роли. Клиент — только свои вызовы: владение
-   * проверяется здесь, а не защитником (ADR-0018).
+   * Администратор и поддержка — по роли. Клиент и партнёр — только свои вызовы:
+   * владение проверяется здесь, а не защитником (ADR-0018).
    *
-   * **Партнёра здесь намеренно нет.** DOMAIN.md называет его среди участников вызова,
-   * но отдавать партнёру разговор пассажира — это передача персональных данных третьему
-   * лицу, и отменить прослушивание нельзя. Расширить доступ можно всегда; решение
-   * вынесено в TASKS.md.
+   * У партнёра два независимых основания ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)):
+   * объявленное намерение слушать записи — и тогда он слышит все свои вызовы, — либо
+   * разовый доступ к одной записи, открытый администратором. Второе работает и когда
+   * первое выключено: это путь для разбора спора «моя SIM исправна».
    */
   private async assertMayListen(recording: RecordingRow, requester: Requester): Promise<void> {
     if (requester.role === 'admin' || requester.role === 'support') return;
 
-    if (requester.role === 'client') {
-      const call = await this.calls.findById(recording.callId);
-      if (call === undefined) throw notFound('Вызов не найден');
-
-      const channel = await this.telephony.findChannel(call.channelId);
-      const client =
-        channel === undefined ? undefined : await this.billing.findClientOwnedBy(requester.userId);
-
+    if (requester.role === 'partner') {
+      const partner = await this.partnerOfRequest(recording, requester);
       // Ответ `not_found`, а не `permission_denied`: иначе по разнице ответов
       // проверяется существование чужих записей.
-      if (client === undefined || channel === undefined || channel.clientId !== client.id) {
-        throw notFound('Запись не найдена');
-      }
+      if (partner === undefined) throw notFound('Запись не найдена');
+      if (partner.listensToRecordings) return;
+
+      const grant = await this.repository.findLiveGrant(recording.id, partner.id, new Date());
+      if (grant === undefined) throw notFound('Запись не найдена');
       return;
     }
 
-    throw notFound('Запись не найдена');
+    // Остался клиент: роли перечислены полностью, и отдельная проверка на него была бы
+    // заведомо истинной. Новая роль сюда не провалится молча — она не пройдёт типы.
+    const call = await this.calls.findById(recording.callId);
+    if (call === undefined) throw notFound('Вызов не найден');
+
+    const channel = await this.telephony.findChannel(call.channelId);
+    const client =
+      channel === undefined ? undefined : await this.billing.findClientOwnedBy(requester.userId);
+
+    // Ответ `not_found`, а не `permission_denied`: иначе по разнице ответов
+    // проверяется существование чужих записей.
+    if (client === undefined || channel === undefined || channel.clientId !== client.id) {
+      throw notFound('Запись не найдена');
+    }
+  }
+
+  /**
+   * Партнёр, чья SIM обслужила вызов этой записи, если он же и спрашивает.
+   *
+   * `undefined` — спрашивающий к вызову отношения не имеет. Связь идёт через SIM:
+   * запись принадлежит вызову, вызов — SIM, SIM — партнёру. Другого способа сказать,
+   * что разговор «его», нет.
+   */
+  private async partnerOfRequest(
+    recording: RecordingRow,
+    requester: Requester,
+  ): Promise<PartnerRow | undefined> {
+    const own = await this.billing.findPartnerOwnedBy(requester.userId);
+    if (own === undefined) return undefined;
+
+    const terminating = await this.partnerOfRecording(recording);
+    if (terminating === undefined || terminating.id !== own.id) return undefined;
+    return terminating;
+  }
+
+  /** Партнёр, чья SIM обслужила вызов. `undefined` — вызов не дошёл до SIM. */
+  private async partnerOfRecording(recording: RecordingRow): Promise<PartnerRow | undefined> {
+    const call = await this.calls.findById(recording.callId);
+    if (call?.simCardId == null) return undefined;
+
+    const sim = await this.telephony.findSim(call.simCardId);
+    if (sim === undefined) return undefined;
+
+    return this.billing.findPartner(sim.partnerId);
+  }
+
+  /**
+   * Разовый доступ партнёра к одной записи — действие администратора
+   * ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
+   *
+   * Партнёр не называется в запросе, а выводится из вызова: назвать его руками значит
+   * однажды назвать не того и выдать чужой разговор. Причина обязательна — доступ
+   * к персональным данным без причины не выдаётся.
+   */
+  async grantAccess(
+    recordingId: Id<'recording'>,
+    input: { reason: string; hours: number },
+    actor: Requester,
+  ): Promise<RecordingGrantRow> {
+    const recording = await this.repository.findById(recordingId);
+    if (recording === undefined) throw notFound('Запись не найдена');
+    if (recording.deletedAt !== null) throw notFound('Запись удалена по истечении срока хранения');
+
+    const partner = await this.partnerOfRecording(recording);
+    if (partner === undefined) {
+      throw conflict('У вызова нет партнёра: открывать доступ некому');
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + input.hours * 60 * 60 * 1000);
+    const grant = await this.repository.insertGrant({
+      recordingId,
+      partnerId: partner.id,
+      grantedByUserId: actor.userId,
+      reason: input.reason.trim(),
+      expiresAt,
+    });
+
+    await this.audit.record({
+      action: 'recording.access_granted',
+      entityType: 'recording',
+      entityId: recordingId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      after: {
+        partner_id: partner.id,
+        reason: grant.reason,
+        expires_at: expiresAt.toISOString(),
+      },
+    });
+
+    this.logger.info('Партнёру открыт доступ к записи', {
+      recording_id: recordingId,
+      partner_id: partner.id,
+      expires_at: expiresAt.toISOString(),
+    });
+    return grant;
+  }
+
+  /** Отзывает все действующие доступы к записи. */
+  async revokeAccess(recordingId: Id<'recording'>, actor: Requester): Promise<number> {
+    const recording = await this.repository.findById(recordingId);
+    if (recording === undefined) throw notFound('Запись не найдена');
+
+    const now = new Date();
+    const revoked = await this.repository.revokeGrants(recordingId, now);
+
+    await this.audit.record({
+      action: 'recording.access_revoked',
+      entityType: 'recording',
+      entityId: recordingId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      after: { revoked },
+    });
+    return revoked;
+  }
+
+  /** Все выданные доступы к записи — для разбора «кому её открывали». */
+  async listGrants(recordingId: Id<'recording'>): Promise<RecordingGrantRow[]> {
+    return this.repository.listGrants(recordingId);
   }
 
   private async signUpload(recording: RecordingRow): Promise<UploadTarget> {

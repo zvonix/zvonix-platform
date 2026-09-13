@@ -44,13 +44,32 @@
 | `recordings` | Приём, хранение, выдача записей по подписанным ссылкам | `apps/api/src/modules/recordings` | объектное хранилище |
 | `nodes` | Реестр узлов, генерация команды установки, health и метрики | `apps/api/src/modules/nodes` | БД |
 | `mail` | Очередь писем в базе и отправка по SMTP ([ADR-0029](adr/0029-pochta.md)). Контроллеров нет: письма пишут доменные службы вместе со своими событиями. Здесь же предел писем на адрес получателя ([ADR-0030](adr/0030-predel-pisem-na-adres.md)) — внутри `enqueue`, чтобы новый путь отправки подчинялся ему, не зная о нём | `apps/api/src/modules/mail` | БД, SMTP |
+| `settings` | Настройки площадки: почта и ключи капчи в базе, секреты шифруются ([ADR-0031](adr/0031-nastroyki-ploshchadki.md)). Глобальный модуль — читают и API, и воркер | `apps/api/src/modules/settings` | БД |
 | `payments` | Пополнения клиентов и выплаты партнёрам | `apps/api/src/modules/payments` | `billing` |
 | `identity` | Учётные записи, роли, права, 2FA, API-ключи | `apps/api/src/modules/identity` | БД |
-| `audit` | Неизменяемый журнал действий | `apps/api/src/modules/audit` | БД |
-| `web` | Админка и кабинеты клиента и партнёра | `apps/web` | `api` |
-| `worker` | Расписание фоновых задач ([ADR-0020](adr/0020-fonovye-zadachi.md)): уборка резервов, зависших вызовов, замолчавших узлов, записей по сроку и закрытых окон лимитов; снятие с маршрутизации по порогу отказов ([ADR-0027](adr/0027-porog-otklyucheniya.md)), отправка писем ([ADR-0029](adr/0029-pochta.md)). Дальше — сверка CDR, выплаты, обновление MNP | `apps/worker` | `billing`, `telephony`, `nodes`, `recordings`, `limits` |
+| `audit` | Неизменяемый журнал действий: запись рядом с действием, у денежных — **той же транзакцией** ([ADR-0034](adr/0034-zhurnal-deneg-odnoy-tranzakciey.md)), и чтение с отбором ([docs/api/audit.md](api/audit.md)). Только чтение: правки и удаления в API нет. Контроллер зарегистрирован отдельным `AuditHttpModule` — `IdentityModule` импортирует `AuditModule`, и обратный импорт замкнул бы круг | `apps/api/src/modules/audit` | БД, `identity` (имена исполнителей) |
+| `web` | Админка и кабинеты клиента и партнёра. Next.js (App Router), сессия в cookie ([ADR-0037](adr/0037-sessiya-v-brauzere.md)), общий источник с API за обратным прокси | `apps/web` | `api` |
+| `worker` | Расписание фоновых задач ([ADR-0020](adr/0020-fonovye-zadachi.md)): уборка резервов, зависших вызовов, замолчавших узлов, записей по сроку и закрытых окон лимитов; снятие с маршрутизации по порогу отказов ([ADR-0027](adr/0027-porog-otklyucheniya.md)), отправка писем ([ADR-0029](adr/0029-pochta.md)), обновление плана нумерации ([ADR-0032](adr/0032-zagruzka-plana-numeracii.md)), фоновое обновление просроченных записей об операторах. Дальше — сверка CDR, выплаты | `apps/worker` | `billing`, `telephony`, `nodes`, `recordings`, `limits` |
 | `esl` | Долгоживущее соединение с узлами, события вызовов в реальном времени | `apps/esl` | `telephony` |
 | `agent` | На узле: установка, обновление, метрики, выгрузка записей | `apps/agent` | control plane |
+
+### Кабинет и API — один источник
+
+Браузер обращается по одному адресу, и обратный прокси делит его:
+
+```
+https://cp.example.com/api/*  →  API   (apps/api, порт 8000)
+https://cp.example.com/*      →  Next  (apps/web, порт 3000)
+```
+
+Это не вкус выкладки, а условие работы сессии: cookie с `SameSite=Strict` отправляется
+только своему источнику, а CORS платформа не настраивает вовсе
+([ADR-0037](adr/0037-sessiya-v-brauzere.md)). Забытая строка в конфигурации прокси
+означает неработающий вход, и симптом у неё внятный — кабинет получает от Next `404`
+на `/api/auth/me`.
+
+В разработке ту же развязку делает `rewrites` в `apps/web/next.config.ts`,
+и адрес API там задаётся переменной `ZVONIX_API_ORIGIN`.
 
 ## Потоки данных
 

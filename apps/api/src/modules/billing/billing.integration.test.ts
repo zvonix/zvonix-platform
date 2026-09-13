@@ -192,6 +192,48 @@ describe('пополнение баланса', () => {
   });
 });
 
+describe('журнал денег пишется той же транзакцией', () => {
+  it('пополнение оставляет в журнале строку со ссылкой на проводку', async () => {
+    // Без идентификатора проводки строка журнала не связана с движением денег —
+    // то есть бесполезна ровно в том разборе, ради которого пишется (ADR-0034).
+    const clientId = await createClient();
+    const key = `deposit:${clientId}:journal`;
+    const posted = await deposit(clientId, '777', key);
+    expect(posted.statusCode).toBe(200);
+
+    const rows = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select after from audit_log
+             where action = 'billing.client_deposited' and entity_id = ${clientId}`,
+      );
+      return result.rows as { after: { transaction_id: string; amount: string } }[];
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.after.transaction_id).toBe(
+      posted.json<{ transaction_id: string }>().transaction_id,
+    );
+    expect(rows[0]?.after.amount).toBe('777');
+  });
+
+  it('повтор с тем же ключом второй строки в журнале не создаёт', async () => {
+    // Проводки нет — значит и действия не было.
+    const clientId = await createClient();
+    const key = `deposit:${clientId}:journal-once`;
+    await deposit(clientId, '10', key);
+    await deposit(clientId, '10', key);
+
+    const count = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select count(*)::int as count from audit_log
+             where action = 'billing.client_deposited' and entity_id = ${clientId}`,
+      );
+      return (result.rows[0] as { count: number }).count;
+    });
+    expect(count).toBe(1);
+  });
+});
+
 describe('инварианты двойной записи', () => {
   it('остаток равен сумме проводок', async () => {
     const clientId = await createClient();

@@ -2,7 +2,13 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    // Рядом с результатом, а не рядом с настройкой. Иначе снести `dist` и собрать
+    // заново — получить пустоту: кэш пережил удаление и считает сборку свежей.
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // Проверки собираются отдельным проектом и в `dist` не попадают —
+  // см. `tsconfig.tests.json`.
+  "exclude": ["src/**/*.test.ts"]
 }

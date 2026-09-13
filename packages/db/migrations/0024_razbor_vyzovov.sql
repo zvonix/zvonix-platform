@@ -1,0 +1,1 @@
+CREATE INDEX "calls_started_idx" ON "calls" USING btree ("started_at");

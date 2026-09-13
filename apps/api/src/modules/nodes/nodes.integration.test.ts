@@ -413,3 +413,29 @@ describe('права', () => {
     expect(listed.statusCode).toBe(200);
   });
 });
+
+describe('установщик без репозитория пакетов', () => {
+  it('всё равно отдаётся: решает сам скрипт, а не площадка', async () => {
+    // Репозиторий нужен только затем, чтобы **поставить** FreeSWITCH, а стоит он уже
+    // или нет — видно только на самой машине
+    // ([ADR-0045](../../../../../docs/adr/0045-ustanovshchik-uzla.md), «Ревизия»).
+    const response = await api().inject({ method: 'GET', url: '/install.sh' });
+
+    expect(response.statusCode).toBe(200);
+    // И отказ на месте: скрипт назовёт незаполненную переменную сам, но только если
+    // ставить действительно нужно.
+    expect(response.body).toContain('NODE_PACKAGE_REPO_URL');
+    expect(response.body).toContain('NEED_PACKAGES=no');
+  });
+
+  it('ошибка на обработчике со своим типом ответа приходит конвертом JSON', async () => {
+    // Диалплан объявляет `text/xml`, и объявление действует **и на ответ с ошибкой**.
+    // Пока фильтр не переставлял тип на JSON, Fastify отказывался слать объект
+    // под чужим типом и выдавал `500` поверх настоящей ошибки — в логе их было две.
+    const response = await api().inject({ method: 'POST', url: '/node/dialplan', payload: {} });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.headers['content-type']).toContain('application/json');
+    expect(response.json<{ error: { code: string } }>().error.code).toBe('unauthenticated');
+  });
+});

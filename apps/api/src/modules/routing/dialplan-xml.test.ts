@@ -37,7 +37,7 @@ const plan = {
   realm: 'sip.zvonix.test',
   callerId: null,
   recordingPath: null,
-  candidates: [{ gatewaySipUsername: 'gw-aaaaaaaaaaaa' }],
+  candidates: [{ kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa' }],
 };
 
 describe('диалплан с маршрутом', () => {
@@ -45,8 +45,8 @@ describe('диалплан с маршрутом', () => {
     const xml = routeDocument({
       ...plan,
       candidates: [
-        { gatewaySipUsername: 'gw-aaaaaaaaaaaa' },
-        { gatewaySipUsername: 'gw-bbbbbbbbbbbb' },
+        { kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa' },
+        { kind: 'sim' as const, gatewaySipUsername: 'gw-bbbbbbbbbbbb' },
       ],
     });
     expect(() => parse(xml)).not.toThrow();
@@ -79,7 +79,7 @@ describe('диалплан с маршрутом', () => {
     // выбросил бы его молча.
     const xml = routeDocument({
       ...plan,
-      candidates: [{ gatewaySipUsername: 'gw-"><evil' }],
+      candidates: [{ kind: 'sim' as const, gatewaySipUsername: 'gw-"><evil' }],
     });
     expect(() => parse(xml)).not.toThrow();
     expect(xml).not.toContain('<evil');

@@ -1,14 +1,27 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
+import { MachineModule } from '../machine/machine.module.js';
 import { BillingController } from './billing.controller.js';
+import { ClientApiBillingController } from './client-api.controller.js';
+import { ClientKeysController } from './client-keys.controller.js';
 import { BillingRepository } from './billing.repository.js';
 import { BillingService } from './billing.service.js';
+import { ClientSelfController } from './client-self.controller.js';
+import { PartnerSelfController } from './partner-self.controller.js';
 import { ReservationRepository } from './reservation.repository.js';
 import { ReservationService } from './reservation.service.js';
 
 @Module({
-  imports: [AuditModule],
-  controllers: [BillingController],
+  // Машинные ключи здесь ради собственного контура клиента (ADR-0044): «чей это клиент»
+  // знает только этот модуль, и обратная стрелка замкнула бы модули в кольцо.
+  imports: [AuditModule, MachineModule],
+  controllers: [
+    BillingController,
+    ClientSelfController,
+    PartnerSelfController,
+    ClientKeysController,
+    ClientApiBillingController,
+  ],
   providers: [BillingService, BillingRepository, ReservationService, ReservationRepository],
   // Тарификация вызова на этапе 2 проводит списание через эту же службу:
   // другого пути изменить остаток в проекте нет и быть не должно.

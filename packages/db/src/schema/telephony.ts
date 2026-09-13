@@ -19,15 +19,19 @@ import {
   GATEWAY_PORT_STATES,
   GATEWAY_STATUSES,
   GATEWAY_TYPES,
+  DEFAULT_TRUNK_CONCURRENT_CALLS,
   MAX_CONCURRENT_CALLS_LIMIT,
+  MAX_TRUNK_CONCURRENT_CALLS,
   SIM_NETWORK_SCOPES,
   SIM_STATUSES,
+  TERMINATION_KINDS,
   type ChannelStatus,
   type GatewayPortState,
   type GatewayStatus,
   type GatewayType,
   type SimNetworkScope,
   type SimStatus,
+  type TerminationKind,
 } from '@zvonix/shared';
 import { createdAt, idRef, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 import { clients, partners } from './billing.js';
@@ -60,8 +64,13 @@ export const gateways = pgTable(
      * Это не «безопасный хеш»: обладание им равносильно знанию пароля для входа по SIP.
      * Но пароль не наш, а придуманный при выдаче, и утечка таблицы не даёт его в открытом
      * виде — то есть не даёт подобрать по нему другие учётные записи партнёра.
+     *
+     * **Пусто у SIP-транка**: к нему регистрируемся мы, а не он к нам, и проверять digest
+     * нечего ([ADR-0039](../../../docs/adr/0039-terminaciya-cherez-sip-trank.md)).
+     * Его `sip_username` при этом заполнен и служит именем исходящего sofia-gateway
+     * на узле — тем же именем, каким GOIP значится в каталоге.
      */
-    a1Hash: text().notNull(),
+    a1Hash: text(),
 
     /**
      * Узел, на котором шлюз зарегистрирован сейчас. Пусто, пока не регистрировался.
@@ -82,6 +91,9 @@ export const gateways = pgTable(
   (t) => [
     check('gateways_type_check', oneOf(t.type, GATEWAY_TYPES)),
     check('gateways_status_check', oneOf(t.status, GATEWAY_STATUSES)),
+    // Пустой хеш допустим ровно у транка: у всех, кто регистрируется к нам, он обязателен,
+    // и шлюз без него молча перестал бы проходить проверку digest.
+    check('gateways_a1_hash_required', sql`${t.a1Hash} is not null or ${t.type} = 'sip_trunk'`),
     check('gateways_port_count_non_negative', sql`${t.portCount} >= 0`),
     uniqueIndex('gateways_sip_username_key').on(t.sipUsername),
     index('gateways_partner_idx').on(t.partnerId),
@@ -196,9 +208,22 @@ export const simCards = pgTable(
       'sim_cards_max_concurrent_calls_range',
       sql`${t.maxConcurrentCalls} between 1 and ${sql.raw(String(MAX_CONCURRENT_CALLS_LIMIT))}`,
     ),
-    // Один номер не может быть двумя SIM: иначе вызовы разъедутся по двум записям,
-    // а лимиты и счётчики перестанут что-либо ограничивать.
-    uniqueIndex('sim_cards_msisdn_key').on(t.msisdn),
+    /**
+     * Номер **не уникален** ([ADR-0043](../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md),
+     * «Ревизия: номер SIM не уникален»).
+     *
+     * Уникальность стояла здесь с доводом «иначе лимиты перестанут ограничивать».
+     * Довод не выдержал проверки: лимиты защищают **физическую** карту, а она стоит
+     * ровно в одном порту — две записи с одним номером не дают двух карт, они дают
+     * одну карту и одну запись-призрак, которой не соответствует ничего.
+     *
+     * Зато уникальность давала способ навредить: партнёр, объявивший чужой номер
+     * первым, не пускал на площадку настоящего владельца карты. От вранья она при этом
+     * не защищала вовсе — соврать можно и первым.
+     *
+     * Индекс остаётся обычным: по номеру разбирают обращения в поддержку.
+     */
+    index('sim_cards_msisdn_idx').on(t.msisdn),
     uniqueIndex('sim_cards_iccid_key')
       .on(t.iccid)
       .where(sql`${t.iccid} is not null`),
@@ -275,6 +300,19 @@ export const channelPartnerPriorities = pgTable(
       .notNull()
       .references(() => partners.id, { onDelete: 'restrict' }),
 
+    /**
+     * Через что уходит вызов по этому приоритету
+     * ([ADR-0040](../../../docs/adr/0040-poryadok-terminacii-predlozhenie-i-cena.md)).
+     *
+     * Единица приоритета — **предложение**, то есть партнёр вместе со способом
+     * терминации: у партнёра с SIM и транком это две отдельные строки, потому что
+     * и цены у них разные, и решение клиента о них разное.
+     *
+     * Умолчание `sim` нужно миграции: на её момент другого способа не существует,
+     * и все заведённые приоритеты — про SIM.
+     */
+    terminationKind: text().$type<TerminationKind>().notNull().default('sim'),
+
     /** Меньше — раньше. Единица — первый, к кому пойдёт вызов. */
     priority: integer().notNull(),
 
@@ -292,11 +330,86 @@ export const channelPartnerPriorities = pgTable(
   },
   (t) => [
     check('channel_partner_priorities_priority_positive', sql`${t.priority} > 0`),
-    // Один партнёр в канале ровно с одним приоритетом: два означали бы, что порядок
-    // перебора зависит от того, какую строку прочитали первой.
-    uniqueIndex('channel_partner_priorities_channel_partner_key').on(t.channelId, t.partnerId),
+    check(
+      'channel_partner_priorities_termination_kind_check',
+      oneOf(t.terminationKind, TERMINATION_KINDS),
+    ),
+    // Одно предложение в канале ровно с одним приоритетом: два означали бы, что порядок
+    // перебора зависит от того, какую строку прочитали первой. Ключ включает способ
+    // терминации — SIM и транк одного партнёра это разные предложения (ADR-0040).
+    uniqueIndex('channel_partner_priorities_channel_offer_key').on(
+      t.channelId,
+      t.partnerId,
+      t.terminationKind,
+    ),
     // Горячий путь: отбор кандидатов сразу в нужном порядке.
     index('channel_partner_priorities_order_idx').on(t.channelId, t.priority, t.lastRoutedAt),
+  ],
+);
+
+/**
+ * Подробности SIP-транка ([ADR-0039](../../../docs/adr/0039-terminaciya-cherez-sip-trank.md)).
+ *
+ * Отдельной таблицей, а не колонками в `gateways`: они осмысленны ровно при одном
+ * значении `type`, и в общей таблице были бы пустыми полями, о которых надо помнить
+ * ([ADR-0016](../../../docs/adr/0016-soglasheniya-shemy-bd.md)).
+ *
+ * Ключ — сам шлюз: один транк это один шлюз, и отдельный идентификатор означал бы,
+ * что бывает транк без шлюза или два транка на одном.
+ */
+export const sipTrunks = pgTable(
+  'sip_trunks',
+  {
+    gatewayId: idRef<'gateway'>()
+      .primaryKey()
+      // Подробности транка без самого шлюза не значат ничего.
+      .references(() => gateways.id, { onDelete: 'cascade' }),
+
+    /** Куда отправлять вызовы: `sip.provider.ru` либо `sip.provider.ru:5070`. */
+    proxyHost: text().notNull(),
+
+    /**
+     * Регистрируемся ли мы у провайдера.
+     *
+     * Провайдеры пускают двумя способами: регистрацией с именем и паролем либо
+     * по адресу источника без неё. Поддерживаются оба — поддержка только регистрации
+     * отсекла бы половину провайдеров.
+     */
+    registersOutbound: boolean().notNull().default(true),
+
+    /** Имя для исходящей регистрации. Пусто при доступе по адресу. */
+    outboundUsername: text(),
+
+    /**
+     * Пароль провайдера — **зашифрованный**, а не хешированный.
+     *
+     * Это единственный пароль в проекте, который надо предъявить наружу: без открытого
+     * значения к провайдеру не зарегистрироваться. Шифруется тем же способом, что секрет
+     * второго фактора ([ADR-0028](../../../docs/adr/0028-vtoroy-faktor.md)) — утечка одной
+     * только базы его не раскрывает. Расшифрованное значение уходит **только узлу**.
+     */
+    outboundSecret: text(),
+
+    /**
+     * Ёмкость в одновременных вызовах. Ограничение договорное: провайдер продаёт каналы,
+     * и превышение он отвергает, а вызовы срываются молча.
+     */
+    maxConcurrentCalls: integer().notNull().default(DEFAULT_TRUNK_CONCURRENT_CALLS),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check(
+      'sip_trunks_concurrency_range',
+      sql`${t.maxConcurrentCalls} between 1 and ${sql.raw(String(MAX_TRUNK_CONCURRENT_CALLS))}`,
+    ),
+    // Регистрация без имени и пароля не состоится, и транк молча не поднялся бы:
+    // узел записал бы ошибку, а платформа продолжала бы считать его годным.
+    check(
+      'sip_trunks_registration_needs_credentials',
+      sql`not ${t.registersOutbound} or (${t.outboundUsername} is not null and ${t.outboundSecret} is not null)`,
+    ),
   ],
 );
 
@@ -325,7 +438,13 @@ export const partnerCoverage = pgTable(
     /** Название так, как его ввёл партнёр. Показывается ему же. */
     region: text().notNull(),
 
-    /** Приведённое написание (`normalizeRegion`). По нему идёт сравнение с регионом номера. */
+    /**
+     * Приведённое написание (`regionKeyOf`) — первый ключ набора.
+     *
+     * По нему идёт сравнение с регионом номера, а регион номера — **набор** субъектов
+     * ([ADR-0033](../../../docs/adr/0033-region-eto-mnozhestvo.md)): подходит партнёр,
+     * объявивший любой из названных.
+     */
     regionKey: text().notNull(),
 
     createdAt: createdAt(),

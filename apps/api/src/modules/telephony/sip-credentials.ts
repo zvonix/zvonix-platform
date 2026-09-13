@@ -47,9 +47,21 @@ export interface SipCredentials {
  * а перерегистрация на соседний это штатный способ пережить отказ узла.
  */
 export function issueSipCredentials(kind: SipPrincipalKind, realm: string): SipCredentials {
-  const username = `${PREFIX[kind]}-${randomUsernameSuffix()}`;
+  const username = issueSipUsername(kind);
   const password = randomBytes(PASSWORD_BYTES).toString('base64url');
   return { username, password, a1Hash: a1Hash(username, realm, password) };
+}
+
+/**
+ * Только имя, без пароля.
+ *
+ * Нужно транку: к провайдеру регистрируемся мы, проверять digest нечего, и пароль
+ * с хешем ему ни к чему. Имя при этом нужно — им транк зовётся исходящим sofia-gateway
+ * на узле ([ADR-0039](../../../../../docs/adr/0039-terminaciya-cherez-sip-trank.md)),
+ * и оно обязано быть уникальным наравне с именами тех, кто регистрируется к нам.
+ */
+export function issueSipUsername(kind: SipPrincipalKind): string {
+  return `${PREFIX[kind]}-${randomUsernameSuffix()}`;
 }
 
 /** `MD5(имя:realm:пароль)` — форма, заданная digest-проверкой SIP (RFC 2617, HA1). */

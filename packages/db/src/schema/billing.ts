@@ -8,7 +8,16 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { bigserial, check, index, jsonb, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  bigserial,
+  boolean,
+  check,
+  index,
+  jsonb,
+  pgTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import {
   ACCOUNT_KINDS,
   CLIENT_STATUSES,
@@ -70,6 +79,17 @@ export const partners = pgTable(
     /** Настоящее имя. В клиентский контур не попадает ни при каких условиях (ADR-0014). */
     name: text().notNull(),
     status: text().$type<PartnerStatus>().notNull().default('pending'),
+
+    /**
+     * Партнёр объявил, что слушает записи своих вызовов
+     * ([ADR-0036](../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
+     *
+     * Умолчание — **выключено**: партнёр, который ничего не сказал, записей не получает.
+     * Признак виден клиенту в списке псевдонимов, и клиент, которому это не подходит,
+     * такого партнёра в приоритеты канала не ставит. Цена решения названа в ADR:
+     * попросивший записи получит меньше трафика.
+     */
+    listensToRecordings: boolean().notNull().default(false),
 
     /**
      * Реквизиты для выплат. Персональные данные: наружу не отдаются, в логах не появляются.

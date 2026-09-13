@@ -148,6 +148,76 @@
       "when": 1788421479626,
       "tag": "0020_predel_pisem_na_adres",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788426064819,
+      "tag": "0021_proverennye_operatory",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788503653650,
+      "tag": "0022_nastroyki_ploshchadki",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788506637515,
+      "tag": "0023_dostup_partnyora_k_zapisyam",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788795016392,
+      "tag": "0024_razbor_vyzovov",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788836367679,
+      "tag": "0025_sposob_terminacii",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788842377518,
+      "tag": "0026_sip_trank",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788845235906,
+      "tag": "0027_shlyuz_ne_na_svyazi",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788870928291,
+      "tag": "0028_nerazobrannyy_nomer",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788871489177,
+      "tag": "0029_naznachenie_u_nerazobrannogo",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788925071238,
+      "tag": "0030_nomer_sim_ne_unikalen",
+      "breakpoints": true
     }
   ]
 }

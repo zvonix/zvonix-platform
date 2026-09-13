@@ -6,7 +6,13 @@
  * рано или поздно оставляет незакрытым один обработчик, и узнают об этом не первыми.
  */
 
-import { Injectable, SetMetadata, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  SetMetadata,
+  type CanActivate,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import {
   permissionDenied,
@@ -14,15 +20,30 @@ import {
   type MachineKeyKind,
   type UserRole,
 } from '@zvonix/shared';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { APP_CONFIG, type Config } from '../infra/tokens.js';
 import { IdentityService, type Principal } from '../modules/identity/identity.service.js';
 import { readBearer } from '../modules/identity/session-token.js';
 import { readMachineKey } from '../modules/machine/machine-key.js';
 import { MachineService, type MachinePrincipal } from '../modules/machine/machine.service.js';
+import {
+  CSRF_HEADER,
+  clearSessionCookie,
+  isSafeMethod,
+  readSessionCookie,
+  secureCookies,
+} from './session-cookie.js';
 
-const PUBLIC_KEY = 'zvonix:public';
+/**
+ * Ключи пометок. `PUBLIC_KEY` и `MACHINE_KEY` вынесены наружу для второго глобального
+ * защитника — предела частоты изменений ([ADR-0041](../../../../docs/adr/0041-predel-chastoty-izmeneniy.md)):
+ * он обязан пропускать ровно то же, что помечено здесь, и второе перечисление тех же
+ * строк разошлось бы с этим на первой же правке.
+ */
+export const PUBLIC_KEY = 'zvonix:public';
 const ROLES_KEY = 'zvonix:roles';
-const MACHINE_KEY = 'zvonix:machine';
+export const MACHINE_KEY = 'zvonix:machine';
+export const UNMETERED_KEY = 'zvonix:unmetered';
 
 /** Обработчик доступен без входа: регистрация, вход, проверка живости. */
 export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(PUBLIC_KEY, true);
@@ -41,6 +62,17 @@ export const Roles = (...roles: UserRole[]): MethodDecorator & ClassDecorator =>
 export const Machine = (...kinds: MachineKeyKind[]): MethodDecorator & ClassDecorator =>
   SetMetadata(MACHINE_KEY, kinds);
 
+/**
+ * Обработчик не попадает под предел частоты изменений
+ * ([ADR-0041](../../../../docs/adr/0041-predel-chastoty-izmeneniy.md)).
+ *
+ * Ставится не ради удобства, а там, где притормаживание опасно: **выход и закрытие
+ * сессий**. Человек, чья сессия захвачена, обязан суметь её оборвать — и именно
+ * в этот момент счётчик изменений у него исчерпан чужими руками. Предел объёма,
+ * запирающий дверь наружу, защищает не того.
+ */
+export const Unmetered = (): MethodDecorator & ClassDecorator => SetMetadata(UNMETERED_KEY, true);
+
 /** Запрос с уже проверенной вызывающей стороной: человеком либо машиной, но не обоими. */
 export interface AuthenticatedRequest extends FastifyRequest {
   principal?: Principal;
@@ -49,11 +81,17 @@ export interface AuthenticatedRequest extends FastifyRequest {
 
 @Injectable()
 export class AuthGuard implements CanActivate {
+  /** Признак `Secure` у cookie: он же выбирает её имя (ADR-0037). */
+  private readonly secure: boolean;
+
   constructor(
     private readonly reflector: Reflector,
     private readonly identity: IdentityService,
     private readonly machine: MachineService,
-  ) {}
+    @Inject(APP_CONFIG) config: Config,
+  ) {
+    this.secure = secureCookies(config.PUBLIC_BASE_URL);
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean | undefined>(PUBLIC_KEY, [
@@ -72,12 +110,7 @@ export class AuthGuard implements CanActivate {
       return this.authenticateMachine(request, machineKinds);
     }
 
-    const token = readBearer(request.headers.authorization);
-    if (token === undefined) {
-      throw unauthenticated('Требуется вход');
-    }
-
-    const principal = await this.identity.authenticate(token);
+    const principal = await this.authenticateHuman(request, context);
     request.principal = principal;
 
     const allowed = this.reflector.getAllAndOverride<UserRole[] | undefined>(ROLES_KEY, [
@@ -91,6 +124,49 @@ export class AuthGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  /**
+   * Человеческая сессия: заголовок `Bearer` либо cookie
+   * ([ADR-0037](../../../../docs/adr/0037-sessiya-v-brauzere.md)).
+   *
+   * Порядок важен. `Bearer` идёт первым: у него нет ни CSRF, ни привязки к браузеру,
+   * и запрос, явно назвавший токен, должен разбираться именно по нему — иначе
+   * забытая в браузере cookie молча подменяла бы токен из заголовка.
+   */
+  private async authenticateHuman(
+    request: AuthenticatedRequest,
+    context: ExecutionContext,
+  ): Promise<Principal> {
+    const bearer = readBearer(request.headers.authorization);
+    const cookie =
+      bearer === undefined ? readSessionCookie(request.headers.cookie, this.secure) : undefined;
+
+    const token = bearer ?? cookie;
+    if (token === undefined) {
+      throw unauthenticated('Требуется вход');
+    }
+
+    // Проверка CSRF идёт до проверки токена: она дешевле и не должна зависеть
+    // от того, годная сессия или нет.
+    if (cookie !== undefined && !isSafeMethod(request.method)) {
+      if (request.headers[CSRF_HEADER] === undefined) {
+        throw permissionDenied('Запрос из браузера без заголовка X-Zvonix-Web');
+      }
+    }
+
+    try {
+      return await this.identity.authenticate(token);
+    } catch (cause) {
+      // Негодная cookie — мусор в браузере, а не ошибка вызывающего: без снятия
+      // кабинет получал бы отказ на каждом запросе, пока человек не почистит
+      // хранилище сайта руками.
+      if (cookie !== undefined) {
+        const reply = context.switchToHttp().getResponse<FastifyReply>();
+        void reply.header('set-cookie', clearSessionCookie(this.secure));
+      }
+      throw cause;
+    }
   }
 
   /**

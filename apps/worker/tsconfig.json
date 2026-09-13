@@ -3,6 +3,9 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
+    // Рядом с результатом, а не рядом с настройкой. Иначе снести `dist` и собрать
+    // заново — получить пустоту: кэш пережил удаление и считает сборку свежей.
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
 
     // Те же две опции, что у API, и по той же причине: контейнер NestJS читает типы
     // параметров конструктора из метаданных, которые генерирует компилятор (ADR-0017).
@@ -10,6 +13,9 @@
     "emitDecoratorMetadata": true
   },
   "include": ["src/**/*.ts"],
+  // Проверки собираются отдельным проектом и в `dist` не попадают —
+  // см. `tsconfig.tests.json`.
+  "exclude": ["src/**/*.test.ts"],
   "references": [
     { "path": "../../packages/shared" },
     { "path": "../../packages/config" },

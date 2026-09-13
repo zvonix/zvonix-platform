@@ -1,26 +1,16 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Всё, что проверяется: код приложения (он же собирается — `tsconfig.build.json`)
+  // и тестовый код, который не собирается никогда.
   "files": [],
   "references": [
-    {
-      "path": "packages/shared"
-    },
-    {
-      "path": "packages/config"
-    },
-    {
-      "path": "packages/logger"
-    },
-    {
-      "path": "packages/db"
-    },
-    {
-      "path": "apps/api"
-    },
-    {
-      "path": "apps/worker"
-    },
-    {
-      "path": "tests"
-    }
+    { "path": "packages/shared" },
+    { "path": "packages/config" },
+    { "path": "packages/logger" },
+    { "path": "packages/db" },
+    { "path": "apps/api" },
+    { "path": "apps/worker" },
+    { "path": "./tsconfig.tests.json" },
+    { "path": "e2e" }
   ]
 }

@@ -6,7 +6,18 @@ export default tseslint.config(
   // Файлы настроек инструментов не входят в типизированный проект (tsconfig указывает
   // только на src), поэтому проверка с типами на них не работает. Их корректность
   // проверяется запуском самих инструментов: drizzle.config.ts — командой db:generate в CI.
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/*.config.js', '**/*.config.ts'] },
+  // `.next` — результат сборки Next: там чужой сгенерированный код, правит его
+  // не человек, и линтер на нём даёт триста ошибок ни о чём.
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/.next/**',
+      '**/*.config.js',
+      '**/*.config.mjs',
+      '**/*.config.ts',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
@@ -39,6 +50,7 @@ export default tseslint.config(
       // зависимость ради него в проекте не нужна. Не хватает имени — добавить сюда.
       globals: {
         AbortController: 'readonly',
+        AbortSignal: 'readonly',
         Buffer: 'readonly',
         URL: 'readonly',
         clearTimeout: 'readonly',

@@ -18,7 +18,9 @@
     "dev": "concurrently -n tsc,api -c blue,green \"tsc --build --watch --preserveWatchOutput ../../tsconfig.json\" \"node --watch --enable-source-maps dist/main.js\"",
     "start": "node --enable-source-maps dist/main.js",
     "admin:create": "node dist/modules/identity/create-admin.js",
-    "numbers:resolve": "node dist/modules/catalog/resolve-batch.js"
+    "numbers:resolve": "node dist/modules/catalog/resolve-batch.js",
+    "operators:aliases": "node dist/modules/catalog/operator-aliases.js",
+    "numbering-plan:load": "node dist/modules/catalog/numbering-plan-load.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1123.0",

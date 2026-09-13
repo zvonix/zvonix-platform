@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build tsconfig.build.json",
     "dev": "pnpm --filter @zvonix/api dev",
     "worker": "pnpm --filter @zvonix/worker start",
     "check": "bash scripts/check.sh",
@@ -19,13 +19,19 @@
     "deadcode": "node scripts/deadcode.mjs",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "e2e": "node scripts/e2e.mjs",
     "db:generate": "pnpm --filter @zvonix/db db:generate",
     "db:migrate": "pnpm --filter @zvonix/db db:migrate",
     "admin:create": "pnpm --filter @zvonix/api admin:create",
-    "numbers:resolve": "pnpm --filter @zvonix/api numbers:resolve"
+    "numbers:resolve": "pnpm --filter @zvonix/api numbers:resolve",
+    "operators:aliases": "pnpm --filter @zvonix/api operators:aliases",
+    "numbering-plan:load": "pnpm --filter @zvonix/api numbering-plan:load",
+    "web": "pnpm --filter @zvonix/web dev",
+    "web:build": "pnpm --filter @zvonix/web build"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.63.0",
     "@swc/core": "^1.16.1",
     "@types/node": "^22.10.0",
     "@types/nodemailer": "^8.0.1",

@@ -15,19 +15,31 @@ import {
   notFound,
   validationFailed,
   type AccountKind,
+  type ClientStatus,
   type MoneyAmount,
+  type PartnerStatus,
   type TransactionKind,
+  type UserRole,
 } from '@zvonix/shared';
-import { AuditService } from '../audit/audit.service.js';
+import { AuditService, type AuditEvent } from '../audit/audit.service.js';
+import { MachineService } from '../machine/machine.service.js';
 import {
   BillingRepository,
   type AccountId,
   type AccountRow,
+  type ClientFilter,
   type ClientId,
+  type ClientRow,
+  type ClientWithBalance,
   type Executor,
+  type PartnerAliasRow,
+  type PartnerFilter,
   type PartnerId,
   type LedgerEntryRow,
+  type LedgerEntryWithTransaction,
   type LedgerTransactionRow,
+  type PartnerRow,
+  type PartnerWithBalance,
   type UserId,
 } from './billing.repository.js';
 
@@ -62,6 +74,23 @@ export interface TransactionDraft {
    * На повторной доставке не вызывается: проводки нет, значит и делать нечего.
    */
   readonly alsoInTransaction?: (executor: Executor) => Promise<void>;
+
+  /**
+   * Запись в журнал действий — **той же транзакцией**
+   * ([ADR-0034](../../../../../docs/adr/0034-zhurnal-deneg-odnoy-tranzakciey.md)).
+   *
+   * Не отдельным вызовом после проводки: спор о списании разбирается через месяцы
+   * и разбирается по журналу, поэтому «не записалось» обязано означать «не произошло».
+   * Здесь, а не у вызывающего, чтобы правило не приходилось помнить каждому новому
+   * денежному действию.
+   *
+   * На повторной доставке не пишется: проводки нет, действия не было.
+   *
+   * Функция, а не готовое событие: идентификатор проводки появляется только внутри
+   * транзакции, а без него строка журнала не связана с движением денег — то есть
+   * бесполезна ровно в том разборе, ради которого пишется.
+   */
+  readonly audit?: (transaction: LedgerTransactionRow) => AuditEvent;
 }
 
 export interface PostedTransaction {
@@ -78,6 +107,9 @@ export class BillingService {
   constructor(
     private readonly repository: BillingRepository,
     private readonly audit: AuditService,
+    // Ключи клиентского API (ADR-0044): закрытие клиента обязано закрывать и машинную
+    // дверь. Тот же приём, что и у узла, выводимого из эксплуатации (`nodes.service`).
+    private readonly machine: MachineService,
   ) {}
 
   /**
@@ -164,6 +196,12 @@ export class BillingService {
         await draft.alsoInTransaction(tx);
       }
 
+      // Последним: журнал пишется тогда, когда действие состоялось целиком, и его
+      // неудача откатывает всё вместе с ним (ADR-0034).
+      if (draft.audit !== undefined) {
+        await this.audit.record(draft.audit(transaction), tx);
+      }
+
       return { transaction, entries, alreadyPosted: false };
     });
   }
@@ -192,7 +230,7 @@ export class BillingService {
     const clientAccount = await this.accountOf('client', input.clientId);
     const settlement = await this.accountOf('settlement', null);
 
-    const posted = await this.post({
+    return this.post({
       kind: 'deposit',
       idempotencyKey: input.idempotencyKey,
       description: input.description,
@@ -204,23 +242,60 @@ export class BillingService {
         { accountId: settlement.id, amount: Money.negate(input.amount) },
         { accountId: clientAccount.id, amount: input.amount },
       ],
-    });
-
-    if (!posted.alreadyPosted) {
-      await this.audit.record({
+      audit: (transaction) => ({
         action: 'billing.client_deposited',
         entityType: 'client',
         entityId: input.clientId,
         actorUserId: input.actorUserId,
         after: {
           amount: Money.format(input.amount),
-          transaction_id: posted.transaction.id,
+          transaction_id: transaction.id,
           idempotency_key: input.idempotencyKey,
         },
-      });
+      }),
+    });
+  }
+
+  /**
+   * Партнёр объявляет, слушает ли он записи своих вызовов
+   * ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
+   *
+   * Меняет только сам партнёр либо администратор: роль — первый рубеж, владение
+   * проверяется здесь ([ADR-0018](../../../../../docs/adr/0018-autentifikaciya.md)).
+   *
+   * Признак виден клиенту в списке псевдонимов, и клиент, которому это не подходит,
+   * такого партнёра в приоритеты канала не поставит. Партнёр это знает — цена решения
+   * названа в ADR.
+   */
+  async setRecordingsAccess(
+    partnerId: PartnerId,
+    listens: boolean,
+    actor: { userId: UserId; role: UserRole },
+  ): Promise<PartnerRow> {
+    const partner = await this.repository.findPartner(partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+
+    if (actor.role === 'partner') {
+      const own = await this.repository.findPartnerOwnedBy(actor.userId);
+      // `not_found`, а не `permission_denied`: чужой партнёр не должен подтверждаться
+      // разницей ответов.
+      if (own === undefined || own.id !== partnerId) throw notFound('Партнёр не найден');
     }
 
-    return posted;
+    const updated = await this.repository.setListensToRecordings(partnerId, listens);
+    if (updated === undefined) throw notFound('Партнёр не найден');
+
+    await this.audit.record({
+      action: 'partner.recordings_access_set',
+      entityType: 'partner',
+      entityId: partnerId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { listens_to_recordings: partner.listensToRecordings },
+      after: { listens_to_recordings: updated.listensToRecordings },
+    });
+
+    return updated;
   }
 
   /**
@@ -300,8 +375,366 @@ export class BillingService {
     return account?.balance ?? Money.ZERO;
   }
 
-  async listEntries(accountId: AccountId, limit = 100): Promise<LedgerEntryRow[]> {
-    return this.repository.listEntries(accountId, limit);
+  /**
+   * Клиенты с остатками. Валюта известна только здесь, поэтому список отдаёт служба,
+   * а не репозиторий напрямую: контроллеру незачем знать, что счёт бывает не один.
+   */
+  async listClients(filter: ClientFilter): Promise<{
+    rows: ClientWithBalance[];
+    total: number;
+  }> {
+    return this.repository.listClients(filter, DEFAULT_CURRENCY);
+  }
+
+  async listPartners(filter: PartnerFilter): Promise<{
+    rows: PartnerWithBalance[];
+    total: number;
+  }> {
+    return this.repository.listPartners(filter, DEFAULT_CURRENCY);
+  }
+
+  /**
+   * Названия клиентов по идентификаторам — для чужих модулей, показывающих список,
+   * в котором клиент упомянут ссылкой.
+   *
+   * Публичный вход вместо чтения таблицы `clients` соседним модулем
+   * (ARCHITECTURE.md, «Границы модулей»).
+   */
+  async clientNamesOf(ids: readonly ClientId[]): Promise<Map<string, string>> {
+    return this.repository.clientNamesOf(ids);
+  }
+
+  /**
+   * Имена партнёров по идентификаторам, вместе с псевдонимом.
+   *
+   * **Только для административного контура.** Настоящее имя партнёра клиенту
+   * не показывается ни в каком виде
+   * ([ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md)):
+   * за это отвечает обработчик, решающий, кому отдаёт ответ.
+   */
+  async partnerNamesOf(
+    ids: readonly PartnerId[],
+  ): Promise<Map<string, { name: string; displayName: string | null }>> {
+    return this.repository.partnerNamesOf(ids);
+  }
+
+  /**
+   * Псевдонимы партнёров, готовых принимать вызовы — то, из чего клиент строит порядок.
+   *
+   * Публичный вход вместо чтения таблицы псевдонимов соседним модулем
+   * (ARCHITECTURE.md, «Границы модулей»).
+   */
+  async listOfferedAliases(): Promise<(PartnerAliasRow & { listensToRecordings: boolean })[]> {
+    return this.repository.listOfferedAliases();
+  }
+
+  /**
+   * Клиент, которым владеет учётная запись.
+   *
+   * Единственный вход клиентского контура: идентификатор клиента там нигде не
+   * принимается — он выводится отсюда, из сессии. Иначе клиенту пришлось бы верить
+   * на слово, чей счёт он открывает.
+   *
+   * Нет клиента — `404`, а не пустой ответ: учётная запись с ролью `client`,
+   * к которой клиент ещё не привязан, — это незавершённое заведение, и человек
+   * обязан увидеть, что дело не в его настройках.
+   */
+  /**
+   * Клиент по идентификатору, полученному **от опознанного предъявителя**.
+   *
+   * Идентификатор сюда приходит из машинного ключа (ADR-0044) — из его владельца,
+   * а не из запроса. Подставлять сюда значение из тела или адреса нельзя: тогда
+   * это будет способ открыть чужой счёт, и весь смысл `requireClientOwnedBy`
+   * пропадёт.
+   */
+  async requireClient(clientId: ClientId): Promise<ClientRow> {
+    const client = await this.repository.findClient(clientId);
+    if (client === undefined) throw notFound('Клиент не найден');
+    return client;
+  }
+
+  async requireClientOwnedBy(userId: UserId): Promise<ClientRow> {
+    const own = await this.repository.findClientOwnedBy(userId);
+    const client = own === undefined ? undefined : await this.repository.findClient(own.id);
+    if (client === undefined) throw notFound('Клиент не найден');
+    return client;
+  }
+
+  /**
+   * Партнёр, которым владеет учётная запись.
+   *
+   * Вход партнёрского контура, устроенный так же, как клиентский: идентификатор партнёра
+   * в `/partner/*` не принимается нигде — он выводится из сессии. Разница с обработчиками
+   * вида `/partners/:id/*` не косметическая: туда партнёр допущен и там ему приходится
+   * сверять владение на каждом входе, а здесь подставить нечего.
+   *
+   * Нет партнёра — `404`: учётная запись с ролью `partner` без привязанного партнёра
+   * это незавершённое заведение, и человек обязан увидеть, что дело не в его настройках.
+   */
+  async requirePartnerOwnedBy(userId: UserId): Promise<PartnerRow> {
+    const own = await this.repository.findPartnerOwnedBy(userId);
+    const partner = own === undefined ? undefined : await this.repository.findPartner(own.id);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+    return partner;
+  }
+
+  /**
+   * Псевдоним партнёра — то единственное, чем его знает клиент (ADR-0014).
+   *
+   * Партнёру он показывается в его же кабинете: под этим именем его выбирают,
+   * и не знать его — значит не понимать, о ком речь в разговоре с площадкой.
+   */
+  async partnerAliasOf(partnerId: PartnerId): Promise<string | undefined> {
+    return this.repository.findPartnerAlias(partnerId);
+  }
+
+  /**
+   * Заводит клиента: запись и счёт.
+   *
+   * **Один владелец — один клиент**, по той же причине, что и у партнёра:
+   * `findClientOwnedBy` берёт первую попавшуюся строку, и второй клиент у того же
+   * человека оказался бы для него самого недоступен — он не увидел бы ни своих каналов,
+   * ни своих записей разговоров.
+   */
+  async createClient(draft: {
+    ownerUserId: UserId;
+    name: string;
+    overdraftLimit: MoneyAmount;
+  }): Promise<ClientRow> {
+    const existing = await this.repository.findClientOwnedBy(draft.ownerUserId);
+    if (existing !== undefined) {
+      throw conflict('У этой учётной записи уже есть клиент');
+    }
+
+    const client = await this.repository.createClient({
+      ownerUserId: draft.ownerUserId,
+      name: draft.name,
+      status: 'pending',
+      overdraftLimit: draft.overdraftLimit,
+    });
+    // Счёт заводится сразу: клиент без счёта — участник, которому некуда начислить.
+    await this.accountOf('client', client.id);
+
+    return client;
+  }
+
+  /**
+   * Смена разрешённого минуса.
+   *
+   * До появления метода эта величина задавалась **только при заведении** и потом
+   * не менялась ничем: опечатка в разрядах означала кредит, который нечем отозвать.
+   *
+   * Действие денежное, поэтому журналируется ([CLAUDE.md](../../../../../CLAUDE.md),
+   * «Доменные правила»): в журнале остаётся и прежний предел, и новый.
+   *
+   * Уменьшение до величины меньше текущего долга **разрешено** и намеренно: это способ
+   * сказать «больше в долг не даём». Уже потраченное при этом никуда не девается,
+   * а новые вызовы просто перестают проходить по резерву.
+   */
+  async changeOverdraftLimit(
+    clientId: ClientId,
+    limit: MoneyAmount,
+    actor: { userId: UserId; role: UserRole },
+  ): Promise<ClientRow> {
+    const client = await this.repository.findClient(clientId);
+    if (client === undefined) throw notFound('Клиент не найден');
+
+    if (client.overdraftLimit === limit) return client;
+
+    const updated = await this.repository.setOverdraftLimit(clientId, limit);
+    if (updated === undefined) throw notFound('Клиент не найден');
+
+    await this.audit.record({
+      action: 'client.overdraft_changed',
+      entityType: 'client',
+      entityId: clientId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { overdraft_limit: Money.format(client.overdraftLimit) },
+      after: { overdraft_limit: Money.format(limit) },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Смена состояния клиента — переход, которого в системе не было вовсе.
+   *
+   * Клиент заводится `pending`, а маршрутизация требует `active` и от канала,
+   * и от самого клиента: `findRoutableChannel` и `findActiveChannel` проверяют оба.
+   * Пока этого метода не было, заведённый клиент не мог совершить ни одного вызова,
+   * и починить это можно было только правкой в базе.
+   *
+   * `closed` терминально, как и у партнёра: у закрытого клиента остаётся история
+   * проводок, и тихое возвращение его в работу — не то, чего ждут от выпадающего списка.
+   *
+   * **Закрытие отзывает ключи клиентского API** ([ADR-0044](../../../../../docs/adr/0044-klientskiy-api.md)).
+   * Человек, закрывая клиента, закрывает и вход его диспетчерской: иначе остаётся дверь,
+   * о которой в этот момент никто не думает, — ровно та же мысль, что и у узла,
+   * выводимого из эксплуатации. Приостановка ключей не трогает: она обратима, а отзыв нет.
+   */
+  async changeClientStatus(
+    clientId: ClientId,
+    status: ClientStatus,
+    actor: { userId: UserId; role: UserRole },
+  ): Promise<ClientRow> {
+    const client = await this.repository.findClient(clientId);
+    if (client === undefined) throw notFound('Клиент не найден');
+
+    if (client.status === status) return client;
+
+    if (client.status === 'closed') {
+      throw conflict('Клиент закрыт: это состояние окончательное');
+    }
+
+    const updated = await this.repository.setClientStatus(clientId, status);
+    if (updated === undefined) throw notFound('Клиент не найден');
+
+    await this.audit.record({
+      action: 'client.status_changed',
+      entityType: 'client',
+      entityId: clientId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { status: client.status },
+      after: { status },
+    });
+
+    // После записи в журнал, а не до: отзыв ключей — следствие закрытия, и в журнале
+    // он обязан идти следом, а не предшествовать причине.
+    if (status === 'closed') {
+      await this.machine.revokeAllOf(clientId, actor.userId, actor.role);
+    }
+
+    return updated;
+  }
+
+  /**
+   * Заводит партнёра: запись, псевдоним и счёт.
+   *
+   * **Один владелец — один партнёр.** Схема этого не требует, а код требует:
+   * `findPartnerOwnedBy` берёт первую попавшуюся строку, и второй партнёр у того же
+   * человека оказался бы для него самого недоступен — например, он не смог бы объявить
+   * по нему намерение слушать записи. Отказ на входе дешевле, чем запись, которую
+   * потом не открыть.
+   */
+  async createPartner(draft: {
+    ownerUserId: UserId;
+    name: string;
+    displayName: string;
+  }): Promise<PartnerRow> {
+    const existing = await this.repository.findPartnerOwnedBy(draft.ownerUserId);
+    if (existing !== undefined) {
+      throw conflict('У этой учётной записи уже есть партнёр');
+    }
+
+    const partner = await this.repository.createPartner({
+      ownerUserId: draft.ownerUserId,
+      name: draft.name,
+      status: 'pending',
+    });
+    await this.repository.setPartnerAlias(partner.id, draft.displayName);
+    // Счёт заводится сразу: партнёр без счёта — участник, которому некуда начислить.
+    await this.accountOf('partner', partner.id);
+
+    return partner;
+  }
+
+  /**
+   * Переименование псевдонима партнёра.
+   *
+   * Псевдоним — **единственное, что клиент вообще знает о партнёре**
+   * ([ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md)), и до появления
+   * этого метода он задавался только при заведении: опечатка оставалась навсегда
+   * и на глазах у всех клиентов.
+   *
+   * Псевдоним уникален на всю площадку — иначе один поставщик выглядел бы у клиента
+   * несколькими разными, и распределение трафика поехало бы. Занятое имя отвергается
+   * с названной причиной, а не общим «такая запись уже существует».
+   */
+  async renamePartnerAlias(
+    partnerId: PartnerId,
+    displayName: string,
+    actor: { userId: UserId; role: UserRole },
+  ): Promise<string> {
+    const partner = await this.repository.findPartner(partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+
+    const previous = await this.repository.findPartnerAlias(partnerId);
+    if (previous === displayName) return displayName;
+
+    const taken = await this.repository.findPartnerByAlias(displayName);
+    if (taken !== undefined && taken !== partnerId) {
+      throw conflict('Такой псевдоним уже занят другим партнёром');
+    }
+
+    const updated = await this.repository.renamePartnerAlias(partnerId, displayName);
+    // Псевдоним заводится вместе с партнёром, но строки может не быть: тогда её надо
+    // создать, а не молча отчитаться об успехе.
+    if (updated === undefined) {
+      await this.repository.setPartnerAlias(partnerId, displayName);
+    }
+
+    await this.audit.record({
+      action: 'partner.alias_renamed',
+      entityType: 'partner',
+      entityId: partnerId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { display_name: previous ?? null },
+      after: { display_name: displayName },
+    });
+
+    return displayName;
+  }
+
+  /**
+   * Смена состояния партнёра — переход, которого в системе не было вовсе.
+   *
+   * Партнёр заводится `pending`, а и регистрация его шлюза, и отбор SIM требуют
+   * `verified`. Пока этого метода не было, заведённый партнёр не мог терминировать
+   * ни одного вызова, и починить это можно было только правкой в базе.
+   *
+   * `closed` терминально: у закрытого партнёра остаётся история выплат, и тихое
+   * возвращение его в работу — не то, что администратор ожидает от выпадающего
+   * списка. Понадобится вернуть — заводится новый партнёр.
+   */
+  async changePartnerStatus(
+    partnerId: PartnerId,
+    status: PartnerStatus,
+    actor: { userId: UserId; role: UserRole },
+  ): Promise<PartnerRow> {
+    const partner = await this.repository.findPartner(partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+
+    if (partner.status === status) return partner;
+
+    if (partner.status === 'closed') {
+      throw conflict('Партнёр закрыт: это состояние окончательное');
+    }
+
+    const updated = await this.repository.setPartnerStatus(partnerId, status);
+    if (updated === undefined) throw notFound('Партнёр не найден');
+
+    await this.audit.record({
+      action: 'partner.status_changed',
+      entityType: 'partner',
+      entityId: partnerId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { status: partner.status },
+      after: { status },
+    });
+
+    return updated;
+  }
+
+  async listEntries(
+    accountId: AccountId,
+    limit = 100,
+    offset = 0,
+  ): Promise<{ rows: LedgerEntryWithTransaction[]; total: number }> {
+    return this.repository.listEntries(accountId, limit, offset);
   }
 
   /**

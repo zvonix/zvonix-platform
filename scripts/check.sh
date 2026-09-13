@@ -27,21 +27,40 @@ FAILED=()
 SKIPPED=()
 TIMINGS=()
 
+# Свободная память в гигабайтах, одинаково на Ubuntu и на Windows.
+#
+# На Linux берётся `MemAvailable`, а не `MemFree`: второе не считает страничный кэш,
+# который ядро отдаёт по первому требованию, и на машине с гигабайтами под кэш
+# показывало бы «памяти нет». `os.freemem()` — запасной путь для остальных систем.
+free_memory_gb() {
+  node -e 'const fs=require("node:fs"),os=require("node:os");let free=os.freemem();try{const m=/^MemAvailable:[^0-9]+([0-9]+) kB/m.exec(fs.readFileSync("/proc/meminfo","utf8"));if(m)free=Number(m[1])*1024}catch{}process.stdout.write((free/1073741824).toFixed(1))' 2>/dev/null || echo "?"
+}
+
+# Печатается только у упавшего шага: тяжёлые шаги (тесты с базой, браузер) на машине
+# без свободной памяти гибнут молча — процесс снимают, и он не успевает сказать ничего.
+# Замер сделан **до** запуска: после падения память уже освобождена, и цифра лгала бы.
+report_memory() {
+  echo "Свободной памяти перед шагом было: $1 ГБ"
+}
+
 # Выполняет шаг и запоминает исход и время.
 step() {
   local name="$1"; shift
-  local started ended
+  local started ended code memory
   echo ""
   echo "=== $name ==="
+  memory=$(free_memory_gb)
   started=$(date +%s)
   if "$@"; then
     ended=$(date +%s)
     TIMINGS+=("$name|$((ended - started))|ok")
     echo "--- $name: ok"
   else
+    code=$?
     ended=$(date +%s)
     TIMINGS+=("$name|$((ended - started))|ПРОВАЛ")
-    echo "--- $name: ПРОВАЛ"
+    report_memory "$memory"
+    echo "--- $name: ПРОВАЛ (код $code)"
     FAILED+=("$name")
   fi
 }
@@ -50,9 +69,10 @@ step() {
 # Код возврата 78 означает «не выполнен», а не «провален».
 step_optional() {
   local name="$1"; shift
-  local started ended code
+  local started ended code memory
   echo ""
   echo "=== $name ==="
+  memory=$(free_memory_gb)
   started=$(date +%s)
   "$@"
   code=$?
@@ -66,7 +86,8 @@ step_optional() {
     SKIPPED+=("$name")
   else
     TIMINGS+=("$name|$((ended - started))|ПРОВАЛ")
-    echo "--- $name: ПРОВАЛ"
+    report_memory "$memory"
+    echo "--- $name: ПРОВАЛ (код $code)"
     FAILED+=("$name")
   fi
 }
@@ -101,7 +122,11 @@ dependency_audit() {
   fi
   # Признаки того, что реестр недоступен. `fetch failed` — то, что печатает pnpm,
   # когда соединение не установилось; остальное приходит от резолвера имён и сокета.
-  if echo "$output" | grep -qiE 'fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|getaddrinfo|socket hang up'; then
+  # `aborted due to timeout` и `TimeoutError` — ответ так и не пришёл: соединение
+  # установилось, но реестр молчал. Это тоже «не выполнено», а не «есть уязвимости»:
+  # утверждать «уязвимостей нет» по неполученному ответу нельзя, но и объявлять
+  # провал из-за чужой недоступности — значит приучить не верить красному.
+  if echo "$output" | grep -qiE 'fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|getaddrinfo|socket hang up|aborted due to timeout|TimeoutError'; then
     echo "Нет доступа к реестру пакетов — аудит не выполнен."
     return 78
   fi
@@ -120,8 +145,18 @@ step "Мёртвый код"   pnpm deadcode
 step "Миграции"      migrations_match_schema
 step "Тесты"         pnpm test
 step "Тесты с БД"    pnpm test:integration
+# Сборка кабинета заодно проверяет его типы: `next build` порождает next-env.d.ts
+# и объявления маршрутов, без которых отдельный `tsc` падает на чистом клоне.
+step "Сборка кабинета" pnpm --filter @zvonix/web build
 step "Смоук запуска" node scripts/smoke.mjs
 step "Смоук воркера"  node scripts/smoke-worker.mjs
+# Кабинет в настоящем браузере: единственный шаг, отвечающий на вопрос «оживает ли
+# страница». Идёт последним из содержательных, потому что требует и собранного API,
+# и собранного кабинета, и **приводит тестовую базу к своему состоянию** — после него
+# на её содержимое опираться нельзя.
+# Необязательный: без браузера шаг «не выполнен», а не провален. Это не то же самое,
+# что упавший кабинет, и путать их — значит приучить не верить красному.
+step_optional "Кабинет в браузере" node scripts/e2e.mjs
 step_optional "Аудит зависимостей" dependency_audit
 
 # --- Итог --------------------------------------------------------------------

@@ -5,22 +5,26 @@
  * и хранится вне базы, а разбирать спор о списании или о доступе к записи разговора
  * приходится через месяцы.
  *
- * **Сознательное отступление от ADR-0003**, который запрещает `catch`, только пишущий в лог
- * и продолжающий работу. Здесь оно оправдано: действие к этому моменту уже совершено
- * и зафиксировано в базе, и отказ из-за неудавшейся записи в журнал вернул бы клиенту
- * ошибку на успешно выполненную операцию. Ошибка при этом не проглатывается — она уходит
- * в лог уровнем `error`.
+ * **У записи два режима, и разница между ними — денежная**
+ * ([ADR-0034](../../../../../docs/adr/0034-zhurnal-deneg-odnoy-tranzakciey.md)).
  *
- * Правильное решение для денежных действий — писать проводку и строку журнала одной
- * транзакцией: тогда «не записалось» означает «не произошло». Это требует протаскивания
- * транзакции через репозитории и делается на этапе 1 вместе с журналом проводок
- * ([ADR-0010](../../../../../docs/adr/0010-model-billinga.md)); строка есть в TASKS.md.
+ * *Без исполнителя* — отдельной операцией, и неудача только пишется в лог. Это
+ * сознательное отступление от [ADR-0003](../../../../../docs/adr/0003-obrabotka-oshibok.md):
+ * действие к этому моменту уже совершено и зафиксировано в базе, и отказ из-за
+ * неудавшейся записи в журнал вернул бы клиенту ошибку на успешно выполненную операцию.
+ *
+ * *С исполнителем* — **той же транзакцией**, что и само действие, и неудача записи
+ * отменяет действие. Так пишутся денежные действия: «не записалось» обязано означать
+ * «не произошло», потому что спор о списании разбирается через месяцы и разбирается
+ * по журналу. Глушить ошибку здесь нельзя ещё и технически: PostgreSQL после сбоя
+ * в транзакции всё равно откажет во всех следующих запросах до отката.
  */
 
 import { Inject, Injectable } from '@nestjs/common';
 import { currentCorrelationId } from '@zvonix/logger';
 import { newId, type Id, type UserRole } from '@zvonix/shared';
 import { auditLog } from '@zvonix/db/schema';
+import type { Executor } from '@zvonix/db';
 import { DatabaseService } from '../../infra/database.service.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 
@@ -48,27 +52,43 @@ export class AuditService {
     this.logger = logger.child('audit');
   }
 
-  async record(event: AuditEvent): Promise<void> {
+  /**
+   * Пишет строку журнала.
+   *
+   * `executor` — открытая транзакция того действия, которое записывается. С ним запись
+   * идёт той же транзакцией и её неудача действие **отменяет**; без него — отдельной
+   * операцией, и неудача только попадает в лог.
+   */
+  async record(event: AuditEvent, executor?: Executor): Promise<void> {
+    if (executor !== undefined) {
+      await this.insert(event, executor);
+      return;
+    }
+
     try {
-      await this.database.db.insert(auditLog).values({
-        id: newId<'audit'>(),
-        actorUserId: event.actorUserId ?? null,
-        actorRole: event.actorRole ?? null,
-        action: event.action,
-        entityType: event.entityType,
-        entityId: event.entityId ?? null,
-        before: event.before ?? null,
-        after: event.after ?? null,
-        ip: event.ip ?? null,
-        userAgent: event.userAgent ?? null,
-        correlationId: currentCorrelationId() ?? null,
-        occurredAt: new Date(),
-      });
+      await this.insert(event, this.database.db);
     } catch (cause) {
       this.logger.error('Не удалось записать действие в журнал', cause, {
         action: event.action,
         entity_type: event.entityType,
       });
     }
+  }
+
+  private async insert(event: AuditEvent, executor: Executor): Promise<void> {
+    await executor.insert(auditLog).values({
+      id: newId<'audit'>(),
+      actorUserId: event.actorUserId ?? null,
+      actorRole: event.actorRole ?? null,
+      action: event.action,
+      entityType: event.entityType,
+      entityId: event.entityId ?? null,
+      before: event.before ?? null,
+      after: event.after ?? null,
+      ip: event.ip ?? null,
+      userAgent: event.userAgent ?? null,
+      correlationId: currentCorrelationId() ?? null,
+      occurredAt: new Date(),
+    });
   }
 }

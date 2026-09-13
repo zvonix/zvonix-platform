@@ -9,7 +9,9 @@
 
 import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
 import { createTransport, type Transporter } from 'nodemailer';
-import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
+import { validationFailed } from '@zvonix/shared';
+import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import { SettingsService, type MailSettings } from '../settings/settings.service.js';
 import { MailRepository, type Executor, type OutboxMessageRow } from './mail.repository.js';
 
 /** Сколько писем берётся за один проход. */
@@ -42,19 +44,26 @@ const RECIPIENT_WINDOW_MS = 3_600_000;
 @Injectable()
 export class MailService implements OnApplicationShutdown {
   private readonly logger: Logger;
-  private transport: Transporter | undefined;
+  /**
+   * Соединение и отпечаток настроек, из которых оно собрано.
+   *
+   * Настройки меняются в админке ([ADR-0031](../../../../../docs/adr/0031-nastroyki-ploshchadki.md)),
+   * и соединение, собранное из прежних, продолжало бы ходить на старый сервер со старым
+   * паролем. Отпечаток нужен, чтобы это заметить и пересобрать.
+   */
+  private connected: { transport: Transporter; signature: string } | undefined;
 
   constructor(
     private readonly repository: MailRepository,
-    @Inject(APP_CONFIG) private readonly config: Config,
+    private readonly settings: SettingsService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('mail');
   }
 
-  /** Настроена ли почта. Пусто — письма копятся, но не уходят (ADR-0029). */
-  get configured(): boolean {
-    return this.config.SMTP_HOST !== '';
+  /** Настроена ли почта. Узел не задан — письма копятся, но не уходят (ADR-0029). */
+  async isConfigured(): Promise<boolean> {
+    return (await this.settings.mail()).host !== '';
   }
 
   /**
@@ -118,14 +127,15 @@ export class MailService implements OnApplicationShutdown {
    * тик ничего не теряет.
    */
   async deliverDue(now: Date = new Date()): Promise<number> {
-    if (!this.configured) {
+    const mail = await this.settings.mail();
+    if (mail.host === '') {
       const pending = await this.repository.countPending();
       if (pending > 0) {
         // Предупреждение при каждом проходе: восстановление пароля при ненастроенной
         // почте молча не работает, и узнать об этом надо не от людей.
         this.logger.warn('Почта не настроена: письма копятся и не уходят', {
           pending,
-          variable: 'SMTP_HOST',
+          setting: 'mail.host',
         });
       }
       return 0;
@@ -138,7 +148,7 @@ export class MailService implements OnApplicationShutdown {
     await this.repository.db.transaction(async (tx) => {
       const due = await this.repository.claimDue(now, BATCH_LIMIT, tx);
       for (const message of due) {
-        delivered += (await this.deliver(message, now, tx)) ? 1 : 0;
+        delivered += (await this.deliver(message, now, tx, mail)) ? 1 : 0;
       }
     });
 
@@ -151,19 +161,58 @@ export class MailService implements OnApplicationShutdown {
     return this.repository.deleteSentBefore(before);
   }
 
+  /**
+   * Пробное письмо из админки — **мимо очереди**, с ответом почтового сервера.
+   *
+   * Исключение из правила «письмо кладётся в базу» ([ADR-0029](../../../../../docs/adr/0029-pochta.md)),
+   * и сделано осознанно: у пробного письма нет породившего события, которое надо
+   * сохранить вместе с ним, а смысл кнопки ровно в том, чтобы увидеть отказ сервера
+   * сразу, а не через полминуты в таблице. Предел писем на адрес
+   * ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)) сюда не относится
+   * по той же причине: адрес называет администратор, а не посторонний.
+   */
+  async sendTest(recipient?: string): Promise<{ delivered: boolean; error: string | null }> {
+    const mail = await this.settings.mail();
+    if (mail.host === '') {
+      throw validationFailed('Почта не настроена: задайте mail.host');
+    }
+
+    const to = recipient ?? mail.testRecipient;
+    if (to === '') {
+      throw validationFailed('Некуда отправлять: задайте адрес или настройку mail.test_recipient');
+    }
+
+    try {
+      await this.connection(mail).sendMail({
+        from: mail.from,
+        to,
+        subject: 'Zvonix: проверка почты',
+        text: 'Если вы это читаете, почта площадки настроена верно.',
+      });
+      this.logger.info('Пробное письмо отправлено', { recipient: maskEmail(to) });
+      return { delivered: true, error: null };
+    } catch (cause) {
+      // Текст ошибки возвращается администратору намеренно: без него «не работает»
+      // неотличимо от «не тот пароль», и чинить приходится наугад.
+      this.logger.error('Пробное письмо не отправлено', cause, { recipient: maskEmail(to) });
+      return { delivered: false, error: String(cause).slice(0, 500) };
+    }
+  }
+
   onApplicationShutdown(): void {
-    this.transport?.close();
-    this.transport = undefined;
+    this.connected?.transport.close();
+    this.connected = undefined;
   }
 
   private async deliver(
     message: OutboxMessageRow,
     now: Date,
     executor: Executor,
+    mail: MailSettings,
   ): Promise<boolean> {
     try {
-      await this.connection().sendMail({
-        from: this.config.SMTP_FROM,
+      await this.connection(mail).sendMail({
+        from: mail.from,
         to: message.recipient,
         subject: message.subject,
         text: message.body,
@@ -202,17 +251,24 @@ export class MailService implements OnApplicationShutdown {
    * и сам переподключается. Заводить его при старте незачем — воркер может простоять
    * сутки без единого письма.
    */
-  private connection(): Transporter {
-    this.transport ??= createTransport({
-      host: this.config.SMTP_HOST,
-      port: this.config.SMTP_PORT,
-      secure: this.config.SMTP_SECURE,
+  private connection(mail: MailSettings): Transporter {
+    // Отпечаток настроек: изменились — соединение пересобирается. Иначе правка
+    // в админке не действовала бы до перезапуска процесса, а это ровно то, ради чего
+    // настройки туда и переехали.
+    const signature = JSON.stringify([mail.host, mail.port, mail.secure, mail.user, mail.password]);
+    if (this.connected?.signature === signature) return this.connected.transport;
+
+    this.connected?.transport.close();
+    const transport = createTransport({
+      host: mail.host,
+      port: mail.port,
+      secure: mail.secure,
       pool: true,
-      ...(this.config.SMTP_USER === ''
-        ? {}
-        : { auth: { user: this.config.SMTP_USER, pass: this.config.SMTP_PASSWORD } }),
+      ...(mail.user === '' ? {} : { auth: { user: mail.user, pass: mail.password } }),
     });
-    return this.transport;
+
+    this.connected = { transport, signature };
+    return transport;
   }
 }
 

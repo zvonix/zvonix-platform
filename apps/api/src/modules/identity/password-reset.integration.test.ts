@@ -292,7 +292,7 @@ describe('очередь писем', () => {
     const { MailService } = await import('../mail/mail.service.js');
     const mail = api().get(MailService);
 
-    expect(mail.configured).toBe(false);
+    expect(await mail.isConfigured()).toBe(false);
     expect(await mail.deliverDue(new Date())).toBe(0);
     expect((await letters(email))[0]?.kind).toBe('email_verification');
   }, 120_000);

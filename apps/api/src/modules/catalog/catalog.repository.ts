@@ -3,15 +3,22 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm';
-import { toDatabaseError } from '@zvonix/db';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
+import { orderByText, toDatabaseError } from '@zvonix/db';
 import {
   numberResolutions,
   numberingPlanRanges,
   operatorAliases,
   operators,
 } from '@zvonix/db/schema';
-import { newId, toNumeric, type Id, type Msisdn, type ResolutionSource } from '@zvonix/shared';
+import {
+  newId,
+  toNumeric,
+  type Id,
+  type Msisdn,
+  type NumberingPlanSource,
+  type ResolutionSource,
+} from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 import { normalizeOperatorName } from './operator-name.js';
 
@@ -25,7 +32,33 @@ export interface NewOperator {
   readonly mnc: string | null;
   readonly isMvno: boolean;
   readonly hostOperatorId: OperatorId | null;
+  /**
+   * Когда запись подтверждена человеком
+   * ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)).
+   *
+   * У заведённой администратором — момент создания: её создавал человек, и он же
+   * назвал признак MVNO и хозяина сети. Пусто бывает только у записи из импорта.
+   */
+  readonly verifiedAt: Date | null;
 }
+
+/** Диапазон, готовый к записи: оператор уже сопоставлен справочнику. */
+export interface NewPlanRange {
+  readonly defCode: string;
+  readonly rangeStart: bigint;
+  readonly rangeEnd: bigint;
+  readonly capacity: number;
+  readonly operatorId: OperatorId;
+  readonly region: string | null;
+}
+
+/**
+ * Сколько диапазонов вставляется одним запросом.
+ *
+ * Не весь набор разом: PostgreSQL принимает не больше 65 535 параметров в запросе,
+ * а на диапазон их девять — семнадцать тысяч строк в один `insert` не поместятся.
+ */
+const PLAN_INSERT_CHUNK = 2000;
 
 export interface StoredResolution {
   readonly msisdn: Msisdn;
@@ -62,7 +95,39 @@ export class CatalogRepository {
   }
 
   async listOperators(): Promise<OperatorRow[]> {
-    return this.database.db.select().from(operators).orderBy(asc(operators.name));
+    return this.database.db.select().from(operators).orderBy(orderByText(operators.name));
+  }
+
+  /**
+   * Подтверждённые операторы — только имя и идентификатор.
+   *
+   * Отдельно от `listOperators`: там строка целиком и все синонимы к ней, а справочник
+   * наполнен планом нумерации. Неподтверждённые сюда не попадают намеренно — по такому
+   * оператору вызов не совершается ни у кого
+   * ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)), и в разговоре
+   * «где у партнёра нет цены» он был бы ложным следом.
+   */
+  async listVerifiedOperators(): Promise<{ id: OperatorId; name: string }[]> {
+    return this.database.db
+      .select({ id: operators.id, name: operators.name })
+      .from(operators)
+      .where(isNotNull(operators.verifiedAt))
+      .orderBy(orderByText(operators.name));
+  }
+
+  /**
+   * Названия операторов пачкой.
+   *
+   * Отдельно от `listOperators`: справочник наполнен планом нумерации и содержит
+   * сотни записей, а списку вызовов нужны имена десятка операторов со страницы.
+   */
+  async operatorNamesOf(ids: readonly OperatorId[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.database.db
+      .select({ id: operators.id, name: operators.name })
+      .from(operators)
+      .where(inArray(operators.id, [...ids]));
+    return new Map(rows.map((row) => [row.id, row.name]));
   }
 
   /**
@@ -156,6 +221,156 @@ export class CatalogRepository {
       .limit(1);
 
     return row;
+  }
+
+  /** Когда план нумерации этого источника загружался последний раз. */
+  async lastPlanImportAt(source: NumberingPlanSource): Promise<Date | undefined> {
+    const [row] = await this.database.db
+      .select({ importedAt: sql<Date | null>`max(${numberingPlanRanges.importedAt})` })
+      .from(numberingPlanRanges)
+      .where(eq(numberingPlanRanges.source, source));
+    return row?.importedAt ?? undefined;
+  }
+
+  /**
+   * Операторы по ИНН — одним запросом.
+   *
+   * Импорт сопоставляет семнадцать тысяч строк с семью десятками операторов: запрос
+   * на строку означал бы семнадцать тысяч обращений к базе за один проход.
+   */
+  async findOperatorsByInn(inns: readonly string[]): Promise<Map<string, OperatorRow>> {
+    if (inns.length === 0) return new Map();
+
+    const rows = await this.database.db
+      .select()
+      .from(operators)
+      .where(inArray(operators.inn, [...inns]));
+
+    const found = new Map<string, OperatorRow>();
+    for (const row of rows) if (row.inn !== null) found.set(row.inn, row);
+    return found;
+  }
+
+  /**
+   * Заводит оператора по данным плана нумерации — **непроверенным**
+   * ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)).
+   *
+   * `verifiedAt` пуст: файл не говорит, виртуальный оператор или нет, а `is_mvno = false`
+   * в проверенной записи означало бы утверждение «своя сеть», которого никто не делал.
+   * Название сразу уходит и в синонимы, иначе оператор не найдётся по ответу внешнего
+   * сервиса.
+   */
+  async createImportedOperator(draft: { name: string; inn: string | null }): Promise<OperatorRow> {
+    try {
+      return await this.database.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(operators)
+          .values({
+            id: newId<'operator'>(),
+            name: draft.name,
+            inn: draft.inn,
+            mnc: null,
+            isMvno: false,
+            hostOperatorId: null,
+            verifiedAt: null,
+          })
+          .returning();
+        if (row === undefined) throw new Error('Вставка не вернула строку');
+
+        await tx
+          .insert(operatorAliases)
+          .values({
+            id: newId<'operatorAlias'>(),
+            operatorId: row.id,
+            alias: normalizeOperatorName(draft.name),
+          })
+          .onConflictDoNothing();
+
+        return row;
+      });
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /** Добавляет написание, если его ещё нет. Импорт повторяется ежедневно. */
+  async ensureAlias(operatorId: OperatorId, name: string): Promise<void> {
+    const alias = normalizeOperatorName(name);
+    if (alias === '') return;
+
+    try {
+      await this.database.db
+        .insert(operatorAliases)
+        .values({ id: newId<'operatorAlias'>(), operatorId, alias })
+        .onConflictDoNothing();
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /**
+   * Человек подтвердил запись оператора ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)).
+   *
+   * Подтверждение и есть ответ на три вопроса — своя сеть или нет, чья сеть, какой MNC:
+   * отметить запись проверенной, не назвав их, значит ничего не проверить.
+   */
+  async verifyOperator(
+    id: OperatorId,
+    patch: { isMvno: boolean; hostOperatorId: OperatorId | null; mnc: string | null },
+    at: Date,
+  ): Promise<OperatorRow | undefined> {
+    try {
+      const [row] = await this.database.db
+        .update(operators)
+        .set({ ...patch, verifiedAt: at, updatedAt: at })
+        .where(eq(operators.id, id))
+        .returning();
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /**
+   * Заменяет план нумерации источника целиком — одной транзакцией
+   * ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)).
+   *
+   * Не «обновить изменившееся»: диапазоны в файле не имеют устойчивого идентификатора,
+   * и вычислять разницу пришлось бы по границам, то есть по тому же объёму работы.
+   * Целиком и в транзакции — потому что читатели обязаны видеть либо прежний план,
+   * либо новый, но никогда половину: в разрыве часть номеров перестала бы определяться.
+   */
+  async replaceNumberingPlan(
+    source: NumberingPlanSource,
+    ranges: readonly NewPlanRange[],
+    importedAt: Date,
+  ): Promise<number> {
+    try {
+      return await this.database.db.transaction(async (tx) => {
+        await tx.delete(numberingPlanRanges).where(eq(numberingPlanRanges.source, source));
+
+        for (let from = 0; from < ranges.length; from += PLAN_INSERT_CHUNK) {
+          const chunk = ranges.slice(from, from + PLAN_INSERT_CHUNK);
+          await tx.insert(numberingPlanRanges).values(
+            chunk.map((range) => ({
+              id: newId<'numberingPlanRange'>(),
+              defCode: range.defCode,
+              rangeStart: range.rangeStart,
+              rangeEnd: range.rangeEnd,
+              capacity: range.capacity,
+              operatorId: range.operatorId,
+              region: range.region,
+              source,
+              importedAt,
+            })),
+          );
+        }
+
+        return ranges.length;
+      });
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
   }
 
   // --- База разрешений -------------------------------------------------------

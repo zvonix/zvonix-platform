@@ -11,7 +11,7 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { Money, notFound, validationFailed, type Id } from '@zvonix/shared';
+import { Money, notFound, terminationKindOf, validationFailed } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { BillingService } from '../billing/billing.service.js';
 import { ReservationService } from '../billing/reservation.service.js';
@@ -116,6 +116,7 @@ export class CdrService {
       gateway.partnerId,
       channel.clientId,
       { operatorId: call.operatorId, region: call.region },
+      terminationKindOf(gateway.type),
       cdr.billableSeconds,
       call.startedAt,
     );
@@ -208,10 +209,5 @@ export class CdrService {
       this.logger.warn('Закрыты вызовы без CDR, место на SIM освобождено', { count: closed });
     }
     return closed;
-  }
-
-  /** Вызовы клиента — для разбора «за что списали». */
-  async listByChannel(channelId: Id<'channel'>, limit: number): Promise<CallRow[]> {
-    return this.calls.listByChannel(channelId, limit);
   }
 }

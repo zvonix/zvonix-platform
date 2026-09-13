@@ -11,6 +11,7 @@
  * тарифом, а не кодом.
  */
 
+import { DomainError, type DomainErrorOptions } from './errors.js';
 import * as Money from './money.js';
 import type { BasisPoints, Money as MoneyAmount, Rounding } from './money.js';
 
@@ -72,8 +73,24 @@ export interface CallCharge {
   readonly clientAmount: MoneyAmount;
 }
 
-export class TariffError extends Error {
+/**
+ * Тариф или длительность не годятся для расчёта.
+ *
+ * **Доменная ошибка, а не обычная** ([ADR-0003](../../../docs/adr/0003-obrabotka-oshibok.md)):
+ * иначе собственная защита расчёта отдавалась бы наружу как внутренняя ошибка. Цена
+ * этого была не косметической — узел, приславший CDR с негодной длительностью, получал
+ * `500` и повторял его, а обработчик цены отвечал «внутренняя ошибка» на то, что человек
+ * ввёл руками и мог исправить.
+ *
+ * Код — `validation_failed`: сюда попадают только негодные **входные** величины,
+ * и виноват в них тот, кто их прислал.
+ */
+export class TariffError extends DomainError {
   override readonly name = 'TariffError';
+
+  constructor(message: string, options?: DomainErrorOptions) {
+    super('validation_failed', message, options);
+  }
 }
 
 function assertRule(rule: TariffRule): void {

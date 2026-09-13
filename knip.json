@@ -2,8 +2,8 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs", "tests/**/*.test.ts"],
-      "project": ["scripts/**/*.mjs", "tests/**/*.ts"]
+      "entry": ["scripts/*.mjs", "tests/**/*.test.ts", "e2e/**/*.spec.ts"],
+      "project": ["scripts/**/*.mjs", "tests/**/*.ts", "e2e/**/*.ts"]
     },
     "packages/*": {
       "entry": ["src/**/*.test.ts"],
@@ -17,7 +17,10 @@
       "entry": [
         "src/main.ts",
         "src/modules/identity/create-admin.ts",
+        "src/testing/seed-e2e.ts",
         "src/modules/catalog/resolve-batch.ts",
+        "src/modules/catalog/numbering-plan-load.ts",
+        "src/modules/catalog/operator-aliases.ts",
         "src/**/*.test.ts"
       ],
       "project": ["src/**/*.ts"]
@@ -25,6 +28,11 @@
     "apps/worker": {
       "entry": ["src/main.ts", "src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
+    },
+    "apps/web": {
+      "entry": ["src/app/**/{page,layout,not-found,error,loading}.tsx"],
+      "project": ["src/**/*.{ts,tsx,css}"],
+      "ignore": ["src/components/ui/**"]
     }
   }
 }

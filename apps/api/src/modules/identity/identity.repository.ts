@@ -7,9 +7,9 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
 import { authTokens, sessions, users } from '@zvonix/db/schema';
-import { toDatabaseError, type Database } from '@zvonix/db';
+import { containsIgnoringCase, toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import {
   newId,
   type AuthTokenPurpose,
@@ -26,7 +26,9 @@ export type UserRow = typeof users.$inferSelect;
 export type AuthTokenRow = typeof authTokens.$inferSelect;
 
 /** Исполнитель запроса: пул или транзакция. */
-export type Executor = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
+// Тип объявлен в `@zvonix/db` и переэкспортируется отсюда: вызывающий берёт его
+// там же, где метод, а определение остаётся одно на весь проект.
+export type { Executor };
 export type SessionRow = typeof sessions.$inferSelect;
 
 export interface NewUser {
@@ -45,6 +47,34 @@ export interface NewSession {
   readonly expiresAt: Date;
   readonly userAgent: string | null;
   readonly ip: string | null;
+}
+
+/**
+ * Отбор для списка учётных записей.
+ *
+ * Пустое поле означает «любое», а не «пустое»: закрытый список значений с отдельным
+ * значением «все» здесь был бы лишним — роль и состояние сами по себе перечисления,
+ * и «не задано» от них отличается.
+ */
+export interface UserFilter {
+  readonly role?: UserRole;
+  readonly status?: UserStatus;
+  /** Часть адреса. Регистр не важен: адреса и хранятся в нижнем. */
+  readonly email?: string;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+function userFilterCondition(filter: UserFilter): SQL | undefined {
+  const parts: SQL[] = [];
+  if (filter.role !== undefined) parts.push(eq(users.role, filter.role));
+  if (filter.status !== undefined) parts.push(eq(users.status, filter.status));
+  // Адреса латинские, и локаль сравнения им безразлична — но правило поиска
+  // в проекте одно на всех, чтобы не приходилось помнить, где оно важно.
+  if (filter.email !== undefined && filter.email !== '') {
+    parts.push(containsIgnoringCase(users.email, filter.email));
+  }
+  return parts.length === 0 ? undefined : and(...parts);
 }
 
 /** Сессия вместе с владельцем: проверка доступа всегда нужна вместе с ролью и статусом. */
@@ -77,6 +107,44 @@ export class IdentityRepository {
   async findById(id: UserId): Promise<UserRow | undefined> {
     const [row] = await this.database.db.select().from(users).where(eq(users.id, id));
     return row;
+  }
+
+  /** Учётные записи по списку идентификаторов. Пустой список — пустой ответ, без запроса. */
+  async findByIds(ids: readonly UserId[]): Promise<UserRow[]> {
+    if (ids.length === 0) return [];
+    return this.database.db
+      .select()
+      .from(users)
+      .where(inArray(users.id, [...ids]));
+  }
+
+  /**
+   * Учётные записи по отбору — для администратора.
+   *
+   * Возвращает и страницу, и полное число подходящих записей: без второго в интерфейсе
+   * остаётся бесконечная прокрутка, а на странице, откуда допускают до денег, человек
+   * должен видеть, сколько всего заявок ждёт ([DESIGN.md](../../../../../docs/DESIGN.md)).
+   *
+   * Счёт идёт отдельным запросом, а не оконной функцией: `count(*) over ()` считает
+   * то же самое, но заставляет базу протащить его через каждую строку страницы,
+   * и на пустой странице ответа не даёт вовсе.
+   */
+  async listUsers(filter: UserFilter): Promise<{ rows: UserRow[]; total: number }> {
+    const where = userFilterCondition(filter);
+
+    const rows = await this.database.db
+      .select()
+      .from(users)
+      .where(where)
+      // По убыванию времени создания: новая заявка на регистрацию — то, ради чего
+      // на этот список чаще всего и приходят.
+      .orderBy(desc(users.createdAt), desc(users.id))
+      .limit(filter.limit)
+      .offset(filter.offset);
+
+    const [counted] = await this.database.db.select({ total: count() }).from(users).where(where);
+
+    return { rows, total: counted?.total ?? 0 };
   }
 
   /**

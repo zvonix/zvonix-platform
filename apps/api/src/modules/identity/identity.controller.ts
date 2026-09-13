@@ -5,14 +5,45 @@
  * Логики здесь нет: она проверяется тестами сервиса, а не через HTTP.
  */
 
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { parseId, type UserStatus } from '@zvonix/shared';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Public, Roles } from '../../http/auth.guard.js';
+import { Public, Roles, Unmetered } from '../../http/auth.guard.js';
 import { CurrentUser, Meta } from '../../http/request-context.js';
-import { zodBody } from '../../http/zod.pipe.js';
-import { IdentityService, type Principal, type RequestMeta } from './identity.service.js';
-import type { LoginResponse, SessionResponse, UserResponse } from './responses.js';
+import {
+  buildSessionCookie,
+  clearSessionCookie,
+  secureCookies,
+} from '../../http/session-cookie.js';
+import { zodBody, zodQuery } from '../../http/zod.pipe.js';
+import { APP_CONFIG, type Config } from '../../infra/tokens.js';
+import { CaptchaService } from './captcha.service.js';
+import {
+  IdentityService,
+  type AdminUser,
+  type Principal,
+  type PublicUser,
+  type RequestMeta,
+} from './identity.service.js';
+import type {
+  AdminUserResponse,
+  LoginResponse,
+  SessionResponse,
+  UserResponse,
+} from './responses.js';
 import {
   changePasswordSchema,
   disableTotpSchema,
@@ -22,6 +53,7 @@ import {
   registerSchema,
   tokenSchema,
   totpCodeSchema,
+  userListQuerySchema,
 } from './schemas.js';
 
 const statusSchema = z.object({
@@ -30,7 +62,16 @@ const statusSchema = z.object({
 
 @Controller()
 export class IdentityController {
-  constructor(private readonly identity: IdentityService) {}
+  /** Признак `Secure` у cookie сессии: он же выбирает её имя (ADR-0037). */
+  private readonly secure: boolean;
+
+  constructor(
+    private readonly identity: IdentityService,
+    private readonly captcha: CaptchaService,
+    @Inject(APP_CONFIG) config: Config,
+  ) {
+    this.secure = secureCookies(config.PUBLIC_BASE_URL);
+  }
 
   /**
    * Самостоятельная регистрация.
@@ -50,6 +91,18 @@ export class IdentityController {
   }
 
   /**
+   * Что форме нужно знать о капче: ключ страницы и где она включена.
+   *
+   * Открыт всем: ключ страницы публичен по устройству SmartCaptcha — он и так уезжает
+   * в браузер. Без этого ответа форма не знает, рисовать ли виджет.
+   */
+  @Public()
+  @Get('auth/captcha')
+  async captchaState() {
+    return this.captcha.publicState();
+  }
+
+  /**
    * Запрос восстановления пароля.
    *
    * `202` всегда: ответ не должен зависеть от того, есть ли такая запись, — иначе
@@ -62,7 +115,7 @@ export class IdentityController {
     @Body(zodBody(passwordResetRequestSchema)) body: z.infer<typeof passwordResetRequestSchema>,
     @Meta() meta: RequestMeta,
   ): Promise<void> {
-    await this.identity.requestPasswordReset(body.email, meta);
+    await this.identity.requestPasswordReset(body.email, meta, body.captchaToken);
   }
 
   /**
@@ -99,31 +152,56 @@ export class IdentityController {
     await this.identity.resendEmailVerification(principal);
   }
 
+  /**
+   * Вход.
+   *
+   * Отвечает и токеном в теле, и cookie ([ADR-0037](../../../../../docs/adr/0037-sessiya-v-brauzere.md)).
+   * Это не два источника одного значения, а два носителя с разными угрозами: браузеру
+   * токен в руки давать нельзя, а `curl` некуда положить cookie. Кабинет токен из тела
+   * не сохраняет — он приходит в ответ на форму и тут же забывается.
+   */
   @Public()
   @Post('auth/login')
   @HttpCode(200)
   async login(
     @Body(zodBody(loginSchema)) body: z.infer<typeof loginSchema>,
     @Meta() meta: RequestMeta,
+    @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<LoginResponse> {
     const issued = await this.identity.login(body, meta);
+    void reply.header(
+      'set-cookie',
+      buildSessionCookie(issued.token, issued.expiresAt, this.secure),
+    );
     return {
       // Токен отдаётся один раз и нигде больше не появляется: в базе лежит его хеш.
       token: issued.token,
       expires_at: issued.expiresAt.toISOString(),
-      user: issued.user,
+      user: toUserResponse(issued.user),
     };
   }
 
+  /**
+   * Выход.
+   *
+   * Cookie снимается всегда, в том числе когда вошли по `Bearer`: лишний `Set-Cookie`
+   * машине безвреден, а забытая cookie после выхода — это невыполненное обещание.
+   */
+  @Unmetered()
   @Post('auth/logout')
   @HttpCode(204)
-  async logout(@CurrentUser() principal: Principal, @Meta() meta: RequestMeta): Promise<void> {
+  async logout(
+    @CurrentUser() principal: Principal,
+    @Meta() meta: RequestMeta,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<void> {
     await this.identity.logout(principal, meta);
+    void reply.header('set-cookie', clearSessionCookie(this.secure));
   }
 
   @Get('auth/me')
   async me(@CurrentUser() principal: Principal): Promise<{ user: UserResponse }> {
-    return { user: await this.identity.findPublicUser(principal.userId) };
+    return { user: toUserResponse(await this.identity.findPublicUser(principal.userId)) };
   }
 
   @Get('auth/sessions')
@@ -143,6 +221,7 @@ export class IdentityController {
     };
   }
 
+  @Unmetered()
   @Delete('auth/sessions/:id')
   @HttpCode(204)
   async revokeSession(@CurrentUser() principal: Principal, @Param('id') id: string): Promise<void> {
@@ -225,6 +304,53 @@ export class IdentityController {
     @Meta() meta: RequestMeta,
   ): Promise<{ user: UserResponse }> {
     const user = await this.identity.changeStatus(actor, parseId(id, 'user'), body.status, meta);
-    return { user };
+    return { user: toUserResponse(user) };
   }
+
+  /**
+   * Учётные записи по отбору.
+   *
+   * До этого обработчика заявку на самостоятельную регистрацию нельзя было ни найти,
+   * ни активировать иначе как через базу: запись создаётся со статусом `pending`,
+   * а `PATCH /users/:id/status` требует идентификатора, который взять было неоткуда.
+   *
+   * Поддержке доступен: разбор «почему человек не может войти» начинается здесь,
+   * и там видно и состояние записи, и блокировку после неудачных попыток.
+   */
+  @Roles('admin', 'support')
+  @Get('users')
+  async listUsers(
+    @Query(zodQuery(userListQuerySchema)) query: z.infer<typeof userListQuerySchema>,
+  ): Promise<{ users: AdminUserResponse[]; total: number }> {
+    const found = await this.identity.listUsers({
+      ...(query.role === undefined ? {} : { role: query.role }),
+      ...(query.status === undefined ? {} : { status: query.status }),
+      ...(query.email === undefined ? {} : { email: query.email }),
+      limit: query.limit,
+      offset: query.offset,
+    });
+
+    return { users: found.users.map(toAdminUserResponse), total: found.total };
+  }
+}
+
+function toUserResponse(user: PublicUser): UserResponse {
+  return {
+    id: user.id,
+    email: user.email,
+    full_name: user.fullName,
+    role: user.role,
+    status: user.status,
+    created_at: user.createdAt.toISOString(),
+  };
+}
+
+function toAdminUserResponse(user: AdminUser): AdminUserResponse {
+  return {
+    ...toUserResponse(user),
+    email_confirmed_at: user.emailConfirmedAt?.toISOString() ?? null,
+    totp_enabled: user.totpEnabled,
+    last_login_at: user.lastLoginAt?.toISOString() ?? null,
+    locked_until: user.lockedUntil?.toISOString() ?? null,
+  };
 }

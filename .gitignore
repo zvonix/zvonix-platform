@@ -23,6 +23,11 @@ build/
 out/
 target/
 *.egg-info/
+# Сборка Next: кэш и результат `next build`.
+.next/
+# Порождается Next при каждом запуске, и содержимое зависит от того, что было
+# последним — сборка или разработка. В истории от него только шум.
+next-env.d.ts
 
 # --- Кэши инструментов ---
 .cache/
@@ -32,6 +37,8 @@ target/
 coverage/
 .coverage
 *.log
+# Снимки и журналы браузера из MCP-сервера playwright.
+.playwright-mcp/
 
 # --- IDE / ОС ---
 .idea/
@@ -44,3 +51,7 @@ desktop.ini
 # --- Claude Code (локальные, не общие настройки) ---
 .claude/settings.local.json
 start.md
+
+# Сквозные проверки кабинета: отчёты и следы упавших проверок.
+test-results/
+playwright-report/

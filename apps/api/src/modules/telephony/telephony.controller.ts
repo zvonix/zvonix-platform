@@ -2,7 +2,7 @@
  * Шлюзы партнёров и каналы клиентов: человеческая часть (ADR-0009).
  */
 
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
@@ -22,6 +22,7 @@ import {
   partnerPrioritiesSchema,
   simConcurrencySchema,
   simStatusSchema,
+  updateChannelSchema,
 } from './schemas.js';
 import type {
   AllowedOperatorRow,
@@ -229,6 +230,58 @@ export class TelephonyController {
       clientId === undefined ? undefined : parseId(clientId, 'client'),
     );
     return { channels: rows.map(toChannelView) };
+  }
+
+  /**
+   * Правка настроек канала: название, требование записи, номер для показа.
+   *
+   * Учётных данных не касается — их меняет только перевыпуск. До появления этого
+   * обработчика сменить номер для показа можно было единственным способом: завести
+   * канал заново, то есть выдать новый пароль SIP и заставить клиента перенастроить АТС.
+   */
+  @Roles('admin')
+  @Patch('channels/:id')
+  async updateChannel(
+    @Param('id') id: string,
+    @Body(zodBody(updateChannelSchema)) body: z.infer<typeof updateChannelSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ channel: ChannelView }> {
+    // Ключи переносятся поштучно, а не разворотом всего тела: при
+    // `exactOptionalPropertyTypes` «поля нет» и «поле равно undefined» — разные вещи,
+    // и второе затёрло бы значение вместо того, чтобы его не трогать.
+    const updated = await this.telephony.updateChannel(
+      parseId(id, 'channel'),
+      {
+        ...(body.name === undefined ? {} : { name: body.name }),
+        ...(body.recordingRequired === undefined
+          ? {}
+          : { recordingRequired: body.recordingRequired }),
+        ...(body.callerId === undefined ? {} : { callerId: body.callerId }),
+      },
+      actor.userId,
+      actor.role,
+    );
+    return { channel: toChannelView(updated) };
+  }
+
+  /**
+   * Перевыпуск учётных данных канала: меняются и имя, и пароль.
+   *
+   * Симметрично шлюзу. Утёкший пароль канала — это чужие вызовы за счёт клиента,
+   * и без этого обработчика единственным ответом на утечку было бы отключение канала.
+   */
+  @Roles('admin')
+  @Post('channels/:id/credentials')
+  async resetChannelCredentials(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ account: SipAccountView }> {
+    const account = await this.telephony.resetChannelCredentials(
+      parseId(id, 'channel'),
+      actor.userId,
+      actor.role,
+    );
+    return { account: toAccountView(account) };
   }
 
   @Roles('admin')
@@ -574,6 +627,8 @@ function toChannelView(row: ChannelRow): ChannelView {
 interface PartnerPriorityResponse {
   alias_id: string;
   display_name: string;
+  /** Через что уходит вызов: SIM и транк одного партнёра — разные предложения (ADR-0040). */
+  termination_kind: string;
   priority: number;
   last_routed_at: string | null;
 }
@@ -582,6 +637,7 @@ function toPriorityView(row: PartnerPriorityView): PartnerPriorityResponse {
   return {
     alias_id: row.aliasId,
     display_name: row.displayName,
+    termination_kind: row.terminationKind,
     priority: row.priority,
     last_routed_at: row.lastRoutedAt?.toISOString() ?? null,
   };

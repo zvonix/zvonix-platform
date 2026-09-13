@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   prepareEnvironment,
+  registerGateway,
   resetDatabase,
   startApi,
   TEST_PASSWORD,
@@ -28,6 +29,7 @@ prepareEnvironment();
 let app: NestFastifyApplication | undefined;
 let token = '';
 let nodeId = '';
+let nodeKey = '';
 
 function api(): NestFastifyApplication {
   if (app === undefined) throw new Error('Приложение не поднято');
@@ -91,6 +93,8 @@ async function createPartner(operatorId: string): Promise<void> {
     await post('/gateways', { partnerId: partner, name: unique('Шлюз'), type: 'goip' })
   ).json<{ gateway: { id: string } }>().gateway.id;
   await post(`/gateways/${gateway}/status`, { status: 'active' });
+  // Маршрутизация выбирает только шлюзы, зарегистрированные на принявшем вызов узле.
+  await registerGateway(api(), nodeKey, gateway);
 
   const port = (await post(`/gateways/${gateway}/ports`, { portNumber: 1 })).json<{
     port: { id: string };
@@ -198,8 +202,20 @@ beforeAll(async () => {
   });
   token = await loginAs(email);
 
-  nodeId = (await post('/nodes', { name: unique('Узел') })).json<{ node: { id: string } }>().node
-    .id;
+  const provisioned = await post('/nodes', { name: unique('Узел') });
+  nodeId = provisioned.json<{ node: { id: string } }>().node.id;
+
+  // Узел доводится до рабочего ключа: без него нечем отметить регистрацию шлюза,
+  // а без регистрации маршрутизация его не выберет.
+  const command = provisioned.json<{ install: { command: string } }>().install.command;
+  const enrolled = await api().inject({
+    method: 'POST',
+    url: '/node/enroll',
+    headers: { authorization: `Bearer ${command.slice(command.lastIndexOf(' ') + 1)}` },
+    payload: { hostname: unique('node'), agentVersion: '1.0.0' },
+  });
+  const key = enrolled.json<{ key: { key_id: string; secret: string } }>().key;
+  nodeKey = `${key.key_id}.${key.secret}`;
 }, 120_000);
 
 afterAll(async () => {

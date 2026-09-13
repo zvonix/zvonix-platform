@@ -42,6 +42,18 @@ export class DomainExceptionFilter implements ExceptionFilter {
     const reply = host.switchToHttp().getResponse<FastifyReply>();
     const correlationId = currentCorrelationId();
 
+    // Тип ответа переставляется на JSON принудительно.
+    //
+    // Обработчик мог объявить свой — `text/xml` у диалплана и каталога SIP,
+    // `text/x-shellscript` у установщика узла. Объявление действует и на ответ
+    // с ошибкой, а Fastify отказывается слать объект под чужим типом: «Attempted
+    // to send payload of invalid type 'object'». Ошибка при этом превращается
+    // в невнятную 500 **поверх** настоящей, и в логе их две.
+    //
+    // Здесь, а не в каждом обработчике: это свойство ответа об ошибке, а не свойство
+    // маршрута, и правило, записанное в одном месте, не забывается на следующем.
+    void reply.header('content-type', 'application/json; charset=utf-8');
+
     // Исключения самого NestJS и Fastify (маршрут не найден, метод не поддержан,
     // тело не разобрано, превышен размер) доменными не являются, но ответ у них
     // должен быть того же вида: клиенту всё равно, где именно внутри нас сломалось.

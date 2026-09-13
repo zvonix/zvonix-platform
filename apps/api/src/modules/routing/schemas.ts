@@ -2,7 +2,6 @@
  * Схемы входных данных маршрутизации (docs/api/node.md).
  */
 
-import { normalizeMsisdn, type Msisdn } from '@zvonix/shared';
 import { z } from 'zod';
 
 /**
@@ -38,16 +37,13 @@ export const previewSchema = z.object({
   callId: z.string().trim().min(4, 'слишком короткий').max(200, 'слишком длинный'),
   channelId: z.uuid('должен быть идентификатором'),
   nodeId: z.uuid('должен быть идентификатором'),
-  destination: z
-    .string()
-    .trim()
-    .min(1, 'не может быть пустым')
-    .transform((value, ctx): Msisdn => {
-      const normalized = normalizeMsisdn(value);
-      if (normalized === undefined) {
-        ctx.addIssue({ code: 'custom', message: 'не похоже на российский номер' });
-        return '70000000000' as Msisdn;
-      }
-      return normalized;
-    }),
+  /**
+   * Номер как набран — без приведения к каноническому виду.
+   *
+   * Разбор перенесён в маршрутизацию (ADR-0042), и это здесь не мелочь: пока схема
+   * отвергала неразобранное, поддержка не могла воспроизвести разбором вызова
+   * ровно тот случай, ради которого разбор и открывают, — набранный `112`.
+   * Верхняя граница длины та же, что у запроса от узла.
+   */
+  destination: z.string().trim().min(1, 'не может быть пустым').max(50, 'слишком длинный'),
 });

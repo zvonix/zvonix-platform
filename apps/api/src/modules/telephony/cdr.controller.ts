@@ -13,25 +13,14 @@
  * тревогу, а не лежать до первой жалобы.
  */
 
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Query } from '@nestjs/common';
-import { parseId, validationFailed } from '@zvonix/shared';
-import { Machine, Roles } from '../../http/auth.guard.js';
+import { Body, Controller, HttpCode, Inject, Post } from '@nestjs/common';
+import { validationFailed } from '@zvonix/shared';
+import { Machine } from '../../http/auth.guard.js';
 import { CurrentMachine } from '../../http/request-context.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
 import { CdrParseError } from './cdr-parse.js';
 import { CdrService } from './cdr.service.js';
-
-interface CallView {
-  readonly id: string;
-  readonly external_id: string;
-  readonly destination: string;
-  readonly status: string;
-  readonly failure_reason: string | null;
-  readonly duration_seconds: number | null;
-  readonly started_at: string;
-  readonly ended_at: string | null;
-}
 
 @Controller()
 export class CdrController {
@@ -65,40 +54,6 @@ export class CdrController {
       throw cause;
     }
   }
-
-  /**
-   * Вызовы канала — для разбора «за что списали» и «почему не звонило».
-   *
-   * Отказы здесь видны наравне с состоявшимися вызовами: у них статус `failed`
-   * и причина, ради которой они и записываются.
-   */
-  @Roles('admin', 'support')
-  @Get('channels/:id/calls')
-  async listCalls(
-    @Param('id') id: string,
-    @Query('limit') limit?: string,
-  ): Promise<{ calls: CallView[] }> {
-    const rows = await this.cdr.listByChannel(parseId(id, 'channel'), boundedLimit(limit));
-    return {
-      calls: rows.map((row) => ({
-        id: row.id,
-        external_id: row.externalId,
-        destination: row.destination,
-        status: row.status,
-        failure_reason: row.failureReason,
-        duration_seconds: row.durationSeconds,
-        started_at: row.startedAt.toISOString(),
-        ended_at: row.endedAt?.toISOString() ?? null,
-      })),
-    };
-  }
-}
-
-/** Верхняя граница выборки: без неё запрос без параметра выгружает всю историю канала. */
-function boundedLimit(raw: string | undefined): number {
-  const parsed = Number.parseInt(raw ?? '', 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 100;
-  return Math.min(parsed, 1000);
 }
 
 /**

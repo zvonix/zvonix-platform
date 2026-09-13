@@ -15,16 +15,19 @@
 import { Injectable } from '@nestjs/common';
 import {
   CdrService,
+  NumberingPlanService,
   EXPIRY_SWEEP_LIMIT,
   IdentityService,
   LimitService,
   MailService,
   NodesService,
+  OperatorResolverService,
   QualityService,
   RecordingsService,
   ReservationService,
   RETENTION_SWEEP_LIMIT,
   SESSION_SWEEP_LIMIT,
+  STALE_SWEEP_LIMIT,
 } from '@zvonix/api';
 import { NODE_HEARTBEAT_INTERVAL_MS } from '@zvonix/shared';
 
@@ -123,6 +126,27 @@ const FAILURE_THRESHOLD_SWEEP_SECONDS = 60;
 const MAIL_DELIVERY_SECONDS = 30;
 
 /**
+ * Как часто проверяется, не пора ли обновить план нумерации
+ * ([ADR-0032](../../../docs/adr/0032-zagruzka-plana-numeracii.md)).
+ *
+ * Раз в час, хотя файл обновляется раз в сутки: сама задача смотрит отметку последней
+ * загрузки и почти всегда не делает ничего. Часовой шаг нужен не для свежести,
+ * а для повтора — источник может не ответить, и ждать следующих суток из-за одной
+ * неудачной попытки незачем.
+ */
+const NUMBERING_PLAN_SECONDS = 3600;
+
+/**
+ * Как часто обновляются просроченные записи об операторах номеров.
+ *
+ * Пять минут при двадцати номерах за проход — это четыре номера в минуту и 0,07
+ * запроса в секунду к источнику. Темп обращений общий с горячим путём вызова,
+ * и жадное обновление отбирало бы его у настоящих звонков; редкий же проход
+ * не успевал бы за сроком годности.
+ */
+const RESOLUTION_REFRESH_SECONDS = 300;
+
+/**
  * Как часто убираются отправленные письма и просроченные одноразовые токены.
  *
  * В теле письма лежит одноразовый токен: держать его дольше, чем нужно для разбора
@@ -141,6 +165,8 @@ export class BackgroundTasks {
     private readonly limits: LimitService,
     private readonly quality: QualityService,
     private readonly mail: MailService,
+    private readonly numberingPlan: NumberingPlanService,
+    private readonly resolver: OperatorResolverService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -182,6 +208,17 @@ export class BackgroundTasks {
         name: 'quality.suspend-over-threshold',
         everySeconds: FAILURE_THRESHOLD_SWEEP_SECONDS,
         run: (now) => this.quality.suspendOverThreshold(now),
+      },
+      {
+        name: 'resolutions.refresh-stale',
+        everySeconds: RESOLUTION_REFRESH_SECONDS,
+        batchLimit: STALE_SWEEP_LIMIT,
+        run: (now) => this.resolver.refreshStale(now),
+      },
+      {
+        name: 'numbering-plan.refresh',
+        everySeconds: NUMBERING_PLAN_SECONDS,
+        run: (now) => this.numberingPlan.refresh(now),
       },
       {
         name: 'mail.deliver-due',

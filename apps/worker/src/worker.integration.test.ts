@@ -89,6 +89,8 @@ describe('реестр фоновых задач', () => {
       'sessions.purge-expired',
       'limits.purge-closed-windows',
       'quality.suspend-over-threshold',
+      'resolutions.refresh-stale',
+      'numbering-plan.refresh',
       'mail.deliver-due',
       'mail.purge-sent',
       'auth-tokens.purge-expired',
