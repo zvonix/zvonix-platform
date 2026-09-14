@@ -9,9 +9,9 @@
 import {
   conflict,
   dependencyUnavailable,
+  DomainError,
   internal,
   validationFailed,
-  type DomainError,
 } from '@zvonix/shared';
 import { sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -141,6 +141,11 @@ export function createDatabase(options: DatabaseOptions): DatabaseHandle {
  * или номер телефона.
  */
 export function toDatabaseError(cause: unknown): DomainError {
+  // Отказ, брошенный внутри транзакции, приходит сюда же, и он уже доменный. Разбирать
+  // его как ошибку базы нельзя: его `code` (`'conflict'`) читался бы как SQLSTATE,
+  // и `409` превращался бы в `500` (ADR-0048, §6).
+  if (cause instanceof DomainError) return cause;
+
   const code = findSqlState(cause);
 
   switch (code) {
@@ -158,9 +163,13 @@ export function toDatabaseError(cause: unknown): DomainError {
     case '40001':
     case '40P01':
       return conflict('Конкурентное изменение, повторите операцию', { cause });
-    // 57014 query_canceled (истёк statement_timeout), 08006 connection_failure,
-    // 08003 connection_does_not_exist, 53300 too_many_connections
+    // 57014 query_canceled — истёк statement_timeout, в том числе в ожидании блокировки;
+    // 25P03 idle_in_transaction_session_timeout — база сама закрыла простаивающую транзакцию.
+    // База жива, но не успела: «недоступна» было бы неправдой и увело бы разбор не туда.
     case '57014':
+    case '25P03':
+      return dependencyUnavailable('База данных не ответила вовремя — повторите позже', { cause });
+    // 08006 connection_failure, 08003 connection_does_not_exist, 53300 too_many_connections
     case '08006':
     case '08003':
     case '53300':

@@ -10,11 +10,13 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
+  holdTransaction,
   prepareEnvironment,
   resetDatabase,
   startApi,
   TEST_PASSWORD,
   uniqueEmail,
+  waitUntilBlocked,
   withDatabase,
 } from '../../testing/harness.js';
 
@@ -165,6 +167,18 @@ async function installSim(portId: string, simCardId: string | null) {
     url: `/gateway-ports/${portId}/sim`,
     headers: auth(),
     payload: { simCardId },
+  });
+}
+
+/** Что записано в журнал об объекте этим действием — поля `after`, по порядку записи. */
+async function auditOf(action: string, entityId: string): Promise<Record<string, unknown>[]> {
+  return withDatabase(async (execute) => {
+    const result = await execute(sql`
+      select after from audit_log
+       where action = ${action} and entity_id = ${entityId}
+       order by occurred_at, id
+    `);
+    return (result.rows as { after: Record<string, unknown> }[]).map((row) => row.after);
   });
 }
 
@@ -336,6 +350,10 @@ describe('порты шлюза', () => {
 
     expect((await installSim(port.id, sim.id)).statusCode).toBe(201);
     expect((await installSim(port.id, sim.id)).statusCode).toBe(201);
+
+    // Повтор ничего не меняет — и журнал о нём молчит: иначе в истории порта одна
+    // установка выглядела бы двумя (ADR-0048).
+    expect(await auditOf('gateway_port.sim_installed', port.id)).toHaveLength(1);
   });
 
   it('номер порта уникален в пределах шлюза', async () => {
@@ -378,6 +396,113 @@ describe('порты шлюза', () => {
       headers: auth(),
     });
     expect(listed.json<{ sim_cards: SimView[] }>().sim_cards).toHaveLength(1);
+  });
+});
+
+describe('одновременные изменения портов (ADR-0048)', () => {
+  /** Шлюз с картами в первом и третьем портах, пустым вторым и свободной картой того же партнёра. */
+  async function gatewayWithCards() {
+    const operator = await createOperator(unique('Оператор'));
+    const partner = await createVerifiedPartner();
+    const gateway = await createActiveGateway(partner);
+    const first = await addPort(gateway, 1);
+    const empty = await addPort(gateway, 2);
+    const third = await addPort(gateway, 3);
+    for (const port of [first, third]) {
+      const sim = await createActiveSim(partner, operator);
+      expect((await installSim(port.id, sim.id)).statusCode).toBe(201);
+    }
+    const spare = await createActiveSim(partner, operator);
+    return { gateway, first, empty, third, spare };
+  }
+
+  function retire(gatewayId: string) {
+    return api().inject({
+      method: 'POST',
+      url: `/gateways/${gatewayId}/status`,
+      headers: auth(),
+      payload: { status: 'retired' },
+    });
+  }
+
+  /**
+   * Держатель запирает первый порт — списание встаёт на нём посреди своей транзакции,
+   * уже сменив состояние шлюза. Ровно в этом окне и шли гонки.
+   */
+  async function stallRetirement(gatewayId: string, portId: string) {
+    const holder = await holdTransaction(
+      sql`select id from gateway_ports where id = ${portId} for update`,
+    );
+    const retiring = retire(gatewayId);
+    const retirer = await waitUntilBlocked({ blockedBy: [holder.pid], until: retiring });
+    if (retirer === 'settled') {
+      await holder.release();
+      throw new Error('Списание не встало в ожидание — гонки, ради которой тест, не случилось');
+    }
+    return { holder, retiring, retirer };
+  }
+
+  async function occupiedPorts(gatewayId: string): Promise<number> {
+    return withDatabase(async (execute) => {
+      const result = await execute(sql`
+        select count(*)::int as count from gateway_ports
+         where gateway_id = ${gatewayId} and sim_card_id is not null
+      `);
+      return (result.rows[0] as { count: number }).count;
+    });
+  }
+
+  it.each([
+    ['в пустой порт', 'empty'],
+    ['поверх карты в занятом порту', 'first'],
+  ] as const)(
+    'установка %s во время списания получает 409, и карта в списанном шлюзе не остаётся',
+    async (_case, target) => {
+      const scene = await gatewayWithCards();
+      const { holder, retiring, retirer } = await stallRetirement(scene.gateway, scene.first.id);
+      try {
+        const installing = installSim(scene[target].id, scene.spare.id);
+        const waited = await waitUntilBlocked({
+          blockedBy: [retirer, holder.pid],
+          until: installing,
+        });
+        await holder.release();
+        const [retired, installed] = await Promise.all([retiring, installing]);
+
+        expect(retired.statusCode).toBe(201);
+        expect(installed.statusCode).toBe(409);
+        // Карта в порту списанного шлюза — тупик ADR-0043: не вынуть, не списать, не переставить.
+        expect(await occupiedPorts(scene.gateway)).toBe(0);
+        // Установка обязана была дождаться списания, а не прочесть шлюз ещё включённым.
+        expect(waited).not.toBe('settled');
+      } finally {
+        await holder.release();
+      }
+    },
+  );
+
+  it('«вынуть» во время списания не пишет второе снятие той же карты', async () => {
+    const scene = await gatewayWithCards();
+    const { holder, retiring, retirer } = await stallRetirement(scene.gateway, scene.first.id);
+    try {
+      const removing = installSim(scene.third.id, null);
+      await waitUntilBlocked({ blockedBy: [retirer, holder.pid], until: removing });
+      await holder.release();
+      const [retired, removed] = await Promise.all([retiring, removing]);
+
+      expect(retired.statusCode).toBe(201);
+      // Вынуть можно всегда — и из порта, который освободило списание, тоже: это не отказ.
+      expect(removed.statusCode).toBe(201);
+      expect(await auditOf('gateway_port.sim_removed', scene.third.id)).toEqual([
+        expect.objectContaining({ sim_card_id: null, reason: 'gateway.retired' }),
+      ]);
+      const retirement = (await auditOf('gateway.status_changed', scene.gateway)).find(
+        (after) => after['status'] === 'retired',
+      );
+      expect(retirement).toMatchObject({ freed_sims: 2 });
+    } finally {
+      await holder.release();
+    }
   });
 });
 

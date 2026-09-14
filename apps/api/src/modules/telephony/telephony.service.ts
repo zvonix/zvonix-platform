@@ -621,13 +621,20 @@ export class TelephonyService {
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<GatewayPortRow> {
-    const gateway = await this.repository.findGateway(gatewayId);
-    if (gateway === undefined) throw notFound('Шлюз не найден');
-    // У транка портов не бывает: к провайдеру регистрируемся мы, а SIM в нём нет.
-    // Заведённый порт был бы строкой, в которую вставляется карта, не звонящая никуда.
-    if (gateway.type === 'sip_trunk') throw conflict('У SIP-транка портов нет');
+    // Под блокировкой шлюза: порт, заведённый в миг списания, остался бы у списанного
+    // шлюза (ADR-0048).
+    const port = await this.repository.transaction(async (tx) => {
+      const gateway = await this.repository.lockGatewayForPorts(gatewayId, tx);
+      if (gateway === undefined) throw notFound('Шлюз не найден');
+      // У транка портов не бывает: к провайдеру регистрируемся мы, а SIM в нём нет.
+      // Заведённый порт был бы строкой, в которую вставляется карта, не звонящая никуда.
+      if (gateway.type === 'sip_trunk') throw conflict('У SIP-транка портов нет');
+      // Списанный шлюз портов не держит (ADR-0043, «Ревизия»): новый порт стал бы местом
+      // для карты, которой не достать.
+      if (gateway.status === 'retired') throw conflict('Шлюз списан: заводить порт некуда');
+      return this.repository.createPort({ gatewayId, portNumber }, tx);
+    });
 
-    const port = await this.repository.createPort({ gatewayId, portNumber });
     await this.audit.record({
       action: 'gateway_port.created',
       entityType: 'gateway_port',
@@ -644,6 +651,14 @@ export class TelephonyService {
    *
    * SIM и порт обязаны принадлежать одному партнёру: иначе чужая SIM оказалась бы
    * в чужом шлюзе, а выручка от вызова ушла бы не тому.
+   *
+   * Одной транзакцией с блокировками «шлюз → порт → карта», и все проверки — по запертым
+   * строкам ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md)).
+   * Порознь установка, прочитавшая шлюз ещё включённым, дописывала карту в порт уже
+   * списанного шлюза, а «вынуть» во время списания давало вторую запись о снятии.
+   *
+   * Не изменилось ничего — повтор той же установки или «вынуть» из пустого порта — ничего
+   * и не пишется, ни в базу, ни в журнал: повтор не отказ, но и не событие.
    */
   async assignSimToPort(
     portId: GatewayPortId,
@@ -651,52 +666,65 @@ export class TelephonyService {
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<GatewayPortRow> {
-    const port = await this.repository.findPort(portId);
-    if (port === undefined) throw notFound('Порт не найден');
+    // Шлюз у порта не меняется никогда, поэтому его можно узнать до блокировок —
+    // а запирать нужно начиная со шлюза.
+    const found = await this.repository.findPort(portId);
+    if (found === undefined) throw notFound('Порт не найден');
 
-    const gateway = await this.repository.findGateway(port.gatewayId);
-    if (gateway === undefined) throw notFound('Шлюз не найден');
+    const { before, after } = await this.repository.transaction(async (tx) => {
+      const gateway = await this.repository.lockGatewayForPorts(found.gatewayId, tx);
+      if (gateway === undefined) throw notFound('Шлюз не найден');
+      const port = await this.repository.lockPort(portId, tx);
+      if (port === undefined) throw notFound('Порт не найден');
 
-    // В порт списанного шлюза ставить нечего: порта больше нет. Вынуть (`null`)
-    // при этом можно всегда — иначе строка, оставшаяся от прежних правил, оказалась бы
-    // неисправимой.
-    if (simCardId !== null && gateway.status === 'retired') {
-      throw conflict('Шлюз списан: ставить карту в его порт некуда');
-    }
+      if (port.simCardId === simCardId) return { before: port, after: port };
 
-    if (simCardId !== null) {
-      const sim = await this.repository.findSim(simCardId);
-      if (sim === undefined) throw notFound('SIM не найдена');
-      if (sim.partnerId !== gateway.partnerId) {
-        throw validationFailed('SIM и шлюз принадлежат разным партнёрам');
+      // Вынуть (`null`) можно всегда, и из порта списанного шлюза тоже: строка, оставшаяся
+      // от прежних правил, не должна оказаться неисправимой.
+      if (simCardId !== null) {
+        // В порт списанного шлюза ставить нечего: порта больше нет.
+        if (gateway.status === 'retired') {
+          throw conflict('Шлюз списан: ставить карту в его порт некуда');
+        }
+
+        const sim = await this.repository.lockSimCard(simCardId, tx);
+        if (sim === undefined) throw notFound('SIM не найдена');
+        if (sim.partnerId !== gateway.partnerId) {
+          throw validationFailed('SIM и шлюз принадлежат разным партнёрам');
+        }
+        // Списание окончательно: в порту карта ожила бы для маршрутизации.
+        if (sim.status === 'retired') throw conflict('SIM списана — ставить её в порт нельзя');
+
+        // «Одна SIM в одном порту» держит частичный уникальный индекс, но он отвечает
+        // «такая запись уже существует» — по такому ответу непонятно ни что занято,
+        // ни где искать. Карта заперта, поэтому чтение видит и установку, завершившуюся
+        // только что; индекс остаётся последним рубежом для путей в обход этого.
+        const occupied = await this.repository.findPortBySim(simCardId, tx);
+        if (occupied !== undefined) {
+          throw conflict('Эта SIM уже стоит в другом порту', {
+            details: { port_id: occupied.id, gateway_id: occupied.gatewayId },
+          });
+        }
       }
 
-      // «Одна SIM в одном порту» держит частичный уникальный индекс, но он отвечает
-      // «такая запись уже существует» — по такому ответу непонятно ни что занято,
-      // ни где искать. Проверка здесь — ради названной причины, а не вместо индекса:
-      // гонку двух одновременных установок по-прежнему ловит он.
-      const occupied = await this.repository.findPortBySim(simCardId);
-      if (occupied !== undefined && occupied.id !== portId) {
-        throw conflict('Эта SIM уже стоит в другом порту', {
-          details: { port_id: occupied.id, gateway_id: occupied.gatewayId },
-        });
-      }
-    }
-
-    const updated = await this.repository.setPortSim(portId, simCardId);
-    if (updated === undefined) throw notFound('Порт не найден');
-
-    await this.audit.record({
-      action: simCardId === null ? 'gateway_port.sim_removed' : 'gateway_port.sim_installed',
-      entityType: 'gateway_port',
-      entityId: portId,
-      actorUserId,
-      actorRole,
-      before: { sim_card_id: port.simCardId },
-      after: { sim_card_id: simCardId },
+      const updated = await this.repository.setPortSim(portId, simCardId, tx);
+      if (updated === undefined) throw notFound('Порт не найден');
+      return { before: port, after: updated };
     });
 
-    return updated;
+    if (before.simCardId !== after.simCardId) {
+      await this.audit.record({
+        action: simCardId === null ? 'gateway_port.sim_removed' : 'gateway_port.sim_installed',
+        entityType: 'gateway_port',
+        entityId: portId,
+        actorUserId,
+        actorRole,
+        before: { sim_card_id: before.simCardId },
+        after: { sim_card_id: after.simCardId },
+      });
+    }
+
+    return after;
   }
 
   async listPorts(gatewayId: GatewayId): Promise<GatewayPortRow[]> {
@@ -1273,12 +1301,25 @@ export class TelephonyService {
     }
     // Придержанную или заблокированную площадкой карту не обойти, заведя её номер заново:
     // новая запись пришла бы без решения площадки (ADR-0047).
-    if (await this.repository.hasHeldSim(input.partnerId, input.msisdn)) {
+    await this.rejectHeldNumber(input.partnerId, input.msisdn);
+    return this.createSim(input, actorUserId, actorRole);
+  }
+
+  /**
+   * Номер придержан или заблокирован площадкой на какой-то записи этого партнёра — `409`.
+   *
+   * Номер не уникален ([ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md),
+   * «Ревизия»), а карта за ним одна: новая или вторая запись того же номера вернула бы её
+   * в работу без решения площадки ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md),
+   * «Ревизия»). Проверка без блокировки: придержание в те же миллисекунды не ловится —
+   * принятая цена, записанная там же.
+   */
+  private async rejectHeldNumber(partnerId: PartnerId, msisdn: Msisdn): Promise<void> {
+    if (await this.repository.hasHeldSim(partnerId, msisdn)) {
       throw conflict('Карта с этим номером придержана или заблокирована площадкой', {
         details: { remedy: 'Включить её может только администратор — напишите площадке.' },
       });
     }
-    return this.createSim(input, actorUserId, actorRole);
   }
 
   /**
@@ -1338,6 +1379,12 @@ export class TelephonyService {
    *
    * Заблокированную площадкой — тоже не списать: это её рычаг, и снимать его
    * списанием значило бы обходить.
+   *
+   * Проверки — под блокировкой карты
+   * ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md)): установка
+   * в порт и придержание площадкой дожидаются списания, а списание — их. Порознь карта,
+   * поставленная в порт в миг списания, оказывалась списанной в порту, а придержание,
+   * поставленное в тот же миг, затиралось.
    */
   async retireOwnSim(
     id: SimCardId,
@@ -1345,25 +1392,46 @@ export class TelephonyService {
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<SimCardRow> {
-    const sim = await this.requireOwnSim(id, partnerId);
-    if (sim.status === 'retired') return sim;
-    // Придержанную — тоже: «списал — завёл заново» обходил бы порог так же, как блокировку
-    // (ADR-0047).
-    if (sim.status === 'blocked' || sim.status === 'throttled') {
-      throw conflict(
-        sim.status === 'blocked'
-          ? 'Карта заблокирована площадкой — распорядиться ею может только администратор'
-          : 'Карта придержана площадкой — распорядиться ею может только администратор',
-      );
-    }
+    await this.requireOwnSim(id, partnerId);
 
-    const port = await this.repository.findPortBySim(id);
-    if (port !== undefined) {
-      throw conflict('Карта стоит в порту', {
-        details: { port_number: port.portNumber, remedy: 'Сначала выньте её из порта.' },
+    const { before, after } = await this.repository.transaction(async (tx) => {
+      const sim = await this.repository.lockSimCard(id, tx);
+      if (sim === undefined) throw notFound('SIM не найдена');
+      if (sim.status === 'retired') return { before: sim, after: sim };
+      // Придержанную — тоже: «списал — завёл заново» обходил бы порог так же, как блокировку
+      // (ADR-0047).
+      if (sim.status === 'blocked' || sim.status === 'throttled') {
+        throw conflict(
+          sim.status === 'blocked'
+            ? 'Карта заблокирована площадкой — распорядиться ею может только администратор'
+            : 'Карта придержана площадкой — распорядиться ею может только администратор',
+        );
+      }
+
+      const port = await this.repository.findPortBySim(id, tx);
+      if (port !== undefined) {
+        throw conflict('Карта стоит в порту', {
+          details: { port_number: port.portNumber, remedy: 'Сначала выньте её из порта.' },
+        });
+      }
+
+      const updated = await this.repository.transitionSimStatus(id, sim.status, 'retired', tx);
+      if (updated === undefined) throw notFound('SIM не найдена');
+      return { before: sim, after: updated };
+    });
+
+    if (before.status !== after.status) {
+      await this.audit.record({
+        action: 'sim.status_changed',
+        entityType: 'sim_card',
+        entityId: id,
+        actorUserId,
+        actorRole,
+        before: { status: before.status },
+        after: { status: after.status },
       });
     }
-    return this.setSimStatus(id, 'retired', actorUserId, actorRole);
+    return after;
   }
 
   /**
@@ -1403,9 +1471,12 @@ export class TelephonyService {
     }
     if (sim.status === 'active') return sim;
 
+    // Номер в базе заведомо канонический — его держит `sim_cards_msisdn_format`.
+    const msisdn = parseMsisdn(sim.msisdn);
+    await this.rejectHeldNumber(partnerId, msisdn);
+
     if (sim.operatorConfirmedAt === null) {
-      // Номер в базе заведомо канонический — его держит `sim_cards_msisdn_format`.
-      const resolution = await this.resolver.resolve(parseMsisdn(sim.msisdn));
+      const resolution = await this.resolver.resolve(msisdn);
       if (!resolution.confirmed || resolution.serving === undefined) {
         throw validationFailed('Оператор SIM не подтверждён — повторите позже', {
           details: {
@@ -1430,12 +1501,33 @@ export class TelephonyService {
       await this.repository.confirmSimOperator(id, new Date());
     }
 
+    // Условием на прежнее: пока шёл запрос к источнику, площадка могла придержать или
+    // заблокировать карту, и безусловная запись затёрла бы её решение (ADR-0048).
+    const updated = await this.repository.transitionSimStatus(id, sim.status, 'active');
+    if (updated === undefined) return this.rejectStaleSim(id);
+
+    await this.audit.record({
+      action: 'sim.status_changed',
+      entityType: 'sim_card',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: { status: sim.status },
+      after: { status: updated.status },
+    });
     this.logger.info('SIM включена партнёром', {
       sim_card_id: id,
       operator_id: sim.operatorId,
       msisdn: maskMsisdn(sim.msisdn),
     });
-    return this.setSimStatus(id, 'active', actorUserId, actorRole);
+    return updated;
+  }
+
+  /** Условие на прежнее состояние карты не совпало: карты нет — `404`, есть — её успели изменить. */
+  private async rejectStaleSim(id: SimCardId): Promise<never> {
+    const current = await this.repository.findSim(id);
+    if (current === undefined) throw notFound('SIM не найдена');
+    throw conflict('Состояние карты успело измениться — обновите страницу');
   }
 
   private toAccount(credentials: SipCredentials): IssuedSipAccount {

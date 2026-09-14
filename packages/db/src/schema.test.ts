@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { getTableConfig, QueryBuilder, type PgTable } from 'drizzle-orm/pg-core';
-import { GATEWAY_SUSPENDED_BY, USER_ROLES, USER_STATUSES } from '@zvonix/shared';
+import { conflict, GATEWAY_SUSPENDED_BY, USER_ROLES, USER_STATUSES } from '@zvonix/shared';
 import { CASING } from './casing.js';
 import { MIGRATIONS_FOLDER } from './migrate.js';
 import { toDatabaseError } from './client.js';
@@ -156,11 +156,28 @@ describe('toDatabaseError', () => {
     ['23514', 'validation_failed'],
     ['23502', 'validation_failed'],
     ['57014', 'dependency_unavailable'],
+    ['25P03', 'dependency_unavailable'],
     ['08006', 'dependency_unavailable'],
     ['53300', 'dependency_unavailable'],
     ['ECONNREFUSED', 'dependency_unavailable'],
   ])('код %s → %s', (code, expected) => {
     expect(toDatabaseError(Object.assign(new Error('x'), { code })).code).toBe(expected);
+  });
+
+  it('доменный отказ из транзакции проходит как есть, а не становится внутренней ошибкой', () => {
+    // Его `code` — 'conflict', и разбор как SQLSTATE превращал 409 в 500 (ADR-0048).
+    const refused = conflict('Шлюз списан: ставить карту в его порт некуда');
+    expect(toDatabaseError(refused)).toBe(refused);
+  });
+
+  it('истёкшее ожидание называется опозданием, а не недоступностью базы', () => {
+    // База жива, но не успела — например, ждала блокировку дольше statement_timeout.
+    const timedOut = toDatabaseError(
+      Object.assign(new Error('canceling statement'), { code: '57014' }),
+    );
+    expect(timedOut.message).toBe('База данных не ответила вовремя — повторите позже');
+    const down = toDatabaseError(Object.assign(new Error('connection'), { code: '08006' }));
+    expect(down.message).toBe('База данных недоступна');
   });
 
   it('находит код внутри обёртки Drizzle', () => {

@@ -41,6 +41,26 @@ const SENT_RETENTION_DAYS = 14;
 const RECIPIENT_LIMIT = 10;
 const RECIPIENT_WINDOW_MS = 3_600_000;
 
+/**
+ * Пределы соединения с почтовым сервером, мс.
+ *
+ * Умолчания nodemailer — две минуты на соединение и десять минут тишины в сокете,
+ * а у каждого внешнего вызова обязан быть свой предел ([ADR-0003](../../../../../docs/adr/0003-obrabotka-oshibok.md)).
+ * Воркер отправляет письмо внутри транзакции, и база закрывает простаивающую транзакцию
+ * через 30 с: письмо успевало уйти, отметка об отправке — нет, и оно уходило снова.
+ * Пробное письмо кабинет ждёт 40 с.
+ *
+ * Каждый шаг ограничен отдельно, и зависание на любом из них обрывается не позже чем
+ * через 15 с. Сервер, отвечающий на каждом шаге чуть быстрее предела, сумму
+ * не ограничивает — это закроет только отправка вне транзакции (TASKS.md).
+ */
+const SMTP_TIMEOUTS = {
+  dnsTimeout: 5_000,
+  connectionTimeout: 10_000,
+  greetingTimeout: 10_000,
+  socketTimeout: 15_000,
+} as const;
+
 @Injectable()
 export class MailService implements OnApplicationShutdown {
   private readonly logger: Logger;
@@ -264,6 +284,7 @@ export class MailService implements OnApplicationShutdown {
       port: mail.port,
       secure: mail.secure,
       pool: true,
+      ...SMTP_TIMEOUTS,
       ...(mail.user === '' ? {} : { auth: { user: mail.user, pass: mail.password } }),
     });
 

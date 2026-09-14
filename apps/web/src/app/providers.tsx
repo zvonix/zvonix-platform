@@ -1,24 +1,29 @@
 'use client';
 
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ApiError } from '@/lib/api';
+import { shouldRetryQuery } from '@/lib/query-retry';
 
 /**
  * Общие настройки запросов.
  *
- * Повтор — только там, где он что-то даёт. Отказ по правам, по отсутствию объекта
- * или по негодной сессии от повтора не изменится: три одинаковых запроса вместо
- * одного лишь задержат страницу, на которую человеку и так пора.
+ * Чтение повторяется только там, где повтор что-то даёт (`shouldRetryQuery`).
+ *
+ * Изменение, не дождавшееся ответа, могло выполниться. Такой отказ перечитывает все
+ * экраны: человек видит исход своими глазами, а не гадает о нём и не повторяет
+ * вслепую (DESIGN.md, «Неизвестный исход»).
  */
 function createClient(): QueryClient {
-  return new QueryClient({
+  const client: QueryClient = new QueryClient({
+    mutationCache: new MutationCache({
+      onError: (error) => {
+        if (error instanceof ApiError && error.timedOut) void client.invalidateQueries();
+      },
+    }),
     defaultOptions: {
       queries: {
-        retry: (attempt, error) => {
-          if (error instanceof ApiError && error.status >= 400 && error.status < 500) return false;
-          return attempt < 2;
-        },
+        retry: shouldRetryQuery,
         // Панель должна быть живой (DESIGN.md), но не мигать: данные считаются
         // свежими полминуты, а обновление не стирает уже показанное.
         staleTime: 30_000,
@@ -27,6 +32,7 @@ function createClient(): QueryClient {
       mutations: { retry: false },
     },
   });
+  return client;
 }
 
 export function Providers({ children }: { children: React.ReactNode }) {

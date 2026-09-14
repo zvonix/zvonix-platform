@@ -21,6 +21,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { ThemeSwitch } from '@/components/theme-switch';
+import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
 import { useSession, type CurrentUser } from '@/lib/session';
 
@@ -222,15 +223,31 @@ export function ConsoleShell({
     return <ShellSkeleton title={title} />;
   }
 
-  if (session.error !== null) {
+  // Страница заменяется ошибкой, только пока неизвестно, кто вошёл. Неудачное обновление
+  // уже известной сессии экран не стирает: на нём бывает только что выданный пароль,
+  // которого второй раз не покажут. Сессию, которой больше нет, ловит `denied` выше.
+  const user = session.data;
+  if (user === undefined) {
     return (
       <ShellSkeleton title={title}>
-        <p className="text-crit">{session.error.message}</p>
+        <div role="alert" className="flex flex-wrap items-center gap-2">
+          <p className="text-crit">{session.error.message}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={session.isFetching}
+            onClick={() => {
+              void session.refetch();
+            }}
+          >
+            Повторить
+          </Button>
+        </div>
       </ShellSkeleton>
     );
   }
 
-  const user = session.data;
   const groups = NAVIGATION[user.role];
 
   return (

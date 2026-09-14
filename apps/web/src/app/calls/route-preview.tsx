@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { CallFailureReason } from '@zvonix/shared';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
@@ -48,16 +48,29 @@ export function RoutePreview() {
     staleTime: 60_000,
   });
 
+  // Проверка, не дождавшаяся ответа, могла состояться: завести вызов и придержать деньги.
+  // Её повтор с той же формой идёт под тем же идентификатором — маршрутизация по нему
+  // возвращает уже принятое решение и второго резерва не делает. Ответ получен или форма
+  // другая — следующая проверка отвечает на новый вопрос и заводит новый вызов.
+  const unanswered = useRef<{ key: string; callId: string } | null>(null);
+
   const check = useMutation({
-    mutationFn: (input: { channelId: string; nodeId: string; destination: string }) =>
-      request<Decision>('/routing/preview', {
+    mutationFn: (input: { channelId: string; nodeId: string; destination: string }) => {
+      const key = [input.channelId, input.nodeId, input.destination].join('|');
+      // Идентификатор задаём здесь, чтобы разбор нашёлся в списке вызовов как обычный.
+      const callId =
+        unanswered.current?.key === key
+          ? unanswered.current.callId
+          : `preview-${crypto.randomUUID()}`;
+      unanswered.current = { key, callId };
+      return request<Decision>('/routing/preview', {
         method: 'POST',
-        body: {
-          // Идентификатор задаём здесь, чтобы разбор нашёлся в списке вызовов как обычный.
-          callId: `preview-${crypto.randomUUID()}`,
-          ...input,
-        },
-      }),
+        body: { callId, ...input },
+      });
+    },
+    onSettled: (_decision, error) => {
+      if (!(error instanceof ApiError && error.timedOut)) unanswered.current = null;
+    },
   });
 
   const available = channels.rows.filter(

@@ -135,6 +135,21 @@ export class TelephonyRepository {
     return this.database.db;
   }
 
+  /**
+   * Транзакция для сервиса — с тем же преобразованием ошибок, что у методов репозитория.
+   *
+   * Отказ, брошенный внутри, проходит как есть, а взаимоблокировка (`40P01`) и истёкшее
+   * ожидание блокировки становятся доменными `409` и `503`, а не `500`
+   * ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md), §5–6).
+   */
+  async transaction<T>(work: (tx: Executor) => Promise<T>): Promise<T> {
+    try {
+      return await this.db.transaction(work);
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
   // --- Шлюзы -----------------------------------------------------------------
 
   async createGateway(draft: {
@@ -174,6 +189,13 @@ export class TelephonyRepository {
    * и при несовпадении не трогает ничего. В обратном порядке гонка «партнёр списывает —
    * администратор запирает» вынула бы карты у шлюза, который так и не списался:
    * `return` внутри транзакции её не откатывает, а фиксирует.
+   *
+   * **Занятые порты запираются, и освобождаются ровно запертые**
+   * ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md)). Установка
+   * и «вынуть» держат шлюз `FOR SHARE`, поэтому `UPDATE` состояния дожидается их, и выборка
+   * после него видит всё зафиксированное. Без блокировки «вынуть» между выборкой
+   * и освобождением давало вторую запись о снятии той же карты. Порядок по `id` —
+   * чтобы два списания одного шлюза не заперли порты навстречу друг другу.
    */
   async retireGatewayFreeingPorts(
     id: GatewayId,
@@ -198,21 +220,26 @@ export class TelephonyRepository {
         const occupied = await tx
           .select({ id: gatewayPorts.id, simCardId: gatewayPorts.simCardId })
           .from(gatewayPorts)
-          .where(and(eq(gatewayPorts.gatewayId, id), isNotNull(gatewayPorts.simCardId)));
+          .where(and(eq(gatewayPorts.gatewayId, id), isNotNull(gatewayPorts.simCardId)))
+          .orderBy(asc(gatewayPorts.id))
+          .for('no key update');
 
-        if (occupied.length > 0) {
+        const freed = occupied.flatMap((port) =>
+          port.simCardId === null ? [] : [{ portId: port.id, simCardId: port.simCardId }],
+        );
+        if (freed.length > 0) {
           await tx
             .update(gatewayPorts)
             .set({ simCardId: null })
-            .where(and(eq(gatewayPorts.gatewayId, id), isNotNull(gatewayPorts.simCardId)));
+            .where(
+              inArray(
+                gatewayPorts.id,
+                freed.map((port) => port.portId),
+              ),
+            );
         }
 
-        return {
-          gateway,
-          freed: occupied.flatMap((port) =>
-            port.simCardId === null ? [] : [{ portId: port.id, simCardId: port.simCardId }],
-          ),
-        };
+        return { gateway, freed };
       });
     } catch (cause) {
       throw toDatabaseError(cause);
@@ -221,6 +248,22 @@ export class TelephonyRepository {
 
   async findGateway(id: GatewayId): Promise<GatewayRow | undefined> {
     const [row] = await this.db.select().from(gateways).where(eq(gateways.id, id));
+    return row;
+  }
+
+  /**
+   * Запирает шлюз на время записи в его порты
+   * ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md)).
+   *
+   * `FOR SHARE`, а не `FOR KEY SHARE`: смена состояния шлюза — `UPDATE` неключевых колонок,
+   * и с `KEY SHARE` она не конфликтует — списание прошло бы, будто блокировки нет.
+   * Две установки в порты одного шлюза друг друга не ждут: `FOR SHARE` совместим сам с собой.
+   *
+   * Отдельный запрос по `id`, без соединений: дождавшись чужой транзакции, он вернёт
+   * уже новую версию строки, и проверка «шлюз списан» увидит зафиксированное.
+   */
+  async lockGatewayForPorts(id: GatewayId, executor: Executor): Promise<GatewayRow | undefined> {
+    const [row] = await executor.select().from(gateways).where(eq(gateways.id, id)).for('share');
     return row;
   }
 
@@ -669,6 +712,22 @@ export class TelephonyRepository {
     return row;
   }
 
+  /**
+   * Запирает карту: установка в порт и списание идут по очереди, и каждое видит
+   * результат другого ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md)).
+   *
+   * `NO KEY UPDATE` — тот же режим, что возьмёт `UPDATE` карты: блокировка не усиливается
+   * посреди транзакции и не мешает вставке вызова, чья ссылка на карту берёт `KEY SHARE`.
+   */
+  async lockSimCard(id: SimCardId, executor: Executor): Promise<SimCardRow | undefined> {
+    const [row] = await executor
+      .select()
+      .from(simCards)
+      .where(eq(simCards.id, id))
+      .for('no key update');
+    return row;
+  }
+
   async listSims(partnerId?: Id<'partner'>): Promise<SimCardRow[]> {
     const query = this.db.select().from(simCards);
     return partnerId === undefined
@@ -686,17 +745,21 @@ export class TelephonyRepository {
   }
 
   /**
-   * Смена состояния карты только из ожидаемого — для автомата порога.
+   * Смена состояния карты только из ожидаемого.
    *
-   * Блокировку, поставленную администратором между отбором и записью, автомат
-   * не перезаписывает своим `throttled` ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+   * Решение, принятое между чтением и записью, не затирается: блокировку администратора
+   * автомат порога не перезаписывает своим `throttled`
+   * ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)), а придержание,
+   * поставленное, пока партнёр ждал источник оператора, — его включением
+   * ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md)).
    */
   async transitionSimStatus(
     id: SimCardId,
     from: SimStatus,
     to: SimStatus,
+    executor: Executor = this.db,
   ): Promise<SimCardRow | undefined> {
-    const [row] = await this.db
+    const [row] = await executor
       .update(simCards)
       .set({ status: to })
       .where(and(eq(simCards.id, id), eq(simCards.status, from)))
@@ -735,9 +798,12 @@ export class TelephonyRepository {
 
   // --- Порты -------------------------------------------------------------------
 
-  async createPort(draft: { gatewayId: GatewayId; portNumber: number }): Promise<GatewayPortRow> {
+  async createPort(
+    draft: { gatewayId: GatewayId; portNumber: number },
+    executor: Executor = this.db,
+  ): Promise<GatewayPortRow> {
     try {
-      const [row] = await this.db
+      const [row] = await executor
         .insert(gatewayPorts)
         .values({ id: newId<'gatewayPort'>(), ...draft })
         .returning();
@@ -755,8 +821,11 @@ export class TelephonyRepository {
    * индекс, но он отвечает «такая запись уже существует» — а человеку надо знать,
    * что SIM занята и каким портом.
    */
-  async findPortBySim(simCardId: SimCardId): Promise<GatewayPortRow | undefined> {
-    const [row] = await this.db
+  async findPortBySim(
+    simCardId: SimCardId,
+    executor: Executor = this.db,
+  ): Promise<GatewayPortRow | undefined> {
+    const [row] = await executor
       .select()
       .from(gatewayPorts)
       .where(eq(gatewayPorts.simCardId, simCardId));
@@ -765,6 +834,22 @@ export class TelephonyRepository {
 
   async findPort(id: GatewayPortId): Promise<GatewayPortRow | undefined> {
     const [row] = await this.db.select().from(gatewayPorts).where(eq(gatewayPorts.id, id));
+    return row;
+  }
+
+  /**
+   * Запирает порт тем же режимом, что возьмёт его `UPDATE`
+   * ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md)).
+   *
+   * `sim_card_id` покрыт частичным уникальным индексом, а частичные индексы PostgreSQL
+   * ключом не считает: запись в порт берёт `NO KEY UPDATE`, и сильнее запирать незачем.
+   */
+  async lockPort(id: GatewayPortId, executor: Executor): Promise<GatewayPortRow | undefined> {
+    const [row] = await executor
+      .select()
+      .from(gatewayPorts)
+      .where(eq(gatewayPorts.id, id))
+      .for('no key update');
     return row;
   }
 
@@ -803,9 +888,10 @@ export class TelephonyRepository {
   async setPortSim(
     id: GatewayPortId,
     simCardId: SimCardId | null,
+    executor: Executor = this.db,
   ): Promise<GatewayPortRow | undefined> {
     try {
-      const [row] = await this.db
+      const [row] = await executor
         .update(gatewayPorts)
         .set({ simCardId })
         .where(eq(gatewayPorts.id, id))

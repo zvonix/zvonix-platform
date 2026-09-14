@@ -13,12 +13,14 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
+  holdTransaction,
   prepareEnvironment,
   registerGateway,
   resetDatabase,
   startApi,
   TEST_PASSWORD,
   uniqueEmail,
+  waitUntilBlocked,
   withDatabase,
 } from '../../testing/harness.js';
 
@@ -59,6 +61,16 @@ async function patch(url: string, payload: Record<string, unknown>, headers = au
 
 async function get(url: string, headers = auth()) {
   return api().inject({ method: 'GET', url, headers });
+}
+
+/** Объявить номер принадлежащим оператору — так же, как это делает источник. */
+async function declare(msisdn: string, operator: string): Promise<void> {
+  await withDatabase(async (execute) => {
+    await execute(sql`
+      insert into number_resolutions (id, msisdn, operator_id, source, resolved_at, expires_at)
+      values (gen_random_uuid()::text::uuid, ${msisdn}, ${operator}, 'manual', now(), now() + interval '30 days')
+    `);
+  });
 }
 
 async function login(email: string): Promise<string> {
@@ -301,12 +313,7 @@ async function makeCall(): Promise<void> {
   // Порядок партнёров задавать не нужно: у соседа нет ни одного кандидата — его SIM
   // никуда не вставлена, а шлюз не зарегистрирован. Вызов уйдёт единственному годному.
   const destination = nextMsisdn();
-  await withDatabase(async (execute) => {
-    await execute(sql`
-      insert into number_resolutions (id, msisdn, operator_id, source, resolved_at, expires_at)
-      values (gen_random_uuid()::text::uuid, ${destination}, ${operatorId}, 'manual', now(), now() + interval '30 days')
-    `);
-  });
+  await declare(destination, operatorId);
 
   const callId = unique('uuid');
   const routed = await post('/routing/preview', {
@@ -728,16 +735,6 @@ describe('границы контура', () => {
 });
 
 describe('партнёр заводит своё оборудование (ADR-0043)', () => {
-  /** Объявить номер принадлежащим оператору — так же, как это делает источник. */
-  async function declare(msisdn: string, operator: string): Promise<void> {
-    await withDatabase(async (execute) => {
-      await execute(sql`
-        insert into number_resolutions (id, msisdn, operator_id, source, resolved_at, expires_at)
-        values (gen_random_uuid()::text::uuid, ${msisdn}, ${operator}, 'manual', now(), now() + interval '30 days')
-      `);
-    });
-  }
-
   it('заводит шлюз и получает пароль SIP там же, где его вводит', async () => {
     const response = await post(
       '/partner/gateways',
@@ -1356,4 +1353,104 @@ describe('кто выключил шлюз (ADR-0047)', () => {
       }),
     );
   });
+});
+
+describe('карты и порты при поздних и одновременных изменениях (ADR-0048)', () => {
+  // Свой партнёр: у общего к этому месту уже упёрся предел на число шлюзов.
+  let keeper: Awaited<ReturnType<typeof createPartner>>;
+  beforeAll(async () => {
+    keeper = await createPartner('Смирнов Семён');
+  });
+
+  const own = () => as(keeper.token);
+
+  async function ownGatewayWithPort(): Promise<{ gateway: string; port: string }> {
+    const gateway = (
+      await post('/partner/gateways', { name: unique('Шлюз'), type: 'goip' }, own())
+    ).json<{ gateway: { id: string } }>().gateway.id;
+    const port = (await post(`/partner/gateways/${gateway}/ports`, { portNumber: 1 }, own())).json<{
+      port: { id: string };
+    }>().port.id;
+    return { gateway, port };
+  }
+
+  async function ownSim(msisdn = nextMsisdn()): Promise<string> {
+    const response = await post('/partner/sim-cards', { operatorId, msisdn }, own());
+    expect(response.statusCode).toBe(201);
+    return response.json<{ sim: { id: string } }>().sim.id;
+  }
+
+  async function simStatus(id: string): Promise<string> {
+    return withDatabase(async (execute) => {
+      const result = await execute(sql`select status from sim_cards where id = ${id}`);
+      return (result.rows[0] as { status: string }).status;
+    });
+  }
+
+  it('списанную карту в порт не поставить: списание окончательно', async () => {
+    const { port } = await ownGatewayWithPort();
+    const sim = await ownSim();
+    expect(
+      (await post(`/partner/sim-cards/${sim}/status`, { status: 'retired' }, own())).statusCode,
+    ).toBe(201);
+
+    // В порту она ожила бы для маршрутизации, хотя партнёр её уже отдал.
+    const refused = await post(`/partner/gateway-ports/${port}/sim`, { simCardId: sim }, own());
+    expect(refused.statusCode).toBe(409);
+  });
+
+  it('порт у списанного шлюза не завести — ни партнёру, ни администратору', async () => {
+    const { gateway } = await ownGatewayWithPort();
+    expect(
+      (await post(`/partner/gateways/${gateway}/status`, { status: 'retired' }, own())).statusCode,
+    ).toBe(201);
+
+    expect(
+      (await post(`/partner/gateways/${gateway}/ports`, { portNumber: 2 }, own())).statusCode,
+    ).toBe(409);
+    expect((await post(`/gateways/${gateway}/ports`, { portNumber: 3 })).statusCode).toBe(409);
+  });
+
+  it('вторую запись придержанного номера не включить: карта физически та же', async () => {
+    const msisdn = nextMsisdn();
+    await declare(msisdn, operatorId);
+    // Обе записи заведены до придержания: номер не уникален (ADR-0043, «Ревизия»).
+    const held = await ownSim(msisdn);
+    const twin = await ownSim(msisdn);
+    expect((await post(`/sim-cards/${held}/status`, { status: 'throttled' })).statusCode).toBe(201);
+
+    const refused = await post(`/partner/sim-cards/${twin}/status`, { status: 'active' }, own());
+    expect(refused.statusCode).toBe(409);
+    expect(await simStatus(twin)).toBe('new');
+  });
+
+  it.each([
+    ['включение', 'active'],
+    ['списание', 'retired'],
+  ] as const)(
+    '%s своей карты не затирает придержание, поставленное в тот же момент',
+    async (_action, status) => {
+      const msisdn = nextMsisdn();
+      await declare(msisdn, operatorId);
+      const sim = await ownSim(msisdn);
+
+      // Площадка придерживает карту, пока обращение партнёра ещё в пути: транзакция
+      // держателя не зафиксирована, и партнёр прочтёт карту прежней.
+      const holder = await holdTransaction(
+        sql`update sim_cards set status = 'throttled' where id = ${sim}`,
+      );
+      try {
+        const changing = post(`/partner/sim-cards/${sim}/status`, { status }, own());
+        expect(await waitUntilBlocked({ blockedBy: [holder.pid], until: changing })).not.toBe(
+          'settled',
+        );
+        await holder.release();
+
+        expect((await changing).statusCode).toBe(409);
+        expect(await simStatus(sim)).toBe('throttled');
+      } finally {
+        await holder.release();
+      }
+    },
+  );
 });

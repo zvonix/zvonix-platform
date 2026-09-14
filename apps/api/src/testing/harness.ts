@@ -11,7 +11,7 @@
  */
 
 import 'reflect-metadata';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { applyMigrations, createDatabase } from '@zvonix/db';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import type { TelephonyRepository } from '../modules/telephony/telephony.repository.js';
@@ -112,6 +112,140 @@ export async function withDatabase<T>(
   const handle = createDatabase({ url, poolMax: 1 });
   try {
     return await work((query) => handle.db.execute(query));
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Транзакция, которая держит блокировки, пока проверка её не отпустит. */
+export interface HeldTransaction {
+  /** Процесс PostgreSQL, в котором она идёт: по нему опознаётся, кто кого ждёт. */
+  readonly pid: number;
+  /** Фиксирует транзакцию и закрывает её соединение. Повторный вызов ничего не делает. */
+  release(): Promise<void>;
+}
+
+/**
+ * Открывает транзакцию, выполняет в ней запрос и не завершает её до `release()`.
+ *
+ * Нужна проверкам одновременности ([ADR-0048](../../../../docs/adr/0048-poryadok-blokirovok-portov.md)):
+ * держатель запирает строку, конкурирующее обращение встаёт на ней в ожидание посреди
+ * своей транзакции, и порядок событий задаёт тест, а не планировщик. Паузы «на всякий
+ * случай» здесь не годятся: они проверяют скорость машины, а не порядок.
+ *
+ * Своё соединение: общий пул приложения держатель занимать не должен.
+ */
+export async function holdTransaction(
+  query: SQL,
+  url = TEST_DATABASE_URL,
+): Promise<HeldTransaction> {
+  const handle = createDatabase({ url, poolMax: 1 });
+
+  let letGo = (): void => undefined;
+  const released = new Promise<void>((resolve) => {
+    letGo = resolve;
+  });
+  let started = (_pid: number): void => undefined;
+  const ready = new Promise<number>((resolve) => {
+    started = resolve;
+  });
+
+  const finished = handle.db.transaction(async (tx) => {
+    const [own] = (await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`)).rows;
+    if (own === undefined) throw new Error('pg_backend_pid() не вернул строку');
+    await tx.execute(query);
+    started(own.pid);
+    await released;
+  });
+
+  let pid: number;
+  try {
+    // Запрос держателя может и упасть: тогда ждать готовности бессмысленно.
+    pid = await Promise.race([
+      ready,
+      finished.then(() => {
+        throw new Error('Транзакция держателя завершилась раньше, чем её отпустили');
+      }),
+    ]);
+  } catch (cause) {
+    letGo();
+    await finished.catch(() => undefined);
+    await handle.close();
+    throw cause;
+  }
+
+  let closing: Promise<void> | undefined;
+  return {
+    pid,
+    release() {
+      closing ??= (async () => {
+        letGo();
+        try {
+          await finished;
+        } finally {
+          await handle.close();
+        }
+      })();
+      return closing;
+    },
+  };
+}
+
+/** Шаг опроса: ожидание блокировки наступает за единицы миллисекунд. */
+const BLOCKED_POLL_MS = 20;
+
+/**
+ * Дожидается, что какой-то процесс базы встал в ожидание блокировки одного из `blockedBy`.
+ *
+ * Возвращает `pid` ждущего — по нему можно ждать следующее звено цепочки. Если раньше
+ * завершилось `until` — обращение, которое должно было ждать, прошло сразу, — возвращает
+ * `'settled'`: это не ошибка обвязки, а наблюдение, которое проверка вправе утверждать.
+ *
+ * Не дождался за `timeoutMs` — исключение: проверка, в которой никто никого не ждал,
+ * проверяет не то, что написано в её названии.
+ */
+export async function waitUntilBlocked(
+  options: { blockedBy: readonly number[]; until?: Promise<unknown>; timeoutMs?: number },
+  url = TEST_DATABASE_URL,
+): Promise<number | 'settled'> {
+  // Флаг в объекте, а не в переменной: поток управления не видит присваивания
+  // из обработчика и считал бы переменную навсегда `false`.
+  const until = { settled: false };
+  options.until?.then(
+    () => {
+      until.settled = true;
+    },
+    () => {
+      until.settled = true;
+    },
+  );
+
+  // Массив — одной строкой-литералом: шаблон drizzle разворачивает массив в список параметров.
+  const blockers = `{${options.blockedBy.map((pid) => String(pid)).join(',')}}`;
+  const deadline = Date.now() + (options.timeoutMs ?? 5000);
+  const handle = createDatabase({ url, poolMax: 1 });
+  try {
+    for (;;) {
+      const result = await handle.db.execute<{ pid: number }>(sql`
+        select pid
+          from pg_stat_activity
+         where datname = current_database()
+           and pg_blocking_pids(pid) && ${blockers}::int[]
+           -- Звено цепочки, уже известное проверке, — не новый ждущий.
+           and pid <> all(${blockers}::int[])
+         limit 1
+      `);
+      const [waiting] = result.rows;
+      if (waiting !== undefined) return waiting.pid;
+      if (until.settled) return 'settled';
+      if (Date.now() > deadline) {
+        throw new Error(
+          `За ${String(options.timeoutMs ?? 5000)} мс никто не встал в ожидание процессов ` +
+            `${blockers}: проверка одновременности проверяет не то`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, BLOCKED_POLL_MS));
+    }
   } finally {
     await handle.close();
   }
