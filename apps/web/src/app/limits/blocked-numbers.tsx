@@ -2,6 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
+import { ErrorNote } from '@/components/error-note';
 import { ReadOnly } from '@/components/read-only';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,6 +28,9 @@ interface Rule {
   readonly created_at: string;
 }
 
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
+
 /**
  * Чёрный список номеров ([ADR-0024](../../../../../docs/adr/0024-chyornyy-spisok-nomerov.md)).
  *
@@ -35,13 +40,16 @@ interface Rule {
  *
  * До этого экрана запрет заводился только через `curl`. Запрет платного диапазона —
  * действие срочное: пока он не поставлен, деньги уходят в реальном времени.
+ *
+ * Снятие запрета — через общее окно подтверждения, как и остальные опасные действия
+ * кабинета. Здесь раньше жил свой двухшаговый вариант: последствие он называл, но фокус
+ * после первого нажатия терялся, а Escape не отменял.
  */
 export function BlockedNumbers() {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
   const [prefix, setPrefix] = useState('');
   const [note, setNote] = useState('');
-  const [removing, setRemoving] = useState<string | undefined>(undefined);
 
   const list = useQuery({
     queryKey: ['blocked-numbers'],
@@ -65,18 +73,15 @@ export function BlockedNumbers() {
   const unblock = useMutation({
     mutationFn: (id: string) =>
       request<{ rule: Rule }>(`/blocked-numbers/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      setRemoving(undefined);
-      await refresh();
+    onSuccess: () => {
+      void refresh();
     },
   });
 
   const trimmedPrefix = prefix.trim();
   const trimmedNote = note.trim();
   const ready = trimmedPrefix !== '' && trimmedNote.length >= 3;
-  const failed = [block.error, unblock.error, list.error].find(
-    (candidate): candidate is ApiError => candidate instanceof ApiError,
-  );
+  const failed = asApiError(block.error ?? list.error);
 
   return (
     <section className="flex flex-col gap-2">
@@ -88,11 +93,7 @@ export function BlockedNumbers() {
         источник.
       </p>
 
-      {failed !== undefined && (
-        <p role="alert" className="text-crit">
-          {failed.message}
-        </p>
-      )}
+      {failed !== undefined && <ErrorNote error={failed} />}
 
       {canChange ? (
         <form
@@ -106,6 +107,9 @@ export function BlockedNumbers() {
             <span className="text-muted-foreground">Префикс</span>
             <Input
               className="num w-[140px]"
+              inputMode="tel"
+              autoComplete="off"
+              spellCheck={false}
               placeholder="8-809"
               value={prefix}
               onChange={(event) => {
@@ -118,6 +122,7 @@ export function BlockedNumbers() {
             <span className="text-muted-foreground">Почему запрещено</span>
             <Input
               className="w-[360px]"
+              autoComplete="off"
               placeholder="Платный диапазон"
               value={note}
               onChange={(event) => {
@@ -127,14 +132,21 @@ export function BlockedNumbers() {
           </label>
 
           <Button type="submit" size="sm" disabled={!ready || block.isPending}>
-            Запретить
+            {block.isPending ? 'Запрещаем…' : 'Запретить'}
           </Button>
+
+          {trimmedPrefix !== '' && trimmedNote.length < 3 && (
+            <p className="w-full text-warn">
+              Назовите основание — не короче трёх знаков: по нему запрет потом снимают или
+              оставляют.
+            </p>
+          )}
         </form>
       ) : (
         <ReadOnly what="запреты" />
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -171,44 +183,24 @@ export function BlockedNumbers() {
                   <span className="num text-muted-foreground">{moment(rule.created_at)}</span>
                 </TableCell>
                 <TableCell>
-                  {canChange &&
-                    (removing === rule.id ? (
-                      <span className="flex flex-wrap items-center gap-2">
-                        <span className="text-muted-foreground">
-                          Снять запрет — вызовы на <span className="num">{rule.prefix}</span> пойдут
-                          снова.
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={unblock.isPending}
-                          onClick={() => {
-                            unblock.mutate(rule.id);
-                          }}
-                        >
-                          Снять
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setRemoving(undefined);
-                          }}
-                        >
-                          Отмена
-                        </Button>
-                      </span>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setRemoving(rule.id);
-                        }}
-                      >
-                        Снять запрет
-                      </Button>
-                    ))}
+                  {canChange && (
+                    <ConfirmAction
+                      label="Снять запрет"
+                      title={`Снять запрет на ${rule.prefix}`}
+                      consequence={
+                        <>
+                          <p>
+                            Вызовы на номера, начинающиеся с{' '}
+                            <span className="num">{rule.prefix}</span>, снова пойдут — и за них
+                            снова будут списываться деньги.
+                          </p>
+                          <p>Основание запрета: {rule.note}</p>
+                        </>
+                      }
+                      confirmLabel="Снять запрет"
+                      onConfirm={() => unblock.mutateAsync(rule.id)}
+                    />
+                  )}
                 </TableCell>
               </TableRow>
             ))}

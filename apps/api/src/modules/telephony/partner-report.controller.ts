@@ -4,11 +4,14 @@
 
 import { Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
+import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
+import { zodQuery } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { CallRow } from './call.repository.js';
 import { PartnerReportService } from './partner-report.service.js';
+import { partnerCallsQuerySchema } from './schemas.js';
 
 /**
  * Вызов так, как его видит партнёр.
@@ -34,22 +37,32 @@ export class PartnerReportController {
   constructor(private readonly reports: PartnerReportService) {}
 
   /**
-   * Вызовы партнёра: по ним он сверяется со счётом своего оператора.
+   * Вызовы партнёра страницами: по ним он сверяется со счётом своего оператора.
    *
-   * Партнёру — только свои, независимо от параметров; администратору и поддержке —
-   * названного партнёра.
+   * Партнёру — только свои, независимо от `partnerId`; администратору и поддержке —
+   * названного партнёра. `total` — число всех подходящих, а не размер страницы: без него
+   * «здесь нет — значит, шёл не через площадку» было бы неправдой за первой страницей.
    */
   @Roles('partner', 'admin', 'support')
   @Get('partner/calls')
   async listCalls(
     @CurrentUser() actor: Principal,
-    @Query('partnerId') partnerId?: string,
-  ): Promise<{ calls: PartnerCallView[] }> {
-    const rows = await this.reports.listCalls(
+    @Query(zodQuery(partnerCallsQuerySchema)) query: z.infer<typeof partnerCallsQuerySchema>,
+  ): Promise<{ calls: PartnerCallView[]; total: number }> {
+    const found = await this.reports.listCalls(
       { userId: actor.userId, role: actor.role },
-      partnerId === undefined ? undefined : parseId(partnerId, 'partner'),
+      {
+        ...(query.partnerId === undefined
+          ? {}
+          : { partnerId: parseId(query.partnerId, 'partner') }),
+        ...(query.status === undefined ? {} : { status: query.status }),
+        ...(query.from === undefined ? {} : { from: new Date(query.from) }),
+        ...(query.to === undefined ? {} : { to: new Date(query.to) }),
+        limit: query.limit,
+        offset: query.offset,
+      },
     );
-    return { calls: rows.map(toPartnerCallView) };
+    return { total: found.total, calls: found.rows.map(toPartnerCallView) };
   }
 
   /**

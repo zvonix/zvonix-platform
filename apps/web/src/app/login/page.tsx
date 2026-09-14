@@ -28,6 +28,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [captchaToken, setCaptchaToken] = useState<string | undefined>(undefined);
+  const [captchaReset, setCaptchaReset] = useState(0);
   const [needsTotp, setNeedsTotp] = useState(false);
 
   /**
@@ -53,8 +54,10 @@ export default function LoginPage() {
     },
     onError: (error: unknown) => {
       if (error instanceof ApiError && error.details['totp_required'] === true) setNeedsTotp(true);
-      // Пройденный токен капчи одноразовый: после отказа нужен новый.
+      // Пройденный токен капчи одноразовый: после отказа нужен новый. Забыть токен мало —
+      // виджет продолжал бы показывать «пройдено», и вторая попытка ушла бы без токена.
       setCaptchaToken(undefined);
+      setCaptchaReset((value) => value + 1);
     },
   });
 
@@ -82,10 +85,13 @@ export default function LoginPage() {
             // Отправку перехватываем: поля без `name`, и родная отправка формы
             // ушла бы запросом `GET` с пустой строкой запроса.
             event.preventDefault();
+            // Код приходит из аутентификатора группами — «123 456», — и так же вставляется.
+            // Пробелы убираются здесь: API принимает только цифры подряд.
+            const code = totpCode.replace(/\s/gu, '');
             login.mutate({
               email,
               password,
-              ...(needsTotp && totpCode !== '' ? { totpCode } : {}),
+              ...(needsTotp && code !== '' ? { totpCode: code } : {}),
               ...(captchaToken === undefined ? {} : { captchaToken }),
             });
           }}
@@ -97,6 +103,7 @@ export default function LoginPage() {
               id="email"
               type="email"
               autoComplete="username"
+              spellCheck={false}
               required
               value={email}
               onChange={(event) => {
@@ -122,11 +129,15 @@ export default function LoginPage() {
           {needsTotp && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="totp">Код из приложения</Label>
+              {/*
+                Без `maxLength`: «123 456» — семь знаков, и поле с пределом в шесть обрезало
+                вставленный код до «123 45» (ui-review, 2026-09-14).
+              */}
               <Input
                 id="totp"
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                maxLength={6}
+                spellCheck={false}
                 className="num"
                 value={totpCode}
                 onChange={(event) => {
@@ -136,7 +147,9 @@ export default function LoginPage() {
             </div>
           )}
 
-          {siteKey !== undefined && <YandexCaptcha siteKey={siteKey} onToken={setCaptchaToken} />}
+          {siteKey !== undefined && (
+            <YandexCaptcha siteKey={siteKey} onToken={setCaptchaToken} resetSignal={captchaReset} />
+          )}
 
           {error !== undefined && (
             <p role="alert" className="text-crit">

@@ -2,6 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
+import { ErrorNote } from '@/components/error-note';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -13,11 +15,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
-import { ErrorNote } from '@/components/error-note';
 import { ApiError, request } from '@/lib/api';
 import { useClients } from '@/lib/dictionaries';
 import { moment } from '@/lib/format';
-import { money, numberFromInput, percent } from '@/lib/money';
+import { basisPointsFromPercent, money, moneyFromInput, percent } from '@/lib/money';
 
 interface CommissionRule {
   readonly id: string;
@@ -26,6 +27,12 @@ interface CommissionRule {
   readonly percent_basis_points: string;
   readonly effective_from: string;
 }
+
+/** Потолок доли в сотых процента — тот же, что проверяет API: больше 100 % — опечатка. */
+const MAX_BASIS_POINTS = 10_000;
+
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
 
 /**
  * Наценка платформы.
@@ -37,6 +44,11 @@ interface CommissionRule {
  * Записи не редактируются, а добавляются с датой начала действия: звонок,
  * тарифицированный вчера, не должен переоцениваться сегодняшней наценкой
  * ([ADR-0010](../../../../../docs/adr/0010-model-billinga.md)).
+ *
+ * Добавление — через подтверждение, которое называет охват и долю: форма заполнена
+ * заранее, и раньше одно нажатие заводило наценку 15 % на всю площадку. Доля
+ * разбирается строкой: пустое поле больше не становится наценкой 0 %, а `0,285` — 28
+ * сотыми вместо отказа (ui-review, 2026-09-14).
  */
 export function CommissionRules() {
   const canChange = useCanChange();
@@ -53,28 +65,29 @@ export function CommissionRules() {
   });
 
   const add = useMutation({
-    mutationFn: () =>
+    mutationFn: (input: { basisPoints: number; fee: string }) =>
       request<unknown>('/commission-rules', {
         method: 'POST',
         body: {
           ...(clientId === '' ? {} : { clientId }),
-          fixedFee: numberFromInput(fixedFee),
-          // Человек вводит проценты, API принимает десятитысячные. Пересчёт здесь,
-          // а не в голове у администратора.
-          percentBasisPoints: Math.round(Number(numberFromInput(share)) * 100),
+          fixedFee: input.fee,
+          percentBasisPoints: input.basisPoints,
         },
       }),
-    onSuccess: async () => {
+    onSuccess: () => {
       setOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ['commission-rules'] });
+      void queryClient.invalidateQueries({ queryKey: ['commission-rules'] });
     },
   });
 
-  const error = add.error instanceof ApiError ? add.error : undefined;
-  const typedShare = Number(numberFromInput(share));
-  const shareValid = Number.isFinite(typedShare) && typedShare >= 0 && typedShare <= 100;
+  const listError = asApiError(list.error);
+  const basisPoints = basisPointsFromPercent(share);
+  const shareValid = basisPoints !== undefined && basisPoints <= MAX_BASIS_POINTS;
+  const fee = moneyFromInput(fixedFee);
+  const ready = shareValid && fee !== undefined;
   const rules = list.data?.rules ?? [];
   const noDefault = list.data !== undefined && !rules.some((rule) => rule.client_id === null);
+  const clientName = clients.nameOf(clientId) ?? clientId;
 
   return (
     <section className="flex flex-col gap-2">
@@ -105,7 +118,6 @@ export function CommissionRules() {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (shareValid) add.mutate();
           }}
           className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-card p-3"
         >
@@ -131,6 +143,8 @@ export function CommissionRules() {
             <span className="text-muted-foreground">Доля, %</span>
             <Input
               className="num w-[100px]"
+              inputMode="decimal"
+              autoComplete="off"
               value={share}
               onChange={(event) => {
                 setShare(event.target.value);
@@ -142,6 +156,8 @@ export function CommissionRules() {
             <span className="text-muted-foreground">Фикс за вызов, ₽</span>
             <Input
               className="num w-[120px]"
+              inputMode="decimal"
+              autoComplete="off"
               value={fixedFee}
               onChange={(event) => {
                 setFixedFee(event.target.value);
@@ -149,9 +165,47 @@ export function CommissionRules() {
             />
           </label>
 
-          <Button type="submit" size="sm" disabled={!shareValid || add.isPending}>
-            Добавить
-          </Button>
+          <ConfirmAction
+            label="Добавить"
+            variant="default"
+            tone="neutral"
+            disabled={!ready}
+            title={
+              clientId === ''
+                ? 'Наценка по умолчанию — для всех клиентов'
+                : `Наценка для клиента «${clientName}»`
+            }
+            consequence={
+              <>
+                <p>
+                  Доля <b className="num">{shareValid ? percent(String(basisPoints)) : ''}</b> и
+                  фикс <b className="num">{fee === undefined ? '' : money(fee)}</b> за вызов
+                  начинают действовать сейчас —{' '}
+                  {clientId === ''
+                    ? 'для всех клиентов, у которых нет своего правила.'
+                    : `для клиента «${clientName}».`}
+                </p>
+                <p>
+                  Прежние правила не отменяются: прошлые вызовы тарифицированы по тем, что
+                  действовали на момент разговора.
+                </p>
+              </>
+            }
+            confirmLabel="Добавить правило"
+            onConfirm={() => add.mutateAsync({ basisPoints: basisPoints ?? 0, fee: fee ?? '0' })}
+          />
+
+          {!shareValid && (
+            <p className="w-full text-warn">
+              Доля обязательна: число от 0 до 100, не больше двух знаков после запятой — например 15
+              или 12,5.
+            </p>
+          )}
+          {fee === undefined && (
+            <p className="w-full text-warn">
+              Фикс — сумма в рублях, не больше шести знаков после запятой; ноль — без фикса.
+            </p>
+          )}
 
           <p className="w-full text-muted-foreground">
             Правило начинает действовать сейчас и не отменяет прежние: прошлые вызовы тарифицированы
@@ -160,15 +214,9 @@ export function CommissionRules() {
         </form>
       )}
 
-      {error !== undefined && <ErrorNote error={error} />}
+      {listError !== undefined && <ErrorNote error={listError} />}
 
-      {list.error !== null && (
-        <p role="alert" className="text-crit">
-          {list.error.message}
-        </p>
-      )}
-
-      <div className="max-w-[760px] rounded-md border border-border bg-card">
+      <div className="max-w-[760px] overflow-x-auto rounded-md border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">

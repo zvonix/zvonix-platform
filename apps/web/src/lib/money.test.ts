@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { isNegative, money, numberFromInput, percent } from './money.js';
+import {
+  basisPointsFromPercent,
+  integerFromInput,
+  isNegative,
+  money,
+  microunits,
+  moneyFromInput,
+  numberFromInput,
+  percent,
+} from './money.js';
 
 /**
  * Пробелы в ожиданиях — escape-последовательностями, теми же, что в самом коде.
@@ -8,6 +17,102 @@ import { isNegative, money, numberFromInput, percent } from './money.js';
  */
 const N = '\u202F';
 const B = '\u00A0';
+
+describe('денежная сумма из поля ввода', () => {
+  it('приводит к машинному виду то, что кабинет показывает', () => {
+    expect(moneyFromInput('1 500,50')).toBe('1500.50');
+    expect(moneyFromInput(`1${N}500${B}₽`)).toBe('1500');
+    expect(moneyFromInput('0')).toBe('0');
+    expect(moneyFromInput('0,000001')).toBe('0.000001');
+  });
+
+  it('отвергает то, что деньгами не является', () => {
+    expect(moneyFromInput('')).toBeUndefined();
+    expect(moneyFromInput('-5')).toBeUndefined();
+    expect(moneyFromInput('1e3')).toBeUndefined();
+    expect(moneyFromInput('двести')).toBeUndefined();
+  });
+
+  it('больше шести знаков после запятой — отказ: деньги площадки в микроединицах', () => {
+    expect(moneyFromInput('1,1234567')).toBeUndefined();
+  });
+
+  it('знак процента в денежном поле — отказ, а не рубли', () => {
+    expect(moneyFromInput('15%')).toBeUndefined();
+  });
+});
+
+describe('сумма в микроединицах', () => {
+  it('сравнивает границы точно, без плавающей точки', () => {
+    expect(microunits('0.5')).toBe(BigInt(500_000));
+    expect(microunits('3')).toBe(BigInt(3_000_000));
+    expect(microunits('0.000001')).toBe(BigInt(1));
+    expect(microunits('0.1') + microunits('0.2')).toBe(microunits('0.3'));
+  });
+});
+
+describe('целое число из поля ввода', () => {
+  it('принимает разряды через любой пробел — так кабинет их и показывает', () => {
+    expect(integerFromInput('1000')).toBe(1000);
+    expect(integerFromInput('1 000')).toBe(1000);
+    expect(integerFromInput(`1${B}000`)).toBe(1000);
+    expect(integerFromInput(`1${N}000`)).toBe(1000);
+    expect(integerFromInput('1 000')).toBe(1000);
+    expect(integerFromInput(' 42 ')).toBe(42);
+  });
+
+  it('не читает половину введённого, как parseInt', () => {
+    // `Number.parseInt('1 000')` — 1: так лимит в тысячу вызовов сохранялся лимитом в один.
+    expect(integerFromInput('1,5')).toBeUndefined();
+    expect(integerFromInput('12abc')).toBeUndefined();
+    expect(integerFromInput('1e3')).toBeUndefined();
+  });
+
+  it('пустое и отрицательное — не количество', () => {
+    expect(integerFromInput('')).toBeUndefined();
+    expect(integerFromInput('   ')).toBeUndefined();
+    expect(integerFromInput('-1')).toBeUndefined();
+  });
+
+  it('ведущие нули не мешают, а число больше безопасного отвергается', () => {
+    expect(integerFromInput('007')).toBe(7);
+    expect(integerFromInput('9007199254740993')).toBeUndefined();
+  });
+});
+
+describe('проценты из поля ввода', () => {
+  it('переводит в сотые доли процента', () => {
+    expect(basisPointsFromPercent('15')).toBe(1500);
+    expect(basisPointsFromPercent('100')).toBe(10_000);
+    expect(basisPointsFromPercent('0')).toBe(0);
+  });
+
+  it('принимает запятую, точку и знак процента', () => {
+    expect(basisPointsFromPercent('0,28')).toBe(28);
+    expect(basisPointsFromPercent('12.5')).toBe(1250);
+    expect(basisPointsFromPercent('15 %')).toBe(1500);
+    expect(basisPointsFromPercent(`15${B}%`)).toBe(1500);
+  });
+
+  it('считает без плавающей точки', () => {
+    // `Math.round(0.285 * 100)` даёт 28, а не 29: процент числом с плавающей точкой
+    // считать нельзя, поэтому разбор строковый.
+    expect(basisPointsFromPercent('0,29')).toBe(29);
+    expect(basisPointsFromPercent('1,01')).toBe(101);
+  });
+
+  it('лишний знак после запятой — отказ, а не молчаливое округление', () => {
+    expect(basisPointsFromPercent('0,285')).toBeUndefined();
+    expect(basisPointsFromPercent('15,2549')).toBeUndefined();
+  });
+
+  it('пустое поле — отказ: раньше оно становилось наценкой 0 %', () => {
+    expect(basisPointsFromPercent('')).toBeUndefined();
+    expect(basisPointsFromPercent('%')).toBeUndefined();
+    expect(basisPointsFromPercent('-5')).toBeUndefined();
+    expect(basisPointsFromPercent('1e1')).toBeUndefined();
+  });
+});
 
 describe('показ денег', () => {
   it('добавляет валюту явно', () => {

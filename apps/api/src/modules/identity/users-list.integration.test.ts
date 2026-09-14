@@ -7,6 +7,7 @@
  * и то, что отбор действительно отбирает.
  */
 
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
@@ -14,6 +15,7 @@ import {
   resetDatabase,
   startApi,
   TEST_PASSWORD,
+  withDatabase,
 } from '../../testing/harness.js';
 
 prepareEnvironment();
@@ -236,5 +238,69 @@ describe('состав ответа', () => {
   it('вход виден: у вошедшего администратора есть время последнего входа', async () => {
     const found = await list(`email=admin.${MARK}`);
     expect(found.users[0]?.last_login_at).not.toBeNull();
+  }, 120_000);
+});
+
+/**
+ * Смена состояния — `PATCH /users/:id/status`.
+ *
+ * Идёт последним: заводит записи с адресами вне общей метки, чтобы не менять счёт
+ * в отборах выше.
+ */
+describe('смена состояния', () => {
+  async function setStatus(id: string, status: string) {
+    return api().inject({
+      method: 'PATCH',
+      url: `/users/${id}/status`,
+      headers: adminAuth,
+      payload: { status },
+    });
+  }
+
+  it('свою учётную запись администратор не меняет — ни состояния, ни журнала', async () => {
+    // Одно неверное нажатие закрыло бы все сессии разом, а вернуть его мог бы только
+    // другой администратор.
+    const own = (await list(`email=admin.${MARK}`)).users[0];
+    expect(own).toBeDefined();
+    const ownId = own?.id ?? '';
+
+    const response = await setStatus(ownId, 'suspended');
+    expect(response.statusCode).toBe(409);
+
+    expect((await list(`email=admin.${MARK}`)).users[0]?.status).toBe('active');
+    const audited = await withDatabase(async (execute) => {
+      const result = await execute(sql`
+        select count(*)::int as n from audit_log
+         where entity_id = ${ownId} and action = 'user.status_changed'
+      `);
+      return (result.rows[0] as { n: number }).n;
+    });
+    expect(audited).toBe(0);
+    // И сессия на месте: отказ ничего не закрыл.
+    expect(
+      (await api().inject({ method: 'GET', url: '/users', headers: adminAuth })).statusCode,
+    ).toBe(200);
+  }, 120_000);
+
+  it('из `disabled` не возвращается: состояние окончательное', async () => {
+    const id = await create('client', 'active', `closed.${String(Date.now())}@example.test`);
+
+    expect((await setStatus(id, 'disabled')).statusCode).toBe(200);
+    expect((await setStatus(id, 'active')).statusCode).toBe(409);
+    expect((await setStatus(id, 'pending')).statusCode).toBe(409);
+    // Повтор того же состояния — не переход, отказывать в нём не за что.
+    expect((await setStatus(id, 'disabled')).statusCode).toBe(200);
+  }, 120_000);
+
+  it('приостановка по-прежнему закрывает сессии', async () => {
+    const email = `paused.${String(Date.now())}@example.test`;
+    const id = await create('client', 'active', email);
+    const headers = await authFor(email);
+    expect((await api().inject({ method: 'GET', url: '/auth/me', headers })).statusCode).toBe(200);
+
+    expect((await setStatus(id, 'suspended')).statusCode).toBe(200);
+
+    const after = await api().inject({ method: 'GET', url: '/auth/me', headers });
+    expect([401, 403]).toContain(after.statusCode);
   }, 120_000);
 });

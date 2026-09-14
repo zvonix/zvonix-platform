@@ -5,6 +5,7 @@ import { CLIENT_STATUSES, type ClientStatus } from '@zvonix/shared';
 import { Suspense, useState } from 'react';
 import { AccountLedger } from '@/components/account-ledger';
 import { Choice } from '@/components/choice';
+import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
@@ -24,7 +25,7 @@ import { ErrorNote } from '@/components/error-note';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { CLIENT_STATUS_MEANING, CLIENT_STATUS_NAME, clientStatusTone } from '@/lib/labels';
-import { isNegative, money, numberFromInput } from '@/lib/money';
+import { isNegative, money, moneyFromInput } from '@/lib/money';
 import { useUrlState } from '@/lib/url-state';
 import { ClientChannels } from './client-channels';
 import { DepositForm } from './deposit-form';
@@ -32,6 +33,14 @@ import { NewClientForm } from './new-client-form';
 
 const PAGE_SIZE = 50;
 const COLUMNS = 6;
+
+/** Кнопка называет действие, а не состояние, в которое переводит. */
+const CLIENT_ACTION: Record<ClientStatus, string> = {
+  pending: 'Вернуть в «ждёт допуска»',
+  active: 'Разрешить звонить',
+  suspended: 'Приостановить',
+  closed: 'Закрыть навсегда',
+};
 
 export interface ClientRow {
   readonly id: string;
@@ -41,6 +50,9 @@ export interface ClientRow {
   readonly balance: string;
   readonly created_at: string;
 }
+
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
 
 export default function ClientsPage() {
   return (
@@ -70,14 +82,29 @@ function ClientsTable() {
       request<{ clients: ClientRow[]; total: number }>(`/clients?${search.toString()}`),
   });
 
-  const change = useMutation({
+  const invalidate = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: ['clients'] });
+  };
+
+  const activate = useMutation({
+    mutationFn: (id: string) =>
+      request<unknown>(`/clients/${id}/status`, {
+        method: 'PATCH',
+        body: { status: 'active' },
+      }),
+    onSuccess: invalidate,
+  });
+
+  // Подтверждаемые действия — своими мутациями: их отказ виден в окне подтверждения
+  // и не повторяется над таблицей.
+  const confirmStatus = useMutation({
     mutationFn: (input: { id: string; status: ClientStatus }) =>
       request<unknown>(`/clients/${input.id}/status`, {
         method: 'PATCH',
         body: { status: input.status },
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['clients'] });
+    onSuccess: () => {
+      void invalidate();
     },
   });
 
@@ -85,16 +112,15 @@ function ClientsTable() {
     mutationFn: (input: { id: string; value: string }) =>
       request<unknown>(`/clients/${input.id}/overdraft`, {
         method: 'PATCH',
-        body: { overdraftLimit: numberFromInput(input.value) },
+        body: { overdraftLimit: input.value },
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['clients'] });
+    onSuccess: () => {
+      void invalidate();
     },
   });
 
-  const changeError = [change.error, overdraft.error].find(
-    (error): error is ApiError => error instanceof ApiError,
-  );
+  const changeError = asApiError(activate.error);
+  const listError = asApiError(list.error);
 
   return (
     <div className="flex flex-col gap-3">
@@ -136,14 +162,9 @@ function ClientsTable() {
       </div>
 
       {changeError !== undefined && <ErrorNote error={changeError} />}
+      {listError !== undefined && <ErrorNote error={listError} />}
 
-      {list.error !== null && (
-        <p role="alert" className="text-crit">
-          {list.error.message}
-        </p>
-      )}
-
-      <div className="rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -177,16 +198,15 @@ function ClientsTable() {
                 key={client.id}
                 client={client}
                 open={opened === client.id}
-                busy={change.isPending}
+                busy={activate.isPending || confirmStatus.isPending}
                 onToggle={() => {
                   setOpened(opened === client.id ? undefined : client.id);
                 }}
-                onChoose={(status) => {
-                  change.mutate({ id: client.id, status });
+                onActivate={() => {
+                  activate.mutate(client.id);
                 }}
-                onOverdraft={(value) => {
-                  overdraft.mutate({ id: client.id, value });
-                }}
+                onConfirmStatus={(status) => confirmStatus.mutateAsync({ id: client.id, status })}
+                onOverdraft={(value) => overdraft.mutateAsync({ id: client.id, value })}
               />
             ))}
           </TableBody>
@@ -201,15 +221,17 @@ function ClientRows({
   open,
   busy,
   onToggle,
-  onChoose,
+  onActivate,
+  onConfirmStatus,
   onOverdraft,
 }: {
   client: ClientRow;
   open: boolean;
   busy: boolean;
   onToggle: () => void;
-  onChoose: (status: ClientStatus) => void;
-  onOverdraft: (value: string) => void;
+  onActivate: () => void;
+  onConfirmStatus: (status: ClientStatus) => Promise<unknown>;
+  onOverdraft: (value: string) => Promise<unknown>;
 }) {
   const canChange = useCanChange();
   return (
@@ -249,13 +271,18 @@ function ClientRows({
             <div className="flex flex-col gap-4">
               {canChange && (
                 <>
-                  <StatusChoice client={client} busy={busy} onChoose={onChoose} />
-                  <OverdraftField client={client} busy={busy} onChange={onOverdraft} />
+                  <StatusChoice
+                    client={client}
+                    busy={busy}
+                    onActivate={onActivate}
+                    onConfirmStatus={onConfirmStatus}
+                  />
+                  <OverdraftField client={client} onSave={onOverdraft} />
                 </>
               )}
               <ClientChannels clientId={client.id} />
               {canChange && <DepositForm client={client} />}
-              <AccountLedger source={`/clients/${client.id}/entries`} />
+              <AccountLedger source={`/clients/${client.id}/entries`} account="client" />
             </div>
           </TableCell>
         </TableRow>
@@ -267,20 +294,23 @@ function ClientRows({
 /**
  * Смена состояния клиента.
  *
- * Последствие названо у каждого варианта ([DESIGN.md](../../../../../docs/DESIGN.md)),
- * и оно не косметическое: маршрутизация требует `active` **и от канала, и от клиента**,
- * поэтому любое другое состояние означает «ни один канал не звонит». Из `closed`
- * вариантов нет вовсе: переход необратим, и предлагать его обратно — обещать то,
- * чего API не сделает.
+ * Последствие не косметическое: маршрутизация требует `active` **и от канала, и от клиента**,
+ * поэтому любое другое состояние означает «ни один канал не звонит». Разрешение звонить —
+ * одним нажатием; остановка и закрытие — через подтверждение с названным последствием
+ * ([DESIGN.md](../../../../../docs/DESIGN.md)): раньше и необратимое «Закрыт» срабатывало
+ * с первого нажатия (ui-review, 2026-09-14). Из `closed` вариантов нет вовсе: переход
+ * необратим, и предлагать его обратно — обещать то, чего API не сделает.
  */
 function StatusChoice({
   client,
   busy,
-  onChoose,
+  onActivate,
+  onConfirmStatus,
 }: {
   client: ClientRow;
   busy: boolean;
-  onChoose: (status: ClientStatus) => void;
+  onActivate: () => void;
+  onConfirmStatus: (status: ClientStatus) => Promise<unknown>;
 }) {
   if (client.status === 'closed') {
     return (
@@ -295,24 +325,27 @@ function StatusChoice({
     <div className="flex flex-col gap-2">
       <h3 className="font-semibold">Состояние</h3>
       <p className="text-muted-foreground">
-        Сейчас — {CLIENT_STATUS_NAME[client.status].toLowerCase()}. Смена попадает в журнал вместе с
-        тем, что было до.
+        Сейчас — {CLIENT_STATUS_NAME[client.status].toLowerCase()}:{' '}
+        {CLIENT_STATUS_MEANING[client.status]} Смена попадает в журнал вместе с тем, что было до.
       </p>
       <div className="flex flex-wrap gap-2">
-        {CLIENT_STATUSES.filter((status) => status !== client.status).map((status) => (
-          <button
-            key={status}
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              onChoose(status);
-            }}
-            className="max-w-[300px] rounded-md border border-border bg-card p-2 text-left hover:border-ring disabled:opacity-50"
-          >
-            <span className="font-medium">{CLIENT_STATUS_NAME[status]}</span>
-            <span className="block text-muted-foreground">{CLIENT_STATUS_MEANING[status]}</span>
-          </button>
-        ))}
+        {CLIENT_STATUSES.filter((status) => status !== client.status).map((status) =>
+          status === 'active' ? (
+            <Button key={status} variant="outline" size="sm" disabled={busy} onClick={onActivate}>
+              {CLIENT_ACTION[status]}
+            </Button>
+          ) : (
+            <ConfirmAction
+              key={status}
+              label={CLIENT_ACTION[status]}
+              title={`${CLIENT_ACTION[status]}: клиент «${client.name}»`}
+              consequence={<p>{CLIENT_STATUS_MEANING[status]}</p>}
+              confirmLabel={CLIENT_ACTION[status]}
+              disabled={busy}
+              onConfirm={() => onConfirmStatus(status)}
+            />
+          ),
+        )}
       </div>
     </div>
   );
@@ -325,38 +358,74 @@ function StatusChoice({
  * опечатка в разрядах означала кредит, который нечем отозвать. Правка денежная,
  * поэтому попадает в журнал вместе с прежним значением.
  *
- * Отправляется по потере фокуса, а не по каждому нажатию: это деньги, и запрос
- * на символ означал бы полтора десятка записей в журнале на одну правку.
+ * Форма с кнопкой и подтверждением «было → станет», а не отправка по потере фокуса:
+ * раньше щелчок мимо поля уже выдавал кредит, в поле стоял машинный `1500.5` вместо
+ * `1 500,5 ₽`, а отказ показывался над таблицей, далеко от поля (ui-review, 2026-09-14).
  */
 function OverdraftField({
   client,
-  busy,
-  onChange,
+  onSave,
 }: {
   client: ClientRow;
-  busy: boolean;
-  onChange: (value: string) => void;
+  onSave: (value: string) => Promise<unknown>;
 }) {
+  const [value, setValue] = useState('');
+  const typed = moneyFromInput(value);
+  const valid = typed !== undefined;
+  const shown = valid ? money(typed) : '';
+
   return (
     <div className="flex flex-col gap-1">
       <h3 className="font-semibold">Разрешённый минус</h3>
-      <div className="flex items-center gap-2">
-        <Input
-          className="num w-[140px]"
-          defaultValue={client.overdraft_limit}
-          disabled={busy}
-          aria-label="Разрешённый минус"
-          onBlur={(event) => {
-            const value = event.target.value.trim();
-            if (value !== '' && value !== client.overdraft_limit) onChange(value);
+      <p className="text-muted-foreground">
+        Сейчас — <span className="num">{money(client.overdraft_limit)}</span>: насколько глубоко
+        клиенту разрешено уходить в минус. Ноль — только на свои. Уменьшение ниже текущего долга
+        допустимо: это «больше в долг не даём», потраченное при этом никуда не девается.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Новый минус, ₽</span>
+          <Input
+            className="num w-[140px]"
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="10 000,00"
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+            }}
+          />
+        </label>
+        <ConfirmAction
+          label="Изменить"
+          tone="neutral"
+          disabled={!valid}
+          title={`Разрешённый минус: «${client.name}»`}
+          consequence={
+            <>
+              <p>
+                Было: <b className="num">{money(client.overdraft_limit)}</b>. Станет:{' '}
+                <b className="num">{shown}</b>.
+              </p>
+              <p>
+                Правка действует на новые вызовы сразу и попадает в журнал вместе с прежним
+                значением.
+              </p>
+            </>
+          }
+          confirmLabel={`Установить ${shown}`}
+          onConfirm={async () => {
+            if (typed === undefined) return;
+            await onSave(typed);
+            setValue('');
           }}
         />
-        <span className="text-muted-foreground">
-          насколько глубоко клиенту разрешено уходить в минус. Ноль — только на свои. Уменьшение
-          ниже текущего долга допустимо: это «больше в долг не даём», потраченное при этом никуда не
-          девается.
-        </span>
       </div>
+      {value !== '' && !valid && (
+        <p className="text-warn">
+          Сумма — число, не больше шести знаков после запятой: например 10 000,50.
+        </p>
+      )}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { Money, parseId, type UserRole } from '@zvonix/shared';
 import { sql } from 'drizzle-orm';
 import { AppModule } from '../app.module.js';
 import { BillingService } from '../modules/billing/billing.service.js';
+import { CatalogService } from '../modules/catalog/catalog.service.js';
 import { IdentityService } from '../modules/identity/identity.service.js';
 import { TelephonyService } from '../modules/telephony/telephony.service.js';
 
@@ -115,7 +116,18 @@ async function main(): Promise<void> {
     });
     await billing.changePartnerStatus(partner.id, 'verified', actor);
 
-    process.stdout.write('Стенд наполнен: четыре роли, клиент с линией, подтверждённый партнёр.\n');
+    // Оператор нужен кабинету партнёра: без него SIM не завести. Заводить его в самой
+    // проверке значило бы проверять админку, а не то, что партнёр видит у себя.
+    await app
+      .get(CatalogService)
+      .createOperator(
+        { name: 'МегаФон', inn: null, mnc: null, isMvno: false, hostOperatorId: null, aliases: [] },
+        actor,
+      );
+
+    process.stdout.write(
+      'Стенд наполнен: четыре роли, клиент с линией, подтверждённый партнёр, оператор.\n',
+    );
   } finally {
     await app.close();
   }

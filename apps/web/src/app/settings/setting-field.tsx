@@ -1,8 +1,11 @@
 'use client';
 
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { integerFromInput } from '@/lib/money';
 
 export interface SettingView {
   readonly key: string;
@@ -43,21 +46,31 @@ export function labelOf(key: string): string {
   return LABELS[key] ?? key;
 }
 
+/**
+ * Поле настройки.
+ *
+ * Черновик: `undefined` — «не трогать», значение — «записать». Для секрета пустая строка
+ * значит «очистить», и выражается она **только кнопкой**: раньше достаточно было набрать
+ * и стереть символ в поле пароля, чтобы сохранение стёрло пароль почты
+ * (ui-review, 2026-09-14).
+ */
 export function SettingField({
   setting,
   draft,
   onChange,
+  onValidity,
 }: {
   setting: SettingView;
   draft: DraftValue | undefined;
   onChange: (value: DraftValue | undefined) => void;
+  /** Годится ли набранное: негодное значение не уходит в черновик и держит сохранение. */
+  onValidity: (valid: boolean) => void;
 }) {
   const id = `setting-${setting.key}`;
   const label = labelOf(setting.key);
-  const touched = draft !== undefined;
 
   if (setting.kind === 'boolean') {
-    const checked = touched ? draft === true : setting.value === true;
+    const checked = draft === undefined ? setting.value === true : draft === true;
     return (
       <div className="flex items-start gap-3 py-1.5">
         <Switch
@@ -77,29 +90,38 @@ export function SettingField({
     );
   }
 
+  if (setting.secret) {
+    return (
+      <SecretField id={id} label={label} setting={setting} draft={draft} onChange={onChange} />
+    );
+  }
+
+  if (setting.kind === 'number') {
+    return (
+      <NumberField
+        id={id}
+        label={label}
+        setting={setting}
+        onChange={onChange}
+        onValidity={onValidity}
+      />
+    );
+  }
+
   const stored = setting.value === null ? '' : String(setting.value);
-  const shown = touched ? String(draft) : stored;
+  const shown = draft === undefined ? stored : String(draft);
 
   return (
     <div className="flex flex-col gap-1 py-1.5">
-      <div className="flex items-baseline gap-2">
-        <Label htmlFor={id}>{label}</Label>
-        {setting.secret && <SecretState setting={setting} draft={draft} />}
-      </div>
+      <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
-        type={setting.secret ? 'password' : setting.kind === 'number' ? 'number' : 'text'}
-        autoComplete={setting.secret ? 'new-password' : 'off'}
-        className={setting.kind === 'number' ? 'num max-w-[120px]' : undefined}
+        autoComplete="off"
+        spellCheck={false}
         value={shown}
-        placeholder={setting.secret && setting.is_set ? '•'.repeat(12) : undefined}
         onChange={(event) => {
           const next = event.target.value;
-          if (setting.kind === 'number') {
-            onChange(next === '' ? '' : Number(next));
-            return;
-          }
-          onChange(next === stored && !setting.secret ? undefined : next);
+          onChange(next === stored ? undefined : next);
         }}
       />
       <p className="text-muted-foreground">{setting.hint}</p>
@@ -108,11 +130,126 @@ export function SettingField({
 }
 
 /**
+ * Секрет: пароль почты, серверный ключ капчи.
+ *
+ * Значение обратно не читается ни администратором, ни кем-либо ещё — в базе он лежит
+ * шифротекстом (ADR-0031). Пустое поле всегда значит «не трогать», очистка — отдельной
+ * кнопкой. Значение из одних пробелов тоже «не трогать»: площадка обрезает пробелы,
+ * и такой «пароль» очистил бы секрет так же, как пустая строка.
+ */
+function SecretField({
+  id,
+  label,
+  setting,
+  draft,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  setting: SettingView;
+  draft: DraftValue | undefined;
+  onChange: (value: DraftValue | undefined) => void;
+}) {
+  const clearing = draft === '';
+
+  return (
+    <div className="flex flex-col gap-1 py-1.5">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <Label htmlFor={id}>{label}</Label>
+        <SecretState setting={setting} draft={draft} />
+        {setting.is_set &&
+          (clearing ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => {
+                onChange(undefined);
+              }}
+            >
+              Не очищать
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => {
+                onChange('');
+              }}
+            >
+              Очистить
+            </Button>
+          ))}
+      </div>
+      <Input
+        id={id}
+        type="password"
+        autoComplete="new-password"
+        disabled={clearing}
+        value={typeof draft === 'string' ? draft : ''}
+        placeholder={setting.is_set ? '•'.repeat(12) : undefined}
+        onChange={(event) => {
+          const next = event.target.value;
+          onChange(next.trim() === '' ? undefined : next);
+        }}
+      />
+      <p className="text-muted-foreground">{setting.hint}</p>
+    </div>
+  );
+}
+
+/**
+ * Число: порт почты и подобное.
+ *
+ * Набранное хранится здесь сырым текстом, а в черновик уходит только разобранное целое.
+ * Раньше поле было `type="number"`, пустое значение уходило в API пустой строкой
+ * и получало отказ, а черновик не снимался, даже когда число вернули к сохранённому.
+ */
+function NumberField({
+  id,
+  label,
+  setting,
+  onChange,
+  onValidity,
+}: {
+  id: string;
+  label: string;
+  setting: SettingView;
+  onChange: (value: DraftValue | undefined) => void;
+  onValidity: (valid: boolean) => void;
+}) {
+  const stored = setting.value === null ? '' : String(setting.value);
+  const [raw, setRaw] = useState(stored);
+  const invalid = raw !== stored && integerFromInput(raw) === undefined;
+
+  return (
+    <div className="flex flex-col gap-1 py-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        className="num max-w-[120px]"
+        inputMode="numeric"
+        autoComplete="off"
+        value={raw}
+        onChange={(event) => {
+          const next = event.target.value;
+          setRaw(next);
+          const parsed = integerFromInput(next);
+          onValidity(parsed !== undefined || next === stored);
+          onChange(parsed === undefined || String(parsed) === stored ? undefined : parsed);
+        }}
+      />
+      {invalid && <p className="text-warn">Нужно целое число — без знаков и дробной части.</p>}
+      <p className="text-muted-foreground">{setting.hint}</p>
+    </div>
+  );
+}
+
+/**
  * Состояние секрета.
  *
- * Значение секрета обратно не читается ни администратором, ни кем-либо ещё —
- * в базе он лежит шифротекстом (ADR-0031). Поэтому вместо значения показывается,
- * задан он или нет, и что произойдёт с пустым полем.
+ * Вместо значения показывается, задан ли он и что произойдёт при сохранении.
  */
 function SecretState({ setting, draft }: { setting: SettingView; draft: DraftValue | undefined }) {
   if (draft === '') {

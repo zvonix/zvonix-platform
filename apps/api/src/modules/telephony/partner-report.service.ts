@@ -11,6 +11,7 @@ import {
   notFound,
   parseMsisdn,
   rateLimited,
+  type CallStatus,
   type Id,
   type Msisdn,
   type UserRole,
@@ -35,9 +36,6 @@ const WRONG_NETWORK_RULE: LimitRule = {
   windowSeconds: 3600,
 };
 
-/** Сколько вызовов партнёр видит за раз. */
-const PARTNER_CALLS_LIMIT = 200;
-
 @Injectable()
 export class PartnerReportService {
   constructor(
@@ -48,15 +46,35 @@ export class PartnerReportService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Вызовы партнёра: по ним он сверяется со счётом своего оператора. */
+  /**
+   * Вызовы партнёра страницами: по ним он сверяется со счётом своего оператора.
+   *
+   * Отбор общий с административным списком (`CallRepository.list`), но наружу уходит
+   * только сам вызов: канал, клиент и номер SIM из окружения сюда не попадают.
+   * Отбор по шлюзу, а не по SIM: SIM переживает порт и может переехать к другому
+   * владельцу, а вызов ушёл через то железо, которое стояло тогда. Вызовы через
+   * SIP-транк партнёра входят тоже — транк и есть его шлюз.
+   */
   async listCalls(
     requester: { userId: Id<'user'>; role: UserRole },
-    partnerId?: Id<'partner'>,
-  ): Promise<CallRow[]> {
-    return this.calls.listByPartner(
-      await this.subjectOf(requester, partnerId),
-      PARTNER_CALLS_LIMIT,
-    );
+    filter: {
+      readonly partnerId?: Id<'partner'>;
+      readonly status?: CallStatus;
+      readonly from?: Date;
+      readonly to?: Date;
+      readonly limit: number;
+      readonly offset: number;
+    },
+  ): Promise<{ rows: CallRow[]; total: number }> {
+    const found = await this.calls.list({
+      partnerId: await this.subjectOf(requester, filter.partnerId),
+      ...(filter.status === undefined ? {} : { status: filter.status }),
+      ...(filter.from === undefined ? {} : { from: filter.from }),
+      ...(filter.to === undefined ? {} : { to: filter.to }),
+      limit: filter.limit,
+      offset: filter.offset,
+    });
+    return { rows: found.rows.map((row) => row.call), total: found.total };
   }
 
   /**

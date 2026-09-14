@@ -132,19 +132,23 @@ export class CatalogController {
   /**
    * Справочник операторов.
    *
-   * Клиенту он тоже нужен: из него он выбирает разрешённых операторов канала (ADR-0025).
-   * Ограничений ADR-0014 это не нарушает — оператор связи не партнёр, и связь
-   * «оператор → партнёр» наружу не выходит.
+   * Клиенту он нужен, чтобы выбрать разрешённых операторов канала (ADR-0025), партнёру —
+   * чтобы объявить оператора своей SIM. Ограничений ADR-0014 это не нарушает: оператор
+   * связи не партнёр, и связь «оператор → партнёр» наружу не выходит.
    *
-   * Клиенту отдаётся **сокращённый** вид: ИНН, MNC и связи MVNO ему не нужны ни для чего.
+   * Обоим отдаётся **сокращённый** вид: ИНН, MNC и связи MVNO не нужны ни для выбора,
+   * ни для заявления. Партнёру — все записи, а не только подтверждённые: резолвер может
+   * назвать обслуживающим оператора из импорта плана нумерации, и SIM такого оператора
+   * иначе было бы не завести. Справочник был закрыт партнёру, пока SIM заводил только
+   * администратор, — и стал дефектом, когда партнёр начал заводить их сам.
    */
-  @Roles('admin', 'support', 'client')
+  @Roles('admin', 'support', 'client', 'partner')
   @Get('operators')
   async list(
     @CurrentUser() actor: Principal,
   ): Promise<{ operators: OperatorResponse[] | OperatorChoice[] }> {
     const operators = await this.catalog.listOperators();
-    if (actor.role === 'client') {
+    if (actor.role === 'client' || actor.role === 'partner') {
       return { operators: operators.map((operator) => ({ id: operator.id, name: operator.name })) };
     }
     return { operators: operators.map(toOperatorResponse) };

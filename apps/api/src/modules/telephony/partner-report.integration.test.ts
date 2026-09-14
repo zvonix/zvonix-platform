@@ -82,6 +82,8 @@ interface Environment {
   readonly channel: string;
   readonly destination: string;
   readonly callId: string;
+  /** Идентификатор вызова на узле: по нему приходит CDR. */
+  readonly externalId: string;
 }
 
 /** Партнёр со шлюзом, SIM и одним состоявшимся вызовом через маршрутизацию. */
@@ -155,8 +157,9 @@ async function environment(): Promise<Environment> {
     `);
   });
 
+  const externalId = unique('call');
   const routed = await post('/routing/preview', {
-    callId: unique('call'),
+    callId: externalId,
     channelId: channel,
     nodeId,
     destination,
@@ -171,6 +174,7 @@ async function environment(): Promise<Environment> {
     channel,
     destination,
     callId,
+    externalId,
   };
 }
 
@@ -283,7 +287,142 @@ describe('обращение партнёра', () => {
       env.callId,
     );
   }, 180_000);
+});
 
+interface PartnerCall {
+  readonly id: string;
+  readonly started_at: string;
+}
+
+interface PartnerCalls {
+  readonly calls: PartnerCall[];
+  readonly total: number;
+}
+
+/**
+ * Закрывает вызов так, как это делает узел: CDR с тем же `uuid`.
+ *
+ * Настоящим путём, а не записью в базу: пока вызов открыт, SIM занята, и следующий
+ * маршрут на неё не выберется.
+ */
+async function complete(externalId: string): Promise<void> {
+  const response = await api().inject({
+    method: 'POST',
+    url: '/node/cdr',
+    headers: { authorization: `Bearer ${nodeKey}` },
+    payload: {
+      variables: {
+        uuid: externalId,
+        billsec: '10',
+        hangup_cause: 'NORMAL_CLEARING',
+        answer_stamp: '2026-09-02 07:15:00.000000',
+        end_stamp: '2026-09-02 07:15:10.000000',
+      },
+    },
+  });
+  expect(response.statusCode).toBe(200);
+}
+
+/** Партнёр с тремя вызовами подряд через одну SIM. */
+async function partnerWithThreeCalls(): Promise<Environment & { callIds: string[] }> {
+  const env = await environment();
+  const callIds = [env.callId];
+  let previous = env.externalId;
+
+  for (let index = 0; index < 2; index += 1) {
+    await complete(previous);
+    previous = unique('call');
+    const routed = await post('/routing/preview', {
+      callId: previous,
+      channelId: env.channel,
+      nodeId,
+      destination: env.destination,
+    });
+    expect(routed.json<{ outcome: string }>().outcome).toBe('routed');
+    callIds.push(routed.json<{ call_id: string }>().call_id);
+  }
+
+  return { ...env, callIds };
+}
+
+async function partnerCalls(headers: Record<string, string>, query = ''): Promise<PartnerCalls> {
+  const response = await api().inject({ method: 'GET', url: `/partner/calls${query}`, headers });
+  expect(response.statusCode).toBe(200);
+  return response.json<PartnerCalls>();
+}
+
+describe('вызовы партнёра страницами', () => {
+  it('без параметров — как раньше, целиком; total — на весь отбор', async () => {
+    const env = await partnerWithThreeCalls();
+
+    const all = await partnerCalls(env.partnerHeaders);
+    expect(all.total).toBe(3);
+    expect(all.calls.map((call) => call.id).sort()).toEqual([...env.callIds].sort());
+  }, 180_000);
+
+  it('limit ограничивает страницу, но не счёт; offset даёт следующую без пересечений', async () => {
+    const env = await partnerWithThreeCalls();
+
+    const first = await partnerCalls(env.partnerHeaders, '?limit=2&offset=0');
+    const second = await partnerCalls(env.partnerHeaders, '?limit=2&offset=2');
+
+    expect(first.calls).toHaveLength(2);
+    expect(first.total).toBe(3);
+    expect(second.calls).toHaveLength(1);
+    const ids = new Set([...first.calls, ...second.calls].map((call) => call.id));
+    expect(ids.size).toBe(3);
+  }, 180_000);
+
+  it('период отбирает вызовы по времени начала', async () => {
+    // Окно в одну миллисекунду, а не «от и до одного момента»: база хранит время
+    // с микросекундами, а наружу оно уходит с миллисекундами. Граница, взятая из ответа,
+    // оказывается чуть раньше настоящего момента, и вызов из точного окна выпадал бы.
+    // Соседние вызовы разделены CDR и маршрутом — между ними десятки миллисекунд.
+    const env = await partnerWithThreeCalls();
+    const all = await partnerCalls(env.partnerHeaders);
+    const middle = all.calls[1];
+    expect(middle).toBeDefined();
+
+    const start = new Date(middle?.started_at ?? '');
+    const from = encodeURIComponent(start.toISOString());
+    const to = encodeURIComponent(new Date(start.getTime() + 1).toISOString());
+    const inside = await partnerCalls(env.partnerHeaders, `?from=${from}&to=${to}`);
+
+    expect(inside.calls.map((call) => call.id)).toEqual([middle?.id]);
+    expect(inside.total).toBe(1);
+  }, 180_000);
+
+  it('чужой partnerId партнёру ничего не открывает', async () => {
+    const mine = await environment();
+    const foreign = await environment();
+
+    const listed = await partnerCalls(mine.partnerHeaders, `?partnerId=${foreign.partner}`);
+    const ids = listed.calls.map((call) => call.id);
+
+    expect(ids).toContain(mine.callId);
+    expect(ids).not.toContain(foreign.callId);
+  }, 180_000);
+
+  it('в ответе только сам вызов: ни клиента, ни линии, ни номера SIM', async () => {
+    // Список собирается общим запросом с административным, а у того в окружении есть
+    // и клиент, и название линии, и номер SIM. Наружу не должно уйти ничего из этого.
+    const env = await environment();
+    const listed = await partnerCalls(env.partnerHeaders);
+
+    expect(Object.keys(listed.calls[0] ?? {}).sort()).toEqual([
+      'destination',
+      'duration_seconds',
+      'gateway_id',
+      'id',
+      'operator_id',
+      'sim_card_id',
+      'started_at',
+      'status',
+    ]);
+  }, 180_000);
+});
+
+describe('обращение партнёра', () => {
   it('записывает обращение в журнал: по нему видно, кто и о чём заявил', async () => {
     const env = await environment();
     await api().inject({

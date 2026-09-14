@@ -980,6 +980,12 @@ export class IdentityService {
    *
    * Снятие активности немедленно закрывает все сессии — иначе заблокированный
    * пользователь продолжает работать до истечения своего токена.
+   *
+   * Два запрета, оба `409`. **Свою запись не меняет никто**: администратор, одним
+   * нажатием закрывший сам себя, разом теряет все сессии, а вернуть его может только
+   * другой администратор. **`disabled` окончательно** — так же, как `closed` у клиента
+   * и партнёра: так его описывает перечисление и так его видит человек в кабинете.
+   * Восстановление — новая учётная запись.
    */
   async changeStatus(
     actor: Principal,
@@ -990,7 +996,15 @@ export class IdentityService {
     const target = await this.repository.findById(id);
     if (target === undefined) throw notFound('Учётная запись не найдена');
 
+    if (target.id === actor.userId) {
+      throw conflict('Состояние своей учётной записи не меняется: это делает другой администратор');
+    }
+
     if (target.status === status) return toPublicUser(target);
+
+    if (target.status === 'disabled') {
+      throw conflict('Учётная запись закрыта: это состояние окончательное');
+    }
 
     const updated = await this.repository.setStatus(id, status);
     const revoked =

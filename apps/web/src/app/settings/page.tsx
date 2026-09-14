@@ -2,11 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
+import { ErrorNote } from '@/components/error-note';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ErrorNote } from '@/components/error-note';
 import { ApiError, request } from '@/lib/api';
+import { moment } from '@/lib/format';
 import { SettingField, labelOf, type DraftValue, type SettingView } from './setting-field';
 
 const SETTINGS_QUERY_KEY = ['settings'] as const;
@@ -20,6 +22,9 @@ interface TestResult {
   readonly error: string | null;
 }
 
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
+
 export default function SettingsPage() {
   return (
     <ConsoleShell title="Настройки площадки" requireRole="admin">
@@ -31,6 +36,7 @@ export default function SettingsPage() {
 function SettingsForm() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
+  const [invalid, setInvalid] = useState<ReadonlySet<string>>(new Set());
   const [savedAt, setSavedAt] = useState<string | undefined>(undefined);
 
   const settings = useQuery({
@@ -38,17 +44,22 @@ function SettingsForm() {
     queryFn: () => request<SettingsResponse>('/settings'),
   });
 
-  const save = useMutation({
+  const saving = {
     mutationFn: (changes: Record<string, DraftValue>) =>
       request<SettingsResponse>('/settings', { method: 'PUT', body: { settings: changes } }),
-    onSuccess: (response) => {
+    onSuccess: (response: SettingsResponse) => {
       // Ответ содержит новый список целиком — кладём его в кэш вместо повторного
       // запроса: лишнее обращение только даёт странице мигнуть.
       queryClient.setQueryData(SETTINGS_QUERY_KEY, response);
       setDraft({});
-      setSavedAt(new Date().toLocaleTimeString('ru-RU'));
+      setInvalid(new Set());
+      setSavedAt(new Date().toISOString());
     },
-  });
+  };
+  const save = useMutation(saving);
+  // Сохранение с очисткой секрета идёт через подтверждение, и отказ показывается в окне.
+  // Общая мутация показала бы его второй раз в нижней панели.
+  const confirmSave = useMutation(saving);
 
   function change(key: string, value: DraftValue | undefined): void {
     setDraft((previous) => {
@@ -62,15 +73,20 @@ function SettingsForm() {
     });
   }
 
+  function validity(key: string, valid: boolean): void {
+    setInvalid((previous) => {
+      const next = new Set(previous);
+      if (valid) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   if (settings.isPending) return <p className="text-muted-foreground">Загружаем…</p>;
 
-  if (settings.error !== null) {
-    return (
-      <p role="alert" className="text-crit">
-        {settings.error.message}
-      </p>
-    );
-  }
+  const loadError = asApiError(settings.error);
+  if (loadError !== undefined) return <ErrorNote error={loadError} />;
+  if (settings.data === undefined) return null;
 
   const groups = [
     { title: 'Почта', prefix: 'mail.' },
@@ -82,7 +98,28 @@ function SettingsForm() {
   );
 
   const changed = Object.keys(draft);
-  const error = save.error instanceof ApiError ? save.error : undefined;
+  const secrets = new Set(
+    settings.data.settings.filter((setting) => setting.secret).map((setting) => setting.key),
+  );
+  const cleared = changed.filter((key) => secrets.has(key) && draft[key] === '');
+  const error = asApiError(save.error);
+  const blocked = changed.length === 0 || invalid.size > 0;
+
+  // Поле пересоздаётся после сохранения: у числового поля свой набранный текст,
+  // и без этого он пережил бы смену сохранённого значения.
+  const field = (setting: SettingView) => (
+    <SettingField
+      key={`${setting.key}:${setting.updated_at ?? ''}`}
+      setting={setting}
+      draft={draft[setting.key]}
+      onChange={(value) => {
+        change(setting.key, value);
+      }}
+      onValidity={(valid) => {
+        validity(setting.key, valid);
+      }}
+    />
+  );
 
   return (
     <div className="flex max-w-[1100px] flex-col gap-4">
@@ -93,16 +130,7 @@ function SettingsForm() {
             <div className="divide-y divide-border-soft">
               {settings.data.settings
                 .filter((setting) => setting.key.startsWith(group.prefix))
-                .map((setting) => (
-                  <SettingField
-                    key={setting.key}
-                    setting={setting}
-                    draft={draft[setting.key]}
-                    onChange={(value) => {
-                      change(setting.key, value);
-                    }}
-                  />
-                ))}
+                .map(field)}
             </div>
             {group.prefix === 'mail.' && <TestLetter />}
             {group.prefix === 'captcha.' && <CaptchaWarning />}
@@ -114,42 +142,65 @@ function SettingsForm() {
             {/* Настройка, для которой здесь ещё нет группы. Лучше показать под ключом,
                 чем не показать вовсе: иначе новое поле пропадает молча. */}
             <h2 className="pb-2 font-semibold">Прочее</h2>
-            <div className="divide-y divide-border-soft">
-              {rest.map((setting) => (
-                <SettingField
-                  key={setting.key}
-                  setting={setting}
-                  draft={draft[setting.key]}
-                  onChange={(value) => {
-                    change(setting.key, value);
-                  }}
-                />
-              ))}
-            </div>
+            <div className="divide-y divide-border-soft">{rest.map(field)}</div>
           </section>
         )}
       </div>
 
       <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t border-border bg-background py-3">
-        <Button
-          type="button"
-          disabled={changed.length === 0 || save.isPending}
-          onClick={() => {
-            save.mutate(draft);
-          }}
-        >
-          {save.isPending ? 'Сохраняем…' : 'Сохранить'}
-        </Button>
+        {/*
+          Очистка секрета — через подтверждение: без пароля почта перестаёт уходить,
+          без серверного ключа капча выключается. Остальное сохраняется сразу.
+        */}
+        {cleared.length > 0 ? (
+          <ConfirmAction
+            label={confirmSave.isPending ? 'Сохраняем…' : 'Сохранить'}
+            variant="default"
+            size="default"
+            disabled={blocked || save.isPending || confirmSave.isPending}
+            title="Сохранить и очистить секреты"
+            consequence={
+              <>
+                <p>Будут очищены: {cleared.map((key) => labelOf(key)).join(', ')}.</p>
+                <p>
+                  Без пароля почты письма перестанут уходить, без серверного ключа капча выключится.
+                  Вернуть прежнее значение нельзя — его придётся ввести заново.
+                </p>
+              </>
+            }
+            confirmLabel="Сохранить и очистить"
+            onConfirm={() => {
+              save.reset();
+              return confirmSave.mutateAsync(draft);
+            }}
+          />
+        ) : (
+          <Button
+            type="button"
+            disabled={blocked || save.isPending}
+            onClick={() => {
+              save.mutate(draft);
+            }}
+          >
+            {save.isPending ? 'Сохраняем…' : 'Сохранить'}
+          </Button>
+        )}
 
-        {changed.length > 0 && (
+        {invalid.size > 0 && (
+          <span className="text-warn">
+            Исправьте: {[...invalid].map((key) => labelOf(key)).join(', ')}
+          </span>
+        )}
+
+        {changed.length > 0 && invalid.size === 0 && (
           <span className="text-muted-foreground">
             Не сохранено: {changed.map((key) => labelOf(key)).join(', ')}
           </span>
         )}
 
-        {changed.length === 0 && savedAt !== undefined && (
+        {changed.length === 0 && invalid.size === 0 && savedAt !== undefined && (
           <span className="text-ok">
-            Сохранено в {savedAt}. В соседнем процессе подействует в течение полуминуты.
+            Сохранено в {moment(savedAt)}. В соседнем процессе подействует в течение полуминуты.
           </span>
         )}
 
@@ -177,7 +228,7 @@ function TestLetter() {
       }),
   });
 
-  const failure = send.error instanceof ApiError ? send.error.message : undefined;
+  const failure = asApiError(send.error);
 
   return (
     <div className="mt-3 flex flex-col gap-2 border-t border-border-soft pt-3">
@@ -189,7 +240,10 @@ function TestLetter() {
       <div className="flex flex-wrap gap-2">
         <Input
           type="email"
-          placeholder="Кому — или пусто"
+          aria-label="Адрес для пробного письма"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="name@example.ru — или пусто…"
           className="max-w-[240px]"
           value={recipient}
           onChange={(event) => {
@@ -214,11 +268,7 @@ function TestLetter() {
           Сервер отказал: {send.data.error}
         </p>
       )}
-      {failure !== undefined && (
-        <p role="alert" className="text-crit">
-          {failure}
-        </p>
-      )}
+      {failure !== undefined && <ErrorNote error={failure} />}
     </div>
   );
 }

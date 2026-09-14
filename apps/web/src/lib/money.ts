@@ -79,3 +79,69 @@ export function percent(basisPoints: string): string {
 export function numberFromInput(value: string): string {
   return value.replace(/[\s₽%]/gu, '').replace(',', '.');
 }
+
+/**
+ * Денежная сумма из поля ввода — строкой в машинном виде (`1500.5`), или `undefined`.
+ *
+ * Принимает то же, что `numberFromInput`, но проверяет результат: неотрицательное число
+ * не больше чем с шестью знаками после запятой — ровно столько хранят деньги площадки
+ * (микроединицы). Проверка одна на все денежные формы: своими выражениями в каждой
+ * форме они расходились бы на первой же правке.
+ */
+export function moneyFromInput(value: string): string | undefined {
+  // Знак процента в денежном поле — вставка не из того столбца, а не рубли:
+  // «15%» в поле фикса иначе становилось 15 ₽.
+  if (value.includes('%')) return undefined;
+  const normalized = numberFromInput(value);
+  return /^\d+(\.\d{1,6})?$/u.test(normalized) ? normalized : undefined;
+}
+
+/**
+ * Сумма в машинном виде (`1500.5`) — в микроединицах, чтобы сравнивать без плавающей точки.
+ *
+ * Принимает то, что вернул `moneyFromInput`; другое не разбирает.
+ */
+export function microunits(value: string): bigint {
+  const [whole = '0', fraction = ''] = value.split('.');
+  return BigInt(whole) * BigInt(1_000_000) + BigInt(fraction.padEnd(6, '0'));
+}
+
+/**
+ * Пробелы, которыми числа делят на разряды: обычный, неразрывный, узкий и тонкий.
+ *
+ * Хватает `\s`: в JavaScript он покрывает все пробельные знаки Юникода, включая
+ * неразрывный и узкий неразрывный, которыми сам кабинет и разбивает разряды.
+ */
+const DIGIT_GROUP_SPACES = /\s/gu;
+
+/**
+ * Целое число из поля ввода — или `undefined`, если введено не оно.
+ *
+ * Строго, в отличие от `Number.parseInt`: тот молча читает «1 000» как 1, а «1,5»
+ * и «12abc» — как 1 и 12. Лимит «1 000 вызовов» так сохранялся лимитом в один вызов
+ * (ui-review, 2026-09-14). Пробелы разрядов принимаются — кабинет сам их показывает;
+ * знак, дробь и экспонента — нет: здесь спрашивают количество.
+ */
+export function integerFromInput(value: string): number | undefined {
+  const digits = value.replace(DIGIT_GROUP_SPACES, '');
+  if (!/^\d+$/u.test(digits)) return undefined;
+  const parsed = Number(digits);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+/**
+ * Проценты из поля ввода — в сотых долях процента (базисных пунктах), или `undefined`.
+ *
+ * Считается строкой, а не плавающей точкой: `Math.round(0.285 * 100)` даёт 28, а не 29,
+ * и наценка тихо уменьшалась. Больше двух знаков после запятой — отказ, а не округление:
+ * API хранит сотые доли процента, и молча отброшенный знак — не та наценка, которую
+ * набрали. Пустое поле — тоже отказ: раньше оно превращалось в 0 %.
+ */
+export function basisPointsFromPercent(value: string): number | undefined {
+  const cleaned = value.replace(DIGIT_GROUP_SPACES, '').replace(/%$/u, '');
+  const match = /^(\d+)(?:[.,](\d{1,2}))?$/u.exec(cleaned);
+  if (match === null) return undefined;
+  const [, whole = '', fraction = ''] = match;
+  const points = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+  return Number.isSafeInteger(points) ? points : undefined;
+}

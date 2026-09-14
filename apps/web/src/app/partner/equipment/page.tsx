@@ -160,7 +160,7 @@ function PartnerEquipment() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <SimActions sim={sim} />
+                      <SimActions sim={sim} inPort={false} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -244,7 +244,7 @@ function GatewayCard({ gateway, spare }: { gateway: Gateway; spare: readonly Sim
                 <TableCell>
                   <div className="flex flex-wrap items-start gap-2">
                     <PortSim portId={port.id} spare={spare} filled={port.sim !== null} />
-                    {port.sim !== null && <SimActions sim={port.sim} />}
+                    {port.sim !== null && <SimActions sim={port.sim} inPort />}
                   </div>
                 </TableCell>
               </TableRow>

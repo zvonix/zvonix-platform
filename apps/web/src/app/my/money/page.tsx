@@ -74,7 +74,7 @@ function MyMoney() {
         </p>
       </div>
 
-      <AccountLedger source="/client/entries" />
+      <AccountLedger source="/client/entries" account="client" />
     </div>
   );
 }

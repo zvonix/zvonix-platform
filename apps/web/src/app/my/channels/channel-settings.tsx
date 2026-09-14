@@ -4,12 +4,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { TerminationKind } from '@zvonix/shared';
 import Link from 'next/link';
 import { useState } from 'react';
+import { ErrorNote } from '@/components/error-note';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { useOperators } from '@/lib/dictionaries';
 import { TERMINATION_KIND_MEANING, TERMINATION_KIND_NAME } from '@/lib/labels';
-import { money } from '@/lib/money';
+import { integerFromInput, money } from '@/lib/money';
 
 interface Priority {
   readonly alias_id: string;
@@ -22,9 +23,9 @@ interface Priority {
 /**
  * Предложение партнёра вместе с тем, во что оно обходится.
  *
- * Цена — стоимость вызова в 60 секунд **для клиента**: тариф партнёра плюс наценка
- * площадки. Диапазон, а не одно число: цена задаётся по направлениям, и у предложения
- * их десятки.
+ * Цена — стоимость вызова эталонной длины **для клиента**: тариф партнёра плюс наценка
+ * площадки, вместе с платой за соединение и минимальной длительностью. Диапазон, а не
+ * одно число: цена задаётся по направлениям, и у предложения их десятки.
  */
 interface Offer {
   readonly alias_id: string;
@@ -34,6 +35,13 @@ interface Offer {
   readonly max_price: string;
   readonly directions: number;
 }
+
+/** Границы номера в порядке — те же, что проверяет API. */
+const PRIORITY_MIN = 1;
+const PRIORITY_MAX = 1000;
+
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
 
 /** Ключ предложения: партнёр вместе со способом терминации (ADR-0040). */
 function offerKey(aliasId: string, kind: TerminationKind): string {
@@ -46,6 +54,10 @@ function offerKey(aliasId: string, kind: TerminationKind): string {
  * Обработчики существовали с самого начала и были ему открыты, но требовали
  * идентификатор канала — а перечислить свои каналы клиент не мог ничем. То есть право
  * было, а воспользоваться им было нечем.
+ *
+ * Оба списка **заменяются целиком**, поэтому менять их можно только после того, как
+ * текущий пришёл. Раньше отметка до ответа строила черновик от пустого набора и одним
+ * сохранением стирала весь порядок или весь список операторов (ui-review, 2026-09-14).
  */
 export function ChannelSettings({ channelId }: { channelId: string }) {
   return (
@@ -97,7 +109,9 @@ function PartnerOrder({ channelId }: { channelId: string }) {
     },
   });
 
+  const loaded = offers.isSuccess && current.isSuccess;
   const offerRows = offers.data?.offers ?? [];
+  const seconds = offers.data?.seconds ?? 60;
 
   const saved: Record<string, string> = {};
   for (const row of current.data ?? []) {
@@ -105,9 +119,17 @@ function PartnerOrder({ channelId }: { channelId: string }) {
   }
   const values = draft ?? saved;
 
-  const failed = [offers.error, current.error, save.error].find(
-    (candidate): candidate is ApiError => candidate instanceof ApiError,
-  );
+  // Негодное значение не выбрасывается молча, как раньше, — оно называется, и сохранить
+  // такой порядок нельзя: иначе «0» или «первый» просто выпадали из порядка без единого слова.
+  const invalid = offerRows.filter((offer) => {
+    const raw = (values[offerKey(offer.alias_id, offer.termination_kind)] ?? '').trim();
+    if (raw === '') return false;
+    const parsed = integerFromInput(raw);
+    return parsed === undefined || parsed < PRIORITY_MIN || parsed > PRIORITY_MAX;
+  });
+
+  const loadError = asApiError(offers.error ?? current.error);
+  const saveError = asApiError(save.error);
 
   return (
     <section className="flex flex-col gap-2">
@@ -118,19 +140,18 @@ function PartnerOrder({ channelId }: { channelId: string }) {
         Меньший номер — раньше; равные номера делят трафик поровну.
       </p>
       <p className="text-muted-foreground">
-        Цены — за вызов длительностью <span className="num">{offers.data?.seconds ?? 60}</span> с.
-        Сравнивать по ним осмысленно только вызовы такой длины: тарифы с разным шагом на коротком
-        вызове расходятся в разы. Полный состав — в разделе{' '}
+        Цены — за вызов длительностью <span className="num">{seconds}</span> с, вместе с платой за
+        соединение. Сравнивать по ним осмысленно только вызовы такой длины: тарифы с разным шагом на
+        коротком вызове расходятся в разы. Полный состав — в разделе{' '}
         <Link href="/my/prices" className="underline underline-offset-2">
           «Мои цены»
         </Link>
         .
       </p>
 
-      {failed !== undefined && (
-        <p role="alert" className="text-crit">
-          {failed.message}
-        </p>
+      {loadError !== undefined && <ErrorNote error={loadError} />}
+      {!loaded && loadError === undefined && (
+        <p className="text-muted-foreground">Загружаем порядок…</p>
       )}
 
       <div className="flex flex-col gap-1">
@@ -140,7 +161,10 @@ function PartnerOrder({ channelId }: { channelId: string }) {
             <label key={key} className="flex items-center gap-2">
               <Input
                 className="num w-[70px]"
+                inputMode="numeric"
+                autoComplete="off"
                 placeholder="—"
+                disabled={!loaded}
                 value={values[key] ?? ''}
                 onChange={(event) => {
                   setDraft({ ...values, [key]: event.target.value });
@@ -156,30 +180,39 @@ function PartnerOrder({ channelId }: { channelId: string }) {
                   {' · '}
                   {TERMINATION_KIND_NAME[offer.termination_kind]}
                 </span>
-                <span className="block text-faint">
-                  <Range offer={offer} /> · направлений: {offer.directions}
+                <span className="block text-muted-foreground">
+                  <Range offer={offer} seconds={seconds} /> · направлений: {offer.directions}
                 </span>
               </span>
             </label>
           );
         })}
 
-        {offers.data !== undefined && offerRows.length === 0 && (
+        {offers.isSuccess && offerRows.length === 0 && (
           <p className="text-muted-foreground">
             Предложений пока нет: ни у одного партнёра не задана цена по направлениям.
           </p>
         )}
       </div>
 
+      {invalid.length > 0 && (
+        <p className="text-warn">
+          Номер в порядке — целое число от {PRIORITY_MIN} до {PRIORITY_MAX}. Исправьте:{' '}
+          {invalid.map((offer) => offer.display_name).join(', ')}.
+        </p>
+      )}
+
+      {saveError !== undefined && <ErrorNote error={saveError} />}
+
       <div className="flex gap-2">
         <Button
           size="sm"
-          disabled={draft === undefined || save.isPending}
+          disabled={!loaded || draft === undefined || invalid.length > 0 || save.isPending}
           onClick={() => {
             save.mutate(toPriorities(values));
           }}
         >
-          Сохранить порядок
+          {save.isPending ? 'Сохраняем…' : 'Сохранить порядок'}
         </Button>
         {draft !== undefined && (
           <Button
@@ -197,36 +230,47 @@ function PartnerOrder({ channelId }: { channelId: string }) {
   );
 }
 
-/** Диапазон цены: одинаковые границы показываются одним числом, а не «X–X». */
-function Range({ offer }: { offer: Offer }) {
+/**
+ * Диапазон цены: одинаковые границы показываются одним числом, а не «X–X».
+ *
+ * «За вызов N с», а не «за минуту»: это стоимость эталонного вызова вместе с платой
+ * за соединение и минимумом, и цена за минуту у того же предложения бывает другой.
+ */
+function Range({ offer, seconds }: { offer: Offer; seconds: number }) {
+  const per = `за вызов ${String(seconds)}\u00A0с`;
   return offer.min_price === offer.max_price ? (
-    <>{money(offer.min_price)} за минуту</>
+    <>
+      {money(offer.min_price)} {per}
+    </>
   ) : (
     <>
-      {money(offer.min_price)} — {money(offer.max_price)} за минуту
+      {money(offer.min_price)} — {money(offer.max_price)} {per}
     </>
   );
 }
 
 /**
- * Пустые и негодные значения выбрасываются: «не участвует» — это отсутствие строки.
+ * Пустые значения выбрасываются: «не участвует» — это отсутствие строки.
  *
- * Ключ разбирается обратно на псевдоним и способ терминации: строкой он живёт только
- * в состоянии формы, а наружу уходит парой, как того и ждёт обработчик.
+ * Негодные сюда не доходят — сохранение с ними запрещено выше. Ключ разбирается обратно
+ * на псевдоним и способ терминации: строкой он живёт только в состоянии формы, а наружу
+ * уходит парой, как того и ждёт обработчик.
  */
 function toPriorities(
   values: Record<string, string>,
 ): { aliasId: string; terminationKind: string; priority: number }[] {
-  return Object.entries(values)
-    .map(([key, raw]) => {
-      const separator = key.lastIndexOf(':');
-      return {
+  return Object.entries(values).flatMap(([key, raw]) => {
+    const priority = integerFromInput(raw);
+    if (priority === undefined) return [];
+    const separator = key.lastIndexOf(':');
+    return [
+      {
         aliasId: key.slice(0, separator),
         terminationKind: key.slice(separator + 1),
-        priority: Number.parseInt(raw, 10),
-      };
-    })
-    .filter((entry) => Number.isFinite(entry.priority) && entry.priority >= 1);
+        priority,
+      },
+    ];
+  });
 }
 
 /**
@@ -262,15 +306,15 @@ function AllowedOperators({ channelId }: { channelId: string }) {
     },
   });
 
+  const loaded = current.isSuccess && operators.ready;
   const chosen = draft ?? new Set(current.data ?? []);
   const needle = filter.trim().toLowerCase();
   const visible = operators.rows.filter(
     (row) => needle === '' || row.name.toLowerCase().includes(needle),
   );
 
-  const failed = [operators.error, current.error, save.error].find(
-    (candidate): candidate is ApiError => candidate instanceof ApiError,
-  );
+  const loadError = asApiError(operators.error ?? current.error);
+  const saveError = asApiError(save.error);
 
   return (
     <section className="flex flex-col gap-2">
@@ -281,15 +325,13 @@ function AllowedOperators({ channelId }: { channelId: string }) {
         отдельной причиной.
       </p>
 
-      {failed !== undefined && (
-        <p role="alert" className="text-crit">
-          {failed.message}
-        </p>
-      )}
+      {loadError !== undefined && <ErrorNote error={loadError} />}
 
       <Input
         className="w-[220px]"
-        placeholder="найти оператора"
+        aria-label="Найти оператора"
+        placeholder="найти оператора…"
+        autoComplete="off"
         value={filter}
         onChange={(event) => {
           setFilter(event.target.value);
@@ -297,33 +339,41 @@ function AllowedOperators({ channelId }: { channelId: string }) {
       />
 
       <div className="max-h-[220px] overflow-y-auto rounded-md border border-border p-2">
-        {visible.map((row) => (
-          <label key={row.id} className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={chosen.has(row.id)}
-              onChange={(event) => {
-                const next = new Set(chosen);
-                if (event.target.checked) next.add(row.id);
-                else next.delete(row.id);
-                setDraft(next);
-              }}
-            />
-            <span>{row.name}</span>
-          </label>
-        ))}
-        {visible.length === 0 && <span className="text-muted-foreground">Ничего не найдено.</span>}
+        {!loaded && loadError === undefined && (
+          <span className="text-muted-foreground">Загружаем…</span>
+        )}
+        {loaded &&
+          visible.map((row) => (
+            <label key={row.id} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={chosen.has(row.id)}
+                onChange={(event) => {
+                  const next = new Set(chosen);
+                  if (event.target.checked) next.add(row.id);
+                  else next.delete(row.id);
+                  setDraft(next);
+                }}
+              />
+              <span>{row.name}</span>
+            </label>
+          ))}
+        {loaded && visible.length === 0 && (
+          <span className="text-muted-foreground">Ничего не найдено.</span>
+        )}
       </div>
+
+      {saveError !== undefined && <ErrorNote error={saveError} />}
 
       <div className="flex gap-2">
         <Button
           size="sm"
-          disabled={draft === undefined || save.isPending}
+          disabled={!loaded || draft === undefined || save.isPending}
           onClick={() => {
             save.mutate([...chosen]);
           }}
         >
-          Сохранить список
+          {save.isPending ? 'Сохраняем…' : 'Сохранить список'}
         </Button>
         {draft !== undefined && (
           <Button

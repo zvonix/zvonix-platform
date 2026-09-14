@@ -19,7 +19,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { E2E_PASSWORD, startStack, TEST_DATABASE_URL } from './e2e-stack.mjs';
+import { E2E_PASSWORD, STACK_ENV, startStack, TEST_DATABASE_URL } from './e2e-stack.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -74,7 +74,7 @@ async function main() {
   process.stdout.write('Готовим базу и наполняем стенд…\n');
   const seeded = await run(process.execPath, [path.join('dist', 'testing', 'seed-e2e.js')], {
     cwd: path.join(ROOT, 'apps', 'api'),
-    env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL, ...stackEnv() },
+    env: { ...process.env, ...STACK_ENV, DATABASE_URL: TEST_DATABASE_URL },
   });
   if (seeded.code !== 0) {
     process.stderr.write(`Наполнение стенда не удалось:\n${seeded.output}\n`);
@@ -106,18 +106,6 @@ async function main() {
   } finally {
     await stack.stop();
   }
-}
-
-/** Конфигурация, без которой приложение не поднимется вовсе (ADR-0002). */
-function stackEnv() {
-  return {
-    SECRET_KEY: 'сквозная-проверка'.padEnd(32, '-'),
-    APP_ENV: 'test',
-    LOG_LEVEL: 'error',
-    LOG_FORMAT: 'json',
-    AUTH_RATE_LIMIT_ENABLED: 'false',
-    WRITE_RATE_LIMIT_PER_MINUTE: '0',
-  };
 }
 
 // Исключение здесь — тоже исход проверки, и он обязан быть назван. Без своей

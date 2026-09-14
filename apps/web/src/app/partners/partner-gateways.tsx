@@ -11,6 +11,8 @@ import {
   type SimStatus,
 } from '@zvonix/shared';
 import { useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
+import { ErrorNote } from '@/components/error-note';
 import { SipCredentials, type SipAccount } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,7 +27,14 @@ import {
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
-import { GATEWAY_STATUS_NAME, GATEWAY_TYPE_NAME, PORT_STATE_NAME, usableTone } from '@/lib/labels';
+import {
+  GATEWAY_STATUS_MEANING,
+  GATEWAY_STATUS_NAME,
+  GATEWAY_TYPE_NAME,
+  PORT_STATE_NAME,
+  usableTone,
+} from '@/lib/labels';
+import { integerFromInput } from '@/lib/money';
 
 interface Gateway {
   readonly id: string;
@@ -53,12 +62,34 @@ export interface SimOption {
 
 const COLUMNS = 7;
 
+/** Границы из API: портов у шлюза от нуля, номер порта от единицы, не больше 256. */
+const MAX_PORTS = 256;
+
+/**
+ * Кнопка смены состояния называет **действие**, а не состояние: «Приостановлен» рядом
+ * с плашкой текущего состояния читалось как ещё одна плашка, а не как кнопка.
+ */
+const STATUS_ACTION: Record<GatewayStatus, string> = {
+  pending: 'Вернуть в «ждёт»',
+  active: 'Включить',
+  suspended: 'Приостановить',
+  retired: 'Вывести навсегда',
+};
+
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
+
 /**
  * Шлюзы партнёра: заведение, доступ SIP, состояние, порты.
  *
  * Шлюз заводится `pending`: учётная запись выдана, но каталог её не отдаёт, пока
  * администратор не переведёт шлюз в «работает». То есть выдача доступа и допуск
  * к трафику — два отдельных решения, и это намеренно.
+ *
+ * Включение — одним нажатием. Всё, что останавливает трафик или необратимо
+ * (приостановка, возврат в «ждёт», вывод, перевыпуск доступа), — через подтверждение
+ * с названным последствием: раньше вывод шлюза вместе с вынутыми SIM срабатывал
+ * с первого нажатия (ui-review, 2026-09-14).
  */
 export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: SimOption[] }) {
   const canChange = useCanChange();
@@ -78,6 +109,10 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
     queryFn: () => request<{ gateways: Gateway[] }>(`/gateways?partnerId=${partnerId}`),
   });
 
+  const invalidate = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: ['gateways', partnerId] });
+  };
+
   const create = useMutation({
     mutationFn: () =>
       request<{ account: SipAccount }>('/gateways', {
@@ -87,7 +122,7 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
           name,
           type,
           ...(model.trim() === '' ? {} : { model: model.trim() }),
-          portCount,
+          portCount: integerFromInput(portCount),
         },
       }),
     onSuccess: async (data) => {
@@ -95,33 +130,46 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
       setName('');
       setModel('');
       setIssued({ title: `Доступ SIP для шлюза «${name}»`, account: data.account });
-      await queryClient.invalidateQueries({ queryKey: ['gateways', partnerId] });
+      await invalidate();
     },
   });
 
-  const changeStatus = useMutation({
-    mutationFn: (input: { id: string; status: GatewayStatus }) =>
-      request<unknown>(`/gateways/${input.id}/status`, {
+  const activate = useMutation({
+    mutationFn: (gateway: Gateway) =>
+      request<unknown>(`/gateways/${gateway.id}/status`, {
+        method: 'POST',
+        body: { status: 'active' },
+      }),
+    onSuccess: invalidate,
+  });
+
+  // Подтверждаемые действия — своими мутациями: их отказ показывается в окне
+  // подтверждения и не должен повторяться в общей строке ошибок.
+  const confirmStatus = useMutation({
+    mutationFn: (input: { gateway: Gateway; status: GatewayStatus }) =>
+      request<unknown>(`/gateways/${input.gateway.id}/status`, {
         method: 'POST',
         body: { status: input.status },
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['gateways', partnerId] });
+    onSuccess: () => {
+      void invalidate();
     },
   });
 
   const reissue = useMutation({
     mutationFn: (gateway: Gateway) =>
       request<{ account: SipAccount }>(`/gateways/${gateway.id}/credentials`, { method: 'POST' }),
-    onSuccess: async (data, gateway) => {
+    onSuccess: (data, gateway) => {
       setIssued({ title: `Новый доступ SIP для шлюза «${gateway.name}»`, account: data.account });
-      await queryClient.invalidateQueries({ queryKey: ['gateways', partnerId] });
+      void invalidate();
     },
   });
 
-  const failed = [create.error, changeStatus.error, reissue.error, list.error].find(
-    (error): error is ApiError => error instanceof ApiError,
-  );
+  const failed = asApiError(create.error ?? activate.error ?? list.error);
+  const ports = integerFromInput(portCount);
+  const portsValid = ports !== undefined && ports <= MAX_PORTS;
+  const nameValid = name.trim().length >= 2;
+  const busy = activate.isPending || confirmStatus.isPending || reissue.isPending;
 
   return (
     <div className="flex flex-col gap-2">
@@ -154,7 +202,7 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (name.trim().length >= 2) create.mutate();
+            if (nameValid && portsValid) create.mutate();
           }}
           className="flex max-w-[900px] flex-wrap items-end gap-2 rounded-md border border-border bg-card p-3"
         >
@@ -163,6 +211,7 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
             <Input
               className="w-[200px]"
               value={name}
+              autoComplete="off"
               placeholder="GOIP в Казани"
               onChange={(event) => {
                 setName(event.target.value);
@@ -192,6 +241,7 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
             <Input
               className="w-[160px]"
               value={model}
+              autoComplete="off"
               placeholder="необязательно"
               onChange={(event) => {
                 setModel(event.target.value);
@@ -203,6 +253,8 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
             <span className="text-muted-foreground">Портов</span>
             <Input
               className="num w-[80px]"
+              inputMode="numeric"
+              autoComplete="off"
               value={portCount}
               onChange={(event) => {
                 setPortCount(event.target.value);
@@ -210,9 +262,16 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
             />
           </label>
 
-          <Button type="submit" size="sm" disabled={create.isPending}>
-            Завести
+          <Button type="submit" size="sm" disabled={!nameValid || !portsValid || create.isPending}>
+            {create.isPending ? 'Заводим…' : 'Завести'}
           </Button>
+
+          {name !== '' && !nameValid && (
+            <p className="w-full text-warn">Название — не короче двух знаков.</p>
+          )}
+          {!portsValid && (
+            <p className="w-full text-warn">Число портов — целое, от 0 до {MAX_PORTS}.</p>
+          )}
 
           <p className="w-full text-muted-foreground">
             {/*
@@ -227,13 +286,9 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
         </form>
       )}
 
-      {failed !== undefined && (
-        <p role="alert" className="text-crit">
-          {failed.message}
-        </p>
-      )}
+      {failed !== undefined && <ErrorNote error={failed} />}
 
-      <div className="max-w-[900px] rounded-md border border-border bg-card">
+      <div className="max-w-[900px] overflow-x-auto rounded-md border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -269,16 +324,15 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
                 gateway={gateway}
                 sims={sims}
                 open={opened === gateway.id}
-                busy={changeStatus.isPending || reissue.isPending}
+                busy={busy}
                 onToggle={() => {
                   setOpened(opened === gateway.id ? undefined : gateway.id);
                 }}
-                onStatus={(status) => {
-                  changeStatus.mutate({ id: gateway.id, status });
+                onActivate={() => {
+                  activate.mutate(gateway);
                 }}
-                onReissue={() => {
-                  reissue.mutate(gateway);
-                }}
+                onConfirmStatus={(status) => confirmStatus.mutateAsync({ gateway, status })}
+                onReissue={() => reissue.mutateAsync(gateway)}
               />
             ))}
           </TableBody>
@@ -294,7 +348,8 @@ function GatewayRows({
   open,
   busy,
   onToggle,
-  onStatus,
+  onActivate,
+  onConfirmStatus,
   onReissue,
 }: {
   gateway: Gateway;
@@ -302,8 +357,9 @@ function GatewayRows({
   open: boolean;
   busy: boolean;
   onToggle: () => void;
-  onStatus: (status: GatewayStatus) => void;
-  onReissue: () => void;
+  onActivate: () => void;
+  onConfirmStatus: (status: GatewayStatus) => Promise<unknown>;
+  onReissue: () => Promise<unknown>;
 }) {
   const canChange = useCanChange();
 
@@ -325,7 +381,9 @@ function GatewayRows({
           </span>
         </TableCell>
         <TableCell>
-          <span className="num">{gateway.sip_username}</span>
+          <span className="num" translate="no">
+            {gateway.sip_username}
+          </span>
         </TableCell>
         <TableCell className="num text-right">{gateway.port_count}</TableCell>
         <TableCell>
@@ -346,43 +404,54 @@ function GatewayRows({
         <TableRow className="bg-muted/40 hover:bg-muted/40">
           <TableCell colSpan={COLUMNS} className="whitespace-normal">
             <div className="flex flex-col gap-3">
-              {canChange && (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-muted-foreground">Состояние шлюза:</span>
-                    {GATEWAY_STATUSES.filter((status) => status !== gateway.status).map(
-                      (status) => (
-                        <Button
-                          key={status}
-                          variant="outline"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => {
-                            onStatus(status);
-                          }}
-                        >
-                          {GATEWAY_STATUS_NAME[status]}
-                        </Button>
-                      ),
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="ml-auto"
-                      disabled={busy}
-                      onClick={onReissue}
-                    >
-                      Перевыпустить доступ
-                    </Button>
-                  </div>
+              {canChange && gateway.status === 'retired' && (
+                <p className="text-muted-foreground">
+                  Шлюз выведен навсегда: состояние больше не меняется, SIM из его портов вынуты.
+                </p>
+              )}
 
-                  <p className="text-muted-foreground">
-                    Отключение действует немедленно: каталог перестаёт отдавать учётную запись, и
-                    следующая регистрация не пройдёт. Уже идущие разговоры не рвутся. Перевыпуск
-                    меняет и имя, и пароль — шлюз замолчит, пока партнёр не настроит оборудование
-                    заново.
-                  </p>
-                </>
+              {canChange && gateway.status !== 'retired' && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">Состояние шлюза:</span>
+                  {GATEWAY_STATUSES.filter((status) => status !== gateway.status).map((status) =>
+                    status === 'active' ? (
+                      <Button
+                        key={status}
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        onClick={onActivate}
+                      >
+                        {STATUS_ACTION[status]}
+                      </Button>
+                    ) : (
+                      <ConfirmAction
+                        key={status}
+                        label={STATUS_ACTION[status]}
+                        title={`${STATUS_ACTION[status]}: шлюз «${gateway.name}»`}
+                        consequence={<p>{GATEWAY_STATUS_MEANING[status]}</p>}
+                        confirmLabel={STATUS_ACTION[status]}
+                        disabled={busy}
+                        onConfirm={() => onConfirmStatus(status)}
+                      />
+                    ),
+                  )}
+                  <ConfirmAction
+                    className="ml-auto"
+                    label="Перевыпустить доступ"
+                    title={`Перевыпустить доступ шлюза «${gateway.name}»`}
+                    consequence={
+                      <p>
+                        Имя и пароль SIP меняются сразу. Шлюз потеряет регистрацию и замолчит, пока
+                        партнёр не введёт новые данные в настройках оборудования. Идущие разговоры
+                        не рвутся.
+                      </p>
+                    }
+                    confirmLabel="Перевыпустить"
+                    disabled={busy}
+                    onConfirm={onReissue}
+                  />
+                </div>
               )}
 
               <GatewayPorts gatewayId={gateway.id} sims={sims} />
@@ -418,7 +487,7 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
     mutationFn: () =>
       request<unknown>(`/gateways/${gatewayId}/ports`, {
         method: 'POST',
-        body: { portNumber },
+        body: { portNumber: integerFromInput(portNumber) },
       }),
     onSuccess: async () => {
       setPortNumber('');
@@ -435,10 +504,10 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
     onSuccess: invalidate,
   });
 
-  const failed = [list.error, addPort.error, assign.error].find(
-    (error): error is ApiError => error instanceof ApiError,
-  );
+  const failed = asApiError(list.error ?? addPort.error ?? assign.error);
   const ports = list.data?.ports ?? [];
+  const port = integerFromInput(portNumber);
+  const portValid = port !== undefined && port >= 1 && port <= MAX_PORTS;
 
   return (
     <div className="flex flex-col gap-2">
@@ -448,6 +517,8 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
             <span className="text-muted-foreground">Номер порта</span>
             <Input
               className="num w-[100px]"
+              inputMode="numeric"
+              autoComplete="off"
               value={portNumber}
               placeholder="как на корпусе"
               onChange={(event) => {
@@ -458,23 +529,22 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
           <Button
             variant="outline"
             size="sm"
-            disabled={portNumber.trim() === '' || addPort.isPending}
+            disabled={!portValid || addPort.isPending}
             onClick={() => {
               addPort.mutate();
             }}
           >
             Добавить порт
           </Button>
+          {portNumber !== '' && !portValid && (
+            <p className="w-full text-warn">Номер порта — целое число от 1 до {MAX_PORTS}.</p>
+          )}
         </div>
       )}
 
-      {failed !== undefined && (
-        <p role="alert" className="text-crit">
-          {failed.message}
-        </p>
-      )}
+      {failed !== undefined && <ErrorNote error={failed} />}
 
-      <div className="max-w-[600px] rounded-md border border-border bg-card">
+      <div className="max-w-[600px] overflow-x-auto rounded-md border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -500,20 +570,21 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
               </TableRow>
             )}
 
-            {ports.map((port) => (
-              <TableRow key={port.id}>
-                <TableCell className="num text-right">{port.port_number}</TableCell>
+            {ports.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell className="num text-right">{row.port_number}</TableCell>
                 <TableCell className="text-muted-foreground">
-                  {PORT_STATE_NAME[port.state]}
+                  {PORT_STATE_NAME[row.state]}
                 </TableCell>
                 <TableCell>
                   {canChange ? (
                     <select
-                      value={port.sim_card_id ?? ''}
+                      aria-label={`SIM в порту ${String(row.port_number)}`}
+                      value={row.sim_card_id ?? ''}
                       disabled={assign.isPending}
                       onChange={(event) => {
                         assign.mutate({
-                          portId: port.id,
+                          portId: row.id,
                           simCardId: event.target.value === '' ? null : event.target.value,
                         });
                       }}
@@ -528,7 +599,7 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
                     </select>
                   ) : (
                     <span className="num">
-                      {sims.find((sim) => sim.id === port.sim_card_id)?.msisdn ?? (
+                      {sims.find((sim) => sim.id === row.sim_card_id)?.msisdn ?? (
                         <span className="text-muted-foreground">порт пуст</span>
                       )}
                     </span>

@@ -3,7 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NODE_OFFLINE_AFTER_MS, type NodeStatus } from '@zvonix/shared';
 import { Fragment, useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
+import { ErrorNote } from '@/components/error-note';
 import { OneTimeSecret } from '@/components/one-time-secret';
 import { ReadOnly } from '@/components/read-only';
 import { Button } from '@/components/ui/button';
@@ -47,6 +49,9 @@ interface Install {
   readonly command: string;
   readonly expiresAt: string | null;
 }
+
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
 
 export default function NodesPage() {
   return (
@@ -104,21 +109,21 @@ function NodesView() {
     },
   });
 
+  // Вывод из эксплуатации идёт через подтверждение, и его отказ показывается там же:
+  // в общей строке ошибок он повторился бы вторым сообщением.
   const decommission = useMutation({
     mutationFn: (id: string) =>
       request<{ node: Node }>(`/nodes/${id}/decommission`, {
         method: 'POST',
       }),
-    onSuccess: async () => {
+    onSuccess: () => {
       setOpened(undefined);
-      await refresh();
+      void refresh();
     },
   });
 
   const busy = provision.isPending || reissue.isPending || decommission.isPending;
-  const failed = [provision.error, reissue.error, decommission.error, list.error].find(
-    (candidate): candidate is ApiError => candidate instanceof ApiError,
-  );
+  const failed = asApiError(provision.error ?? reissue.error ?? list.error);
 
   return (
     <div className="flex flex-col gap-3">
@@ -139,17 +144,15 @@ function NodesView() {
             {creating ? 'Свернуть' : 'Завести узел'}
           </Button>
         ) : (
-          <span className="ml-auto">
+          // Обёртка — блок, а не `span`: внутри `ReadOnly` абзац, и строчный элемент
+          // вокруг абзаца — недопустимая разметка.
+          <div className="ml-auto">
             <ReadOnly what="узлы" />
-          </span>
+          </div>
         )}
       </div>
 
-      {failed !== undefined && (
-        <p role="alert" className="text-crit">
-          {failed.message}
-        </p>
-      )}
+      {failed !== undefined && <ErrorNote error={failed} />}
 
       {install !== undefined && (
         <OneTimeSecret
@@ -170,7 +173,10 @@ function NodesView() {
               </>
             )}
           </p>
-          <pre className="num overflow-x-auto rounded-md border border-border bg-card p-2 select-all">
+          <pre
+            className="num overflow-x-auto rounded-md border border-border bg-card p-2 select-all"
+            translate="no"
+          >
             {install.command}
           </pre>
           <p className="text-muted-foreground">
@@ -192,7 +198,7 @@ function NodesView() {
         />
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -236,9 +242,7 @@ function NodesView() {
                 onReissue={(allowedIps) => {
                   reissue.mutate({ id: node.id, allowedIps });
                 }}
-                onDecommission={() => {
-                  decommission.mutate(node.id);
-                }}
+                onDecommission={() => decommission.mutateAsync(node.id)}
               />
             ))}
           </TableBody>
@@ -263,7 +267,7 @@ function NodeRows({
   canChange: boolean;
   onToggle: () => void;
   onReissue: (allowedIps: string[]) => void;
-  onDecommission: () => void;
+  onDecommission: () => Promise<unknown>;
 }) {
   const closed = node.status === 'decommissioned';
 
@@ -272,7 +276,9 @@ function NodeRows({
       <TableRow>
         <TableCell>
           {node.name}
-          <span className="num block text-faint">{node.hostname ?? 'машина не отвечала'}</span>
+          <span className="num block text-faint" translate="no">
+            {node.hostname ?? 'машина не отвечала'}
+          </span>
         </TableCell>
 
         <TableCell>
@@ -285,7 +291,9 @@ function NodeRows({
           {node.sip_address === null ? (
             <span className="text-faint">не задан</span>
           ) : (
-            <span className="num">{node.sip_address}</span>
+            <span className="num" translate="no">
+              {node.sip_address}
+            </span>
           )}
         </TableCell>
 
@@ -316,9 +324,10 @@ function NodeRows({
         <TableRow className="bg-muted/40 hover:bg-muted/40">
           <TableCell colSpan={COLUMNS} className="whitespace-normal">
             {/*
-              Подтверждение называет последствие, а не спрашивает «вы уверены?» (DESIGN.md).
-              Здесь последствий два, и они разной тяжести: перевыпуск команды обратим,
-              вывод из эксплуатации — нет.
+              Два действия разной тяжести: перевыпуск команды обратим и идёт формой,
+              вывод из эксплуатации необратим и идёт через подтверждение с последствием
+              (DESIGN.md). Раньше вывод срабатывал с первого нажатия на кнопку, которая
+              сама и была «подтверждением» (ui-review, 2026-09-14).
             */}
             <div className="flex flex-col gap-2">
               <p className="text-muted-foreground">
@@ -327,19 +336,22 @@ function NodeRows({
               <div className="flex flex-wrap items-start gap-2">
                 <ReissueInstall busy={busy} onReissue={onReissue} />
 
-                <button
-                  type="button"
+                <ConfirmAction
+                  label="Вывести из эксплуатации"
+                  title={`Вывести узел «${node.name}» из эксплуатации`}
+                  consequence={
+                    <>
+                      <p>Все ключи узла отзываются, вызовы через него прекращаются.</p>
+                      <p>
+                        Запись остаётся: на неё ссылаются CDR. Состояние окончательное — вернуть
+                        узел в работу нельзя, понадобится завести новый.
+                      </p>
+                    </>
+                  }
+                  confirmLabel="Вывести навсегда"
                   disabled={busy}
-                  onClick={onDecommission}
-                  className="max-w-[320px] rounded-md border border-crit/40 bg-card p-2 text-left hover:border-crit disabled:opacity-50"
-                >
-                  <span className="font-medium text-crit">Вывести из эксплуатации</span>
-                  <span className="block text-muted-foreground">
-                    Все ключи узла отзываются, вызовы прекращаются. Запись остаётся: на неё
-                    ссылаются CDR. Состояние окончательное — вернуть узел в работу нельзя,
-                    понадобится завести новый.
-                  </span>
-                </button>
+                  onConfirm={onDecommission}
+                />
               </div>
             </div>
           </TableCell>

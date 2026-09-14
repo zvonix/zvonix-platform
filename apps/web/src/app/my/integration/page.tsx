@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { OneTimeSecret } from '@/components/one-time-secret';
@@ -97,9 +98,10 @@ function Integration() {
             восстановить будет нечем, останется только завести новый ключ и отозвать этот.
           </p>
 
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          {/* Имя и секрет — идентификаторы: автоперевод браузера исказил бы их молча. */}
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1" translate="no">
             <dt className="text-muted-foreground">Имя</dt>
-            <dd className="num select-all">{issued.key.key_id}</dd>
+            <dd className="num select-all break-all">{issued.key.key_id}</dd>
             <dt className="text-muted-foreground">Секрет</dt>
             <dd className="num select-all break-all">{issued.key.secret}</dd>
             {issued.key.expires_at !== null && (
@@ -119,7 +121,7 @@ function Integration() {
         }}
       />
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -151,7 +153,9 @@ function Integration() {
             {keys.data?.keys.map((key) => (
               <TableRow key={key.id} className={key.revoked_at === null ? '' : 'opacity-60'}>
                 <TableCell className="whitespace-normal">{key.label}</TableCell>
-                <TableCell className="num select-all">{key.key_id}</TableCell>
+                <TableCell className="num select-all" translate="no">
+                  {key.key_id}
+                </TableCell>
                 <TableCell className="num whitespace-normal">
                   {key.allowed_ips.length === 0 ? (
                     <span className="text-muted-foreground">откуда угодно</span>
@@ -164,7 +168,7 @@ function Integration() {
                 </TableCell>
                 <TableCell className="text-right">
                   {key.revoked_at === null ? (
-                    <RevokeKey id={key.id} onRevoked={refresh} />
+                    <RevokeKey apiKey={key} onRevoked={refresh} />
                   ) : (
                     <span className="text-muted-foreground">отозван {moment(key.revoked_at)}</span>
                   )}
@@ -212,6 +216,7 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
   });
 
   const error = asApiError(add.error);
+  const ready = label.trim() !== '';
 
   if (!open) {
     return (
@@ -233,7 +238,7 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
       className="flex max-w-[720px] flex-col gap-2 rounded-lg border border-border bg-card p-3"
       onSubmit={(event) => {
         event.preventDefault();
-        if (label.trim() !== '') add.mutate();
+        if (ready) add.mutate();
       }}
     >
       <div className="flex flex-wrap items-end gap-2">
@@ -242,6 +247,7 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
           <Input
             className="w-[260px]"
             value={label}
+            autoComplete="off"
             placeholder="Диспетчерская, основной сервер"
             onChange={(event) => {
               setLabel(event.target.value);
@@ -253,14 +259,16 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
           <Input
             className="num w-[280px]"
             value={ips}
+            autoComplete="off"
+            spellCheck={false}
             placeholder="необязательно: 203.0.113.7"
             onChange={(event) => {
               setIps(event.target.value);
             }}
           />
         </label>
-        <Button type="submit" size="sm" disabled={add.isPending}>
-          Завести
+        <Button type="submit" size="sm" disabled={!ready || add.isPending}>
+          {add.isPending ? 'Заводим…' : 'Завести'}
         </Button>
         <Button
           type="button"
@@ -275,6 +283,7 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
       </div>
 
       <p className="text-muted-foreground">
+        Назначение обязательно — по нему ключ узнают в списке, когда его понадобится отозвать.
         Адреса перечисляются через запятую. Пустое поле означает «откуда угодно» — это допустимо, но
         заполненный список остаётся единственной защитой на случай, если ключ утечёт.
       </p>
@@ -284,36 +293,36 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
   );
 }
 
-/** Отзыв необратим: первый нажим спрашивает, второй делает. */
-function RevokeKey({ id, onRevoked }: { id: string; onRevoked: () => Promise<void> }) {
-  const [asked, setAsked] = useState(false);
-
+/**
+ * Отзыв ключа — необратим: отозванный не оживить, остаётся завести новый.
+ *
+ * Через подтверждение с последствием. Прежняя кнопка спрашивала «Точно отозвать?»,
+ * не называя, что система с этим ключом сразу потеряет доступ, и взведённой оставалась
+ * навсегда: случайное нажатие много позже отзывало ключ (ui-review, 2026-09-14).
+ */
+function RevokeKey({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: () => Promise<void> }) {
   const revoke = useMutation({
-    mutationFn: () => request<unknown>(`/client/api-keys/${id}`, { method: 'DELETE' }),
-    onSuccess: onRevoked,
+    mutationFn: () => request<unknown>(`/client/api-keys/${apiKey.id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void onRevoked();
+    },
   });
 
-  const error = asApiError(revoke.error);
-
   return (
-    <div className="flex flex-col items-end gap-1">
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={revoke.isPending}
-        className={asked ? 'text-crit' : ''}
-        onClick={() => {
-          if (asked) {
-            revoke.mutate();
-            setAsked(false);
-          } else {
-            setAsked(true);
-          }
-        }}
-      >
-        {asked ? 'Точно отозвать?' : 'Отозвать'}
-      </Button>
-      {error !== undefined && <ErrorNote error={error} />}
-    </div>
+    <ConfirmAction
+      label="Отозвать"
+      title={`Отозвать ключ «${apiKey.label}»`}
+      consequence={
+        <>
+          <p>
+            Система, которая пользуется этим ключом, сразу потеряет доступ к{' '}
+            <span className="num">/v1</span>: её обращения начнут получать отказ.
+          </p>
+          <p>Вернуть ключ нельзя — только завести новый и вписать его в систему.</p>
+        </>
+      }
+      confirmLabel="Отозвать ключ"
+      onConfirm={() => revoke.mutateAsync()}
+    />
   );
 }

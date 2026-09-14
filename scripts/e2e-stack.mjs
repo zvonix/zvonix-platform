@@ -45,6 +45,29 @@ export const TEST_DATABASE_URL =
 /** Общий пароль учётных записей стенда. Стенд одноразовый и живёт в памяти прогона. */
 export const E2E_PASSWORD = 'Пров3рка-Кабинета!';
 
+/**
+ * Окружение приложения на стенде — общее для API и для наполнения базы.
+ *
+ * **Внешние источники выключены**, как и на стенде проверок API (`harness.ts`):
+ * проверка кабинета не должна зависеть ни от сети, ни от чужой доступности. Иначе первое
+ * же заведение SIM определяло бы оператора в настоящем num.voxlink.ru, а воркер качал бы
+ * план нумерации с сайта Минцифры.
+ */
+export const STACK_ENV = {
+  SECRET_KEY: 'сквозная-проверка'.padEnd(32, '-'),
+  APP_ENV: 'test',
+  LOG_LEVEL: 'error',
+  LOG_FORMAT: 'json',
+  // Стенд создаёт учётные записи и данные пачкой — те самые всплески, против
+  // которых заведены оба предела (ADR-0041).
+  AUTH_RATE_LIMIT_ENABLED: 'false',
+  WRITE_RATE_LIMIT_PER_MINUTE: '0',
+  OPERATOR_LOOKUP_ENABLED: 'false',
+  OPERATOR_LOOKUP_URL: 'http://num.example.test/get/',
+  NUMBERING_PLAN_ENABLED: 'false',
+  NUMBERING_PLAN_URL: 'http://plan.example.test/DEF-9xx.csv',
+};
+
 /** Свободный порт: занимаем нулевой, узнаём номер, освобождаем. */
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -196,18 +219,11 @@ export async function startStack() {
     cwd: path.join(ROOT, 'apps', 'api'),
     env: {
       ...process.env,
+      ...STACK_ENV,
       DATABASE_URL: TEST_DATABASE_URL,
-      SECRET_KEY: 'сквозная-проверка'.padEnd(32, '-'),
-      APP_ENV: 'test',
       APP_HOST: '127.0.0.1',
       APP_PORT: String(apiPort),
       PUBLIC_BASE_URL: `http://127.0.0.1:${String(port)}`,
-      LOG_LEVEL: 'error',
-      LOG_FORMAT: 'json',
-      // Стенд создаёт учётные записи и данные пачкой — те самые всплески, против
-      // которых заведены оба предела (ADR-0041).
-      AUTH_RATE_LIMIT_ENABLED: 'false',
-      WRITE_RATE_LIMIT_PER_MINUTE: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

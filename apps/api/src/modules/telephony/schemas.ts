@@ -389,6 +389,29 @@ export const clientCallsQuerySchema = z.object({
 });
 
 /**
+ * Отбор вызовов в кабинете партнёра.
+ *
+ * `partnerId` принимается, но решает только у администратора и поддержки: партнёру
+ * служба подставляет его самого (`PartnerReportService`). Отбора по клиенту и линии нет:
+ * по ним партнёр проверял бы, какие клиенты идут через его железо, а стороны друг друга
+ * не видят ([ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md)).
+ *
+ * Без `limit` отдаются прежние двести последних: так обработчик отвечал до появления
+ * страниц, и вызов без параметров должен остаться тем же.
+ */
+export const partnerCallsQuerySchema = z.object({
+  partnerId: callFilterShape.partnerId,
+  status: callFilterShape.status,
+  from: callFilterShape.from,
+  to: callFilterShape.to,
+  limit: z
+    .string()
+    .optional()
+    .transform((raw) => boundedLimit(raw ?? String(CALLS_PAGE_MAX), CALLS_PAGE_MAX)),
+  offset: z.string().optional().transform(boundedOffset),
+});
+
+/**
  * Заведение SIP-транка ([ADR-0039](../../../../../docs/adr/0039-terminaciya-cherez-sip-trank.md)).
  *
  * Узел обязателен: к провайдеру регистрируемся мы, и регистрация принадлежит конкретной

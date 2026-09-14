@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
-import { TRANSACTION_KIND_NAME } from '@/lib/labels';
+import { TRANSACTION_KIND_NAME, type LedgerAccount } from '@/lib/labels';
 import { isNegative, money } from '@/lib/money';
 
 const PAGE_SIZE = 20;
@@ -41,8 +41,11 @@ interface Entry {
  * Страница этого списка живёт в состоянии компонента, а не в адресе: в адресе уже
  * есть отбор участников, и подмешивать туда страницу раскрытой карточки значило бы
  * получить ссылку, которая при открытии показывает не то, что было у отправителя.
+ *
+ * Чей это счёт, передаётся явно: API его в ответе не называет, а подпись операции
+ * от стороны зависит — одна и та же `charge` у клиента списание, у партнёра начисление.
  */
-export function AccountLedger({ source }: { source: string }) {
+export function AccountLedger({ source, account }: { source: string; account: LedgerAccount }) {
   const [offset, setOffset] = useState(0);
 
   const list = useQuery({
@@ -105,7 +108,7 @@ export function AccountLedger({ source }: { source: string }) {
                 <TableCell>
                   <span className="num text-muted-foreground">{moment(entry.created_at)}</span>
                 </TableCell>
-                <TableCell>{TRANSACTION_KIND_NAME[entry.kind]}</TableCell>
+                <TableCell>{TRANSACTION_KIND_NAME[account][entry.kind]}</TableCell>
                 <TableCell className="whitespace-normal">
                   {entry.description}
                   {/*

@@ -1,8 +1,12 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CallStatus } from '@zvonix/shared';
+import { CALL_STATUSES, type CallStatus } from '@zvonix/shared';
+import { Suspense } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
+import { PageNav } from '@/components/page-nav';
+import { PeriodInput } from '@/components/period-input';
 import {
   Table,
   TableBody,
@@ -14,8 +18,10 @@ import {
 import { request } from '@/lib/api';
 import { duration, moment } from '@/lib/format';
 import { CALL_STATUS_NAME, callTone } from '@/lib/labels';
+import { useUrlState } from '@/lib/url-state';
 import { simsOf, type Equipment, type Gateway, type Sim } from '../equipment/equipment';
 
+const PAGE_SIZE = 50;
 const COLUMNS = 6;
 
 /**
@@ -38,15 +44,35 @@ interface PartnerCall {
 export default function PartnerCallsPage() {
   return (
     <ConsoleShell title="Вызовы через меня" requireRole="partner">
-      {() => <PartnerCalls />}
+      {() => (
+        <Suspense fallback={<p className="text-muted-foreground">Загружаем…</p>}>
+          <PartnerCalls />
+        </Suspense>
+      )}
     </ConsoleShell>
   );
 }
 
+/**
+ * Вызовы страницами и за период.
+ *
+ * Раньше приходили последние двести без страниц, а текст обещал полноту: «если разговора
+ * здесь нет — он шёл не через площадку». За двумястами это было неправдой, а сверка
+ * со счётом оператора — главное, ради чего экран открывают (ui-review, 2026-09-14).
+ * Период и страница живут в адресе, как во всех списках кабинета.
+ */
 function PartnerCalls() {
+  const url = useUrlState();
+  const offset = Number.parseInt(url.get('offset'), 10) || 0;
+  const filtered = url.get('from') !== '' || url.get('to') !== '' || url.get('status') !== '';
+
+  const search = new URLSearchParams(url.query);
+  search.set('limit', String(PAGE_SIZE));
+
   const list = useQuery({
-    queryKey: ['partner', 'calls'],
-    queryFn: () => request<{ calls: PartnerCall[] }>('/partner/calls'),
+    queryKey: ['partner', 'calls', search.toString()],
+    queryFn: () =>
+      request<{ calls: PartnerCall[]; total: number }>(`/partner/calls?${search.toString()}`),
   });
 
   // Названия железа берутся из того же ответа, что и раздел «оборудование»: второй
@@ -68,9 +94,56 @@ function PartnerCalls() {
   return (
     <div className="flex flex-col gap-3">
       <p className="max-w-prose text-muted-foreground">
-        Вызовы, прошедшие через ваше оборудование. По ним сверяется счёт вашего оператора: если
-        разговора здесь нет, а оператор его посчитал, — он шёл не через площадку.
+        Вызовы, прошедшие через ваше оборудование, — по ним сверяется счёт вашего оператора. Задайте
+        тот же период, что в счёте: если разговора за этот период здесь нет, а оператор его
+        посчитал, — он шёл не через площадку.
       </p>
+
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Итог</span>
+          <select
+            value={url.get('status')}
+            onChange={(event) => {
+              url.set({ status: event.target.value, offset: '' });
+            }}
+            className="h-9 w-[150px] rounded-md border border-input bg-transparent px-2"
+          >
+            <option value="">любой</option>
+            {CALL_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {CALL_STATUS_NAME[status]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <PeriodInput
+          label="С"
+          value={url.get('from')}
+          onChange={(from) => {
+            url.set({ from, offset: '' });
+          }}
+        />
+        <PeriodInput
+          label="По"
+          value={url.get('to')}
+          onChange={(to) => {
+            url.set({ to, offset: '' });
+          }}
+        />
+
+        <div className="ml-auto">
+          <PageNav
+            offset={offset}
+            limit={PAGE_SIZE}
+            total={list.data?.total ?? 0}
+            onChange={(next) => {
+              url.set({ offset: next === 0 ? '' : String(next) });
+            }}
+          />
+        </div>
+      </div>
 
       {list.error !== null && (
         <p role="alert" className="text-crit">
@@ -78,7 +151,7 @@ function PartnerCalls() {
         </p>
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -102,9 +175,9 @@ function PartnerCalls() {
             {list.data?.calls.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
-                  Вызовов через ваше оборудование пока не было. Если оно подключено и включено,
-                  посмотрите «Моё оборудование» и «Мои цены»: без регистрации на узле и без цены по
-                  направлению вызов не уйдёт вовсе.
+                  {filtered
+                    ? 'За этот период и с этим итогом вызовов через ваше оборудование не было.'
+                    : 'Вызовов через ваше оборудование пока не было. Если оно подключено и включено, посмотрите «Моё оборудование» и «Мои цены»: без регистрации на узле и без цены по направлению вызов не уйдёт вовсе.'}
                 </TableCell>
               </TableRow>
             )}
@@ -167,6 +240,9 @@ function PartnerCalls() {
  * немедленно, не дожидаясь срока годности записи
  * ([ADR-0013](../../../../../docs/adr/0013-opredelenie-operatora.md)).
  *
+ * Через подтверждение: последствие раньше жило только во всплывающей подсказке,
+ * а на телефоне — основном устройстве партнёра — подсказок нет.
+ *
  * Показывается только у состоявшихся разговоров: несостоявшийся вызов оператор
  * не тарифицирует, и отменять по нему нечего.
  */
@@ -190,23 +266,25 @@ function WrongNetwork({ call }: { call: PartnerCall }) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-0.5">
-      <button
-        type="button"
-        onClick={() => {
-          report.mutate();
-        }}
-        disabled={report.isPending}
-        title="Оператор номера будет определён заново, а этот вызов мы разберём"
-        className="rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-      >
-        Ушёл не в мою сеть
-      </button>
-      {report.error !== null && (
-        <span role="alert" className="text-crit">
-          {report.error.message}
-        </span>
-      )}
-    </div>
+    <ConfirmAction
+      label="Ушёл не в мою сеть"
+      size="xs"
+      tone="neutral"
+      title={`Вызов на ${call.destination} ушёл не в вашу сеть`}
+      consequence={
+        <>
+          <p>
+            Оператор этого номера будет определён заново: прежняя запись отменяется сразу, а сам
+            вызов площадка разберёт.
+          </p>
+          <p>
+            Обращений принимается не больше пятидесяти в час — отмечайте те, что видите в счёте
+            оператора.
+          </p>
+        </>
+      }
+      confirmLabel="Сообщить"
+      onConfirm={() => report.mutateAsync()}
+    />
   );
 }

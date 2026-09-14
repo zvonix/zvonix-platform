@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LIMIT_METRICS, LIMIT_WINDOWS, type LimitMetric, type LimitWindow } from '@zvonix/shared';
 import { useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
+import { ErrorNote } from '@/components/error-note';
 import { ReadOnly } from '@/components/read-only';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,8 +21,12 @@ import { useCanChange } from '@/lib/access';
 import { useChannels, useClients, usePartners, useSimCards } from '@/lib/dictionaries';
 import { moment } from '@/lib/format';
 import { LIMIT_METRIC_NAME, LIMIT_WINDOW_NAME } from '@/lib/labels';
+import { integerFromInput } from '@/lib/money';
 
 const COLUMNS = 5;
+
+/** Верхняя граница предела — та же, что проверяет API. */
+const LIMIT_MAX = 10_000_000;
 
 interface Rule {
   readonly id: string;
@@ -54,6 +60,9 @@ const SUBJECT_NAME: Record<SubjectKind, string> = {
   sim: 'SIM',
 };
 
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
+
 /**
  * Лимиты по окнам ([ADR-0026](../../../../../docs/adr/0026-limity-po-oknam.md)).
  *
@@ -64,6 +73,9 @@ const SUBJECT_NAME: Record<SubjectKind, string> = {
  * До этого экрана лимит заводился только через `curl` — то есть увидеть, что вообще
  * ограничено и насколько израсходовано, было нельзя ниоткуда, а `limit_exceeded`
  * в разборе вызовов оставался причиной без объяснения.
+ *
+ * Предел разбирается строго: `Number.parseInt` читал «1 000» как 1, и лимит «тысяча
+ * вызовов» сохранялся лимитом в один вызов (ui-review, 2026-09-14).
  */
 export function LimitRules() {
   const canChange = useCanChange();
@@ -110,16 +122,19 @@ export function LimitRules() {
     },
   });
 
+  // Снятие идёт через подтверждение, и его отказ показывается там же.
   const remove = useMutation({
     mutationFn: (id: string) => request<{ limit: Rule }>(`/limits/${id}`, { method: 'DELETE' }),
-    onSuccess: refresh,
+    onSuccess: () => {
+      setEditing(undefined);
+      void refresh();
+    },
   });
 
-  const amount = Number.parseInt(value, 10);
-  const ready = subject !== '' && Number.isFinite(amount) && amount >= 1;
-  const failed = [add.error, change.error, remove.error, list.error].find(
-    (candidate): candidate is ApiError => candidate instanceof ApiError,
-  );
+  const amount = integerFromInput(value);
+  const valueValid = amount !== undefined && amount >= 1 && amount <= LIMIT_MAX;
+  const ready = subject !== '' && valueValid;
+  const failed = asApiError(add.error ?? change.error ?? list.error);
 
   /**
    * Кого ограничивает правило: у лимита заполнено ровно одно из четырёх полей.
@@ -152,11 +167,7 @@ export function LimitRules() {
         секунд это не «полторы минуты» и не «одна».
       </p>
 
-      {failed !== undefined && (
-        <p role="alert" className="text-crit">
-          {failed.message}
-        </p>
-      )}
+      {failed !== undefined && <ErrorNote error={failed} />}
 
       {canChange ? (
         <form
@@ -226,6 +237,8 @@ export function LimitRules() {
             <span className="text-muted-foreground">Не больше</span>
             <Input
               className="num w-[110px]"
+              inputMode="numeric"
+              autoComplete="off"
               placeholder="100"
               value={value}
               onChange={(event) => {
@@ -269,14 +282,20 @@ export function LimitRules() {
           </label>
 
           <Button type="submit" size="sm" disabled={!ready || add.isPending}>
-            Завести лимит
+            {add.isPending ? 'Заводим…' : 'Завести лимит'}
           </Button>
+
+          {value !== '' && !valueValid && (
+            <p className="w-full text-warn">
+              Предел — целое число от 1 до 10 000 000: без запятой и букв.
+            </p>
+          )}
         </form>
       ) : (
         <ReadOnly what="лимиты" />
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -336,13 +355,12 @@ export function LimitRules() {
                       (editing === rule.id ? (
                         <ChangeValue
                           rule={rule}
+                          subject={subjectOf}
                           busy={change.isPending || remove.isPending}
                           onSave={(next) => {
                             change.mutate({ id: rule.id, value: next });
                           }}
-                          onRemove={() => {
-                            remove.mutate(rule.id);
-                          }}
+                          onRemove={() => remove.mutateAsync(rule.id)}
                           onCancel={() => {
                             setEditing(undefined);
                           }}
@@ -373,24 +391,28 @@ export function LimitRules() {
  * Правка предела и снятие лимита.
  *
  * Снятие уносит и счётчики — это и есть способ обнулить израсходованное, когда предел
- * исчерпан по ошибке, а ждать конца окна нельзя.
+ * исчерпан по ошибке, а ждать конца окна нельзя. Именно поэтому оно через
+ * подтверждение: у SIM это снятие защиты, и раньше срабатывало с первого нажатия.
  */
 function ChangeValue({
   rule,
+  subject,
   busy,
   onSave,
   onRemove,
   onCancel,
 }: {
   rule: Rule;
+  subject: { kind: SubjectKind; name: string };
   busy: boolean;
   onSave: (value: number) => void;
-  onRemove: () => void;
+  onRemove: () => Promise<unknown>;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(String(rule.value));
-  const amount = Number.parseInt(value, 10);
-  const changed = Number.isFinite(amount) && amount >= 1 && amount !== rule.value;
+  const amount = integerFromInput(value);
+  const valid = amount !== undefined && amount >= 1 && amount <= LIMIT_MAX;
+  const changed = valid && amount !== rule.value;
 
   return (
     <form
@@ -401,7 +423,10 @@ function ChangeValue({
       className="flex flex-wrap items-center gap-2"
     >
       <Input
+        aria-label="Новый предел"
         className="num w-[110px]"
+        inputMode="numeric"
+        autoComplete="off"
         value={value}
         onChange={(event) => {
           setValue(event.target.value);
@@ -410,13 +435,31 @@ function ChangeValue({
       <Button type="submit" size="sm" disabled={!changed || busy}>
         Сохранить
       </Button>
-      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onRemove}>
-        Снять лимит
-      </Button>
+      <ConfirmAction
+        label="Снять лимит"
+        title={`Снять лимит: ${SUBJECT_NAME[subject.kind].toLowerCase()} «${subject.name}»`}
+        consequence={
+          <>
+            <p>
+              Лимит удаляется вместе со счётчиком израсходованного: ограничения на{' '}
+              {LIMIT_METRIC_NAME[rule.metric]} {LIMIT_WINDOW_NAME[rule.window]} больше не будет.
+            </p>
+            {subject.kind === 'sim' && (
+              <p>
+                Для SIM это снятие защиты: оператор блокирует карту за нечеловеческий профиль
+                трафика, а потерянная SIM означает потерянного партнёра.
+              </p>
+            )}
+          </>
+        }
+        confirmLabel="Снять лимит"
+        disabled={busy}
+        onConfirm={onRemove}
+      />
       <Button type="button" variant="outline" size="sm" onClick={onCancel}>
         Отмена
       </Button>
-      <span className="text-muted-foreground">Снятие обнуляет и счётчик.</span>
+      {!valid && <span className="w-full text-warn">Предел — целое число от 1 до 10 000 000.</span>}
     </form>
   );
 }

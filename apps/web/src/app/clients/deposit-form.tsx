@@ -2,11 +2,11 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
-import { isNegative, money, numberFromInput } from '@/lib/money';
+import { isNegative, money, moneyFromInput, numberFromInput } from '@/lib/money';
 import type { ClientRow } from './page';
 
 interface Funds {
@@ -39,6 +39,23 @@ function newKey(): string {
   return `web-${crypto.randomUUID()}`;
 }
 
+/** Сумма, которую имеет смысл отправлять: денежная сумма больше нуля. */
+function isAmount(value: string): boolean {
+  const parsed = moneyFromInput(value);
+  return parsed !== undefined && !/^0+(\.0*)?$/u.test(parsed);
+}
+
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
+
+/**
+ * Ручное пополнение счёта клиента.
+ *
+ * Через подтверждение, которое повторяет сумму, клиента и основание: отменить пополнение
+ * нельзя, а лишний разряд в сумме раньше уходил на счёт с первого нажатия
+ * (ui-review, 2026-09-14). Открытие окна ключ идемпотентности не меняет — это то же
+ * намерение.
+ */
 export function DepositForm({ client }: { client: ClientRow }) {
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState('');
@@ -63,26 +80,37 @@ export function DepositForm({ client }: { client: ClientRow }) {
         method: 'POST',
         body: { amount: numberFromInput(amount), idempotencyKey: key, description },
       }),
-    onSuccess: async (posted) => {
+    onSuccess: (posted) => {
       setDone(posted);
       setAmount('');
       setDescription('');
       setKey(newKey());
-      await queryClient.invalidateQueries({ queryKey: ['clients'] });
+      void queryClient.invalidateQueries({ queryKey: ['clients'] });
+      // И лента проводок той же карточки: у неё свой ключ, и пополнение в ней не появлялось.
+      void queryClient.invalidateQueries({ queryKey: ['entries'] });
     },
   });
 
-  const error = deposit.error instanceof ApiError ? deposit.error : undefined;
-  const ready = amount.trim() !== '' && description.trim() !== '';
+  const fundsError = asApiError(funds.error);
+  const typed = numberFromInput(amount);
+  const amountValid = isAmount(typed);
+  const ready = amountValid && description.trim() !== '';
+  const shown = amountValid ? money(typed) : '';
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-x-6 gap-y-1">
-        <Figure title="Остаток" value={funds.data?.balance} highlight />
-        <Figure title="Придержано под вызовы" value={funds.data?.held} />
-        <Figure title="Разрешённый минус" value={funds.data?.overdraft_limit} />
-        <Figure title="Можно потратить сейчас" value={funds.data?.available} highlight />
+        <Figure title="Остаток" value={funds.data?.balance} failed={fundsError} highlight />
+        <Figure title="Придержано под вызовы" value={funds.data?.held} failed={fundsError} />
+        <Figure title="Разрешённый минус" value={funds.data?.overdraft_limit} failed={fundsError} />
+        <Figure
+          title="Можно потратить сейчас"
+          value={funds.data?.available}
+          failed={fundsError}
+          highlight
+        />
       </div>
+      {fundsError !== undefined && <ErrorNote error={fundsError} />}
 
       <div className="max-w-[720px] rounded-md border border-border bg-card p-3">
         <h3 className="pb-1 font-semibold">Пополнить вручную</h3>
@@ -98,7 +126,8 @@ export function DepositForm({ client }: { client: ClientRow }) {
             <Input
               className="num w-[140px]"
               inputMode="decimal"
-              placeholder="1500.00"
+              autoComplete="off"
+              placeholder="1 500,00"
               value={amount}
               onChange={(event) => {
                 setAmount(event.target.value);
@@ -111,6 +140,7 @@ export function DepositForm({ client }: { client: ClientRow }) {
           <label className="flex flex-1 flex-col gap-1">
             <span className="text-muted-foreground">Основание</span>
             <Input
+              autoComplete="off"
               placeholder="Платёжное поручение № 42 от 07.09.2026"
               value={description}
               onChange={(event) => {
@@ -121,26 +151,46 @@ export function DepositForm({ client }: { client: ClientRow }) {
             />
           </label>
 
-          <Button
-            type="button"
-            disabled={!ready || deposit.isPending}
-            onClick={() => {
-              deposit.mutate();
-            }}
-          >
-            {deposit.isPending ? 'Проводим…' : 'Пополнить'}
-          </Button>
+          <ConfirmAction
+            label="Пополнить"
+            variant="default"
+            size="default"
+            tone="neutral"
+            disabled={!ready}
+            title={`Пополнить счёт «${client.name}»`}
+            consequence={
+              <>
+                <p>
+                  На остаток клиента сразу поступит <b className="num">{shown}</b>, и деньги станут
+                  доступны для звонков.
+                </p>
+                <p>Основание: {description}</p>
+                <p>
+                  Отменить пополнение нельзя — только провести обратную операцию. Действие попадёт в
+                  журнал вместе с суммой и вашим именем.
+                </p>
+              </>
+            }
+            confirmLabel={`Пополнить на ${shown}`}
+            onConfirm={() => deposit.mutateAsync()}
+          />
         </div>
 
-        {done !== undefined && (
-          <p className={done.already_posted ? 'pt-2 text-warn' : 'pt-2 text-ok'}>
-            {done.already_posted
-              ? `Точно такая операция уже проводилась — повторно деньги не добавлены. Остаток: ${money(done.balance)}.`
-              : `Проведено. Остаток: ${money(done.balance)}.`}
+        {amount !== '' && !amountValid && (
+          <p className="pt-2 text-warn">
+            Сумма — число больше нуля, не больше шести знаков после запятой: например 1 500,50.
           </p>
         )}
 
-        {error !== undefined && <ErrorNote error={error} className="pt-2" />}
+        <div aria-live="polite">
+          {done !== undefined && (
+            <p className={done.already_posted ? 'pt-2 text-warn' : 'pt-2 text-ok'}>
+              {done.already_posted
+                ? `Точно такая операция уже проводилась — повторно деньги не добавлены. Остаток: ${money(done.balance)}.`
+                : `Проведено. Остаток: ${money(done.balance)}.`}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -149,12 +199,16 @@ export function DepositForm({ client }: { client: ClientRow }) {
 function Figure({
   title,
   value,
+  failed,
   highlight,
 }: {
   title: string;
   value: string | undefined;
+  failed: ApiError | undefined;
   highlight?: boolean;
 }) {
+  // Отказ — не «загрузка»: вечное «…» при упавшем запросе читалось как «ещё считаем».
+  const text = value === undefined ? (failed === undefined ? '…' : '—') : money(value);
   return (
     <div>
       <div className="text-muted-foreground">{title}</div>
@@ -165,7 +219,7 @@ function Figure({
             : 'num text-[15px] text-muted-foreground'
         }
       >
-        {value === undefined ? '…' : money(value)}
+        {text}
       </div>
     </div>
   );

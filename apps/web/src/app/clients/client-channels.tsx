@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CHANNEL_STATUSES, type ChannelStatus } from '@zvonix/shared';
 import { Fragment, useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
+import { ErrorNote } from '@/components/error-note';
 import { SipCredentials, type SipAccount } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +18,7 @@ import {
 } from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
-import { CHANNEL_STATUS_NAME, usableTone } from '@/lib/labels';
+import { CHANNEL_STATUS_MEANING, CHANNEL_STATUS_NAME, usableTone } from '@/lib/labels';
 
 interface Channel {
   readonly id: string;
@@ -30,6 +32,19 @@ interface Channel {
 const COLUMNS = 6;
 
 /**
+ * Кнопка называет действие, а не состояние: «Приостановлен» рядом с плашкой текущего
+ * состояния читалось как ещё одна плашка.
+ */
+const CHANNEL_ACTION: Record<ChannelStatus, string> = {
+  pending: 'Вернуть в «ждёт»',
+  active: 'Разрешить звонить',
+  suspended: 'Приостановить',
+};
+
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
+
+/**
  * Каналы клиента — линии, по которым он звонит.
  *
  * **Канал — не порт.** Канал это линия клиента, порт — слот с SIM у партнёра
@@ -38,6 +53,10 @@ const COLUMNS = 6;
  * Канал заводится `pending`: учётная запись SIP выдана, но звонить по ней нельзя,
  * пока администратор не переведёт канал в «работает». Маршрутизация требует `active`
  * **и от канала, и от самого клиента** — закрытый клиент не звонит ни по одному каналу.
+ *
+ * Разрешение звонить — одним нажатием. Остановка линии и перевыпуск доступа — через
+ * подтверждение с последствием: раньше оба срабатывали с первого нажатия, а перевыпуск
+ * молча обрывал регистрацию АТС клиента (ui-review, 2026-09-14).
  */
 export function ClientChannels({ clientId }: { clientId: string }) {
   const canChange = useCanChange();
@@ -56,6 +75,10 @@ export function ClientChannels({ clientId }: { clientId: string }) {
     queryFn: () => request<{ channels: Channel[] }>(`/channels?clientId=${clientId}`),
   });
 
+  const invalidate = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: ['channels', clientId] });
+  };
+
   const create = useMutation({
     mutationFn: () =>
       request<{ account: SipAccount }>('/channels', {
@@ -72,27 +95,38 @@ export function ClientChannels({ clientId }: { clientId: string }) {
       setName('');
       setCallerId('');
       setIssued({ title: `Доступ SIP для канала «${name}»`, account: data.account });
-      await queryClient.invalidateQueries({ queryKey: ['channels', clientId] });
+      await invalidate();
     },
   });
 
-  const changeStatus = useMutation({
+  const activate = useMutation({
+    mutationFn: (id: string) =>
+      request<unknown>(`/channels/${id}/status`, {
+        method: 'POST',
+        body: { status: 'active' },
+      }),
+    onSuccess: invalidate,
+  });
+
+  // Подтверждаемые действия — своими мутациями: их отказ показывается в окне
+  // подтверждения и не повторяется в общей строке ошибок.
+  const confirmStatus = useMutation({
     mutationFn: (input: { id: string; status: ChannelStatus }) =>
       request<unknown>(`/channels/${input.id}/status`, {
         method: 'POST',
         body: { status: input.status },
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['channels', clientId] });
+    onSuccess: () => {
+      void invalidate();
     },
   });
 
   const reissue = useMutation({
     mutationFn: (channel: Channel) =>
       request<{ account: SipAccount }>(`/channels/${channel.id}/credentials`, { method: 'POST' }),
-    onSuccess: async (data, channel) => {
+    onSuccess: (data, channel) => {
       setIssued({ title: `Новый доступ SIP для канала «${channel.name}»`, account: data.account });
-      await queryClient.invalidateQueries({ queryKey: ['channels', clientId] });
+      void invalidate();
     },
   });
 
@@ -101,14 +135,14 @@ export function ClientChannels({ clientId }: { clientId: string }) {
       request<unknown>(`/channels/${input.id}`, { method: 'PATCH', body: input.changes }),
     onSuccess: async () => {
       setEditing(undefined);
-      await queryClient.invalidateQueries({ queryKey: ['channels', clientId] });
+      await invalidate();
     },
   });
 
-  const failed = [create.error, changeStatus.error, reissue.error, edit.error, list.error].find(
-    (error): error is ApiError => error instanceof ApiError,
-  );
+  const failed = asApiError(create.error ?? activate.error ?? edit.error ?? list.error);
   const channels = list.data?.channels ?? [];
+  const nameValid = name.trim().length >= 2;
+  const busy = activate.isPending || confirmStatus.isPending || reissue.isPending;
 
   return (
     <div className="flex flex-col gap-2">
@@ -147,7 +181,7 @@ export function ClientChannels({ clientId }: { clientId: string }) {
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (name.trim().length >= 2) create.mutate();
+            if (nameValid) create.mutate();
           }}
           className="flex max-w-[900px] flex-wrap items-end gap-2 rounded-md border border-border bg-card p-3"
         >
@@ -156,6 +190,7 @@ export function ClientChannels({ clientId }: { clientId: string }) {
             <Input
               className="w-[220px]"
               value={name}
+              autoComplete="off"
               placeholder="Диспетчерская"
               onChange={(event) => {
                 setName(event.target.value);
@@ -167,6 +202,9 @@ export function ClientChannels({ clientId }: { clientId: string }) {
             <span className="text-muted-foreground">Номер для показа</span>
             <Input
               className="num w-[180px]"
+              inputMode="tel"
+              autoComplete="off"
+              spellCheck={false}
               value={callerId}
               placeholder="номер SIM"
               onChange={(event) => {
@@ -186,9 +224,13 @@ export function ClientChannels({ clientId }: { clientId: string }) {
             <span>Запись разговора обязательна</span>
           </label>
 
-          <Button type="submit" size="sm" disabled={create.isPending}>
-            Завести
+          <Button type="submit" size="sm" disabled={!nameValid || create.isPending}>
+            {create.isPending ? 'Заводим…' : 'Завести'}
           </Button>
+
+          {name !== '' && !nameValid && (
+            <p className="w-full text-warn">Название — не короче двух знаков.</p>
+          )}
 
           <p className="w-full text-muted-foreground">
             {/*
@@ -204,13 +246,9 @@ export function ClientChannels({ clientId }: { clientId: string }) {
         </form>
       )}
 
-      {failed !== undefined && (
-        <p role="alert" className="text-crit">
-          {failed.message}
-        </p>
-      )}
+      {failed !== undefined && <ErrorNote error={failed} />}
 
-      <div className="max-w-[900px] rounded-md border border-border bg-card">
+      <div className="max-w-[900px] overflow-x-auto rounded-md border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -243,7 +281,9 @@ export function ClientChannels({ clientId }: { clientId: string }) {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <span className="num">{channel.sip_username}</span>
+                    <span className="num" translate="no">
+                      {channel.sip_username}
+                    </span>
                   </TableCell>
                   <TableCell>
                     {channel.recording_required ? (
@@ -265,53 +305,72 @@ export function ClientChannels({ clientId }: { clientId: string }) {
                       каналов помечены `@Roles('admin')`, и каждая из этих кнопок
                       ответила бы ей отказом (DESIGN.md).
                     */}
-                    <div className="flex flex-wrap gap-1">
-                      {canChange &&
-                        CHANNEL_STATUSES.filter((status) => status !== channel.status).map(
-                          (status) => (
-                            <Button
-                              key={status}
-                              variant="outline"
-                              size="sm"
-                              disabled={changeStatus.isPending}
-                              onClick={() => {
-                                changeStatus.mutate({ id: channel.id, status });
-                              }}
-                            >
-                              {CHANNEL_STATUS_NAME[status]}
-                            </Button>
-                          ),
+                    {canChange && (
+                      <div className="flex flex-wrap gap-1">
+                        {CHANNEL_STATUSES.filter((status) => status !== channel.status).map(
+                          (status) =>
+                            status === 'active' ? (
+                              <Button
+                                key={status}
+                                variant="outline"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => {
+                                  activate.mutate(channel.id);
+                                }}
+                              >
+                                {CHANNEL_ACTION[status]}
+                              </Button>
+                            ) : (
+                              <ConfirmAction
+                                key={status}
+                                label={CHANNEL_ACTION[status]}
+                                title={`${CHANNEL_ACTION[status]}: канал «${channel.name}»`}
+                                consequence={<p>{CHANNEL_STATUS_MEANING[status]}</p>}
+                                confirmLabel={CHANNEL_ACTION[status]}
+                                disabled={busy}
+                                onConfirm={() =>
+                                  confirmStatus.mutateAsync({ id: channel.id, status })
+                                }
+                              />
+                            ),
                         )}
-                      {/*
-                      Пароль SIP восстановить неоткуда, а утёкший пароль канала — это
-                      чужие вызовы за счёт клиента. Без перевыпуска единственным ответом
-                      на утечку было бы отключение канала целиком.
-                    */}
-                      {canChange && (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setEditing(editing === channel.id ? undefined : channel.id);
-                            }}
-                            aria-expanded={editing === channel.id}
-                          >
-                            {editing === channel.id ? 'Свернуть' : 'Настроить'}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={reissue.isPending}
-                            onClick={() => {
-                              reissue.mutate(channel);
-                            }}
-                          >
-                            Перевыпустить доступ
-                          </Button>
-                        </>
-                      )}
-                    </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditing(editing === channel.id ? undefined : channel.id);
+                          }}
+                          aria-expanded={editing === channel.id}
+                        >
+                          {editing === channel.id ? 'Свернуть' : 'Настроить'}
+                        </Button>
+                        {/*
+                          Пароль SIP восстановить неоткуда, а утёкший пароль канала — это
+                          чужие вызовы за счёт клиента. Без перевыпуска единственным ответом
+                          на утечку было бы отключение канала целиком.
+                        */}
+                        <ConfirmAction
+                          label="Перевыпустить доступ"
+                          title={`Перевыпустить доступ канала «${channel.name}»`}
+                          consequence={
+                            <>
+                              <p>
+                                Имя и пароль SIP меняются сразу. АТС клиента потеряет регистрацию и
+                                не сможет звонить по этой линии, пока в неё не введут новые данные.
+                              </p>
+                              <p>
+                                Нужно, когда прежний пароль мог утечь: утёкший пароль линии — это
+                                чужие вызовы за счёт клиента.
+                              </p>
+                            </>
+                          }
+                          confirmLabel="Перевыпустить"
+                          disabled={busy}
+                          onConfirm={() => reissue.mutateAsync(channel)}
+                        />
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
 
@@ -381,6 +440,7 @@ function ChannelSettings({
         <Input
           className="w-[220px]"
           value={name}
+          autoComplete="off"
           onChange={(event) => {
             setName(event.target.value);
           }}
@@ -391,6 +451,9 @@ function ChannelSettings({
         <span className="text-muted-foreground">Номер для показа</span>
         <Input
           className="num w-[180px]"
+          inputMode="tel"
+          autoComplete="off"
+          spellCheck={false}
           value={callerId}
           placeholder="номер SIM"
           onChange={(event) => {
@@ -411,7 +474,7 @@ function ChannelSettings({
       </label>
 
       <Button type="submit" size="sm" disabled={!dirty || busy}>
-        Сохранить
+        {busy ? 'Сохраняем…' : 'Сохранить'}
       </Button>
 
       <p className="w-full text-muted-foreground">

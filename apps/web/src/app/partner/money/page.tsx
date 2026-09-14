@@ -84,7 +84,7 @@ function PartnerMoney() {
 
       <RecordingsAccess partnerId={partner.id} listens={partner.listens_to_recordings} />
 
-      <AccountLedger source="/partner/entries" />
+      <AccountLedger source="/partner/entries" account="partner" />
     </div>
   );
 }

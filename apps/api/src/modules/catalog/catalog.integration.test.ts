@@ -109,10 +109,32 @@ describe('доступ к справочнику', () => {
     expect(found).not.toHaveProperty('isMvno');
   });
 
-  it('партнёру не разрешён', async () => {
-    // Партнёру справочник назначения не нужен: его SIM заводит администратор,
-    // а направления вызовов — не его дело.
-    expect((await roleSees('partner')).statusCode).toBe(403);
+  it('партнёру открыт сокращённым видом: из него он объявляет оператора своей SIM', async () => {
+    // Раньше справочник партнёру был закрыт — SIM заводил только администратор. Когда
+    // партнёр стал заводить их сам, закрытый справочник сделал это невозможным: форма
+    // не могла назвать ни одного оператора (ui-review, 2026-09-14).
+    const created = await createOperator({ name: `Для-партнёра-${String(Date.now())}` });
+
+    const response = await roleSees('partner');
+    expect(response.statusCode).toBe(200);
+    const found = response
+      .json<{ operators: Record<string, unknown>[] }>()
+      .operators.find((operator) => operator['id'] === created.id);
+    expect(found).toEqual({ id: created.id, name: expect.any(String) as string });
+  });
+
+  it('партнёру видны и неподтверждённые операторы', async () => {
+    // Резолвер может назвать обслуживающим оператора, заведённого импортом плана
+    // нумерации. Без такой записи в справочнике SIM этого оператора было бы не завести.
+    const created = await createOperator({ name: `Из-импорта-${String(Date.now())}` });
+    await withDatabase(async (execute) => {
+      await execute(sql`update operators set verified_at = null where id = ${created.id}`);
+    });
+
+    const ids = (await roleSees('partner'))
+      .json<{ operators: { id: string }[] }>()
+      .operators.map((operator) => operator.id);
+    expect(ids).toContain(created.id);
   });
 });
 

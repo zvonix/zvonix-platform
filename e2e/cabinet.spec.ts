@@ -152,7 +152,7 @@ test.describe('кабинет клиента', () => {
 });
 
 test.describe('ввод денег', () => {
-  // Идёт последним: единственная проверка, которая **меняет** состояние стенда.
+  // Меняет состояние стенда — поэтому после проверок, которые только читают.
   test('копейки набираются запятой — той же, с какой кабинет их показывает', async ({ page }) => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/tariffs');
@@ -161,6 +161,13 @@ test.describe('ввод денег', () => {
     await page.getByLabel('Доля, %').fill('5');
     await page.getByLabel('Фикс за вызов, ₽').fill('0,1');
     await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+
+    // Правило без клиента ложится на всех, у кого нет своего, — окно говорит это до нажатия.
+    // Раньше заранее заполненная форма заводила наценку на всю площадку с первого щелчка.
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('для всех клиентов');
+    await dialog.getByRole('button', { name: 'Добавить правило' }).click();
+    await expect(dialog).toHaveCount(0);
 
     // Десять копеек, а не рубль и не отказ проверки: перевод в машинный вид —
     // работа кабинета, а не человека.
@@ -183,7 +190,7 @@ test.describe('клиент заводит доступ своей систем�
     await expect(page.getByText(/zvx_client_/u).first()).toBeVisible();
   });
 
-  test('отзыв спрашивает второй раз: ключ после него не оживить', async ({ page }) => {
+  test('отзыв спрашивает и отменяется: ключ после него не оживить', async ({ page }) => {
     await signIn(page, PEOPLE.client);
     await page.goto('/my/integration');
 
@@ -193,10 +200,20 @@ test.describe('клиент заводит доступ своей систем�
     await expect(page.getByText('Ключ «Ключ на отзыв»')).toBeVisible();
 
     const row = page.getByRole('row').filter({ hasText: 'Ключ на отзыв' });
-    await row.getByRole('button', { name: 'Отозвать' }).click();
-    await expect(row.getByRole('button', { name: 'Точно отозвать?' })).toBeVisible();
-    await row.getByRole('button', { name: 'Точно отозвать?' }).click();
+    const dialog = page.getByRole('alertdialog', { name: 'Отозвать ключ «Ключ на отзыв»' });
 
+    // Escape отменяет, и ключ жив. Прежняя взведённая кнопка «Точно отозвать?»
+    // не сбрасывалась ничем, и следующий щелчок отзывал ключ уже без вопроса.
+    await row.getByRole('button', { name: 'Отозвать' }).click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(row.getByText(/отозван/u)).toHaveCount(0);
+
+    await row.getByRole('button', { name: 'Отозвать' }).click();
+    await dialog.getByRole('button', { name: 'Отозвать ключ' }).click();
+
+    await expect(dialog).toHaveCount(0);
     await expect(row.getByText(/отозван/u)).toBeVisible();
   });
 });
@@ -217,7 +234,30 @@ test.describe('партнёр заводит своё оборудование',
     await expect(page.getByText('GOIP на проверке')).toBeVisible();
   });
 
-  test('списание спрашивает второй раз: отменить его будет нечем', async ({ page }) => {
+  test('заводит SIM: справочник операторов ему открыт', async ({ page }) => {
+    // Форма брала операторов из `GET /operators`, закрытого партнёру: `403` на каждом
+    // открытии раздела и пустой выбор, с которым SIM не завести (ui-review, 2026-09-14).
+    const denied: string[] = [];
+    page.on('response', (response) => {
+      if (response.status() === 403) denied.push(response.url());
+    });
+
+    await signIn(page, PEOPLE.partner);
+    await page.goto('/partner/equipment');
+
+    await page.getByRole('button', { name: 'Завести SIM' }).click();
+    await page.getByLabel('Номер карты').fill('+7 913 555-00-17');
+    await page.getByLabel('Оператор').selectOption({ label: 'МегаФон' });
+    await page.getByRole('button', { name: 'Завести', exact: true }).click();
+
+    // Источник оператора на стенде выключен: карта заводится и ждёт подтверждения.
+    await expect(
+      page.getByRole('row').filter({ hasText: '9135550017' }).filter({ hasText: 'МегаФон' }),
+    ).toBeVisible();
+    expect(denied).toEqual([]);
+  });
+
+  test('списание спрашивает с последствием: отменить его будет нечем', async ({ page }) => {
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/equipment');
 
@@ -226,13 +266,64 @@ test.describe('партнёр заводит своё оборудование',
     await page.getByRole('button', { name: 'Завести', exact: true }).click();
     await expect(page.getByText('Шлюз на списание')).toBeVisible();
 
-    // Первый нажим спрашивает, второй делает: списание стоит рядом с «выключить»,
-    // которое отменяется одним нажатием, и разница должна быть видна пальцу.
+    // Окно называет последствие, а не «вы уверены?»: списание стоит рядом с «выключить»,
+    // которое отменяется одним нажатием, и разница должна быть видна до нажатия.
     const card = page.getByRole('region', { name: 'Шлюз на списание' });
+    const dialog = page.getByRole('alertdialog', { name: 'Списать шлюз «Шлюз на списание»' });
     await card.getByRole('button', { name: 'Списать' }).click();
-    await expect(card.getByRole('button', { name: 'Точно списать?' })).toBeVisible();
-    await card.getByRole('button', { name: 'Точно списать?' }).click();
+    await expect(dialog).toContainText('навсегда');
+    await dialog.getByRole('button', { name: 'Списать шлюз' }).click();
 
     await expect(page.getByRole('region', { name: 'Шлюз на списание' })).toHaveCount(0);
+  });
+});
+
+test.describe('список, который заменяется целиком', () => {
+  test('регион покрытия не добавить, пока список не пришёл: форма стёрла бы прежние', async ({
+    page,
+  }) => {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Ответ со списком придерживается. Форма, работавшая до него, отправляла
+    // `[новый регион]`, и API заменял им весь список (ui-review, 2026-09-14).
+    await page.route(/\/partners\/[^/]+\/coverage$/u, async (route) => {
+      if (route.request().method() === 'GET') await held;
+      await route.continue();
+    });
+
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/partners');
+    await page
+      .getByRole('row')
+      .filter({ hasText: 'Иванов Иван Иванович' })
+      .getByRole('button', { name: 'Открыть' })
+      .click();
+
+    await expect(page.getByText('Загружаем покрытие…')).toBeVisible();
+    await expect(page.getByLabel('Добавить регион')).toHaveCount(0);
+    // И не «список пуст — берёт любой регион»: до ответа это неправда.
+    await expect(page.getByText('Список пуст')).toHaveCount(0);
+
+    release();
+    await expect(page.getByLabel('Добавить регион')).toBeVisible();
+  });
+});
+
+test.describe('учётные записи', () => {
+  test('свою запись администратор не закрывает: вернуть его смог бы только другой', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/users');
+
+    const own = page.getByRole('row').filter({ hasText: PEOPLE.admin });
+    await expect(own.getByText('ваша запись')).toBeVisible();
+    await expect(own.getByRole('button', { name: 'Изменить' })).toHaveCount(0);
+
+    // Обратная половина: у чужой записи выбор есть, иначе проверка прошла бы и на пустом экране.
+    const other = page.getByRole('row').filter({ hasText: PEOPLE.support });
+    await expect(other.getByRole('button', { name: 'Изменить' })).toBeVisible();
   });
 });

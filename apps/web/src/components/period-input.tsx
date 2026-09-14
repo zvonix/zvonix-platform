@@ -1,5 +1,7 @@
 'use client';
 
+import { Input } from '@/components/ui/input';
+
 /**
  * Граница периода в отборе.
  *
@@ -20,13 +22,15 @@ export function PeriodInput({
   return (
     <label className="flex flex-col gap-1">
       <span className="text-muted-foreground">{label}</span>
-      <input
+      {/* Общее поле кабинета, а не голое `input`: у голого не было видимого фокуса
+          (ui-review в браузере, 2026-09-14). */}
+      <Input
         type="datetime-local"
         value={toLocalInput(value)}
         onChange={(event) => {
           onChange(fromLocalInput(event.target.value));
         }}
-        className="num h-9 rounded-md border border-input bg-transparent px-2"
+        className="num w-auto px-2"
       />
     </label>
   );

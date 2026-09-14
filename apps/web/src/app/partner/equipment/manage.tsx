@@ -2,12 +2,15 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { SipCredentials, type SipAccount } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { useOperators } from '@/lib/dictionaries';
+import { SIM_STATUS_MEANING } from '@/lib/labels';
+import { integerFromInput } from '@/lib/money';
 import type { Gateway, Sim } from './equipment';
 
 /**
@@ -19,6 +22,10 @@ import type { Gateway, Sim } from './equipment';
  *
  * Все обращения идут в собственный контур `/partner/*`: идентификатор партнёра там
  * выводится из сессии, и подставить чужой нечего.
+ *
+ * Необратимое и останавливающее связь — списание и перевыпуск доступа — идёт через
+ * `ConfirmAction`. У каждого такого действия своя мутация: отказ показывается в окне
+ * подтверждения, и в общей строке ошибок он повторился бы вторым сообщением.
  */
 
 /** Общий хвост любого действия: перечитать оборудование целиком. */
@@ -31,44 +38,6 @@ function useRefresh(): () => Promise<void> {
 
 const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
-
-/**
- * Кнопка необратимого действия: первый нажим спрашивает, второй делает.
- *
- * Списание не отменить, а стоит оно рядом с «выключить», которое отменяется одним
- * нажатием. Разница должна быть видна пальцу, а не только глазу.
- */
-function Irreversible({
-  label,
-  confirm,
-  disabled,
-  onConfirm,
-}: {
-  label: string;
-  confirm: string;
-  disabled: boolean;
-  onConfirm: () => void;
-}) {
-  const [asked, setAsked] = useState(false);
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={disabled}
-      className={asked ? 'text-crit' : ''}
-      onClick={() => {
-        if (asked) {
-          onConfirm();
-          setAsked(false);
-        } else {
-          setAsked(true);
-        }
-      }}
-    >
-      {asked ? confirm : label}
-    </Button>
-  );
-}
 
 /** Заведение шлюза. Учётные данные SIP показываются здесь же и один раз. */
 export function AddGateway() {
@@ -88,7 +57,7 @@ export function AddGateway() {
           name,
           type,
           ...(model.trim() === '' ? {} : { model: model.trim() }),
-          portCount: Number(portCount),
+          portCount: integerFromInput(portCount),
         },
       }),
     onSuccess: async (created) => {
@@ -102,7 +71,10 @@ export function AddGateway() {
   });
 
   const error = asApiError(add.error);
-  const ready = name.trim().length >= 2 && Number.isInteger(Number(portCount));
+  const ports = integerFromInput(portCount);
+  const portsValid = ports !== undefined && ports <= 256;
+  const nameValid = name.trim().length >= 2;
+  const ready = nameValid && portsValid;
 
   return (
     <div className="flex flex-col gap-2">
@@ -142,6 +114,7 @@ export function AddGateway() {
               className="w-[220px]"
               value={name}
               placeholder="GOIP в офисе"
+              autoComplete="off"
               onChange={(event) => {
                 setName(event.target.value);
               }}
@@ -168,6 +141,7 @@ export function AddGateway() {
               className="w-[180px]"
               value={model}
               placeholder="GoIP-8"
+              autoComplete="off"
               onChange={(event) => {
                 setModel(event.target.value);
               }}
@@ -178,6 +152,8 @@ export function AddGateway() {
             <span className="text-muted-foreground">Портов</span>
             <Input
               className="num w-[90px]"
+              inputMode="numeric"
+              autoComplete="off"
               value={portCount}
               onChange={(event) => {
                 setPortCount(event.target.value);
@@ -186,8 +162,14 @@ export function AddGateway() {
           </label>
 
           <Button type="submit" size="sm" disabled={!ready || add.isPending}>
-            Завести
+            {add.isPending ? 'Заводим…' : 'Завести'}
           </Button>
+
+          {/* Почему кнопка неактивна, говорится прямо: иначе её не отличить от сломанной. */}
+          {name !== '' && !nameValid && (
+            <p className="w-full text-warn">Название — не короче двух знаков.</p>
+          )}
+          {!portsValid && <p className="w-full text-warn">Число портов — целое, от 0 до 256.</p>}
 
           <p className="w-full text-muted-foreground">
             Шлюз заводится выключенным: пароль SIP выдаётся сразу, но регистрацию на узле он получит
@@ -201,26 +183,52 @@ export function AddGateway() {
   );
 }
 
-/** Включение, выключение, новый порт и перевыпуск доступа — по одному шлюзу. */
+/** Включение, выключение, новый порт, перевыпуск доступа и списание — по одному шлюзу. */
 export function GatewayActions({ gateway }: { gateway: Gateway }) {
   const refresh = useRefresh();
   const [portNumber, setPortNumber] = useState('');
   const [account, setAccount] = useState<SipAccount | undefined>(undefined);
 
-  const setStatus = useMutation({
-    mutationFn: (status: 'active' | 'suspended' | 'retired') =>
+  const activate = useMutation({
+    mutationFn: () =>
       request<unknown>(`/partner/gateways/${gateway.id}/status`, {
         method: 'POST',
-        body: { status },
+        body: { status: 'active' },
       }),
     onSuccess: refresh,
+  });
+
+  // Выключение — через подтверждение: включить шлюз обратно партнёр уже не может,
+  // `suspended` одно и для него, и для отключения площадкой. Отказ показывается в окне.
+  const suspend = useMutation({
+    mutationFn: () =>
+      request<unknown>(`/partner/gateways/${gateway.id}/status`, {
+        method: 'POST',
+        body: { status: 'suspended' },
+      }),
+    onSuccess: () => {
+      void refresh();
+    },
+  });
+
+  // Обновление без ожидания: списанный шлюз уходит из списка, и окно подтверждения
+  // должно закрыться раньше, чем исчезнет его кнопка.
+  const retire = useMutation({
+    mutationFn: () =>
+      request<unknown>(`/partner/gateways/${gateway.id}/status`, {
+        method: 'POST',
+        body: { status: 'retired' },
+      }),
+    onSuccess: () => {
+      void refresh();
+    },
   });
 
   const addPort = useMutation({
     mutationFn: () =>
       request<unknown>(`/partner/gateways/${gateway.id}/ports`, {
         method: 'POST',
-        body: { portNumber: Number(portNumber) },
+        body: { portNumber: integerFromInput(portNumber) },
       }),
     onSuccess: async () => {
       setPortNumber('');
@@ -238,42 +246,57 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
     },
   });
 
-  const error = asApiError(setStatus.error ?? addPort.error ?? reset.error);
+  const error = asApiError(activate.error ?? addPort.error);
   const nextPort = String((gateway.ports.at(-1)?.port_number ?? 0) + 1);
+  const port = integerFromInput(portNumber);
+  const portValid = port !== undefined && port >= 1 && port <= 256;
   // Списание шлюза вынимает карты из его портов: порта после списания не существует.
-  // Их число называется до нажатия, а не после — отменить будет нечем.
-  const occupied = gateway.ports.filter((port) => port.sim !== null).length;
+  // Их число называется до подтверждения, а не после — отменить будет нечем.
+  const occupied = gateway.ports.filter((slot) => slot.sim !== null).length;
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-end gap-2">
-        {gateway.status === 'active' ? (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={setStatus.isPending}
-            onClick={() => {
-              setStatus.mutate('suspended');
-            }}
-          >
-            Выключить
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            disabled={setStatus.isPending || gateway.status === 'retired'}
-            onClick={() => {
-              setStatus.mutate('active');
-            }}
-          >
-            Включить
-          </Button>
+        {gateway.status === 'active' && (
+          <ConfirmAction
+            label="Выключить"
+            title={`Выключить шлюз «${gateway.name}»`}
+            consequence={
+              <>
+                <p>Шлюз перестанет получать вызовы от площадки.</p>
+                <p>
+                  Включить его обратно сможет только администратор площадки: выключенный вами шлюз и
+                  шлюз, отключённый площадкой, для неё одно и то же состояние.
+                </p>
+              </>
+            }
+            confirmLabel="Выключить шлюз"
+            onConfirm={() => suspend.mutateAsync()}
+          />
         )}
+        {gateway.status === 'suspended' && (
+          <span className="self-center text-muted-foreground">
+            выключен — включить или списать его может только администратор площадки
+          </span>
+        )}
+        {gateway.status !== 'active' &&
+          gateway.status !== 'suspended' &&
+          gateway.status !== 'retired' && (
+            <Button
+              size="sm"
+              disabled={activate.isPending}
+              onClick={() => {
+                activate.mutate();
+              }}
+            >
+              Включить
+            </Button>
+          )}
 
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (Number.isInteger(Number(portNumber)) && portNumber !== '') addPort.mutate();
+            if (portValid) addPort.mutate();
           }}
           className="flex items-end gap-2"
         >
@@ -281,6 +304,8 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
             <span className="text-muted-foreground">Новый порт</span>
             <Input
               className="num w-[90px]"
+              inputMode="numeric"
+              autoComplete="off"
               value={portNumber}
               placeholder={nextPort}
               onChange={(event) => {
@@ -288,35 +313,55 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
               }}
             />
           </label>
-          <Button type="submit" variant="outline" size="sm" disabled={addPort.isPending}>
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            disabled={!portValid || addPort.isPending}
+          >
             Добавить
           </Button>
         </form>
 
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={reset.isPending}
-          onClick={() => {
-            reset.mutate();
-          }}
-        >
-          Перевыпустить доступ
-        </Button>
+        <ConfirmAction
+          label="Перевыпустить доступ"
+          title={`Перевыпустить доступ шлюза «${gateway.name}»`}
+          consequence={
+            <p>
+              Имя и пароль SIP меняются сразу. Шлюз потеряет регистрацию и замолчит, пока вы не
+              введёте новые данные в его настройках. Идущие разговоры не рвутся.
+            </p>
+          }
+          confirmLabel="Перевыпустить"
+          onConfirm={() => reset.mutateAsync()}
+        />
 
-        {gateway.status !== 'retired' && (
-          <Irreversible
+        {gateway.status !== 'retired' && gateway.status !== 'suspended' && (
+          <ConfirmAction
             label="Списать"
-            confirm={
-              occupied === 0 ? 'Точно списать?' : `Списать и вынуть карт: ${String(occupied)}?`
+            title={`Списать шлюз «${gateway.name}»`}
+            consequence={
+              <>
+                <p>Шлюз выводится навсегда: вернуть его в работу нельзя, только завести новый.</p>
+                {occupied > 0 && (
+                  <p>
+                    Из его портов будут вынуты карты: {occupied}. Их можно поставить в другой шлюз.
+                  </p>
+                )}
+              </>
             }
-            disabled={setStatus.isPending}
-            onConfirm={() => {
-              setStatus.mutate('retired');
-            }}
+            confirmLabel={
+              occupied === 0 ? 'Списать шлюз' : `Списать и вынуть карт: ${String(occupied)}`
+            }
+            disabled={activate.isPending}
+            onConfirm={() => retire.mutateAsync()}
           />
         )}
       </div>
+
+      {portNumber !== '' && !portValid && (
+        <p className="text-warn">Номер порта — целое число от 1 до 256.</p>
+      )}
 
       {account !== undefined && (
         <SipCredentials
@@ -355,6 +400,7 @@ export function AddSim() {
   });
 
   const error = asApiError(add.error);
+  const operatorsError = asApiError(operators.error);
   const ready = msisdn.trim() !== '' && operatorId !== '';
 
   return (
@@ -383,6 +429,9 @@ export function AddSim() {
             <span className="text-muted-foreground">Номер карты</span>
             <Input
               className="num w-[200px]"
+              inputMode="tel"
+              autoComplete="off"
+              spellCheck={false}
               value={msisdn}
               placeholder="+7 913 042-41-23"
               onChange={(event) => {
@@ -393,14 +442,21 @@ export function AddSim() {
 
           <label className="flex flex-col gap-1">
             <span className="text-muted-foreground">Оператор</span>
+            {/*
+              Пока справочник не пришёл, выбор не открывается: пустой список до ответа
+              выглядит так же, как пустой в ответе, и форму было не отправить без объяснения.
+            */}
             <select
               value={operatorId}
+              disabled={!operators.ready}
               onChange={(event) => {
                 setOperatorId(event.target.value);
               }}
               className="h-9 w-[220px] rounded-md border border-input bg-transparent px-2"
             >
-              <option value="">выберите оператора</option>
+              <option value="">
+                {operators.ready ? 'выберите оператора' : 'загружаем операторов…'}
+              </option>
               {operators.rows.map((operator) => (
                 <option key={operator.id} value={operator.id}>
                   {operator.name}
@@ -410,8 +466,14 @@ export function AddSim() {
           </label>
 
           <Button type="submit" size="sm" disabled={!ready || add.isPending}>
-            Завести
+            {add.isPending ? 'Заводим…' : 'Завести'}
           </Button>
+
+          {operatorsError !== undefined && (
+            <div className="w-full">
+              <ErrorNote error={operatorsError} />
+            </div>
+          )}
 
           <p className="w-full max-w-prose text-muted-foreground">
             Оператора площадка проверяет по самому номеру. Если он окажется другим — карта не
@@ -429,20 +491,44 @@ export function AddSim() {
 /**
  * Что можно сделать со своей картой: включить или списать.
  *
- * Включение проходит только с подтверждённым оператором, списание — только у карты
- * вне порта. Обе проверки на стороне API; здесь показывается их ответ, а не своя
- * догадка о том, пройдёт ли действие.
+ * Рисуется только то, что API примет. Заблокированную площадкой карту партнёр не трогает —
+ * это её рычаг; стоящую в порту не списать, сначала её вынимают. Раньше обе кнопки были
+ * на месте и получали отказ уже после подтверждения (разбор правок ui-review, 2026-09-14).
+ * Подтверждён ли оператор при включении, решает внешний источник, поэтому «Включить»
+ * остаётся, а ответ показывается под кнопкой.
  */
-export function SimActions({ sim }: { sim: Sim }) {
+export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
   const refresh = useRefresh();
-  const change = useMutation({
-    mutationFn: (status: 'active' | 'retired') =>
-      request<unknown>(`/partner/sim-cards/${sim.id}/status`, { method: 'POST', body: { status } }),
+
+  const activate = useMutation({
+    mutationFn: () =>
+      request<unknown>(`/partner/sim-cards/${sim.id}/status`, {
+        method: 'POST',
+        body: { status: 'active' },
+      }),
     onSuccess: refresh,
   });
 
-  const error = asApiError(change.error);
+  const retire = useMutation({
+    mutationFn: () =>
+      request<unknown>(`/partner/sim-cards/${sim.id}/status`, {
+        method: 'POST',
+        body: { status: 'retired' },
+      }),
+    onSuccess: () => {
+      void refresh();
+    },
+  });
+
+  const error = asApiError(activate.error);
   if (sim.status === 'retired') return null;
+  if (sim.status === 'blocked') {
+    return (
+      <span className="text-muted-foreground">
+        заблокирована площадкой — распоряжается администратор
+      </span>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-1">
@@ -451,22 +537,24 @@ export function SimActions({ sim }: { sim: Sim }) {
           <Button
             variant="outline"
             size="sm"
-            disabled={change.isPending}
+            disabled={activate.isPending}
             onClick={() => {
-              change.mutate('active');
+              activate.mutate();
             }}
           >
             Включить
           </Button>
         )}
-        <Irreversible
-          label="Списать"
-          confirm="Точно списать?"
-          disabled={change.isPending}
-          onConfirm={() => {
-            change.mutate('retired');
-          }}
-        />
+        {!inPort && (
+          <ConfirmAction
+            label="Списать"
+            title={`Списать карту ${sim.msisdn}`}
+            consequence={<p>{SIM_STATUS_MEANING.retired}</p>}
+            confirmLabel="Списать карту"
+            disabled={activate.isPending}
+            onConfirm={() => retire.mutateAsync()}
+          />
+        )}
       </div>
       {error !== undefined && <ErrorNote error={error} />}
     </div>

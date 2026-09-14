@@ -14,6 +14,10 @@ import { useEffect, useRef } from 'react';
  * он пропускает запрос и пишет ошибку в журнал. Тот же довод, что и у счётчика
  * ограничений частоты, — отказ на этом месте закрыл бы вход **всем**, включая
  * администратора, которому это и чинить.
+ *
+ * Методы — по документации SmartCaptcha (`widget-methods`): у `render` нет параметра
+ * истечения токена, оно приходит событием `token-expired` через `subscribe`, а тот
+ * возвращает функцию отписки.
  */
 declare global {
   interface Window {
@@ -24,10 +28,11 @@ declare global {
           sitekey: string;
           hl?: string;
           callback?: (token: string) => void;
-          'expired-callback'?: () => void;
         },
       ) => number;
-      destroy?: (widgetId: number) => void;
+      reset?: (widgetId?: number) => void;
+      destroy?: (widgetId?: number) => void;
+      subscribe?: (widgetId: number, event: 'token-expired', callback: () => void) => () => void;
     };
   }
 }
@@ -71,32 +76,43 @@ function loadScript(): Promise<void> {
 export function YandexCaptcha({
   siteKey,
   onToken,
+  resetSignal = 0,
 }: {
   siteKey: string;
   onToken: (token: string | undefined) => void;
+  /**
+   * Сброс виджета: каждое новое значение просит новую проверку.
+   *
+   * Пройденный токен одноразовый. Прежняя редакция после отказа формы забывала токен,
+   * а виджет продолжал показывать «пройдено» — и вторая попытка уходила без токена.
+   */
+  resetSignal?: number;
 }) {
   const container = useRef<HTMLDivElement | null>(null);
+  const widget = useRef<number | undefined>(undefined);
   // Обработчик держится в ссылке, чтобы его замена не перерисовывала виджет:
   // перерисовка сбрасывает уже пройденную проверку.
   const notify = useRef(onToken);
   notify.current = onToken;
 
   useEffect(() => {
-    let widgetId: number | undefined;
     let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
 
     void loadScript()
       .then(() => {
-        if (cancelled || container.current === null) return;
-        widgetId = window.smartCaptcha?.render(container.current, {
+        const api = window.smartCaptcha;
+        if (cancelled || container.current === null || api === undefined) return;
+        const id = api.render(container.current, {
           sitekey: siteKey,
           hl: 'ru',
           callback: (token) => {
             notify.current(token);
           },
-          'expired-callback': () => {
-            notify.current(undefined);
-          },
+        });
+        widget.current = id;
+        unsubscribe = api.subscribe?.(id, 'token-expired', () => {
+          notify.current(undefined);
         });
       })
       .catch(() => {
@@ -106,9 +122,17 @@ export function YandexCaptcha({
 
     return () => {
       cancelled = true;
-      if (widgetId !== undefined) window.smartCaptcha?.destroy?.(widgetId);
+      unsubscribe?.();
+      if (widget.current !== undefined) window.smartCaptcha?.destroy?.(widget.current);
+      widget.current = undefined;
     };
   }, [siteKey]);
+
+  useEffect(() => {
+    if (resetSignal === 0 || widget.current === undefined) return;
+    window.smartCaptcha?.reset?.(widget.current);
+    notify.current(undefined);
+  }, [resetSignal]);
 
   return <div ref={container} />;
 }

@@ -36,12 +36,20 @@ export interface Dictionary {
   /** Имя по идентификатору либо `undefined`, если запись не пришла. */
   readonly nameOf: (id: string) => string | undefined;
   readonly error: Error | null;
+  /**
+   * Ответ пришёл.
+   *
+   * Пустой список до ответа и пустой список в ответе — разные утверждения. Форма,
+   * которая их не различает, показывает «выберите…» без единого варианта и молча
+   * не даёт отправить — так партнёр не мог завести SIM (ui-review, 2026-09-14).
+   */
+  readonly ready: boolean;
 }
 
 function toDictionary(query: UseQueryResult<readonly NamedRow[]>): Dictionary {
   const rows = query.data ?? [];
   const byId = new Map(rows.map((row) => [row.id, row.name]));
-  return { rows, nameOf: (id) => byId.get(id), error: query.error };
+  return { rows, nameOf: (id) => byId.get(id), error: query.error, ready: query.isSuccess };
 }
 
 /** Операторы связи. Справочник целиком: их десятки, а не тысячи. */

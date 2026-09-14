@@ -5,7 +5,9 @@ import { PARTNER_STATUSES, type PartnerStatus } from '@zvonix/shared';
 import { Suspense, useState } from 'react';
 import { AccountLedger } from '@/components/account-ledger';
 import { Choice } from '@/components/choice';
+import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
+import { ErrorNote } from '@/components/error-note';
 import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
 import { Button } from '@/components/ui/button';
@@ -32,6 +34,14 @@ import { PartnerRates } from './partner-rates';
 const PAGE_SIZE = 50;
 const COLUMNS = 7;
 
+/** Кнопка называет действие, а не состояние, в которое переводит. */
+const PARTNER_ACTION: Record<PartnerStatus, string> = {
+  pending: 'Вернуть на проверку',
+  verified: 'Допустить к работе',
+  suspended: 'Приостановить',
+  closed: 'Закрыть навсегда',
+};
+
 interface PartnerRow {
   readonly id: string;
   /** Настоящее имя. В клиентский контур не попадает: этот экран административный. */
@@ -42,6 +52,9 @@ interface PartnerRow {
   readonly balance: string;
   readonly created_at: string;
 }
+
+const asApiError = (error: unknown): ApiError | undefined =>
+  error instanceof ApiError ? error : undefined;
 
 export default function PartnersPage() {
   return (
@@ -71,14 +84,28 @@ function PartnersTable() {
       request<{ partners: PartnerRow[]; total: number }>(`/partners?${search.toString()}`),
   });
 
-  const change = useMutation({
+  const invalidate = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: ['partners'] });
+  };
+
+  const verify = useMutation({
+    mutationFn: (id: string) =>
+      request<unknown>(`/partners/${id}/status`, {
+        method: 'PATCH',
+        body: { status: 'verified' },
+      }),
+    onSuccess: invalidate,
+  });
+
+  // Подтверждаемый перевод — своей мутацией: отказ виден в окне подтверждения.
+  const confirmStatus = useMutation({
     mutationFn: (input: { id: string; status: PartnerStatus }) =>
       request<unknown>(`/partners/${input.id}/status`, {
         method: 'PATCH',
         body: { status: input.status },
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['partners'] });
+    onSuccess: () => {
+      void invalidate();
     },
   });
 
@@ -88,14 +115,11 @@ function PartnersTable() {
         method: 'PUT',
         body: { displayName: input.displayName },
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['partners'] });
-    },
+    onSuccess: invalidate,
   });
 
-  const error = [change.error, rename.error].find(
-    (candidate): candidate is ApiError => candidate instanceof ApiError,
-  );
+  const error = asApiError(verify.error ?? rename.error);
+  const listError = asApiError(list.error);
 
   return (
     <div className="flex flex-col gap-3">
@@ -136,19 +160,10 @@ function PartnersTable() {
         </div>
       </div>
 
-      {error !== undefined && (
-        <p role="alert" className="text-crit">
-          {error.message}
-        </p>
-      )}
+      {error !== undefined && <ErrorNote error={error} />}
+      {listError !== undefined && <ErrorNote error={listError} />}
 
-      {list.error !== null && (
-        <p role="alert" className="text-crit">
-          {list.error.message}
-        </p>
-      )}
-
-      <div className="rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -183,13 +198,15 @@ function PartnersTable() {
                 key={partner.id}
                 partner={partner}
                 open={opened === partner.id}
-                busy={change.isPending}
+                busy={verify.isPending || confirmStatus.isPending}
+                renaming={rename.isPending}
                 onToggle={() => {
                   setOpened(opened === partner.id ? undefined : partner.id);
                 }}
-                onChoose={(status) => {
-                  change.mutate({ id: partner.id, status });
+                onVerify={() => {
+                  verify.mutate(partner.id);
                 }}
+                onConfirmStatus={(status) => confirmStatus.mutateAsync({ id: partner.id, status })}
                 onRename={(displayName) => {
                   rename.mutate({ id: partner.id, displayName });
                 }}
@@ -206,15 +223,19 @@ function PartnerRows({
   partner,
   open,
   busy,
+  renaming,
   onToggle,
-  onChoose,
+  onVerify,
+  onConfirmStatus,
   onRename,
 }: {
   partner: PartnerRow;
   open: boolean;
   busy: boolean;
+  renaming: boolean;
   onToggle: () => void;
-  onChoose: (status: PartnerStatus) => void;
+  onVerify: () => void;
+  onConfirmStatus: (status: PartnerStatus) => Promise<unknown>;
   onRename: (displayName: string) => void;
 }) {
   const canChange = useCanChange();
@@ -268,13 +289,18 @@ function PartnerRows({
             <div className="flex flex-col gap-4">
               {canChange && (
                 <>
-                  <AliasField partner={partner} busy={busy} onRename={onRename} />
-                  <StatusChoice partner={partner} busy={busy} onChoose={onChoose} />
+                  <AliasField partner={partner} busy={renaming} onRename={onRename} />
+                  <StatusChoice
+                    partner={partner}
+                    busy={busy}
+                    onVerify={onVerify}
+                    onConfirmStatus={onConfirmStatus}
+                  />
                 </>
               )}
               <PartnerEquipment partnerId={partner.id} />
               <PartnerRates partnerId={partner.id} />
-              <AccountLedger source={`/partners/${partner.id}/entries`} />
+              <AccountLedger source={`/partners/${partner.id}/entries`} account="partner" />
             </div>
           </TableCell>
         </TableRow>
@@ -286,19 +312,23 @@ function PartnerRows({
 /**
  * Смена состояния партнёра.
  *
- * Последствие названо у каждого варианта ([DESIGN.md](../../../../../docs/DESIGN.md)),
- * и здесь оно не косметическое: `verified` — единственное состояние, при котором шлюз
- * регистрируется, а SIM попадают в отбор. Из `closed` вариантов нет вовсе: переход
- * необратим, и предлагать его обратно — обещать то, чего API не сделает.
+ * Последствие не косметическое: `verified` — единственное состояние, при котором шлюз
+ * регистрируется, а SIM попадают в отбор. Допуск к работе — одним нажатием; всё, что
+ * трафик останавливает или необратимо, — через подтверждение с названным последствием
+ * ([DESIGN.md](../../../../../docs/DESIGN.md)). Раньше и «Закрыт» срабатывал с первого
+ * нажатия (ui-review, 2026-09-14). Из `closed` вариантов нет вовсе: переход необратим,
+ * и предлагать его обратно — обещать то, чего API не сделает.
  */
 function StatusChoice({
   partner,
   busy,
-  onChoose,
+  onVerify,
+  onConfirmStatus,
 }: {
   partner: PartnerRow;
   busy: boolean;
-  onChoose: (status: PartnerStatus) => void;
+  onVerify: () => void;
+  onConfirmStatus: (status: PartnerStatus) => Promise<unknown>;
 }) {
   if (partner.status === 'closed') {
     return (
@@ -313,24 +343,27 @@ function StatusChoice({
     <div className="flex flex-col gap-2">
       <h3 className="font-semibold">Состояние</h3>
       <p className="text-muted-foreground">
-        Сейчас — {PARTNER_STATUS_NAME[partner.status].toLowerCase()}. Смена попадает в журнал вместе
-        с тем, что было до.
+        Сейчас — {PARTNER_STATUS_NAME[partner.status].toLowerCase()}:{' '}
+        {PARTNER_STATUS_MEANING[partner.status]} Смена попадает в журнал вместе с тем, что было до.
       </p>
       <div className="flex flex-wrap gap-2">
-        {PARTNER_STATUSES.filter((status) => status !== partner.status).map((status) => (
-          <button
-            key={status}
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              onChoose(status);
-            }}
-            className="max-w-[300px] rounded-md border border-border bg-card p-2 text-left hover:border-ring disabled:opacity-50"
-          >
-            <span className="font-medium">{PARTNER_STATUS_NAME[status]}</span>
-            <span className="block text-muted-foreground">{PARTNER_STATUS_MEANING[status]}</span>
-          </button>
-        ))}
+        {PARTNER_STATUSES.filter((status) => status !== partner.status).map((status) =>
+          status === 'verified' ? (
+            <Button key={status} variant="outline" size="sm" disabled={busy} onClick={onVerify}>
+              {PARTNER_ACTION[status]}
+            </Button>
+          ) : (
+            <ConfirmAction
+              key={status}
+              label={PARTNER_ACTION[status]}
+              title={`${PARTNER_ACTION[status]}: партнёр «${partner.name}»`}
+              consequence={<p>{PARTNER_STATUS_MEANING[status]}</p>}
+              confirmLabel={PARTNER_ACTION[status]}
+              disabled={busy}
+              onConfirm={() => onConfirmStatus(status)}
+            />
+          ),
+        )}
       </div>
     </div>
   );
@@ -370,6 +403,7 @@ function AliasField({
         <Input
           className="w-[240px]"
           value={value}
+          autoComplete="off"
           placeholder="Партнёр 17"
           onChange={(event) => {
             setValue(event.target.value);
@@ -377,7 +411,7 @@ function AliasField({
         />
       </label>
       <Button type="submit" variant="outline" size="sm" disabled={!dirty || busy}>
-        Переименовать
+        {busy ? 'Переименовываем…' : 'Переименовать'}
       </Button>
       <p className="w-full text-muted-foreground">
         Клиенты увидят новое имя сразу. Настоящее имя партнёра им не показывается никогда —
