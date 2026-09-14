@@ -1,0 +1,31 @@
+# Кабинет (ADR-0037, ADR-0049): самодостаточная сборка Next на 127.0.0.1:3000.
+#
+# Окружения площадки здесь нет намеренно: кабинету не нужны ни база, ни `SECRET_KEY`,
+# а в API он ходит через тот же обратный прокси, что и браузер.
+[Unit]
+Description=Zvonix cabinet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zvonix
+Group=zvonix
+WorkingDirectory=/opt/zvonix/current/apps/web/.next/standalone/apps/web
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3000
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Next пишет кэш рядом со сборкой. Запись открыта только каталогу выпусков,
+# а не всей /opt.
+ReadWritePaths=/opt/zvonix/releases
+
+[Install]
+WantedBy=multi-user.target

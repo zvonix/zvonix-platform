@@ -1,0 +1,69 @@
+# Выпуск площадки (ADR-0049): полная проверка → сборка на Ubuntu → архив в GitHub Release.
+#
+# Сервер собирать не должен: на машине с узлом сборка отнимает процессор у голоса,
+# а на тестовом сервере не помещается в память. Он скачивает готовый архив сам —
+# `deploy/deploy.sh <метка>` — по токену только на чтение.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Метка выпуска, например v0.1.0'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: ./.github/workflows/ci.yml
+
+  pack:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Запись нужна только здесь: создать выпуск и приложить к нему архив.
+      contents: write
+    env:
+      # Метка — через окружение, а не подстановкой в команду: значение из формы запуска
+      # иначе исполнялось бы оболочкой.
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Установка зависимостей
+        run: pnpm install --frozen-lockfile
+
+      - name: Сборка
+        run: |
+          pnpm build
+          pnpm web:build
+
+      - name: Архив выпуска
+        run: node scripts/release-pack.mjs "$TAG" release
+
+      # Существующий выпуск не перезаписывается: `gh release create` откажет. Метка — адрес
+      # выпуска, и под одним адресом не должно лежать два разных архива.
+      - name: Выпуск в GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" \
+            "release/zvonix-${TAG}.tgz" \
+            "release/zvonix-${TAG}.tgz.sha256" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes "Выкладка на сервере: deploy/deploy.sh ${TAG}"

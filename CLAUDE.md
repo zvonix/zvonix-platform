@@ -50,7 +50,8 @@
 | Форматирование         | `pnpm format` |
 | Мёртвый код            | `pnpm deadcode` — knip: неиспользуемые файлы, экспорты и зависимости |
 | Ссылки в документации  | `node scripts/docs-links.mjs` — битые цели и несовпадение регистра |
-| Конфигурация узла      | `node scripts/node-config.mjs` — XML в `node/`, синтаксис `install.sh` |
+| Конфигурация узла      | `node scripts/node-config.mjs` — XML в `node/`, синтаксис `install.sh` и скриптов выкладки |
+| Архив выпуска          | `node scripts/release-pack.mjs <метка>` — после `pnpm build` и `pnpm web:build`; выкладка — [deploy/README.md](deploy/README.md) |
 | **Полная проверка**    | `pnpm verify` (то же — `pnpm check`, `bash scripts/check.sh`). Тот же скрипт гоняет CI |
 | Сгенерировать миграцию | `pnpm db:generate` — **после `pnpm build`**: читается собранная схема |
 | Применить миграции     | `pnpm db:migrate` |
@@ -123,6 +124,7 @@ packages/
   config/  — модуль конфигурации (ADR-0002)
   logger/  — логгер (ADR-0004)
 node/      — конфигурация FreeSWITCH и скрипт установки узла
+deploy/    — выкладка площадки: скрипт, службы systemd, сайт nginx (ADR-0049)
 android/   — приложение партнёра (Kotlin)
 docs/      — документация (см. ниже)
 scripts/   — check.sh: единая точка проверки проекта

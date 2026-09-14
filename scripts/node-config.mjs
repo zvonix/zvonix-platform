@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { SyntaxValidator } from 'fast-xml-validator';
 
@@ -61,47 +61,52 @@ for (const file of configs) {
   }
 }
 
-// --- Скрипт установки ---------------------------------------------------------
+// --- Скрипты, которые исполняются на серверах от root ------------------------------
+//
+// Установщик узла (ADR-0045) и выкладка площадки (ADR-0049). Проверка механическая:
+// работают ли они, отвечает только живая машина.
 
-const installScript = path.join(NODE_DIR, 'install.sh');
-let installScriptExists = true;
-try {
-  statSync(installScript);
-} catch {
-  problems.push('нет node/install.sh');
-  installScriptExists = false;
-}
+const SHELL_SCRIPTS = ['node/install.sh', 'deploy/deploy.sh', 'deploy/server-setup.sh'];
 
-// Условие именно про существование файла, а не про отсутствие проблем вообще:
-// иначе сломанный XML отменял бы проверку скрипта, и о второй ошибке узнавали бы
-// только после починки первой. Проверка обязана показать полную картину сразу.
-if (installScriptExists) {
-  const source = readFileSync(installScript, 'utf8');
+// Каждый скрипт проверяется независимо от остальных и от XML: сломанный файл не отменяет
+// проверку соседнего, иначе о второй ошибке узнавали бы только после починки первой.
+for (const script of SHELL_SCRIPTS) {
+  const file = path.join(ROOT, script);
+  let source;
+  try {
+    source = readFileSync(file, 'utf8');
+  } catch {
+    problems.push(`нет ${script}`);
+    continue;
+  }
 
-  // Без этого скрипт продолжает работу после ошибки и оставляет узел настроенным
+  // Без этого скрипт продолжает работу после ошибки и оставляет сервер настроенным
   // наполовину — а это хуже ненастроенного, потому что выглядит рабочим.
   if (!source.includes('set -euo pipefail')) {
-    problems.push('node/install.sh: нет `set -euo pipefail`');
+    problems.push(`${script}: нет \`set -euo pipefail\``);
   }
   // Переводы строк только LF: скрипт исполняется на Ubuntu, а CR в шебанге
   // даёт «bad interpreter» — ошибку, по которой причина не очевидна.
   if (source.includes('\r')) {
-    problems.push('node/install.sh: возврат каретки в файле, нужен только LF');
+    problems.push(`${script}: возврат каретки в файле, нужен только LF`);
   }
 
   try {
-    execFileSync('bash', ['-n', installScript], { stdio: 'pipe' });
+    execFileSync('bash', ['-n', file], { stdio: 'pipe' });
   } catch (error) {
     const output =
       error instanceof Error && 'stderr' in error ? String(error.stderr) : String(error);
-    problems.push(`node/install.sh: синтаксическая ошибка — ${output.trim()}`);
+    problems.push(`${script}: синтаксическая ошибка — ${output.trim()}`);
   }
 }
 
 if (problems.length > 0) {
-  console.error(`Проблем в конфигурации узла: ${problems.length}`);
+  console.error(`Проблем в конфигурации узла и выкладки: ${problems.length}`);
   for (const problem of problems) console.error(`  ${problem}`);
   process.exit(1);
 }
 
-console.log(`Конфигурация узла проверена: ${String(configs.length)} файлов XML и install.sh.`);
+console.log(
+  `Конфигурация узла и выкладки проверена: ${String(configs.length)} файлов XML, ` +
+    `${String(SHELL_SCRIPTS.length)} скрипта.`,
+);

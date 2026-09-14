@@ -8,6 +8,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Выпуск вызывает этот же процесс перед сборкой архива: выпуск без пройденного гейта
+  # не собирается (ADR-0049).
+  workflow_call:
 
 jobs:
   check:
@@ -53,9 +56,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Версия pnpm берётся из `packageManager` в package.json. Здесь её не повторяем:
+      # копия разошлась — стояла 9 при закреплённой 11.5.0, и CI ставил бы другое дерево.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
