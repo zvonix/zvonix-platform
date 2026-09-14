@@ -18,6 +18,7 @@ import {
   DEFAULT_MAX_CONCURRENT_CALLS,
   GATEWAY_PORT_STATES,
   GATEWAY_STATUSES,
+  GATEWAY_SUSPENDED_BY,
   GATEWAY_TYPES,
   DEFAULT_TRUNK_CONCURRENT_CALLS,
   MAX_CONCURRENT_CALLS_LIMIT,
@@ -28,6 +29,7 @@ import {
   type ChannelStatus,
   type GatewayPortState,
   type GatewayStatus,
+  type GatewaySuspendedBy,
   type GatewayType,
   type SimNetworkScope,
   type SimStatus,
@@ -51,6 +53,13 @@ export const gateways = pgTable(
     name: text().notNull(),
     type: text().$type<GatewayType>().notNull(),
     status: text().$type<GatewayStatus>().notNull().default('pending'),
+
+    /**
+     * Кто выключил: задан ровно у `suspended`
+     * ([ADR-0047](../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)). Партнёр снимает только
+     * своё выключение — отключение администратором или порогом отказов не снимает.
+     */
+    suspendedBy: text().$type<GatewaySuspendedBy>(),
 
     /**
      * Имя учётной записи SIP: `gw-a1b2c3d4e5f6`. Уникально по всей платформе, потому что
@@ -91,6 +100,16 @@ export const gateways = pgTable(
   (t) => [
     check('gateways_type_check', oneOf(t.type, GATEWAY_TYPES)),
     check('gateways_status_check', oneOf(t.status, GATEWAY_STATUSES)),
+    check(
+      'gateways_suspended_by_check',
+      sql`${t.suspendedBy} is null or ${oneOf(t.suspendedBy, GATEWAY_SUSPENDED_BY)}`,
+    ),
+    // Отключение без источника — шлюз, про который не сказать, кто вправе его вернуть;
+    // источник без отключения — поле, по которому разбор пошёл бы по ложному следу.
+    check(
+      'gateways_suspended_by_matches_status',
+      sql`(${t.status} = 'suspended') = (${t.suspendedBy} is not null)`,
+    ),
     // Пустой хеш допустим ровно у транка: у всех, кто регистрируется к нам, он обязателен,
     // и шлюз без него молча перестал бы проходить проверку digest.
     check('gateways_a1_hash_required', sql`${t.a1Hash} is not null or ${t.type} = 'sip_trunk'`),

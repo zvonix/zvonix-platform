@@ -215,6 +215,10 @@ test.describe('клиент заводит доступ своей систем�
 
     await expect(dialog).toHaveCount(0);
     await expect(row.getByText(/отозван/u)).toBeVisible();
+    // Кнопки «Отозвать» у ключа больше нет, но фокус не падает на страницу (ConfirmAction).
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(false);
   });
 });
 
@@ -257,6 +261,30 @@ test.describe('партнёр заводит своё оборудование',
     expect(denied).toEqual([]);
   });
 
+  test('выключенный собой шлюз партнёр включает обратно здесь же', async ({ page }) => {
+    await signIn(page, PEOPLE.partner);
+    await page.goto('/partner/equipment');
+
+    await page.getByRole('button', { name: 'Завести шлюз' }).click();
+    await page.getByLabel('Название').fill('Шлюз на выключение');
+    await page.getByRole('button', { name: 'Завести', exact: true }).click();
+
+    const card = page.getByRole('region', { name: 'Шлюз на выключение' });
+    await card.getByRole('button', { name: 'Включить' }).click();
+    await expect(card.getByText('Работает', { exact: true })).toBeVisible();
+
+    // До ADR-0047 выключение партнёра не отличалось от отключения площадкой,
+    // и за одной кнопкой «Включить» приходилось идти к администратору.
+    const dialog = page.getByRole('alertdialog', { name: 'Выключить шлюз «Шлюз на выключение»' });
+    await card.getByRole('button', { name: 'Выключить' }).click();
+    await expect(dialog).toContainText('обратно');
+    await dialog.getByRole('button', { name: 'Выключить шлюз' }).click();
+
+    await expect(card.getByText('Выключен вами')).toBeVisible();
+    await card.getByRole('button', { name: 'Включить' }).click();
+    await expect(card.getByText('Работает', { exact: true })).toBeVisible();
+  });
+
   test('списание спрашивает с последствием: отменить его будет нечем', async ({ page }) => {
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/equipment');
@@ -275,6 +303,9 @@ test.describe('партнёр заводит своё оборудование',
     await dialog.getByRole('button', { name: 'Списать шлюз' }).click();
 
     await expect(page.getByRole('region', { name: 'Шлюз на списание' })).toHaveCount(0);
+    // Кнопка «Списать» ушла вместе со шлюзом, но фокус не падает на страницу: он встаёт
+    // на ближайший доступный элемент там, где кнопка стояла (ConfirmAction).
+    await expect(page.getByRole('button', { name: 'Завести шлюз' })).toBeFocused();
   });
 });
 

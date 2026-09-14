@@ -8,6 +8,7 @@ import { SipCredentials, type SipAccount } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { useOperators } from '@/lib/dictionaries';
 import { SIM_STATUS_MEANING } from '@/lib/labels';
 import { integerFromInput } from '@/lib/money';
@@ -198,30 +199,26 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
     onSuccess: refresh,
   });
 
-  // Выключение — через подтверждение: включить шлюз обратно партнёр уже не может,
-  // `suspended` одно и для него, и для отключения площадкой. Отказ показывается в окне.
+  // Выключение — через подтверждение: оно останавливает трафик. Включить обратно партнёр
+  // может сам — источник выключения записывается (ADR-0047). Отказ показывается в окне.
   const suspend = useMutation({
     mutationFn: () =>
       request<unknown>(`/partner/gateways/${gateway.id}/status`, {
         method: 'POST',
         body: { status: 'suspended' },
       }),
-    onSuccess: () => {
-      void refresh();
-    },
+    onSuccess: () => atMost(refresh()),
   });
 
-  // Обновление без ожидания: списанный шлюз уходит из списка, и окно подтверждения
-  // должно закрыться раньше, чем исчезнет его кнопка.
+  // Окно закрывается, когда обновление пришло: шлюза в списке уже нет, и фокус встаёт
+  // рядом, а не падает на страницу (ConfirmAction).
   const retire = useMutation({
     mutationFn: () =>
       request<unknown>(`/partner/gateways/${gateway.id}/status`, {
         method: 'POST',
         body: { status: 'retired' },
       }),
-    onSuccess: () => {
-      void refresh();
-    },
+    onSuccess: () => atMost(refresh()),
   });
 
   const addPort = useMutation({
@@ -253,6 +250,12 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
   // Списание шлюза вынимает карты из его портов: порта после списания не существует.
   // Их число называется до подтверждения, а не после — отменить будет нечем.
   const occupied = gateway.ports.filter((slot) => slot.sim !== null).length;
+  // Кто выключил, решает, кто вправе вернуть (ADR-0047): своё выключение партнёр снимает
+  // сам, отключение площадкой или порогом — нет, ни включением, ни списанием.
+  const lockedByPlatform = gateway.status === 'suspended' && gateway.suspended_by !== 'partner';
+  const canActivate =
+    gateway.status === 'pending' ||
+    (gateway.status === 'suspended' && gateway.suspended_by === 'partner');
 
   return (
     <div className="flex flex-col gap-2">
@@ -262,36 +265,33 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
             label="Выключить"
             title={`Выключить шлюз «${gateway.name}»`}
             consequence={
-              <>
-                <p>Шлюз перестанет получать вызовы от площадки.</p>
-                <p>
-                  Включить его обратно сможет только администратор площадки: выключенный вами шлюз и
-                  шлюз, отключённый площадкой, для неё одно и то же состояние.
-                </p>
-              </>
+              <p>
+                Шлюз перестанет получать вызовы от площадки. Включить его обратно можно здесь же, в
+                любой момент.
+              </p>
             }
             confirmLabel="Выключить шлюз"
             onConfirm={() => suspend.mutateAsync()}
           />
         )}
-        {gateway.status === 'suspended' && (
+        {lockedByPlatform && (
           <span className="self-center text-muted-foreground">
-            выключен — включить или списать его может только администратор площадки
+            {gateway.suspended_by === 'failure_threshold'
+              ? 'много неудачных вызовов — проверьте оборудование и напишите площадке: включит администратор'
+              : 'включить или списать его может только администратор площадки'}
           </span>
         )}
-        {gateway.status !== 'active' &&
-          gateway.status !== 'suspended' &&
-          gateway.status !== 'retired' && (
-            <Button
-              size="sm"
-              disabled={activate.isPending}
-              onClick={() => {
-                activate.mutate();
-              }}
-            >
-              Включить
-            </Button>
-          )}
+        {canActivate && (
+          <Button
+            size="sm"
+            disabled={activate.isPending}
+            onClick={() => {
+              activate.mutate();
+            }}
+          >
+            Включить
+          </Button>
+        )}
 
         <form
           onSubmit={(event) => {
@@ -336,7 +336,7 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
           onConfirm={() => reset.mutateAsync()}
         />
 
-        {gateway.status !== 'retired' && gateway.status !== 'suspended' && (
+        {gateway.status !== 'retired' && !lockedByPlatform && (
           <ConfirmAction
             label="Списать"
             title={`Списать шлюз «${gateway.name}»`}
@@ -515,9 +515,7 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
         method: 'POST',
         body: { status: 'retired' },
       }),
-    onSuccess: () => {
-      void refresh();
-    },
+    onSuccess: () => atMost(refresh()),
   });
 
   const error = asApiError(activate.error);
@@ -533,7 +531,14 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap gap-2">
-        {sim.status !== 'active' && (
+        {/* Придержанную карту включает только администратор (ADR-0047): порог отключил
+            бы её снова на следующем проходе, пока старые отказы ещё в окне. */}
+        {sim.status === 'throttled' && (
+          <span className="self-center text-muted-foreground">
+            придержана площадкой — включает администратор
+          </span>
+        )}
+        {sim.status !== 'active' && sim.status !== 'throttled' && (
           <Button
             variant="outline"
             size="sm"
@@ -545,7 +550,7 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
             Включить
           </Button>
         )}
-        {!inPort && (
+        {!inPort && sim.status !== 'throttled' && (
           <ConfirmAction
             label="Списать"
             title={`Списать карту ${sim.msisdn}`}

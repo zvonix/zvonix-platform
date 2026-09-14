@@ -43,9 +43,11 @@ export function ThemeSwitch() {
     }
   }
 
+  // Кнопки 24×24 — минимум цели нажатия (WCAG 2.5.8); было 22×22 на каждой странице.
+  // Отступы группы сняты ровно на прибавку: снаружи те же 76×28, и шапка на телефоне не растёт.
   return (
     <div
-      className="flex items-center gap-0.5 rounded-md border border-border p-0.5"
+      className="flex items-center rounded-md border border-border p-px"
       role="group"
       aria-label="Тема оформления"
     >
@@ -61,8 +63,8 @@ export function ThemeSwitch() {
           }}
           className={
             theme === value
-              ? 'rounded-sm bg-accent p-1 text-accent-foreground'
-              : 'rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground'
+              ? 'grid size-6 place-items-center rounded-sm bg-accent text-accent-foreground'
+              : 'grid size-6 place-items-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground'
           }
         >
           <Icon size={14} strokeWidth={2} aria-hidden />

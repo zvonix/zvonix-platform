@@ -7,6 +7,7 @@ import {
   MAX_TRUNK_CONCURRENT_CALLS,
   REGISTRABLE_GATEWAY_STATUSES,
   type GatewayStatus,
+  type GatewaySuspendedBy,
 } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
@@ -23,7 +24,8 @@ import {
 } from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
-import { GATEWAY_STATUS_NAME, usableTone } from '@/lib/labels';
+import { atMost } from '@/lib/wait';
+import { GATEWAY_STATUS_NAME, GATEWAY_SUSPENDED_BY_NAME, usableTone } from '@/lib/labels';
 import { integerFromInput } from '@/lib/money';
 
 const COLUMNS = 6;
@@ -33,6 +35,8 @@ interface Trunk {
   readonly node_id: string | null;
   readonly name: string;
   readonly status: GatewayStatus;
+  /** Кто выключил: порог отказов срабатывает и на транк (ADR-0047). */
+  readonly suspended_by: GatewaySuspendedBy | null;
   readonly sip_username: string;
   readonly proxy_host: string;
   readonly registers_outbound: boolean;
@@ -131,9 +135,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
         method: 'POST',
         body: { status: input.status },
       }),
-    onSuccess: () => {
-      void refresh();
-    },
+    onSuccess: () => atMost(refresh()),
   });
 
   const failed = asApiError(list.error ?? create.error ?? update.error ?? activate.error);
@@ -226,6 +228,11 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                     >
                       {GATEWAY_STATUS_NAME[trunk.status]}
                     </span>
+                    {trunk.suspended_by !== null && (
+                      <span className="text-muted-foreground">
+                        {GATEWAY_SUSPENDED_BY_NAME[trunk.suspended_by]}
+                      </span>
+                    )}
                     {canChange && (
                       <TrunkStatus
                         // Новый выбор после смены состояния: прежний мог совпасть с новым.

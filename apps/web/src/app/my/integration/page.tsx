@@ -17,6 +17,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { moment } from '@/lib/format';
 
 const COLUMNS = 5;
@@ -303,9 +304,9 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
 function RevokeKey({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: () => Promise<void> }) {
   const revoke = useMutation({
     mutationFn: () => request<unknown>(`/client/api-keys/${apiKey.id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      void onRevoked();
-    },
+    // С ожиданием: окно закрывается, когда ключ уже показан отозванным, и фокус встаёт
+    // рядом, а не на кнопку, которая исчезнет следом (ConfirmAction).
+    onSuccess: () => atMost(onRevoked()),
   });
 
   return (

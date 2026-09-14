@@ -6,10 +6,12 @@ import type {
   ClientStatus,
   GatewayPortState,
   GatewayStatus,
+  GatewaySuspendedBy,
   GatewayType,
   LimitMetric,
   LimitWindow,
   NodeStatus,
+  PartnerFacingSuspension,
   PartnerStatus,
   Rounding,
   SimStatus,
@@ -146,6 +148,31 @@ export const GATEWAY_STATUS_NAME: Record<GatewayStatus, string> = {
   retired: 'Выведен',
 };
 
+/**
+ * Кто выключил шлюз — для администратора и поддержки
+ * ([ADR-0047](../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+ *
+ * От источника зависит, кто вправе вернуть: своё выключение партнёр снимает сам,
+ * отключение администратором или порогом — нет. «Выключил порог» и «выключил
+ * администратор» — разные разговоры с партнёром, поэтому показываются раздельно.
+ */
+export const GATEWAY_SUSPENDED_BY_NAME: Record<GatewaySuspendedBy, string> = {
+  partner: 'выключил партнёр',
+  admin: 'выключил администратор',
+  failure_threshold: 'отключил порог отказов',
+};
+
+/** Кто выключил — так, как это видит партнёр: кто именно на площадке, не раскрывается. */
+export const PARTNER_SUSPENSION_NAME: Record<PartnerFacingSuspension, string> = {
+  partner: 'Выключен вами',
+  platform: 'Отключён площадкой',
+  failure_threshold: 'Отключён автоматически',
+};
+
+/** Последствие, когда администратор запирает шлюз, выключенный самим партнёром. */
+export const GATEWAY_LOCK_MEANING =
+  'Партнёр выключил шлюз сам и может включить его обратно. После приостановки площадкой включить или списать шлюз сможет только администратор.';
+
 export const SIM_STATUS_NAME: Record<SimStatus, string> = {
   new: 'Новая',
   active: 'Работает',
@@ -217,7 +244,7 @@ export const GATEWAY_STATUS_MEANING: Record<GatewayStatus, string> = {
     'Шлюз не регистрируется на узле, вызовы через него не идут. Так он заводится до допуска.',
   active: 'Шлюз регистрируется на узле, его SIM участвуют в отборе под вызовы.',
   suspended:
-    'Следующая регистрация не пройдёт, новые вызовы через шлюз не идут. Идущие разговоры не рвутся. Вернуть можно.',
+    'Следующая регистрация не пройдёт, новые вызовы через шлюз не идут. Идущие разговоры не рвутся. Включить обратно сможет только администратор: отключение площадкой партнёр не снимает.',
   retired:
     'Шлюз выводится навсегда, все SIM вынимаются из его портов. Вернуть его в работу нельзя — только завести новый.',
 };
@@ -231,7 +258,8 @@ export const GATEWAY_STATUS_MEANING: Record<GatewayStatus, string> = {
 export const SIM_STATUS_MEANING: Record<SimStatus, string> = {
   new: 'SIM заведена, но в отбор под вызовы не попадает, пока её не включат.',
   active: 'SIM участвует в отборе под вызовы.',
-  throttled: 'SIM придержана: в отбор не попадает, пока ограничение не снимут. Вернуть можно.',
+  throttled:
+    'SIM придержана: в отбор не попадает и сама не вернётся. Партнёр её не включает — только администратор.',
   blocked: 'SIM заблокирована: в отбор не попадает и сама не вернётся — только решением человека.',
   retired: 'SIM выводится навсегда. Вернуть её в работу нельзя.',
 };

@@ -6,7 +6,13 @@
  * разъехался бы с первым на первой же правке контракта.
  */
 
-import type { GatewayPortState, GatewayStatus, GatewayType, SimStatus } from '@zvonix/shared';
+import type {
+  GatewayPortState,
+  GatewayStatus,
+  GatewayType,
+  PartnerFacingSuspension,
+  SimStatus,
+} from '@zvonix/shared';
 
 export interface Sim {
   readonly id: string;
@@ -31,6 +37,11 @@ export interface Gateway {
   readonly name: string;
   readonly type: GatewayType;
   readonly status: GatewayStatus;
+  /**
+   * Кто выключил (ADR-0047): `partner` партнёр снимает сам, `platform`
+   * и `failure_threshold` — нет. Задан ровно у `suspended`.
+   */
+  readonly suspended_by: PartnerFacingSuspension | null;
   readonly model: string | null;
   /**
    * Есть ли регистрация на узле. Без неё вызов не уйдёт вовсе: диалплан набирает шлюз

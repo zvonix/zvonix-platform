@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { getTableConfig, QueryBuilder, type PgTable } from 'drizzle-orm/pg-core';
-import { USER_ROLES, USER_STATUSES } from '@zvonix/shared';
+import { GATEWAY_SUSPENDED_BY, USER_ROLES, USER_STATUSES } from '@zvonix/shared';
 import { CASING } from './casing.js';
 import { MIGRATIONS_FOLDER } from './migrate.js';
 import { toDatabaseError } from './client.js';
@@ -115,12 +115,21 @@ describe('согласованность рантайма и сгенериро�
     }
   });
 
-  it('ограничения на роли и статусы содержат ровно значения из @zvonix/shared', () => {
+  it('ограничения на роли, статусы и источник отключения содержат значения из @zvonix/shared', () => {
     for (const role of USER_ROLES) {
       expect(migrationSql).toContain(`'${role}'`);
     }
     for (const status of USER_STATUSES) {
       expect(migrationSql).toContain(`'${status}'`);
+    }
+    // Источник отключения шлюза (ADR-0047): значение, которого нет в CHECK, база
+    // отвергла бы на первом же выключении. Ищется внутри своего ограничения: `partner`
+    // и `admin` есть и в ограничениях ролей, и общий поиск по тексту их не отличил бы.
+    const suspendedByCheck =
+      /"gateways_suspended_by_check" CHECK \(([^;]+)\)/u.exec(migrationSql)?.[1] ?? '';
+    expect(suspendedByCheck).not.toBe('');
+    for (const source of GATEWAY_SUSPENDED_BY) {
+      expect(suspendedByCheck).toContain(`'${source}'`);
     }
   });
 });

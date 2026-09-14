@@ -15,6 +15,7 @@ import { moment } from '@/lib/format';
 import {
   GATEWAY_STATUS_NAME,
   GATEWAY_TYPE_NAME,
+  PARTNER_SUSPENSION_NAME,
   PORT_STATE_NAME,
   SIM_STATUS_NAME,
 } from '@/lib/labels';
@@ -35,7 +36,12 @@ function PartnerEquipment() {
     queryFn: () => request<Equipment>('/partner/equipment'),
   });
 
-  if (equipment.error !== null) {
+  if (equipment.isPending) return <p className="text-muted-foreground">Загружаем…</p>;
+
+  // Ранний выход — только когда показывать нечего. Неудачное фоновое обновление (партнёр
+  // вернулся из вкладки с настройками GOIP) не должно размонтировать формы: вместе с ними
+  // пропадал только что выданный пароль SIP, который показывается один раз.
+  if (equipment.data === undefined) {
     return (
       <p role="alert" className="text-crit">
         {equipment.error.message}
@@ -43,13 +49,20 @@ function PartnerEquipment() {
     );
   }
 
-  if (equipment.isPending) return <p className="text-muted-foreground">Загружаем…</p>;
-
   const { gateways, trunks, spare_sims: spare } = equipment.data;
   const offline = gateways.filter((gateway) => gateway.status === 'active' && !gateway.on_node);
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Обновление не удалось, но загруженное остаётся на экране — вместе с формами
+          и выданным паролем. */}
+      {equipment.error !== null && (
+        <p role="alert" className="text-crit">
+          Не удалось обновить оборудование: {equipment.error.message}. Показано последнее
+          загруженное.
+        </p>
+      )}
+
       <div className="flex flex-col gap-1">
         {/*
           Самое дорогое из невидимого: включённый шлюз без регистрации выглядит рабочим
@@ -184,7 +197,13 @@ function GatewayCard({ gateway, spare }: { gateway: Gateway; spare: readonly Sim
         <h3 className="font-semibold">{gateway.name}</h3>
         <span className="text-muted-foreground">{GATEWAY_TYPE_NAME[gateway.type]}</span>
         {gateway.model !== null && <span className="text-faint">{gateway.model}</span>}
-        <span className="text-muted-foreground">{GATEWAY_STATUS_NAME[gateway.status]}</span>
+        <span className="text-muted-foreground">
+          {/* У выключенного важнее не «приостановлен», а кто выключил: от этого зависит,
+              может ли партнёр включить его сам (ADR-0047). */}
+          {gateway.suspended_by === null
+            ? GATEWAY_STATUS_NAME[gateway.status]
+            : PARTNER_SUSPENSION_NAME[gateway.suspended_by]}
+        </span>
         <span className={gateway.on_node ? 'text-muted-foreground' : 'text-warn'}>
           {gateway.on_node ? `на связи · ${moment(gateway.registered_at)}` : 'не на связи с узлом'}
         </span>

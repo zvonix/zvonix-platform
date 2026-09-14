@@ -20,9 +20,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ReadOnly } from '@/components/read-only';
+import { SipCredentials, type IssuedCredentials } from '@/components/sip-credentials';
 import { useCanChange } from '@/lib/access';
 import { ErrorNote } from '@/components/error-note';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { moment } from '@/lib/format';
 import { CLIENT_STATUS_MEANING, CLIENT_STATUS_NAME, clientStatusTone } from '@/lib/labels';
 import { isNegative, money, moneyFromInput } from '@/lib/money';
@@ -71,6 +73,7 @@ function ClientsTable() {
   const url = useUrlState();
   const queryClient = useQueryClient();
   const [opened, setOpened] = useState<string | undefined>(undefined);
+  const [issued, setIssued] = useState<readonly IssuedCredentials[]>([]);
 
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
   const search = new URLSearchParams(url.query);
@@ -103,9 +106,7 @@ function ClientsTable() {
         method: 'PATCH',
         body: { status: input.status },
       }),
-    onSuccess: () => {
-      void invalidate();
-    },
+    onSuccess: () => atMost(invalidate()),
   });
 
   const overdraft = useMutation({
@@ -114,9 +115,7 @@ function ClientsTable() {
         method: 'PATCH',
         body: { overdraftLimit: input.value },
       }),
-    onSuccess: () => {
-      void invalidate();
-    },
+    onSuccess: () => atMost(invalidate()),
   });
 
   const changeError = asApiError(activate.error);
@@ -164,6 +163,22 @@ function ClientsTable() {
       {changeError !== undefined && <ErrorNote error={changeError} />}
       {listError !== undefined && <ErrorNote error={listError} />}
 
+      {/*
+        Выданный пароль канала — здесь, над таблицей, а не в строке клиента: строку сворачивают,
+        и панель пропадала вместе с ней. Второго показа пароля не будет. Панелей может быть
+        несколько: пароль второго канала не затирает незакрытый пароль первого.
+      */}
+      {issued.map((secret) => (
+        <SipCredentials
+          key={secret.account.username}
+          account={secret.account}
+          title={secret.title}
+          onClose={() => {
+            setIssued((list) => list.filter((item) => item !== secret));
+          }}
+        />
+      ))}
+
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
@@ -207,6 +222,9 @@ function ClientsTable() {
                 }}
                 onConfirmStatus={(status) => confirmStatus.mutateAsync({ id: client.id, status })}
                 onOverdraft={(value) => overdraft.mutateAsync({ id: client.id, value })}
+                onIssued={(secret) => {
+                  setIssued((list) => [...list, secret]);
+                }}
               />
             ))}
           </TableBody>
@@ -224,6 +242,7 @@ function ClientRows({
   onActivate,
   onConfirmStatus,
   onOverdraft,
+  onIssued,
 }: {
   client: ClientRow;
   open: boolean;
@@ -232,6 +251,7 @@ function ClientRows({
   onActivate: () => void;
   onConfirmStatus: (status: ClientStatus) => Promise<unknown>;
   onOverdraft: (value: string) => Promise<unknown>;
+  onIssued: (issued: IssuedCredentials) => void;
 }) {
   const canChange = useCanChange();
   return (
@@ -280,7 +300,12 @@ function ClientRows({
                   <OverdraftField client={client} onSave={onOverdraft} />
                 </>
               )}
-              <ClientChannels clientId={client.id} />
+              <ClientChannels
+                clientId={client.id}
+                onIssued={(secret) => {
+                  onIssued({ ...secret, title: `${secret.title} — клиент «${client.name}»` });
+                }}
+              />
               {canChange && <DepositForm client={client} />}
               <AccountLedger source={`/clients/${client.id}/entries`} account="client" />
             </div>

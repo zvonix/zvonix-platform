@@ -7,13 +7,14 @@ import {
   REGISTRABLE_GATEWAY_STATUSES,
   type GatewayPortState,
   type GatewayStatus,
+  type GatewaySuspendedBy,
   type GatewayType,
   type SimStatus,
 } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
-import { SipCredentials, type SipAccount } from '@/components/sip-credentials';
+import type { IssuedCredentials, SipAccount } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -26,10 +27,13 @@ import {
 } from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { moment } from '@/lib/format';
 import {
+  GATEWAY_LOCK_MEANING,
   GATEWAY_STATUS_MEANING,
   GATEWAY_STATUS_NAME,
+  GATEWAY_SUSPENDED_BY_NAME,
   GATEWAY_TYPE_NAME,
   PORT_STATE_NAME,
   usableTone,
@@ -41,6 +45,8 @@ interface Gateway {
   readonly name: string;
   readonly type: GatewayType;
   readonly status: GatewayStatus;
+  /** Кто выключил: задан ровно у `suspended` (ADR-0047). */
+  readonly suspended_by: GatewaySuspendedBy | null;
   readonly sip_username: string;
   readonly registered_at: string | null;
   readonly model: string | null;
@@ -90,13 +96,22 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * (приостановка, возврат в «ждёт», вывод, перевыпуск доступа), — через подтверждение
  * с названным последствием: раньше вывод шлюза вместе с вынутыми SIM срабатывал
  * с первого нажатия (ui-review, 2026-09-14).
+ *
+ * Выданный пароль SIP уходит наверх (`onIssued`) и показывается над таблицей партнёров:
+ * этот блок живёт внутри строки партнёра, и при её сворачивании панель с паролем,
+ * который показывается один раз, пропадала вместе с ним.
  */
-export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: SimOption[] }) {
+export function PartnerGateways({
+  partnerId,
+  sims,
+  onIssued,
+}: {
+  partnerId: string;
+  sims: SimOption[];
+  onIssued: (issued: IssuedCredentials) => void;
+}) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
-  const [issued, setIssued] = useState<{ title: string; account: SipAccount } | undefined>(
-    undefined,
-  );
   const [creating, setCreating] = useState(false);
   const [opened, setOpened] = useState<string | undefined>(undefined);
   const [name, setName] = useState('');
@@ -129,7 +144,7 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
       setCreating(false);
       setName('');
       setModel('');
-      setIssued({ title: `Доступ SIP для шлюза «${name}»`, account: data.account });
+      onIssued({ title: `Доступ SIP для шлюза «${name}»`, account: data.account });
       await invalidate();
     },
   });
@@ -151,16 +166,14 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
         method: 'POST',
         body: { status: input.status },
       }),
-    onSuccess: () => {
-      void invalidate();
-    },
+    onSuccess: () => atMost(invalidate()),
   });
 
   const reissue = useMutation({
     mutationFn: (gateway: Gateway) =>
       request<{ account: SipAccount }>(`/gateways/${gateway.id}/credentials`, { method: 'POST' }),
     onSuccess: (data, gateway) => {
-      setIssued({ title: `Новый доступ SIP для шлюза «${gateway.name}»`, account: data.account });
+      onIssued({ title: `Новый доступ SIP для шлюза «${gateway.name}»`, account: data.account });
       void invalidate();
     },
   });
@@ -187,16 +200,6 @@ export function PartnerGateways({ partnerId, sims }: { partnerId: string; sims: 
           </Button>
         )}
       </div>
-
-      {issued !== undefined && (
-        <SipCredentials
-          account={issued.account}
-          title={issued.title}
-          onClose={() => {
-            setIssued(undefined);
-          }}
-        />
-      )}
 
       {canChange && creating && (
         <form
@@ -362,6 +365,9 @@ function GatewayRows({
   onReissue: () => Promise<unknown>;
 }) {
   const canChange = useCanChange();
+  // Выключенный самим партнёром шлюз администратор может запереть: состояние то же,
+  // источник — площадка, и партнёр больше не включит и не спишет его (ADR-0047).
+  const lockable = gateway.status === 'suspended' && gateway.suspended_by === 'partner';
 
   return (
     <>
@@ -379,6 +385,11 @@ function GatewayRows({
           >
             {GATEWAY_STATUS_NAME[gateway.status]}
           </span>
+          {gateway.suspended_by !== null && (
+            <span className="block text-muted-foreground">
+              {GATEWAY_SUSPENDED_BY_NAME[gateway.suspended_by]}
+            </span>
+          )}
         </TableCell>
         <TableCell>
           <span className="num" translate="no">
@@ -413,8 +424,12 @@ function GatewayRows({
               {canChange && gateway.status !== 'retired' && (
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-muted-foreground">Состояние шлюза:</span>
-                  {GATEWAY_STATUSES.filter((status) => status !== gateway.status).map((status) =>
-                    status === 'active' ? (
+                  {GATEWAY_STATUSES.filter(
+                    (status) => status !== gateway.status || (lockable && status === 'suspended'),
+                  ).map((status) => {
+                    const lock = status === gateway.status;
+                    const action = lock ? 'Приостановить площадкой' : STATUS_ACTION[status];
+                    return status === 'active' ? (
                       <Button
                         key={status}
                         variant="outline"
@@ -422,20 +437,22 @@ function GatewayRows({
                         disabled={busy}
                         onClick={onActivate}
                       >
-                        {STATUS_ACTION[status]}
+                        {action}
                       </Button>
                     ) : (
                       <ConfirmAction
                         key={status}
-                        label={STATUS_ACTION[status]}
-                        title={`${STATUS_ACTION[status]}: шлюз «${gateway.name}»`}
-                        consequence={<p>{GATEWAY_STATUS_MEANING[status]}</p>}
-                        confirmLabel={STATUS_ACTION[status]}
+                        label={action}
+                        title={`${action}: шлюз «${gateway.name}»`}
+                        consequence={
+                          <p>{lock ? GATEWAY_LOCK_MEANING : GATEWAY_STATUS_MEANING[status]}</p>
+                        }
+                        confirmLabel={action}
                         disabled={busy}
                         onConfirm={() => onConfirmStatus(status)}
                       />
-                    ),
-                  )}
+                    );
+                  })}
                   <ConfirmAction
                     className="ml-auto"
                     label="Перевыпустить доступ"

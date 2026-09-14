@@ -125,7 +125,10 @@ export class QualityService {
 
     // Шлюзы раньше SIM намеренно: SIM неисправного шлюза отказывает не потому, что
     // с ней что-то не так. Отключив шлюз первым, мы выводим его SIM из отбора того же
-    // прохода — иначе партнёру пришлось бы включать обратно два объекта вместо одного.
+    // прохода — иначе администратору пришлось бы включать обратно два объекта вместо одного.
+    //
+    // Запись — условием на прежнее состояние: решение человека, принятое между отбором
+    // и записью, автомат не перезаписывает (ADR-0047). Не совпало — объект пропускается.
     const gatewayThreshold = thresholds.find((row) => row.scope === 'gateway');
     if (gatewayThreshold !== undefined) {
       const since = new Date(now.getTime() - gatewayThreshold.windowMinutes * 60_000);
@@ -133,9 +136,10 @@ export class QualityService {
         since,
         gatewayThreshold.failures,
       )) {
-        const updated = await this.telephony.setGatewayStatus(
+        const updated = await this.telephony.transitionGateway(
           found.subjectId as Id<'gateway'>,
-          'suspended',
+          { status: 'active', suspendedBy: null },
+          { status: 'suspended', suspendedBy: 'failure_threshold' },
         );
         if (updated === undefined) continue;
         suspensions.push({
@@ -150,8 +154,9 @@ export class QualityService {
     if (simThreshold !== undefined) {
       const since = new Date(now.getTime() - simThreshold.windowMinutes * 60_000);
       for (const found of await this.repository.simsOverThreshold(since, simThreshold.failures)) {
-        const updated = await this.telephony.setSimStatus(
+        const updated = await this.telephony.transitionSimStatus(
           found.subjectId as Id<'simCard'>,
+          'active',
           'throttled',
         );
         if (updated === undefined) continue;

@@ -5,7 +5,7 @@ import { CHANNEL_STATUSES, type ChannelStatus } from '@zvonix/shared';
 import { Fragment, useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
-import { SipCredentials, type SipAccount } from '@/components/sip-credentials';
+import type { IssuedCredentials, SipAccount } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { CHANNEL_STATUS_MEANING, CHANNEL_STATUS_NAME, usableTone } from '@/lib/labels';
 
 interface Channel {
@@ -57,13 +58,19 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * Разрешение звонить — одним нажатием. Остановка линии и перевыпуск доступа — через
  * подтверждение с последствием: раньше оба срабатывали с первого нажатия, а перевыпуск
  * молча обрывал регистрацию АТС клиента (ui-review, 2026-09-14).
+ *
+ * Выданный пароль уходит наверх (`onIssued`) и показывается над таблицей клиентов: этот
+ * блок живёт внутри строки клиента, и при её сворачивании панель пропадала вместе с ним.
  */
-export function ClientChannels({ clientId }: { clientId: string }) {
+export function ClientChannels({
+  clientId,
+  onIssued,
+}: {
+  clientId: string;
+  onIssued: (issued: IssuedCredentials) => void;
+}) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
-  const [issued, setIssued] = useState<{ title: string; account: SipAccount } | undefined>(
-    undefined,
-  );
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<string | undefined>(undefined);
   const [name, setName] = useState('');
@@ -94,7 +101,7 @@ export function ClientChannels({ clientId }: { clientId: string }) {
       setCreating(false);
       setName('');
       setCallerId('');
-      setIssued({ title: `Доступ SIP для канала «${name}»`, account: data.account });
+      onIssued({ title: `Доступ SIP для канала «${name}»`, account: data.account });
       await invalidate();
     },
   });
@@ -116,16 +123,14 @@ export function ClientChannels({ clientId }: { clientId: string }) {
         method: 'POST',
         body: { status: input.status },
       }),
-    onSuccess: () => {
-      void invalidate();
-    },
+    onSuccess: () => atMost(invalidate()),
   });
 
   const reissue = useMutation({
     mutationFn: (channel: Channel) =>
       request<{ account: SipAccount }>(`/channels/${channel.id}/credentials`, { method: 'POST' }),
     onSuccess: (data, channel) => {
-      setIssued({ title: `Новый доступ SIP для канала «${channel.name}»`, account: data.account });
+      onIssued({ title: `Новый доступ SIP для канала «${channel.name}»`, account: data.account });
       void invalidate();
     },
   });
@@ -165,16 +170,6 @@ export function ClientChannels({ clientId }: { clientId: string }) {
         <p className="text-warn">
           Каналов нет — клиенту нечем подключиться к платформе и не с чего звонить.
         </p>
-      )}
-
-      {issued !== undefined && (
-        <SipCredentials
-          account={issued.account}
-          title={issued.title}
-          onClose={() => {
-            setIssued(undefined);
-          }}
-        />
       )}
 
       {canChange && creating && (

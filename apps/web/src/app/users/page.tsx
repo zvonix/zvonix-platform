@@ -21,6 +21,7 @@ import {
 import { ReadOnly } from '@/components/read-only';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { isFuture, moment } from '@/lib/format';
 import { ROLE_NAME, STATUS_MEANING, STATUS_NAME, statusTone } from '@/lib/labels';
 import { useSession } from '@/lib/session';
@@ -109,9 +110,9 @@ function UsersTable() {
         method: 'PATCH',
         body: { status: input.status },
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setEditing(undefined);
-      void invalidate();
+      await atMost(invalidate());
     },
   });
 

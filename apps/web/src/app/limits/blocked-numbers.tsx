@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { useCanChange } from '@/lib/access';
 import { moment } from '@/lib/format';
 
@@ -73,9 +74,7 @@ export function BlockedNumbers() {
   const unblock = useMutation({
     mutationFn: (id: string) =>
       request<{ rule: Rule }>(`/blocked-numbers/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      void refresh();
-    },
+    onSuccess: () => atMost(refresh()),
   });
 
   const trimmedPrefix = prefix.trim();

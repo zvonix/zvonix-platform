@@ -16,7 +16,9 @@ import {
   parseMsisdn,
   validationFailed,
   type ChannelStatus,
+  type GatewayState,
   type GatewayStatus,
+  type GatewaySuspendedBy,
   type GatewayType,
   type Id,
   type Msisdn,
@@ -33,6 +35,7 @@ import { OperatorResolverService } from '../catalog/operator-resolver.service.js
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
 import { issueSipCredentials, issueSipUsername, type SipCredentials } from './sip-credentials.js';
 import {
+  gatewayStateOf,
   TelephonyRepository,
   type AllowedOperatorRow,
   type ChannelId,
@@ -188,6 +191,14 @@ export class TelephonyService {
     return this.toAccount(credentials);
   }
 
+  /**
+   * Смена состояния шлюза администратором.
+   *
+   * Переходы свободны, но источник отключения ставится всегда: `suspended` от
+   * администратора — это `admin`. Так он и **запирает** шлюз, выключенный самим
+   * партнёром: тот больше не включит его и не спишет
+   * ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+   */
   async setGatewayStatus(
     id: GatewayId,
     status: GatewayStatus,
@@ -196,25 +207,60 @@ export class TelephonyService {
   ): Promise<GatewayRow> {
     const existing = await this.repository.findGateway(id);
     if (existing === undefined) throw notFound('Шлюз не найден');
+    const from = gatewayStateOf(existing);
 
-    if (status === 'retired' && existing.status !== 'retired') {
-      return this.retireGateway(existing, actorUserId, actorRole);
+    if (status === 'retired') {
+      return from.status === 'retired'
+        ? existing
+        : this.retireGateway(existing, from, actorUserId, actorRole);
     }
 
-    const updated = await this.repository.setGatewayStatus(id, status);
-    if (updated === undefined) throw notFound('Шлюз не найден');
+    // Списание окончательно и для площадки: порты освобождены, карты розданы по другим шлюзам.
+    if (from.status === 'retired') {
+      throw conflict('Шлюз списан навсегда — заведите новый');
+    }
+
+    const to: GatewayState =
+      status === 'suspended' ? { status, suspendedBy: 'admin' } : { status, suspendedBy: null };
+    return this.changeGatewayState(existing, from, to, actorUserId, actorRole);
+  }
+
+  /**
+   * Смена состояния условием на прежнее — и запись в журнал вместе с источником.
+   *
+   * Тот же результат — ничего не меняется и не пишется. Не совпало прежнее — кто-то
+   * успел раньше, и перезаписывать его решение нельзя.
+   */
+  private async changeGatewayState(
+    existing: GatewayRow,
+    from: GatewayState,
+    to: GatewayState,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<GatewayRow> {
+    if (from.status === to.status && from.suspendedBy === to.suspendedBy) return existing;
+
+    const updated = await this.repository.transitionGateway(existing.id, from, to);
+    if (updated === undefined) return this.rejectStaleGateway(existing.id);
 
     await this.audit.record({
       action: 'gateway.status_changed',
       entityType: 'gateway',
-      entityId: id,
+      entityId: existing.id,
       actorUserId,
       actorRole,
-      before: { status: existing.status },
-      after: { status },
+      before: stateForAudit(from),
+      after: stateForAudit(to),
     });
 
     return updated;
+  }
+
+  /** Условие на прежнее состояние не совпало: шлюза нет — `404`, есть — его успели изменить. */
+  private async rejectStaleGateway(id: GatewayId): Promise<never> {
+    const current = await this.repository.findGateway(id);
+    if (current === undefined) throw notFound('Шлюз не найден');
+    throw conflict('Состояние шлюза успело измениться — обновите страницу');
   }
 
   /**
@@ -232,11 +278,12 @@ export class TelephonyService {
    */
   private async retireGateway(
     existing: GatewayRow,
+    from: GatewayState,
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<GatewayRow> {
-    const result = await this.repository.retireGatewayFreeingPorts(existing.id);
-    if (result === undefined) throw notFound('Шлюз не найден');
+    const result = await this.repository.retireGatewayFreeingPorts(existing.id, from);
+    if (result === undefined) return this.rejectStaleGateway(existing.id);
 
     // Каждая карта отдельной записью, а не числом в записи о шлюзе: искать историю
     // карты будут по её порту, и «здесь сняли пять» на этот вопрос не отвечает.
@@ -258,8 +305,11 @@ export class TelephonyService {
       entityId: existing.id,
       actorUserId,
       actorRole,
-      before: { status: existing.status },
-      after: { status: 'retired', freed_sims: result.freed.length },
+      before: stateForAudit(from),
+      after: {
+        ...stateForAudit({ status: 'retired', suspendedBy: null }),
+        freed_sims: result.freed.length,
+      },
     });
 
     return result.gateway;
@@ -505,6 +555,11 @@ export class TelephonyService {
   ): Promise<SimCardRow> {
     const existing = await this.repository.findSim(id);
     if (existing === undefined) throw notFound('SIM не найдена');
+    // Списание окончательно и для площадки (DOMAIN.md, «Жизненные циклы»): на карту
+    // ссылаются CDR, а вернуть её — значит ожить записи, у которой порт давно освобождён.
+    if (existing.status === 'retired' && status !== 'retired') {
+      throw conflict('SIM списана навсегда — заведите новую');
+    }
 
     const updated = await this.repository.setSimStatus(id, status);
     if (updated === undefined) throw notFound('SIM не найдена');
@@ -568,6 +623,9 @@ export class TelephonyService {
   ): Promise<GatewayPortRow> {
     const gateway = await this.repository.findGateway(gatewayId);
     if (gateway === undefined) throw notFound('Шлюз не найден');
+    // У транка портов не бывает: к провайдеру регистрируемся мы, а SIM в нём нет.
+    // Заведённый порт был бы строкой, в которую вставляется карта, не звонящая никуда.
+    if (gateway.type === 'sip_trunk') throw conflict('У SIP-транка портов нет');
 
     const port = await this.repository.createPort({ gatewayId, portNumber });
     await this.audit.record({
@@ -1129,10 +1187,15 @@ export class TelephonyService {
    * Отказ `404`, а не `403`: `403` сообщил бы, что объект есть и он чужой, а партнёр
    * не должен узнавать даже этого. Ту же границу с другой стороны держит
    * [ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md).
+   *
+   * **Свой транк — тоже `404`.** Он лежит в той же таблице, но партнёру только
+   * показывается: заводит и настраивает его площадка, он привязан к её узлу. Без этой
+   * проверки через пути шлюзов партнёр выключал транк, перевыпускал ему доступ
+   * и заводил порты ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
    */
   async requireOwnGateway(id: GatewayId, partnerId: PartnerId): Promise<GatewayRow> {
     const gateway = await this.repository.findGateway(id);
-    if (gateway === undefined || gateway.partnerId !== partnerId) throw notFound('Шлюз не найден');
+    if (!isOwnPartnerGateway(gateway, partnerId)) throw notFound('Шлюз не найден');
     return gateway;
   }
 
@@ -1150,7 +1213,7 @@ export class TelephonyService {
     const gateway = await this.repository.findGateway(port.gatewayId);
     // Отказ называется портом, а не шлюзом: спрашивали про порт, и чужой шлюз
     // за ним — не то, о чём партнёру следует узнать.
-    if (gateway === undefined || gateway.partnerId !== partnerId) throw notFound('Порт не найден');
+    if (!isOwnPartnerGateway(gateway, partnerId)) throw notFound('Порт не найден');
     return port;
   }
 
@@ -1208,22 +1271,27 @@ export class TelephonyService {
         details: { limit, remedy: 'Спишите неиспользуемые или напишите площадке.' },
       });
     }
+    // Придержанную или заблокированную площадкой карту не обойти, заведя её номер заново:
+    // новая запись пришла бы без решения площадки (ADR-0047).
+    if (await this.repository.hasHeldSim(input.partnerId, input.msisdn)) {
+      throw conflict('Карта с этим номером придержана или заблокирована площадкой', {
+        details: { remedy: 'Включить её может только администратор — напишите площадке.' },
+      });
+    }
     return this.createSim(input, actorUserId, actorRole);
   }
 
   /**
    * Партнёр распоряжается **своим** оборудованием — но не снимает отключение,
-   * поставленное площадкой.
+   * поставленное площадкой ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
    *
-   * Три правила, и каждое держит своё:
-   *
-   * - из `suspended` обратно в `active` переводит только администратор — иначе рычаг
-   *   площадки снимался бы тем, против кого он поставлен;
-   * - из `suspended` нельзя и **списать**: списал, завёл новый — и рычаг обойдён
-   *   так же, только длиннее;
-   * - `retired` необратим и потому доступен лишь оттуда, где шлюз работает или ещё
-   *   не запускался. Списывает партнёр сам: железо у него, и когда оно уехало,
-   *   знает об этом он ([ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md)).
+   * - **Своё выключение** партнёр снимает сам: включает обратно или списывает.
+   * - **Отключение администратором или порогом** — нет, ни включением, ни списанием:
+   *   иначе рычаг площадки снимался бы тем, против кого он поставлен, а «списал — завёл
+   *   новый» обходил бы его в два шага.
+   * - **Выключить можно только включённый.** У `pending` выключать нечего.
+   * - **Списывает партнёр сам:** железо у него, и когда оно уехало, знает об этом он
+   *   ([ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md)).
    */
   async setOwnGatewayStatus(
     id: GatewayId,
@@ -1233,13 +1301,32 @@ export class TelephonyService {
     actorRole: UserRole,
   ): Promise<GatewayRow> {
     const gateway = await this.requireOwnGateway(id, partnerId);
-    if (gateway.status === 'retired') {
+    const from = gatewayStateOf(gateway);
+
+    if (from.status === 'retired') {
       throw conflict('Шлюз списан: заведите новый');
     }
-    if (gateway.status === 'suspended') {
-      throw conflict('Шлюз отключён площадкой — распорядиться им может только администратор');
+    if (from.status === 'suspended' && from.suspendedBy !== 'partner') {
+      throw from.suspendedBy === 'failure_threshold'
+        ? conflict('Шлюз отключён автоматически: много неудачных вызовов', {
+            details: {
+              remedy: 'Проверьте оборудование и напишите площадке — включит администратор.',
+            },
+          })
+        : conflict('Шлюз отключён площадкой — распорядиться им может только администратор', {
+            details: { remedy: 'Напишите площадке.' },
+          });
     }
-    return this.setGatewayStatus(id, status, actorUserId, actorRole);
+
+    if (status === 'retired') {
+      return this.retireGateway(gateway, from, actorUserId, actorRole);
+    }
+    if (status === 'suspended' && from.status === 'pending') {
+      throw conflict('Шлюз ещё не включён — выключать нечего');
+    }
+    const to: GatewayState =
+      status === 'suspended' ? { status, suspendedBy: 'partner' } : { status, suspendedBy: null };
+    return this.changeGatewayState(gateway, from, to, actorUserId, actorRole);
   }
 
   /**
@@ -1260,8 +1347,14 @@ export class TelephonyService {
   ): Promise<SimCardRow> {
     const sim = await this.requireOwnSim(id, partnerId);
     if (sim.status === 'retired') return sim;
-    if (sim.status === 'blocked') {
-      throw conflict('Карта заблокирована площадкой — распорядиться ею может только администратор');
+    // Придержанную — тоже: «списал — завёл заново» обходил бы порог так же, как блокировку
+    // (ADR-0047).
+    if (sim.status === 'blocked' || sim.status === 'throttled') {
+      throw conflict(
+        sim.status === 'blocked'
+          ? 'Карта заблокирована площадкой — распорядиться ею может только администратор'
+          : 'Карта придержана площадкой — распорядиться ею может только администратор',
+      );
     }
 
     const port = await this.repository.findPortBySim(id);
@@ -1299,6 +1392,14 @@ export class TelephonyService {
     const sim = await this.requireOwnSim(id, partnerId);
     if (sim.status === 'blocked' || sim.status === 'retired') {
       throw conflict('SIM отключена площадкой — включить её может только администратор');
+    }
+    // Придерживает порог отказов или администратор — оба решение площадки. Включённая
+    // партнёром карта, пока старые отказы ещё в окне, отключилась бы на следующем
+    // проходе снова ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+    if (sim.status === 'throttled') {
+      throw conflict('Карта придержана площадкой — включить её может только администратор', {
+        details: { remedy: 'Проверьте карту и напишите площадке.' },
+      });
     }
     if (sim.status === 'active') return sim;
 
@@ -1344,6 +1445,27 @@ export class TelephonyService {
       realm: this.realm,
     };
   }
+}
+
+/**
+ * Шлюз этого партнёра, которым он распоряжается сам: свой и не транк.
+ *
+ * Сужение типа, а не просто проверка: после неё обработчик работает со строкой,
+ * а не с `undefined`.
+ */
+function isOwnPartnerGateway(
+  gateway: GatewayRow | undefined,
+  partnerId: PartnerId,
+): gateway is GatewayRow {
+  return gateway !== undefined && gateway.partnerId === partnerId && gateway.type !== 'sip_trunk';
+}
+
+/** Состояние шлюза для журнала: без источника `before`/`after` не отвечают, кто вправе вернуть. */
+function stateForAudit(state: GatewayState): {
+  status: GatewayStatus;
+  suspended_by: GatewaySuspendedBy | null;
+} {
+  return { status: state.status, suspended_by: state.suspendedBy };
 }
 
 function channelVariables(channel: ChannelRow): DirectoryUser['variables'] {

@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { useCanChange } from '@/lib/access';
 import { useChannels, useClients, usePartners, useSimCards } from '@/lib/dictionaries';
 import { moment } from '@/lib/format';
@@ -125,9 +126,9 @@ export function LimitRules() {
   // Снятие идёт через подтверждение, и его отказ показывается там же.
   const remove = useMutation({
     mutationFn: (id: string) => request<{ limit: Rule }>(`/limits/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setEditing(undefined);
-      void refresh();
+      await atMost(refresh());
     },
   });
 

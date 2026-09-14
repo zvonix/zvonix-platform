@@ -36,6 +36,8 @@ interface SipTrunkView {
   readonly node_id: string | null;
   readonly name: string;
   readonly status: string;
+  /** Кто выключил: порог отказов срабатывает и на транк (ADR-0047). */
+  readonly suspended_by: string | null;
   /** Имя исходящего sofia-gateway на узле. По нему транк ищется в логах FreeSWITCH. */
   readonly sip_username: string;
   readonly proxy_host: string;
@@ -123,6 +125,7 @@ function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): SipTrunk
     node_id: row.gateway.nodeId,
     name: row.gateway.name,
     status: row.gateway.status,
+    suspended_by: row.gateway.suspendedBy,
     sip_username: row.gateway.sipUsername,
     proxy_host: row.trunk.proxyHost,
     registers_outbound: row.trunk.registersOutbound,

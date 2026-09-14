@@ -21,8 +21,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ReadOnly } from '@/components/read-only';
+import { SipCredentials, type IssuedCredentials } from '@/components/sip-credentials';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { moment } from '@/lib/format';
 import { PARTNER_STATUS_MEANING, PARTNER_STATUS_NAME, partnerStatusTone } from '@/lib/labels';
 import { isNegative, money } from '@/lib/money';
@@ -73,6 +75,7 @@ function PartnersTable() {
   const url = useUrlState();
   const queryClient = useQueryClient();
   const [opened, setOpened] = useState<string | undefined>(undefined);
+  const [issued, setIssued] = useState<readonly IssuedCredentials[]>([]);
 
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
   const search = new URLSearchParams(url.query);
@@ -104,9 +107,7 @@ function PartnersTable() {
         method: 'PATCH',
         body: { status: input.status },
       }),
-    onSuccess: () => {
-      void invalidate();
-    },
+    onSuccess: () => atMost(invalidate()),
   });
 
   const rename = useMutation({
@@ -163,6 +164,23 @@ function PartnersTable() {
       {error !== undefined && <ErrorNote error={error} />}
       {listError !== undefined && <ErrorNote error={listError} />}
 
+      {/*
+        Выданный пароль SIP — здесь, над таблицей, а не в строке партнёра: строку сворачивают,
+        открывают соседнюю, меняют страницу, и панель пропадала вместе с ней. Второго показа
+        пароля не будет — закрывает панель только человек. Панелей может быть несколько:
+        пароль второго шлюза не затирает незакрытый пароль первого.
+      */}
+      {issued.map((secret) => (
+        <SipCredentials
+          key={secret.account.username}
+          account={secret.account}
+          title={secret.title}
+          onClose={() => {
+            setIssued((list) => list.filter((item) => item !== secret));
+          }}
+        />
+      ))}
+
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
@@ -210,6 +228,9 @@ function PartnersTable() {
                 onRename={(displayName) => {
                   rename.mutate({ id: partner.id, displayName });
                 }}
+                onIssued={(secret) => {
+                  setIssued((list) => [...list, secret]);
+                }}
               />
             ))}
           </TableBody>
@@ -228,6 +249,7 @@ function PartnerRows({
   onVerify,
   onConfirmStatus,
   onRename,
+  onIssued,
 }: {
   partner: PartnerRow;
   open: boolean;
@@ -237,6 +259,7 @@ function PartnerRows({
   onVerify: () => void;
   onConfirmStatus: (status: PartnerStatus) => Promise<unknown>;
   onRename: (displayName: string) => void;
+  onIssued: (issued: IssuedCredentials) => void;
 }) {
   const canChange = useCanChange();
 
@@ -298,7 +321,12 @@ function PartnerRows({
                   />
                 </>
               )}
-              <PartnerEquipment partnerId={partner.id} />
+              <PartnerEquipment
+                partnerId={partner.id}
+                onIssued={(secret) => {
+                  onIssued({ ...secret, title: `${secret.title} — партнёр «${partner.name}»` });
+                }}
+              />
               <PartnerRates partnerId={partner.id} />
               <AccountLedger source={`/partners/${partner.id}/entries`} account="partner" />
             </div>

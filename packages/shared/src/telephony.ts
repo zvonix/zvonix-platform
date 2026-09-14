@@ -74,11 +74,51 @@ export function terminationKindOf(type: GatewayType): TerminationKind {
  *
  * `pending`   — заведён партнёром, модерация не пройдена: учётная запись SIP не выдаётся;
  * `active`    — регистрируется и принимает вызовы;
- * `suspended` — временно отключён администратором или автоматикой по порогу неудач;
+ * `suspended` — выключен: самим партнёром, администратором или порогом отказов.
+ *               Кто именно — `GATEWAY_SUSPENDED_BY`, от этого зависит, кто вправе вернуть;
  * `retired`   — выведен навсегда. Запись остаётся: на шлюз ссылаются CDR.
  */
 export const GATEWAY_STATUSES = ['pending', 'active', 'suspended', 'retired'] as const;
 export type GatewayStatus = (typeof GATEWAY_STATUSES)[number];
+
+/**
+ * Кто выключил шлюз. Задан ровно у `suspended`
+ * ([ADR-0047](../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+ *
+ * `partner`           — сам партнёр: он же и включает обратно, и списывает;
+ * `admin`             — администратор площадки: рычаг против злоупотребления;
+ * `failure_threshold` — порог отказов сети ([ADR-0027](../../../docs/adr/0027-porog-otklyucheniya.md)).
+ *
+ * Состояние отвечает на вопрос «идут ли вызовы», источник — «кто вправе вернуть».
+ * Отдельное состояние `paused` смешало бы одно с другим и не различило бы админа и порог.
+ */
+export const GATEWAY_SUSPENDED_BY = ['partner', 'admin', 'failure_threshold'] as const;
+export type GatewaySuspendedBy = (typeof GATEWAY_SUSPENDED_BY)[number];
+
+/** Состояние шлюза целиком: `suspended` без источника и источник без `suspended` не записать. */
+export type GatewayState =
+  | { readonly status: 'suspended'; readonly suspendedBy: GatewaySuspendedBy }
+  | { readonly status: Exclude<GatewayStatus, 'suspended'>; readonly suspendedBy: null };
+
+/**
+ * Источник отключения, каким его видит партнёр.
+ *
+ * Администратор схлопнут в `platform`: кто именно на площадке выключил — не вопрос
+ * партнёра. Порог показан отдельно: с ним партнёру есть что делать — проверить
+ * оборудование. Чисел порога он не видит, качество ему закрыто.
+ */
+export type PartnerFacingSuspension = 'partner' | 'platform' | 'failure_threshold';
+
+/** Через `Record`: новый источник не соберётся, пока не решено, как его видит партнёр. */
+const PARTNER_FACING_SUSPENSION: Record<GatewaySuspendedBy, PartnerFacingSuspension> = {
+  partner: 'partner',
+  admin: 'platform',
+  failure_threshold: 'failure_threshold',
+};
+
+export function partnerFacingSuspension(by: GatewaySuspendedBy): PartnerFacingSuspension {
+  return PARTNER_FACING_SUSPENSION[by];
+}
 
 /**
  * Состояния, в которых шлюзу выдаётся учётная запись SIP.
@@ -118,8 +158,10 @@ export function isSipUsername(value: string): boolean {
  *
  * `new`       — заведена партнёром, в работу не пущена;
  * `active`    — принимает вызовы;
- * `throttled` — временно придержана: подошла к лимиту или просела по ASR.
- *               Возвращается в `active` сама, когда показатели восстановились;
+ * `throttled` — придержана площадкой: порогом отказов сети или администратором.
+ *               Сама не возвращается, и партнёр её не снимает — только администратор
+ *               ([ADR-0027](../../../docs/adr/0027-porog-otklyucheniya.md),
+ *               [ADR-0047](../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md));
  * `blocked`   — заблокирована оператором или администратором. Сама не возвращается;
  * `retired`   — выведена навсегда. Запись остаётся: на неё ссылаются CDR.
  */

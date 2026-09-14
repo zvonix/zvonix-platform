@@ -13,6 +13,7 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { parseId } from '@zvonix/shared';
 import {
   prepareEnvironment,
   registerGateway,
@@ -164,6 +165,13 @@ async function gatewayStatus(id: string): Promise<string> {
   });
 }
 
+async function gatewaySuspendedBy(id: string): Promise<string | null> {
+  return withDatabase(async (execute) => {
+    const result = await execute(sql`select suspended_by from gateways where id = ${id}`);
+    return (result.rows[0] as { suspended_by: string | null }).suspended_by;
+  });
+}
+
 /** Проход порога — тот же, что выполняет воркер по расписанию. */
 async function sweep(): Promise<number> {
   const { QualityService } = await import('./quality.service.js');
@@ -292,12 +300,14 @@ describe('за что отключают', () => {
 
     expect(await sweep()).toBeGreaterThan(0);
     expect(await gatewayStatus(env.gateway)).toBe('suspended');
+    // Источник — порог: такое отключение партнёр не снимает, включает администратор (ADR-0047).
+    expect(await gatewaySuspendedBy(env.gateway)).toBe('failure_threshold');
     // SIM не трогается: порог у неё не задан.
     expect(await simStatus(env.sim)).toBe('active');
   }, 120_000);
 
   it('SIM неисправного шлюза отдельно не отключается', async () => {
-    // Иначе партнёру пришлось бы включать обратно два объекта вместо одного, хотя
+    // Иначе администратору пришлось бы включать обратно два объекта вместо одного, хотя
     // виновато железо, а не пластик.
     const env = await environment();
     await setThreshold('gateway', 2, 60);
@@ -348,6 +358,94 @@ describe('за что отключают', () => {
     expect(recorded?.action).toBe('sim.suspended_by_failures');
     // Инициатора нет: отключил автомат, а не человек.
     expect(recorded?.actor_user_id).toBeNull();
+  }, 120_000);
+});
+
+describe('автомат не затирает решение человека (ADR-0047)', () => {
+  async function telephonyRepository() {
+    const { TelephonyRepository } = await import('./telephony.repository.js');
+    return api().get(TelephonyRepository);
+  }
+
+  it('выключенный партнёром шлюз порог не перезаписывает', async () => {
+    const env = await environment();
+    await setThreshold('gateway', 2, 60);
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update gateways set status = 'suspended', suspended_by = 'partner' where id = ${env.gateway}`,
+      );
+    });
+    await recordCall(env, 'failed');
+    await recordCall(env, 'failed');
+    await sweep();
+
+    // Своё выключение партнёр снимает сам. Стань источником порог — он потерял бы это право.
+    expect(await gatewaySuspendedBy(env.gateway)).toBe('partner');
+  }, 120_000);
+
+  it('решение, принятое между отбором и записью, не перезаписывается', async () => {
+    const env = await environment();
+    const repository = await telephonyRepository();
+
+    // Отбор порога видел `active`, а администратор успел запереть шлюз и заблокировать карту.
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update gateways set status = 'suspended', suspended_by = 'admin' where id = ${env.gateway}`,
+      );
+      await execute(sql`update sim_cards set status = 'blocked' where id = ${env.sim}`);
+    });
+
+    expect(
+      await repository.transitionGateway(
+        parseId(env.gateway, 'gateway'),
+        { status: 'active', suspendedBy: null },
+        { status: 'suspended', suspendedBy: 'failure_threshold' },
+      ),
+    ).toBeUndefined();
+    expect(
+      await repository.transitionSimStatus(parseId(env.sim, 'simCard'), 'active', 'throttled'),
+    ).toBeUndefined();
+
+    expect(await gatewaySuspendedBy(env.gateway)).toBe('admin');
+    expect(await simStatus(env.sim)).toBe('blocked');
+  }, 120_000);
+
+  it('списание по устаревшему состоянию не вынимает карты из портов', async () => {
+    const env = await environment();
+    const repository = await telephonyRepository();
+
+    // Шлюз включён, а списание пришло с представлением «выключен партнёром»: кто-то успел раньше.
+    const result = await repository.retireGatewayFreeingPorts(parseId(env.gateway, 'gateway'), {
+      status: 'suspended',
+      suspendedBy: 'partner',
+    });
+    expect(result).toBeUndefined();
+    expect(await gatewayStatus(env.gateway)).toBe('active');
+
+    // Порядок «сначала состояние, потом порты»: в обратном карта была бы уже вынута,
+    // а шлюз так и остался бы работать без неё.
+    const inPorts = await withDatabase(async (execute) => {
+      const rows = await execute(
+        sql`select sim_card_id from gateway_ports where gateway_id = ${env.gateway}`,
+      );
+      return rows.rows.map((row) => (row as { sim_card_id: string | null }).sim_card_id);
+    });
+    expect(inPorts).toEqual([env.sim]);
+  }, 120_000);
+
+  it('база не принимает отключение без источника и источник без отключения', async () => {
+    const env = await environment();
+
+    await expect(
+      withDatabase(async (execute) => {
+        await execute(sql`update gateways set status = 'suspended' where id = ${env.gateway}`);
+      }),
+    ).rejects.toThrow();
+    await expect(
+      withDatabase(async (execute) => {
+        await execute(sql`update gateways set suspended_by = 'admin' where id = ${env.gateway}`);
+      }),
+    ).rejects.toThrow();
   }, 120_000);
 });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import {
   AlertDialog,
@@ -31,8 +31,18 @@ import { ApiError } from '@/lib/api';
  * - Успех закрывает окно. Обновление экрана — дело вызывающего.
  * - Кнопка, открывающая окно, — `AlertDialogTrigger`: диктор объявляет, что она открывает
  *   окно, а после закрытия фокус возвращается на неё.
+ * - **Кнопки к закрытию может уже не быть**: списанный шлюз уходит из списка, свёрнутая
+ *   правка уносит свою кнопку, выполненное действие делает её недоступной. Тогда фокус
+ *   встаёт на первый доступный элемент в ближайшем уцелевшем месте, где кнопка стояла, —
+ *   иначе он падал на страницу, и клавиатуре с диктором приходилось искать место заново.
+ *   Вызывающий для этого ждёт обновления экрана в `onSuccess`: окно закрывается, когда
+ *   на экране уже новое состояние.
  * - Роль не проверяется: действие, недоступное роли, вызывающий просто не рисует.
  */
+/** Что может принять фокус: доступное и не исключённое из обхода клавиатурой. */
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function ConfirmAction({
   label,
   title,
@@ -68,6 +78,45 @@ export function ConfirmAction({
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<ApiError | undefined>(undefined);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Предки кнопки на момент открытия: сама кнопка может исчезнуть вместе с тем, что
+  // подтверждали, а фокус должен остаться рядом с этим местом.
+  const placeRef = useRef<HTMLElement[]>([]);
+
+  function rememberPlace(): void {
+    const chain: HTMLElement[] = [];
+    for (
+      let node = triggerRef.current?.parentElement ?? null;
+      node !== null && node !== document.body;
+      node = node.parentElement
+    ) {
+      chain.push(node);
+    }
+    placeRef.current = chain;
+  }
+
+  /**
+   * Возврат фокуса после закрытия.
+   *
+   * Кнопка на месте и доступна — фокус возвращает Radix. Иначе — первый доступный
+   * элемент в ближайшем уцелевшем предке. Срабатывает и тогда, когда вместе с кнопкой
+   * размонтировалось всё окно: Radix вызывает обработчик при снятии ловушки фокуса.
+   */
+  function returnFocus(event: Event): void {
+    const trigger = triggerRef.current;
+    if (trigger !== null && trigger.isConnected && !trigger.disabled) return;
+    event.preventDefault();
+    for (const place of placeRef.current) {
+      if (!place.isConnected) continue;
+      for (const candidate of place.querySelectorAll<HTMLElement>(FOCUSABLE)) {
+        // Скрытое фокус не принимает, и `focus()` на нём молча ничего не делает.
+        if (candidate.closest('[hidden], [inert]') !== null) continue;
+        if (candidate.getClientRects().length === 0) continue;
+        candidate.focus();
+        if (document.activeElement === candidate) return;
+      }
+    }
+  }
 
   async function confirm(): Promise<void> {
     if (pending) return;
@@ -95,12 +144,14 @@ export function ConfirmAction({
       open={open}
       onOpenChange={(next) => {
         if (pending) return;
+        if (next) rememberPlace();
         setOpen(next);
         setFailure(undefined);
       }}
     >
       <AlertDialogTrigger asChild>
         <Button
+          ref={triggerRef}
           type="button"
           variant={variant}
           size={size}
@@ -111,7 +162,7 @@ export function ConfirmAction({
         </Button>
       </AlertDialogTrigger>
 
-      <AlertDialogContent>
+      <AlertDialogContent onCloseAutoFocus={returnFocus}>
         <AlertDialogTitle>{title}</AlertDialogTitle>
         <AlertDialogDescription asChild>
           <div className="flex flex-col gap-2">{consequence}</div>

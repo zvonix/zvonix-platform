@@ -18,6 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { useCanChange } from '@/lib/access';
 import { moment } from '@/lib/format';
 import { NODE_STATUS_MEANING, NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
@@ -116,9 +117,9 @@ function NodesView() {
       request<{ node: Node }>(`/nodes/${id}/decommission`, {
         method: 'POST',
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setOpened(undefined);
-      void refresh();
+      await atMost(refresh());
     },
   });
 

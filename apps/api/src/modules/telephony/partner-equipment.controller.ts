@@ -20,11 +20,12 @@
  */
 
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { parseId } from '@zvonix/shared';
+import { parseId, partnerFacingSuspension } from '@zvonix/shared';
 import type {
   GatewayPortState,
   GatewayStatus,
   GatewayType,
+  PartnerFacingSuspension,
   SimNetworkScope,
   SimStatus,
 } from '@zvonix/shared';
@@ -89,6 +90,11 @@ interface GatewayView {
   readonly name: string;
   readonly type: GatewayType;
   readonly status: GatewayStatus;
+  /**
+   * Кто выключил — как это видит партнёр (ADR-0047). `partner` он снимает сам;
+   * `platform` и `failure_threshold` — нет. Кто именно на площадке, не раскрывается.
+   */
+  readonly suspended_by: PartnerFacingSuspension | null;
   readonly model: string | null;
   readonly on_node: boolean;
   readonly registered_at: string | null;
@@ -405,6 +411,8 @@ function toGatewayView(gateway: GatewayRow, ports: readonly PortView[]): Gateway
     name: gateway.name,
     type: gateway.type,
     status: gateway.status,
+    suspended_by:
+      gateway.suspendedBy === null ? null : partnerFacingSuspension(gateway.suspendedBy),
     model: gateway.model,
     on_node: gateway.nodeId !== null,
     registered_at: gateway.registeredAt?.toISOString() ?? null,

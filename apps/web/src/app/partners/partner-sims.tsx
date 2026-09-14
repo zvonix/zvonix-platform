@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
+import { atMost } from '@/lib/wait';
 import { useOperators } from '@/lib/dictionaries';
 import { moment } from '@/lib/format';
 import { SIM_STATUS_MEANING, SIM_STATUS_NAME, usableTone } from '@/lib/labels';
@@ -126,9 +127,7 @@ export function PartnerSims({
         method: 'POST',
         body: { status: input.status },
       }),
-    onSuccess: () => {
-      void invalidate();
-    },
+    onSuccess: () => atMost(invalidate()),
   });
 
   const failed = asApiError(declare.error ?? activate.error ?? error);

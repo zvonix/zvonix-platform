@@ -344,6 +344,25 @@ describe('каталог для узла', () => {
 
     expect((await setGatewayStatus(id, 'suspended')).statusCode).toBe(201);
     expect((await askDirectory(account.username)).body).toContain('not found');
+
+    // Источник записан: такое отключение партнёр не снимает (ADR-0047).
+    const listed = await api().inject({
+      method: 'GET',
+      url: `/gateways?partnerId=${partner}`,
+      headers: auth(),
+    });
+    const suspended = listed
+      .json<{ gateways: { id: string; suspended_by: string | null }[] }>()
+      .gateways.find((row) => row.id === id);
+    expect(suspended?.suspended_by).toBe('admin');
+
+    // Обратно — одним действием администратора: источник уходит вместе с отключением,
+    // и следующая регистрация снова проходит.
+    const restored = await setGatewayStatus(id, 'active');
+    expect(restored.json<{ gateway: { suspended_by: string | null } }>().gateway.suspended_by).toBe(
+      null,
+    );
+    expect((await askDirectory(account.username)).body).toContain('<user id=');
   });
 
   it('канал клиента получает переменные, по которым узнаётся при вызове', async () => {

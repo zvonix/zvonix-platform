@@ -416,7 +416,9 @@ describe('отбор кандидатов на терминацию', () => {
       if (what === 'sim') {
         await execute(sql`update sim_cards set status = 'blocked' where id = ${chain.sim.id}`);
       } else if (what === 'gateway') {
-        await execute(sql`update gateways set status = 'suspended' where id = ${chain.gatewayId}`);
+        await execute(
+          sql`update gateways set status = 'suspended', suspended_by = 'admin' where id = ${chain.gatewayId}`,
+        );
       } else if (what === 'partner') {
         await execute(sql`update partners set status = 'suspended' where id = ${chain.partnerId}`);
       } else {

@@ -100,6 +100,7 @@ interface EquipmentResponse {
     name: string;
     type: string;
     status: string;
+    suspended_by: string | null;
     on_node: boolean;
     registered_at: string | null;
     ports: {
@@ -1139,5 +1140,220 @@ describe('партнёр распоряжается своим оборудов�
       (await post('/partner/gateways', { name: unique('Взамен'), type: 'goip' }, as(fresh.token)))
         .statusCode,
     ).toBe(201);
+  });
+
+  it('придержанную площадкой карту партнёр не включает — снимает администратор', async () => {
+    const sim = (
+      await post('/partner/sim-cards', { operatorId, msisdn: nextMsisdn() }, as(mine.token))
+    ).json<{ sim: { id: string } }>().sim.id;
+    expect((await post(`/sim-cards/${sim}/status`, { status: 'throttled' })).statusCode).toBe(201);
+
+    // Придерживает порог отказов или администратор, и оба — решение площадки
+    // (ADR-0047): включённая партнёром карта, пока старые отказы в окне, отключится снова.
+    const refused = await post(
+      `/partner/sim-cards/${sim}/status`,
+      { status: 'active' },
+      as(mine.token),
+    );
+    expect(refused.statusCode).toBe(409);
+  });
+
+  it('придержанную карту не списать и её номер заново не завести: иначе порог обходится', async () => {
+    const msisdn = nextMsisdn();
+    const sim = (await post('/partner/sim-cards', { operatorId, msisdn }, as(mine.token))).json<{
+      sim: { id: string };
+    }>().sim.id;
+    expect((await post(`/sim-cards/${sim}/status`, { status: 'throttled' })).statusCode).toBe(201);
+
+    // «Списал — завёл тот же номер заново — включил» вернул бы карту в работу без решения
+    // площадки (ADR-0047).
+    expect(
+      (await post(`/partner/sim-cards/${sim}/status`, { status: 'retired' }, as(mine.token)))
+        .statusCode,
+    ).toBe(409);
+    expect(
+      (await post('/partner/sim-cards', { operatorId, msisdn }, as(mine.token))).statusCode,
+    ).toBe(409);
+
+    // Другой номер — пожалуйста: запрет про решение площадки по этой карте, а не про партнёра.
+    expect(
+      (await post('/partner/sim-cards', { operatorId, msisdn: nextMsisdn() }, as(mine.token)))
+        .statusCode,
+    ).toBe(201);
+  });
+});
+
+describe('списанное окончательно и для площадки', () => {
+  it('списанные шлюз и карту администратор тоже не возвращает', async () => {
+    // Порты списанного шлюза освобождены, карты розданы по другим шлюзам: «ожившая» запись
+    // стала бы шлюзом без портов и картой без истории (DOMAIN.md, «Жизненные циклы»).
+    const gateway = (
+      await post('/gateways', { partnerId: mine.id, name: unique('Шлюз'), type: 'goip' })
+    ).json<{ gateway: { id: string } }>().gateway.id;
+    expect((await post(`/gateways/${gateway}/status`, { status: 'retired' })).statusCode).toBe(201);
+    expect((await post(`/gateways/${gateway}/status`, { status: 'active' })).statusCode).toBe(409);
+
+    const sim = (
+      await post('/sim-cards', { partnerId: mine.id, operatorId, msisdn: nextMsisdn() })
+    ).json<{ sim: { id: string } }>().sim.id;
+    expect((await post(`/sim-cards/${sim}/status`, { status: 'retired' })).statusCode).toBe(201);
+    expect((await post(`/sim-cards/${sim}/status`, { status: 'active' })).statusCode).toBe(409);
+  });
+});
+
+describe('транк не подчиняется контуру шлюзов (ADR-0047)', () => {
+  /** Состояние и имя учётной записи транка — глазами администратора. */
+  async function trunkAsAdmin(): Promise<{ status: string; sip_username: string }> {
+    const trunks = (await get(`/sip-trunks?partnerId=${mine.id}`)).json<{
+      trunks: { id: string; status: string; sip_username: string }[];
+    }>().trunks;
+    const found = trunks.find((trunk) => trunk.id === myTrunk);
+    expect(found).toBeDefined();
+    return { status: found?.status ?? '', sip_username: found?.sip_username ?? '' };
+  }
+
+  // Транк партнёру только показывается: заводит и настраивает его площадка, он привязан
+  // к её узлу. Пути шлюзов проверяли владельца, но не вид, — и через них партнёр
+  // выключал транк, перевыпускал ему доступ и заводил порты.
+  it.each([
+    [
+      'status',
+      () => post(`/partner/gateways/${myTrunk}/status`, { status: 'suspended' }, as(mine.token)),
+    ],
+    ['credentials', () => post(`/partner/gateways/${myTrunk}/credentials`, {}, as(mine.token))],
+    ['ports', () => post(`/partner/gateways/${myTrunk}/ports`, { portNumber: 7 }, as(mine.token))],
+  ])('%s — 404, как на чужой объект, и транк не меняется', async (_path, send) => {
+    const before = await trunkAsAdmin();
+    expect((await send()).statusCode).toBe(404);
+    expect(await trunkAsAdmin()).toEqual(before);
+  });
+
+  it('портов у транка нет и у администратора', async () => {
+    const response = await post(`/gateways/${myTrunk}/ports`, { portNumber: 1 });
+    expect(response.statusCode).toBe(409);
+  });
+});
+
+describe('кто выключил шлюз (ADR-0047)', () => {
+  // Свой партнёр: у общего к этому месту уже упёрся предел на число шлюзов.
+  let owner: Awaited<ReturnType<typeof createPartner>>;
+  beforeAll(async () => {
+    owner = await createPartner('Кузнецов Кузьма');
+  });
+
+  /** Свой шлюз, уже включённый: выключать можно только включённое. */
+  async function ownActiveGateway(): Promise<string> {
+    const id = (
+      await post('/partner/gateways', { name: unique('Шлюз'), type: 'goip' }, as(owner.token))
+    ).json<{ gateway: { id: string } }>().gateway.id;
+    expect(
+      (await post(`/partner/gateways/${id}/status`, { status: 'active' }, as(owner.token)))
+        .statusCode,
+    ).toBe(201);
+    return id;
+  }
+
+  const setOwnStatus = (id: string, status: string) =>
+    post(`/partner/gateways/${id}/status`, { status }, as(owner.token));
+
+  /** Состояние шлюза глазами партнёра; списанный на экране не показывается. */
+  async function partnerSees(
+    id: string,
+  ): Promise<{ status: string; suspended_by: string | null } | undefined> {
+    const equipment = (await get('/partner/equipment', as(owner.token))).json<EquipmentResponse>();
+    const found = equipment.gateways.find((row) => row.id === id);
+    return found === undefined
+      ? undefined
+      : { status: found.status, suspended_by: found.suspended_by };
+  }
+
+  it('выключенный собой шлюз партнёр включает обратно сам', async () => {
+    const id = await ownActiveGateway();
+
+    expect((await setOwnStatus(id, 'suspended')).statusCode).toBe(201);
+    expect(await partnerSees(id)).toEqual({ status: 'suspended', suspended_by: 'partner' });
+
+    // До ADR-0047 здесь был `409`: выключение партнёра не отличалось от отключения
+    // площадкой, и за одной кнопкой приходилось идти к человеку.
+    expect((await setOwnStatus(id, 'active')).statusCode).toBe(201);
+    expect(await partnerSees(id)).toEqual({ status: 'active', suspended_by: null });
+  });
+
+  it('выключенный собой шлюз партнёр и списывает сам', async () => {
+    const id = await ownActiveGateway();
+    expect((await setOwnStatus(id, 'suspended')).statusCode).toBe(201);
+
+    expect((await setOwnStatus(id, 'retired')).statusCode).toBe(201);
+    expect(await partnerSees(id)).toBeUndefined();
+  });
+
+  it('площадка запирает выключенный партнёром шлюз — дальше распоряжается только она', async () => {
+    const id = await ownActiveGateway();
+    expect((await setOwnStatus(id, 'suspended')).statusCode).toBe(201);
+
+    // Тот же `suspended`, другой источник: так выключение становится необратимым для партнёра.
+    expect((await post(`/gateways/${id}/status`, { status: 'suspended' })).statusCode).toBe(201);
+
+    expect(await partnerSees(id)).toEqual({ status: 'suspended', suspended_by: 'platform' });
+    expect((await setOwnStatus(id, 'active')).statusCode).toBe(409);
+    expect((await setOwnStatus(id, 'retired')).statusCode).toBe(409);
+  });
+
+  it('отключение порогом партнёр видит отдельно и не снимает', async () => {
+    const id = await ownActiveGateway();
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update gateways set status = 'suspended', suspended_by = 'failure_threshold' where id = ${id}`,
+      );
+    });
+
+    // Причина показана, потому что с ней партнёру есть что делать — проверить оборудование.
+    expect(await partnerSees(id)).toEqual({
+      status: 'suspended',
+      suspended_by: 'failure_threshold',
+    });
+    const refused = await setOwnStatus(id, 'active');
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { details: { remedy: string } } }>().error.details.remedy).toMatch(
+      /оборудование/u,
+    );
+  });
+
+  it('кто именно на площадке выключил, партнёру не раскрывается', async () => {
+    const id = await ownActiveGateway();
+    expect((await post(`/gateways/${id}/status`, { status: 'suspended' })).statusCode).toBe(201);
+
+    expect(await partnerSees(id)).toEqual({ status: 'suspended', suspended_by: 'platform' });
+
+    // Администратору и поддержке — как есть: «выключил администратор» и «выключил порог»
+    // для них разные разговоры.
+    const admin = (await get(`/gateways?partnerId=${owner.id}`)).json<{
+      gateways: { id: string; suspended_by: string | null }[];
+    }>();
+    expect(admin.gateways.find((row) => row.id === id)?.suspended_by).toBe('admin');
+  });
+
+  it('не выключает шлюз, который ещё не включён: выключать нечего', async () => {
+    const id = (
+      await post('/partner/gateways', { name: unique('Шлюз'), type: 'goip' }, as(owner.token))
+    ).json<{ gateway: { id: string } }>().gateway.id;
+
+    expect((await setOwnStatus(id, 'suspended')).statusCode).toBe(409);
+  });
+
+  it('журнал называет, кто выключил', async () => {
+    const id = await ownActiveGateway();
+    expect((await setOwnStatus(id, 'suspended')).statusCode).toBe(201);
+
+    const entries = (
+      await get(`/audit?entityType=gateway&entityId=${id}&action=gateway.status_changed`)
+    ).json<{ entries: { actor_role: string | null; before: unknown; after: unknown }[] }>().entries;
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        actor_role: 'partner',
+        before: { status: 'active', suspended_by: null },
+        after: { status: 'suspended', suspended_by: 'partner' },
+      }),
+    );
   });
 });

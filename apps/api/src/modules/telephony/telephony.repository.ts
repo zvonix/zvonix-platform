@@ -36,6 +36,7 @@ import {
   USABLE_SIM_STATUSES,
   type ChannelStatus,
   type GatewayPortState,
+  type GatewayState,
   type GatewayStatus,
   type GatewayType,
   type Id,
@@ -58,6 +59,24 @@ export type PartnerPriorityRow = typeof channelPartnerPriorities.$inferSelect;
 export type PartnerCoverageRow = typeof partnerCoverage.$inferSelect;
 export type AllowedOperatorRow = typeof channelAllowedOperators.$inferSelect;
 export type PartnerId = Id<'partner'>;
+
+/**
+ * Состояние шлюза из строки.
+ *
+ * В строке две независимые колонки, и тип этого не выражает. Согласованность держит
+ * CHECK `gateways_suspended_by_matches_status`, так что несогласованная строка — поломка
+ * базы, а не состояние, и разбирать её как одно из состояний нельзя
+ * ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+ */
+export function gatewayStateOf(row: GatewayRow): GatewayState {
+  if (row.status === 'suspended') {
+    if (row.suspendedBy === null) {
+      throw new Error(`Шлюз ${row.id} выключен без источника: нарушен CHECK схемы`);
+    }
+    return { status: 'suspended', suspendedBy: row.suspendedBy };
+  }
+  return { status: row.status, suspendedBy: null };
+}
 
 /** Исполнитель запроса: пул или транзакция. */
 // Тип объявлен в `@zvonix/db` и переэкспортируется отсюда: вызывающий берёт его
@@ -150,8 +169,16 @@ export class TelephonyRepository {
    *
    * Отдаётся то, что в портах стояло: без этого журнал не отличит снятие карты
    * от того, что её там и не было.
+   *
+   * **Сначала состояние, потом порты.** Смена состояния идёт условием на прежнее
+   * и при несовпадении не трогает ничего. В обратном порядке гонка «партнёр списывает —
+   * администратор запирает» вынула бы карты у шлюза, который так и не списался:
+   * `return` внутри транзакции её не откатывает, а фиксирует.
    */
-  async retireGatewayFreeingPorts(id: GatewayId): Promise<
+  async retireGatewayFreeingPorts(
+    id: GatewayId,
+    from: GatewayState,
+  ): Promise<
     | {
         gateway: GatewayRow;
         freed: { portId: GatewayPortId; simCardId: SimCardId }[];
@@ -160,6 +187,14 @@ export class TelephonyRepository {
   > {
     try {
       return await this.db.transaction(async (tx) => {
+        const gateway = await this.transitionGateway(
+          id,
+          from,
+          { status: 'retired', suspendedBy: null },
+          tx,
+        );
+        if (gateway === undefined) return undefined;
+
         const occupied = await tx
           .select({ id: gatewayPorts.id, simCardId: gatewayPorts.simCardId })
           .from(gatewayPorts)
@@ -171,9 +206,6 @@ export class TelephonyRepository {
             .set({ simCardId: null })
             .where(and(eq(gatewayPorts.gatewayId, id), isNotNull(gatewayPorts.simCardId)));
         }
-
-        const gateway = await this.setGatewayStatus(id, 'retired', tx);
-        if (gateway === undefined) return undefined;
 
         return {
           gateway,
@@ -201,15 +233,32 @@ export class TelephonyRepository {
     return rows;
   }
 
-  async setGatewayStatus(
+  /**
+   * Смена состояния шлюза — только из ожидаемого
+   * ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+   *
+   * Условие и на состояние, и на источник отключения: решение, принятое между чтением
+   * и записью, не затирается. Администратор запер шлюз, пока партнёр его включал;
+   * порог отключил, пока администратор разбирался, — не совпало, `undefined`.
+   */
+  async transitionGateway(
     id: GatewayId,
-    status: GatewayStatus,
+    from: GatewayState,
+    to: GatewayState,
     executor: Executor = this.db,
   ): Promise<GatewayRow | undefined> {
     const [row] = await executor
       .update(gateways)
-      .set({ status })
-      .where(eq(gateways.id, id))
+      .set({ status: to.status, suspendedBy: to.suspendedBy })
+      .where(
+        and(
+          eq(gateways.id, id),
+          eq(gateways.status, from.status),
+          from.suspendedBy === null
+            ? isNull(gateways.suspendedBy)
+            : eq(gateways.suspendedBy, from.suspendedBy),
+        ),
+      )
       .returning();
     return row;
   }
@@ -596,6 +645,25 @@ export class TelephonyRepository {
     return row?.value ?? 0;
   }
 
+  /**
+   * Есть ли у партнёра карта с этим номером, которую держит площадка: `throttled`
+   * или `blocked`. Заведение того же номера заново обходило бы её решение — новая
+   * запись пришла бы без него ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+   */
+  async hasHeldSim(partnerId: Id<'partner'>, msisdn: Msisdn): Promise<boolean> {
+    const [row] = await this.db
+      .select({ value: count() })
+      .from(simCards)
+      .where(
+        and(
+          eq(simCards.partnerId, partnerId),
+          eq(simCards.msisdn, msisdn),
+          inArray(simCards.status, ['throttled', 'blocked']),
+        ),
+      );
+    return (row?.value ?? 0) > 0;
+  }
+
   async findSim(id: SimCardId): Promise<SimCardRow | undefined> {
     const [row] = await this.db.select().from(simCards).where(eq(simCards.id, id));
     return row;
@@ -613,6 +681,25 @@ export class TelephonyRepository {
       .update(simCards)
       .set({ status })
       .where(eq(simCards.id, id))
+      .returning();
+    return row;
+  }
+
+  /**
+   * Смена состояния карты только из ожидаемого — для автомата порога.
+   *
+   * Блокировку, поставленную администратором между отбором и записью, автомат
+   * не перезаписывает своим `throttled` ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+   */
+  async transitionSimStatus(
+    id: SimCardId,
+    from: SimStatus,
+    to: SimStatus,
+  ): Promise<SimCardRow | undefined> {
+    const [row] = await this.db
+      .update(simCards)
+      .set({ status: to })
+      .where(and(eq(simCards.id, id), eq(simCards.status, from)))
       .returning();
     return row;
   }

@@ -67,6 +67,8 @@ interface GatewayView {
   readonly name: string;
   readonly type: string;
   readonly status: string;
+  /** Кто выключил: задан ровно у `suspended` (ADR-0047) — от этого зависит, кто вправе вернуть. */
+  readonly suspended_by: string | null;
   readonly sip_username: string;
   readonly node_id: string | null;
   readonly registered_at: string | null;
@@ -603,6 +605,7 @@ function toGatewayView(row: GatewayRow): GatewayView {
     name: row.name,
     type: row.type,
     status: row.status,
+    suspended_by: row.suspendedBy,
     sip_username: row.sipUsername,
     node_id: row.nodeId,
     registered_at: row.registeredAt?.toISOString() ?? null,
