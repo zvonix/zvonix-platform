@@ -139,8 +139,12 @@ dependency_audit() {
 step "Формат"        pnpm format:check
 step "Ссылки в доках" node scripts/docs-links.mjs
 step "Конфиг узла"    node scripts/node-config.mjs
-step "Линтер"        pnpm lint
+# Типы — раньше линтера: `pnpm typecheck` собирает `dist` пакетов, а линтер с проверкой
+# типов читает объявления `@zvonix/shared` оттуда. На чистом клоне `dist` нет, и линтер,
+# идущий первым, видел вместо типов пакета «ошибочный тип» — первый прогон CI упал
+# именно так, а локально мешал увидеть это оставшийся от прошлых сборок `dist`.
 step "Типы"          pnpm typecheck
+step "Линтер"        pnpm lint
 step "Мёртвый код"   pnpm deadcode
 step "Миграции"      migrations_match_schema
 step "Тесты"         pnpm test
