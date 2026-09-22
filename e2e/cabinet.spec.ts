@@ -80,6 +80,24 @@ test.describe('разводка по ролям', () => {
   }
 });
 
+test.describe('версия выпуска в углу панели', () => {
+  // Стенд собран не из выпуска: файла RELEASE нет, и кабинет так и говорит, а не выдумывает.
+  test('администратор её видит', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    const rail = page.getByRole('navigation', { name: 'Разделы' });
+    await expect(rail.getByText('сборка не из выпуска')).toBeVisible();
+  });
+
+  test('клиент — нет: номер выпуска подсказывает, какие уязвимости пробовать', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    const rail = page.getByRole('navigation', { name: 'Разделы' });
+    // Панель рисуется после ответа о сессии; клиенту запрос версии не делается вовсе,
+    // так что после её появления ждать больше нечего.
+    await expect(rail).toBeVisible();
+    await expect(rail.getByText(/сборка не из выпуска|^версия /u)).toHaveCount(0);
+  });
+});
+
 test.describe('поддержка видит, но не меняет', () => {
   test('разделы открыты — включая те, что раньше были закрыты целиком', async ({ page }) => {
     await signIn(page, PEOPLE.support);

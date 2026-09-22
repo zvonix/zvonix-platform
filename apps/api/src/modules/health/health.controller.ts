@@ -10,16 +10,22 @@
  *
  * Одна общая проверка означает, что при недоступности базы оркестратор начнёт
  * перезапускать все экземпляры по кругу, добавляя нагрузку туда, где уже авария.
+ *
+ *   `/health/version` — какой выпуск работает. Не открыт: номер версии подсказывает,
+ *                       какие известные уязвимости пробовать, — поэтому только сотрудникам.
  */
 
 import { Controller, Get, Inject } from '@nestjs/common';
 import { dependencyUnavailable } from '@zvonix/shared';
-import { Public } from '../../http/auth.guard.js';
+import { Public, Roles } from '../../http/auth.guard.js';
 import { DatabaseService } from '../../infra/database.service.js';
+import { readRelease, type ReleaseInfo } from '../../infra/release.js';
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 
 @Controller('health')
 export class HealthController {
+  private readonly release: ReleaseInfo = readRelease();
+
   constructor(
     private readonly database: DatabaseService,
     @Inject(APP_CONFIG) private readonly config: Config,
@@ -40,5 +46,11 @@ export class HealthController {
       throw dependencyUnavailable('База данных недоступна');
     }
     return { status: 'ok', database: 'ok' };
+  }
+
+  @Roles('admin', 'support')
+  @Get('version')
+  version(): ReleaseInfo {
+    return this.release;
   }
 }

@@ -106,7 +106,8 @@ fi
 echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
   >/etc/apt/sources.list.d/nodesource.list
 apt-get update -qq
-apt-get install -y -qq nodejs postgresql-16 redis-server nginx ufw python3 sudo ca-certificates
+apt-get install -y -qq nodejs postgresql-16 redis-server nginx ufw python3 sudo ca-certificates \
+  fail2ban python3-systemd
 [ "$PUBLIC_SITE" = no ] || apt-get install -y -qq certbot
 systemctl enable --now postgresql redis-server
 # pnpm ставит corepack той версии, что закреплена в `packageManager` выпуска.
@@ -115,6 +116,70 @@ corepack enable
 # Воркер отказывается работать с Redis, который вытесняет ключи (ADR-0020).
 policy="$(redis-cli config get maxmemory-policy | tail -1)"
 [ "$policy" = "noeviction" ] || die "в Redis maxmemory-policy=${policy}, нужна noeviction (ADR-0020)"
+
+step "Подкачка"
+# Сервер без подкачки при нехватке памяти убивает процессы — а с ними и звонки. Замер
+# 2026-09-22 на чистой машине: 1 ГБ памяти, подкачки нет, свободно ~400 МБ ещё до узла АТС,
+# а выкладка ставит зависимости на этой же машине. Файл заводится, только если подкачки
+# нет вовсе: заданную руками подготовка не трогает. Там, где подкачку не дают (контейнер),
+# это предупреждение, а не отказ.
+if [ -z "$(swapon --noheadings --show=NAME)" ]; then
+  rm -f /swapfile
+  if (fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none) \
+    && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile; then
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+    echo "заведена подкачка /swapfile, 2 ГБ"
+  else
+    rm -f /swapfile
+    echo "ВНИМАНИЕ: подкачку завести не удалось — при нехватке памяти система будет убивать процессы" >&2
+  fi
+fi
+# Подкачка — запас на всплеск, а не рабочая память: вытеснять в неё без нужды незачем.
+echo 'vm.swappiness = 10' >/etc/sysctl.d/60-zvonix.conf
+sysctl -q -p /etc/sysctl.d/60-zvonix.conf
+swapon --show
+
+step "Защита SSH"
+# Вход root по паролю открыт в интернет, и его подбирают сразу: 273 попытки за первые
+# 12 минут работы чистого сервера (2026-09-22). fail2ban закрывает адрес после пяти неудач.
+# Владелец входит с первой попытки, а ключ Claude не ошибается — их это не касается.
+# Отключить пароль совсем можно только после того, как у владельца есть ключ; скрипт
+# этого не делает, чтобы не запереть сервер.
+cat >/etc/fail2ban/jail.d/zvonix.conf <<'EOF'
+# Порождается deploy/server-setup.sh при каждом запуске — правится там, а не здесь.
+[sshd]
+enabled = true
+backend = systemd
+maxretry = 5
+findtime = 10m
+bantime = 1h
+EOF
+systemctl enable fail2ban >/dev/null 2>&1
+systemctl restart fail2ban
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  fail2ban-client ping >/dev/null 2>&1 && break
+  sleep 1
+done
+fail2ban-client status sshd | grep -E 'Currently (failed|banned)' \
+  || die "fail2ban не поднял защиту sshd — journalctl -u fail2ban"
+
+# Первое значение побеждает, поэтому файл назван раньше облачных 50-/60-. Проверка до
+# перечитывания: сломанная настройка sshd — это сервер, на который не войти.
+SSHD_CONF=/etc/ssh/sshd_config.d/10-zvonix.conf
+cat >"$SSHD_CONF" <<'EOF'
+# Порождается deploy/server-setup.sh при каждом запуске — правится там, а не здесь.
+# Пересылка графики серверу без графики не нужна и только расширяет вход.
+X11Forwarding no
+EOF
+sshd -t || {
+  rm -f "$SSHD_CONF"
+  die "sshd не принял ${SSHD_CONF} — файл убран, настройка SSH прежняя"
+}
+# В Ubuntu 24.04 sshd запускается сокетом по первому входу: не запущен — новая настройка
+# и так подхватится при следующем.
+if systemctl is-active --quiet ssh; then
+  systemctl reload ssh
+fi
 
 step "Пользователь и каталоги"
 id zvonix >/dev/null 2>&1 || useradd --system --home-dir /opt/zvonix --shell /usr/sbin/nologin zvonix
