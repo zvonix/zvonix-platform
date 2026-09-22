@@ -43,6 +43,9 @@ case "$WEB_ADDRESS" in
   *) WEB_ADDRESS="https://${WEB_ADDRESS}" ;;
 esac
 WEB_ADDRESS="${WEB_ADDRESS%/}"
+# Имя в DNS регистра не различает, а сравнение с записанным адресом и путь сертификата —
+# различают: CP.zvonix.com и cp.zvonix.com не должны стать двумя адресами.
+WEB_ADDRESS="$(printf '%s' "$WEB_ADDRESS" | tr '[:upper:]' '[:lower:]')"
 
 # Адрес кабинета разбирается до любых изменений: ошибка в нём не должна оставить сервер
 # настроенным наполовину.
