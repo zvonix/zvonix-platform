@@ -8,6 +8,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Выпуск вызывает этот же процесс перед сборкой архива: выпуск без пройденного гейта
+  # не собирается (ADR-0049).
+  workflow_call:
 
 jobs:
   check:
@@ -32,15 +35,30 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # Расписание фоновых задач (ADR-0020). Версия совпадает с production.
+      # Политика вытеснения обязана быть noeviction: при любой другой Redis выбрасывает
+      # ключи заданий молча, и воркер отказывается запускаться — это проверяется.
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 6379:6379
+
     env:
       TEST_DATABASE_URL: postgresql://zvonix:zvonix@127.0.0.1:5432/zvonix_test
+      # База не нулевая: проверки очищают её целиком.
+      TEST_REDIS_URL: redis://127.0.0.1:6379/15
 
     steps:
       - uses: actions/checkout@v4
 
+      # Версия pnpm берётся из `packageManager` в package.json. Здесь её не повторяем:
+      # копия разошлась — стояла 9 при закреплённой 11.5.0, и CI ставил бы другое дерево.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
@@ -50,23 +68,19 @@ jobs:
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
+      # Браузер для сквозных проверок кабинета. Без него шаг «Кабинет в браузере»
+      # отчитается «НЕ ВЫПОЛНЕН» — и проверка, ради которой CI и заведён, молча
+      # перестанет что-либо проверять. `--with-deps` ставит системные библиотеки,
+      # которых в образе Ubuntu нет.
+      - name: Браузер для сквозных проверок
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Всё содержимое гейта — внутри check.sh, включая соответствие миграций схеме,
+      # смоук собранного приложения и аудит зависимостей. Отдельных шагов здесь
+      # нет намеренно: проверка, которая есть только в CI, не запускается локально
+      # и потому находит проблемы позже всех.
       - name: Полная проверка
         run: bash scripts/check.sh
-
-      # Схема и миграции обязаны сходиться: если кто-то правил схему Drizzle,
-      # но не сгенерировал миграцию, база разойдётся с кодом. Проверяем тем,
-      # что генерация не даёт новых файлов (ADR-0005).
-      - name: Миграции соответствуют схеме
-        run: |
-          before=$(git status --porcelain packages/db/migrations)
-          pnpm db:generate
-          after=$(git status --porcelain packages/db/migrations)
-          if [ "$before" != "$after" ]; then
-            echo "Схема изменена без миграции. Выполните pnpm db:generate и закоммитьте результат:"
-            git status --porcelain packages/db/migrations
-            exit 1
-          fi
-          echo "Миграции соответствуют схеме."
 
   # Проверка, которую нельзя пройти на Windows: имена файлов, отличающиеся только регистром.
   case-sensitivity:

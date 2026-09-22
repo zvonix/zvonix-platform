@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { getTableConfig, QueryBuilder, type PgTable } from 'drizzle-orm/pg-core';
-import { USER_ROLES, USER_STATUSES } from '@zvonix/shared';
+import { conflict, GATEWAY_SUSPENDED_BY, USER_ROLES, USER_STATUSES } from '@zvonix/shared';
 import { CASING } from './casing.js';
 import { MIGRATIONS_FOLDER } from './migrate.js';
 import { toDatabaseError } from './client.js';
@@ -73,14 +73,21 @@ describe('соглашения схемы (ADR-0016)', () => {
     }
   });
 
-  it.each(tables)('%s: идентификаторы объявлены как uuid', (_name, table) => {
-    for (const column of getTableConfig(table).columns) {
-      const name = column.name;
-      if (name === 'id' || /Id$/.test(name)) {
-        // Исключения: `correlationId` приходит извне и не обязан быть UUID,
-        // `entityId` в журнале аудита ссылается в том числе на сущности
-        // с числовым номером (CDR, проводка) и на объекты внешних систем.
-        if (name === 'correlationId' || name === 'entityId') continue;
+  it.each(tables)('%s: ссылки на другие таблицы объявлены как uuid', (_name, table) => {
+    const config = getTableConfig(table);
+
+    // Правило про «всё, что кончается на Id» было слишком грубым: под него попадали
+    // и полиморфные ссылки — `accounts.owner_id` указывает то на клиента, то на партнёра,
+    // а `ledger_transactions.reference_id` — на вызов, платёж или заявку на выплату.
+    // Одним внешним ключом это не выразить, поэтому и тип там текстовый.
+    //
+    // Проверяем то, что имели в виду на самом деле: **настоящая** ссылка обязана быть uuid.
+    const referencing = new Set(
+      config.foreignKeys.flatMap((key) => key.reference().columns.map((column) => column.name)),
+    );
+
+    for (const column of config.columns) {
+      if (column.primary || referencing.has(column.name)) {
         expect(column.getSQLType()).toBe('uuid');
       }
     }
@@ -108,12 +115,21 @@ describe('согласованность рантайма и сгенериро�
     }
   });
 
-  it('ограничения на роли и статусы содержат ровно значения из @zvonix/shared', () => {
+  it('ограничения на роли, статусы и источник отключения содержат значения из @zvonix/shared', () => {
     for (const role of USER_ROLES) {
       expect(migrationSql).toContain(`'${role}'`);
     }
     for (const status of USER_STATUSES) {
       expect(migrationSql).toContain(`'${status}'`);
+    }
+    // Источник отключения шлюза (ADR-0047): значение, которого нет в CHECK, база
+    // отвергла бы на первом же выключении. Ищется внутри своего ограничения: `partner`
+    // и `admin` есть и в ограничениях ролей, и общий поиск по тексту их не отличил бы.
+    const suspendedByCheck =
+      /"gateways_suspended_by_check" CHECK \(([^;]+)\)/u.exec(migrationSql)?.[1] ?? '';
+    expect(suspendedByCheck).not.toBe('');
+    for (const source of GATEWAY_SUSPENDED_BY) {
+      expect(suspendedByCheck).toContain(`'${source}'`);
     }
   });
 });
@@ -140,11 +156,28 @@ describe('toDatabaseError', () => {
     ['23514', 'validation_failed'],
     ['23502', 'validation_failed'],
     ['57014', 'dependency_unavailable'],
+    ['25P03', 'dependency_unavailable'],
     ['08006', 'dependency_unavailable'],
     ['53300', 'dependency_unavailable'],
     ['ECONNREFUSED', 'dependency_unavailable'],
   ])('код %s → %s', (code, expected) => {
     expect(toDatabaseError(Object.assign(new Error('x'), { code })).code).toBe(expected);
+  });
+
+  it('доменный отказ из транзакции проходит как есть, а не становится внутренней ошибкой', () => {
+    // Его `code` — 'conflict', и разбор как SQLSTATE превращал 409 в 500 (ADR-0048).
+    const refused = conflict('Шлюз списан: ставить карту в его порт некуда');
+    expect(toDatabaseError(refused)).toBe(refused);
+  });
+
+  it('истёкшее ожидание называется опозданием, а не недоступностью базы', () => {
+    // База жива, но не успела — например, ждала блокировку дольше statement_timeout.
+    const timedOut = toDatabaseError(
+      Object.assign(new Error('canceling statement'), { code: '57014' }),
+    );
+    expect(timedOut.message).toBe('База данных не ответила вовремя — повторите позже');
+    const down = toDatabaseError(Object.assign(new Error('connection'), { code: '08006' }));
+    expect(down.message).toBe('База данных недоступна');
   });
 
   it('находит код внутри обёртки Drizzle', () => {

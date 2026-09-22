@@ -9,11 +9,12 @@
  * Адрес тестовой базы — в `TEST_DATABASE_URL`. Запуск: `pnpm test:integration`.
  */
 
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId, type Id } from '@zvonix/shared';
 import { createDatabase, toDatabaseError, type DatabaseHandle } from './client.js';
 import { applyMigrations } from './migrate.js';
+import { containsIgnoringCase, orderByText } from './search.js';
 import { sessions, users } from './schema/index.js';
 
 const url =
@@ -220,6 +221,40 @@ describe('sessions', () => {
   });
 });
 
+describe('журнал запросов', () => {
+  it('получает текст запроса, но не значения параметров', async () => {
+    // Штатный журнал Drizzle печатает параметры целиком — в них хеши паролей,
+    // адреса и номера абонентов, — и делает это мимо маскирования логгера (ADR-0004).
+    const seen: { query: string; parameters: number }[] = [];
+    const logged = createDatabase({
+      url,
+      poolMax: 1,
+      logQuery: (query, parameters) => seen.push({ query, parameters }),
+    });
+
+    try {
+      const secret = 'значение-которого-не-должно-быть-в-логе';
+      await logged.db.execute(sql`select ${secret}::text as value`);
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]?.query).toContain('select');
+      expect(seen[0]?.parameters).toBe(1);
+      expect(JSON.stringify(seen)).not.toContain(secret);
+    } finally {
+      await logged.close();
+    }
+  });
+
+  it('молчит, когда приёмник не задан', async () => {
+    const silent = createDatabase({ url, poolMax: 1 });
+    try {
+      await expect(silent.db.execute(sql`select 1`)).resolves.toBeDefined();
+    } finally {
+      await silent.close();
+    }
+  });
+});
+
 describe('ошибки', () => {
   it('превышение statement_timeout превращается в недоступность зависимости', async () => {
     // Зависший запрос удерживает соединение пула; лучше отдать ошибку, чем ждать.
@@ -229,5 +264,93 @@ describe('ошибки', () => {
     await attempt.catch((cause: unknown) => {
       expect(toDatabaseError(cause).code).toBe('dependency_unavailable');
     });
+  });
+});
+
+/**
+ * Поиск без учёта регистра по-русски.
+ *
+ * Проверка стоит здесь, а не в модуле, который ищет: она про базу, а не про домен.
+ * PostgreSQL приводит регистр по локали, и в локали `C` кириллица не приводится
+ * вовсе — поиск при этом не падает, а молча ничего не находит.
+ */
+describe('поиск без учёта регистра', () => {
+  it('«такси» находит «Такси», и «ТАКСИ» тоже', async () => {
+    const draft = makeUser({ fullName: 'Служба Такси Первое' });
+    await connected().db.insert(users).values(draft);
+
+    for (const needle of ['такси', 'ТАКСИ', 'ТаКсИ']) {
+      const rows = await connected()
+        .db.select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.id, draft.id), containsIgnoringCase(users.fullName, needle)));
+      expect(rows, `по запросу «${needle}»`).toHaveLength(1);
+    }
+  });
+
+  it('штатный ilike этого не умеет — ради этого помощник и заведён', async () => {
+    // Не проверка нашего кода, а фиксация свойства базы: в локали `C` регистр кириллицы
+    // не приводится. Локаль задана явно, а не взята у базы: у локальной она `C`, у базы
+    // в CI — `en_US.UTF-8`, и «как у базы» проверяло бы то, где запущен тест. Помощник
+    // нужен именно потому, что локаль рабочей базы заранее неизвестна.
+    const found = await connected().db.execute(sql`select
+      (('Такси' collate "C") ilike '%такси%') as plain,
+      (('Такси' collate "und-x-icu") ilike '%такси%') as with_locale`);
+    const row = found.rows[0] as { plain: boolean; with_locale: boolean };
+    expect(row.with_locale).toBe(true);
+    expect(row.plain).toBe(false);
+  });
+
+  it('знаки шаблона в запросе ничего не значат', async () => {
+    const draft = makeUser({ fullName: 'Обычное имя' });
+    await connected().db.insert(users).values(draft);
+
+    const rows = await connected()
+      .db.select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, draft.id), containsIgnoringCase(users.fullName, '%')));
+    expect(rows).toHaveLength(0);
+  });
+});
+
+/**
+ * Порядок русских названий.
+ *
+ * Та же болезнь, что и у поиска, и тоже свойство базы, а не домена: в локали `C`
+ * сравнение идёт по кодам символов, и все заглавные оказываются раньше строчных.
+ */
+describe('порядок по названию', () => {
+  it('регистр не решает, кто первый', async () => {
+    const mark = `Я${String(Date.now()).slice(-7)}`;
+    const drafts = [
+      makeUser({ fullName: `${mark} Яндекс` }),
+      makeUser({ fullName: `${mark} абв` }),
+      makeUser({ fullName: `${mark} Бета` }),
+    ];
+    await connected().db.insert(users).values(drafts);
+
+    const rows = await connected()
+      .db.select({ fullName: users.fullName })
+      .from(users)
+      .where(containsIgnoringCase(users.fullName, mark))
+      .orderBy(orderByText(users.fullName));
+
+    expect(rows.map((row) => row.fullName)).toEqual([
+      `${mark} абв`,
+      `${mark} Бета`,
+      `${mark} Яндекс`,
+    ]);
+  });
+
+  it('штатный порядок этого не умеет — ради этого помощник и заведён', async () => {
+    // Фиксация свойства базы в локали `C` — заданной явно по той же причине, что и выше:
+    // порядок «как у базы» зависел бы от машины, где запущен тест.
+    const found = await connected().db.execute(
+      sql`select (('Яндекс' collate "C") < ('абв' collate "C")) as plain,
+        (('Яндекс' collate "und-x-icu") < ('абв' collate "und-x-icu")) as with_locale`,
+    );
+    const row = found.rows[0] as { plain: boolean; with_locale: boolean };
+    expect(row.plain).toBe(true);
+    expect(row.with_locale).toBe(false);
   });
 });

@@ -22,12 +22,19 @@ export type BasisPoints = bigint;
 
 export const BASIS_POINTS_SCALE = 10_000n;
 
-/** Правило округления при получении дробного результата. */
-export type Rounding =
-  /** К ближайшему, половина — от нуля. Значение по умолчанию для денег. */
-  | 'half-away-from-zero'
-  /** Отбрасывание дробной части, к нулю. */
-  | 'toward-zero';
+/**
+ * Правило округления при получении дробного результата.
+ *
+ * `half_away_from_zero` — к ближайшему, половина от нуля. Значение по умолчанию для денег.
+ * `toward_zero`         — отбрасывание дробной части, к нулю.
+ *
+ * Значения в нижнем регистре через подчёркивание, потому что правило хранится в базе
+ * и попадает в API: одна и та же строка в типе, в ограничении `CHECK` и в ответе —
+ * это на одно отображение туда-обратно меньше, а каждое такое отображение однажды
+ * расходится со своей парой.
+ */
+export const ROUNDING_MODES = ['half_away_from_zero', 'toward_zero'] as const;
+export type Rounding = (typeof ROUNDING_MODES)[number];
 
 export class MoneyParseError extends Error {
   override readonly name = 'MoneyParseError';
@@ -120,9 +127,33 @@ export function multiplyByCount(value: Money, count: bigint): Money {
 export function applyBasisPoints(
   value: Money,
   basisPoints: BasisPoints,
-  rounding: Rounding = 'half-away-from-zero',
+  rounding: Rounding = 'half_away_from_zero',
 ): Money {
   return fromMicros(divideRounded(value * basisPoints, BASIS_POINTS_SCALE, rounding));
+}
+
+/**
+ * Пропорция: `value × numerator / denominator`.
+ *
+ * Нужна там, где цена задана за одну единицу времени, а списывается за другую:
+ * цена за минуту, помноженная на секунды и делённая на шестьдесят. Отдельная функция,
+ * а не два действия подряд, потому что промежуточное деление теряет точность —
+ * при цене 1,5 ₽/мин и 30 секундах «поделить, потом умножить» даёт другой результат,
+ * чем «умножить, потом поделить».
+ *
+ * Правило округления задаётся явно: это единственное место расчёта, где возникает
+ * дробный результат, и правило — часть тарифа, а не свойство кода.
+ */
+export function prorate(
+  value: Money,
+  numerator: bigint,
+  denominator: bigint,
+  rounding: Rounding = 'half_away_from_zero',
+): Money {
+  if (denominator === 0n) {
+    throw new MoneyParseError('Деление на ноль в пропорции');
+  }
+  return fromMicros(divideRounded(value * numerator, denominator, rounding));
 }
 
 export function compare(a: Money, b: Money): -1 | 0 | 1 {
@@ -146,7 +177,7 @@ export function sum(values: readonly Money[]): Money {
 
 function divideRounded(dividend: bigint, divisor: bigint, rounding: Rounding): bigint {
   const quotient = dividend / divisor;
-  if (rounding === 'toward-zero') return quotient;
+  if (rounding === 'toward_zero') return quotient;
 
   const remainder = dividend % divisor;
   if (remainder === 0n) return quotient;

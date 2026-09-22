@@ -114,6 +114,35 @@ describe('дочерний логгер', () => {
     expect(lines[0]?.['node']).toBe('node-2');
     expect(lines[0]?.['app']).toBe('zvonix');
   });
+
+  it('не повторяет поле component в записи', () => {
+    // Проверяется сырой текст, а не разобранный объект: JSON.parse при повторе
+    // ключа молча оставляет последний, и дефект остаётся невидимым для теста,
+    // хотя в собранных логах запись становится неотличимо испорченной.
+    const raw: string[] = [];
+    const log = createLogger(
+      { level: 'debug', format: 'json', component: 'api', base: { app: 'zvonix' } },
+      {
+        write(line: string) {
+          raw.push(line);
+        },
+      },
+    );
+
+    log.child('operator-resolver').child('lookup').info('запрос');
+
+    const line = raw[0] ?? '';
+    expect(line.match(/"component":/g)).toHaveLength(1);
+    expect(line).toContain('"component":"lookup"');
+  });
+
+  it('внук наследует поля деда', () => {
+    const { log, lines } = make();
+    log.child('routing', { node: 'node-2' }).child('selection').info('шлюз выбран');
+    expect(lines[0]?.['component']).toBe('selection');
+    expect(lines[0]?.['node']).toBe('node-2');
+    expect(lines[0]?.['app']).toBe('zvonix');
+  });
 });
 
 describe('маскирование — маскирует логгер, а не автор вызова', () => {

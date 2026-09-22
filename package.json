@@ -7,24 +7,46 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "bash scripts/check.sh",
+    "build": "tsc --build tsconfig.build.json",
+    "dev": "pnpm --filter @zvonix/api dev",
+    "worker": "pnpm --filter @zvonix/worker start",
+    "check": "node scripts/verify.mjs",
+    "verify": "node scripts/verify.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --build --force",
+    "deadcode": "node scripts/deadcode.mjs",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "e2e": "node scripts/e2e.mjs",
+    "ui:screens": "node scripts/ui-screens.mjs",
     "db:generate": "pnpm --filter @zvonix/db db:generate",
-    "db:migrate": "pnpm --filter @zvonix/db db:migrate"
+    "db:migrate": "pnpm --filter @zvonix/db db:migrate",
+    "admin:create": "pnpm --filter @zvonix/api admin:create",
+    "numbers:resolve": "pnpm --filter @zvonix/api numbers:resolve",
+    "operators:aliases": "pnpm --filter @zvonix/api operators:aliases",
+    "numbering-plan:load": "pnpm --filter @zvonix/api numbering-plan:load",
+    "web": "pnpm --filter @zvonix/web dev",
+    "web:build": "pnpm --filter @zvonix/web build"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.63.0",
+    "@swc/core": "^1.16.1",
     "@types/node": "^22.10.0",
+    "@types/nodemailer": "^8.0.1",
+    "concurrently": "^10.0.5",
     "eslint": "^9.17.0",
+    "fast-xml-parser": "^5.11.1",
+    "fast-xml-validator": "^1.4.2",
+    "knip": "^6.33.0",
     "prettier": "^3.4.0",
-    "tsx": "^4.23.13",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.18.0",
-    "vitest": "^2.1.0"
+    "unplugin-swc": "^1.5.11",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }

@@ -1,0 +1,23 @@
+# Фоновые задачи (ADR-0020, ADR-0049). Порта нет; гаснет по сигналу — это проверяет смоук воркера.
+[Unit]
+Description=Zvonix worker
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zvonix
+Group=zvonix
+WorkingDirectory=/opt/zvonix/current/apps/worker
+EnvironmentFile=/etc/zvonix/zvonix.env
+ExecStart=/usr/bin/node --enable-source-maps dist/main.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

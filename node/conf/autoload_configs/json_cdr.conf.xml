@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Отправка CDR в control plane (docs/api/node.md).
+
+  ВНИМАНИЕ. Два значения здесь определяют, дойдут ли деньги:
+
+    encode-values=false — по умолчанию у модуля `true`, и тогда КАЖДОЕ значение приходит
+                          percent-encoded. Приёмник сохранит `%D0%9C%D0%A2%D0%A1`
+                          названием оператора и не заметит: данные идут, тесты зелёные,
+                          в отчётах мусор;
+
+    err-log-dir         — при неудаче доставки CDR ложится сюда. Эти файлы —
+                          НЕВЫСТАВЛЕННЫЕ СЧЕТА. Их накопление обязано поднимать тревогу,
+                          а не лежать до первой жалобы.
+
+  Доставка получается «хотя бы один раз»: модуль повторяет, потом пишет на диск.
+  Приёмник это учитывает — списание идемпотентно по идентификатору вызова (ADR-0010).
+-->
+<configuration name="json_cdr.conf" description="CDR в control plane">
+  <settings>
+    <param name="url" value="@@CONTROL_PLANE@@/node/cdr"/>
+    <param name="auth-scheme" value="basic"/>
+    <param name="cred" value="@@KEY_ID@@:@@KEY_SECRET@@"/>
+
+    <!-- Значения не кодируются: иначе приёмник получит percent-encoded мусор. -->
+    <param name="encode-values" value="false"/>
+
+    <param name="timeout" value="5"/>
+    <param name="retries" value="3"/>
+    <param name="delay" value="5"/>
+
+    <!-- Невыставленные счета оседают здесь. За каталогом нужно следить. -->
+    <param name="err-log-dir" value="/var/lib/zvonix/cdr-failed"/>
+
+    <!--
+      Плечо B тоже отправляется. Тарифицировать его нельзя — это тот же разговор,
+      и списание вышло бы двойным, — поэтому приёмник опознаёт его по переменной
+      `zvonix_call_id` и принимает без тарификации. Отключать здесь не нужно:
+      второе плечо пригодится для разбора качества связи.
+    -->
+    <param name="log-b-leg" value="true"/>
+
+    <param name="enable-cacert-check" value="true"/>
+    <param name="enable-ssl-verifyhost" value="true"/>
+  </settings>
+</configuration>

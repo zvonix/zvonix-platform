@@ -1,0 +1,29 @@
+{
+  // Общая строгость берётся из базы, но три её опции здесь неприменимы: пакет
+  // ничего не собирает сам (`noEmit`), а значит не может быть ни проектом-ссылкой
+  // (`composite`), ни поставщиком объявлений (`declaration`). Результат сборки
+  // делает Next своим бандлером, TypeScript здесь только проверяет типы.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "incremental": true,
+
+    // Разрешение модулей — бандлерное, а не NodeNext: расширения `.js` в импортах
+    // внутри пакета не нужны, а `@/` указывает на `src`.
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "allowJs": true,
+    "isolatedModules": true,
+    "paths": { "@/*": ["./src/*"] },
+
+    // Плагин Next: подсказки по типам маршрутов и серверных компонентов в редакторе.
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "next-env.d.ts", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

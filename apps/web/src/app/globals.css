@@ -1,0 +1,235 @@
+@import 'tailwindcss';
+
+/*
+ * Вариант `dark:` переопределён под три состояния темы.
+ *
+ * Умолчание Tailwind знает только `prefers-color-scheme` и не видит явного выбора,
+ * а компоненты shadcn/ui им пользуются. Без этого блока человек, выбравший светлую
+ * тему на тёмной системе, получал бы светлую страницу с тёмными вставками от shadcn.
+ */
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+}
+
+/*
+ * Палитра кабинета.
+ *
+ * Цвета взяты из согласованного прототипа (`docs/prototype/index.html`) без правок:
+ * он служит образцом, а не вдохновением ([DESIGN.md](../../../../docs/DESIGN.md)).
+ * Исключение одно и внесено в оба места сразу: три токена текста — `faint`,
+ * `muted-foreground` в светлой теме и `rail-ink-dim` — подняты до контраста AA
+ * (решение владельца, 2026-09-14): в прототипе они давали 2,4–4,5 при нужных 4,5.
+ * А **имена** взяты у shadcn/ui: компоненты оттуда написаны под `--primary`,
+ * `--muted-foreground`, `--ring`, и переименовывать их у себя значило бы править
+ * каждый компонент при каждом обновлении. Собственных имён здесь ровно столько,
+ * сколько понятий, которых у shadcn нет: тёмная колонка навигации и три состояния
+ * оборудования.
+ *
+ * Осторожно с `--accent`: у прототипа это фирменный терракотовый, у shadcn —
+ * приглушённая подложка наведения. Фирменный здесь называется `--primary`.
+ *
+ * Три состояния темы, а не два. Явный выбор ставит `data-theme` на корне; настройка
+ * «как в системе» не ставит ничего, и тогда светлую от тёмной отличает только
+ * `prefers-color-scheme`. Поэтому светлая палитра определена на голом `:root`,
+ * а тёмная — дважды: под запросом среды (с оговоркой, что явный светлый выбор
+ * сильнее системного тёмного) и под явным выбором.
+ *
+ * Цвет, определённый только внутри `@media` или `[data-theme]`, в третьем состоянии
+ * не применится вовсе. Отсюда правило: компоненты берут цвет только через токены.
+ */
+:root {
+  --background: #eef2f5;
+  --foreground: #101c26;
+  --card: #ffffff;
+  --card-foreground: #101c26;
+  --popover: #ffffff;
+  --popover-foreground: #101c26;
+  --primary: #b4622f;
+  --primary-foreground: #ffffff;
+  --secondary: #e4eaef;
+  --secondary-foreground: #101c26;
+  --muted: #e4eaef;
+  --muted-foreground: #475766;
+  --accent: #f5e4d8;
+  --accent-foreground: #b4622f;
+  --destructive: #b53e36;
+  --border: #d3dbe2;
+  --input: #d3dbe2;
+  --ring: #b4622f;
+  --radius: 5px;
+
+  /* Своё: то, чего в словаре shadcn нет. */
+  --faint: #5a6975;
+  --border-soft: #e3e9ee;
+  --rail: #1b2732;
+  --rail-ink: #c3d0dc;
+  --rail-ink-dim: #90a0af;
+  --rail-active: #263646;
+  --ok: #2c8f62;
+  --ok-soft: #dcefe5;
+  --warn: #a8791a;
+  --warn-soft: #f7edd3;
+  --crit: #b53e36;
+  --crit-soft: #f8dedc;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --background: #0b1116;
+    --foreground: #e3ebf2;
+    --card: #131c24;
+    --card-foreground: #e3ebf2;
+    --popover: #131c24;
+    --popover-foreground: #e3ebf2;
+    --primary: #dd8b53;
+    --primary-foreground: #16100b;
+    --secondary: #0e161d;
+    --secondary-foreground: #e3ebf2;
+    --muted: #0e161d;
+    --muted-foreground: #8ca0b1;
+    --accent: #3a2418;
+    --accent-foreground: #dd8b53;
+    --destructive: #dc6d64;
+    --border: #22303c;
+    --input: #22303c;
+    --ring: #dd8b53;
+
+    --faint: #758698;
+    --border-soft: #1a252f;
+    --rail: #0d151c;
+    --rail-ink: #b7c6d4;
+    --rail-ink-dim: #8092a3;
+    --rail-active: #1c2935;
+    --ok: #46b585;
+    --ok-soft: #14291f;
+    --warn: #d4a744;
+    --warn-soft: #2a2212;
+    --crit: #dc6d64;
+    --crit-soft: #2d1714;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --background: #0b1116;
+  --foreground: #e3ebf2;
+  --card: #131c24;
+  --card-foreground: #e3ebf2;
+  --popover: #131c24;
+  --popover-foreground: #e3ebf2;
+  --primary: #dd8b53;
+  --primary-foreground: #16100b;
+  --secondary: #0e161d;
+  --secondary-foreground: #e3ebf2;
+  --muted: #0e161d;
+  --muted-foreground: #8ca0b1;
+  --accent: #3a2418;
+  --accent-foreground: #dd8b53;
+  --destructive: #dc6d64;
+  --border: #22303c;
+  --input: #22303c;
+  --ring: #dd8b53;
+
+  --faint: #758698;
+  --border-soft: #1a252f;
+  --rail: #0d151c;
+  --rail-ink: #b7c6d4;
+  --rail-ink-dim: #8092a3;
+  --rail-active: #1c2935;
+  --ok: #46b585;
+  --ok-soft: #14291f;
+  --warn: #d4a744;
+  --warn-soft: #2a2212;
+  --crit: #dc6d64;
+  --crit-soft: #2d1714;
+
+  color-scheme: dark;
+}
+
+/*
+ * `inline` здесь обязателен: без него Tailwind подставит в утилиты **значение**
+ * переменной на момент сборки, и тёмная тема перестанет действовать. С ним утилита
+ * ссылается на саму переменную, а её значение выбирается в браузере.
+ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-faint: var(--faint);
+  --color-border-soft: var(--border-soft);
+  --color-rail: var(--rail);
+  --color-rail-ink: var(--rail-ink);
+  --color-rail-ink-dim: var(--rail-ink-dim);
+  --color-rail-active: var(--rail-active);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-crit: var(--crit);
+  --color-crit-soft: var(--crit-soft);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 3px);
+
+  --font-sans: var(--font-plex-sans), system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, Menlo, monospace;
+
+  /* Плотность оператора: тринадцать пикселей — базовый размер прототипа. */
+  --text-base: 13px;
+  --text-base--line-height: 1.4;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * Фокус виден всегда: панелью пользуются с клавиатуры часами
+   * ([DESIGN.md](../../../../docs/DESIGN.md), «Доступность»).
+   */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+}
+
+/* Колонки цифр должны выстраиваться друг под другом: деньги читают, а не разглядывают. */
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}

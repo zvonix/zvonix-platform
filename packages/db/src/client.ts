@@ -9,9 +9,9 @@
 import {
   conflict,
   dependencyUnavailable,
+  DomainError,
   internal,
   validationFailed,
-  type DomainError,
 } from '@zvonix/shared';
 import { sql } from 'drizzle-orm';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -21,12 +21,31 @@ import * as schema from './schema/index.js';
 
 export type Database = NodePgDatabase<typeof schema>;
 
+/**
+ * Исполнитель запроса: пул или открытая транзакция.
+ *
+ * Объявлен один раз здесь, а не в каждом репозитории: тип выводится из `Database`,
+ * и шесть его копий разъехались бы на первой же смене версии drizzle. Репозитории
+ * его переэкспортируют, чтобы вызывающий брал тип оттуда же, откуда метод.
+ */
+export type Executor = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
+
+/** Приёмник журнала запросов. Значения параметров не передаются намеренно. */
+export type QueryLogger = (query: string, parameterCount: number) => void;
+
 export interface DatabaseOptions {
   readonly url: string;
   /** Верхняя граница соединений этого процесса. Сумма по всем процессам — не больше `max_connections`. */
   readonly poolMax: number;
-  /** Логировать каждый запрос. Только для разработки: в логе окажутся значения параметров. */
-  readonly logQueries?: boolean;
+  /**
+   * Журнал запросов для разработки.
+   *
+   * Принимает только текст запроса и число параметров. Значений параметров здесь нет
+   * и быть не должно: в них хеши паролей, адреса почты и номера абонентов, а этот
+   * вывод идёт мимо маскирования логгера (ADR-0004). Штатный журнал Drizzle печатает
+   * их целиком, поэтому он не используется.
+   */
+  readonly logQuery?: QueryLogger;
   /**
    * Предел времени одного запроса, мс. `0` снимает ограничение.
    *
@@ -82,10 +101,19 @@ export function createDatabase(options: DatabaseOptions): DatabaseHandle {
     if (onPoolError !== undefined) onPoolError(error);
   });
 
+  const sink = options.logQuery;
   const db = drizzle(pool, {
     schema,
     casing: CASING,
-    ...(options.logQueries === true ? { logger: true } : {}),
+    ...(sink === undefined
+      ? {}
+      : {
+          logger: {
+            logQuery: (query: string, parameters: unknown[]): void => {
+              sink(query, parameters.length);
+            },
+          },
+        }),
   });
 
   return {
@@ -113,6 +141,11 @@ export function createDatabase(options: DatabaseOptions): DatabaseHandle {
  * или номер телефона.
  */
 export function toDatabaseError(cause: unknown): DomainError {
+  // Отказ, брошенный внутри транзакции, приходит сюда же, и он уже доменный. Разбирать
+  // его как ошибку базы нельзя: его `code` (`'conflict'`) читался бы как SQLSTATE,
+  // и `409` превращался бы в `500` (ADR-0048, §6).
+  if (cause instanceof DomainError) return cause;
+
   const code = findSqlState(cause);
 
   switch (code) {
@@ -130,9 +163,13 @@ export function toDatabaseError(cause: unknown): DomainError {
     case '40001':
     case '40P01':
       return conflict('Конкурентное изменение, повторите операцию', { cause });
-    // 57014 query_canceled (истёк statement_timeout), 08006 connection_failure,
-    // 08003 connection_does_not_exist, 53300 too_many_connections
+    // 57014 query_canceled — истёк statement_timeout, в том числе в ожидании блокировки;
+    // 25P03 idle_in_transaction_session_timeout — база сама закрыла простаивающую транзакцию.
+    // База жива, но не успела: «недоступна» было бы неправдой и увело бы разбор не туда.
     case '57014':
+    case '25P03':
+      return dependencyUnavailable('База данных не ответила вовремя — повторите позже', { cause });
+    // 08006 connection_failure, 08003 connection_does_not_exist, 53300 too_many_connections
     case '08006':
     case '08003':
     case '53300':

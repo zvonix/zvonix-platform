@@ -1,0 +1,30 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // Рядом с результатом, а не рядом с настройкой. Иначе снести `dist` и собрать
+    // заново — получить пустоту: кэш пережил удаление и считает сборку свежей.
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+
+    // Внедрение зависимостей NestJS читает типы параметров конструктора из метаданных,
+    // которые генерирует компилятор. Без этих двух опций контейнер не знает,
+    // что подставлять, и падает при старте.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src/**/*.ts"],
+  // Проверки в артефакт не идут: под vitest они читаются из исходников,
+  // а в production не вызываются вовсе. Типы им проверяет `tsconfig.tests.json`.
+  //
+  // Обвязка `src/testing/harness.ts` при этом собирается: она объявлена входом
+  // пакета (`@zvonix/api/testing`) и нужна набору воркера. Там же `seed-e2e.ts` —
+  // он поднимает собранное приложение и потому обязан быть собранным сам.
+  "exclude": ["src/**/*.test.ts"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/config" },
+    { "path": "../../packages/logger" },
+    { "path": "../../packages/db" }
+  ]
+}

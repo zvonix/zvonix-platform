@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { workspaceAliases } from './vitest.shared.config.js';
 
 /**
  * Модульные проверки: без сети, без базы, без файлов за пределами репозитория.
@@ -9,8 +10,9 @@ import { defineConfig } from 'vitest/config';
  * о которой никто не знает, хуже отсутствующей.
  */
 export default defineConfig({
+  resolve: { alias: workspaceAliases },
   test: {
-    include: ['{apps,packages}/*/src/**/*.test.ts'],
+    include: ['{apps,packages}/*/src/**/*.test.ts', 'tests/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**', '**/*.integration.test.ts'],
   },
 });

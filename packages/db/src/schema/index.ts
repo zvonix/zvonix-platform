@@ -7,3 +7,37 @@
 
 export { users, sessions } from './users.js';
 export { auditLog } from './audit-log.js';
+export { platformSettings } from './settings.js';
+export {
+  operators,
+  operatorAliases,
+  numberingPlanRanges,
+  numberResolutions,
+  blockedNumbers,
+} from './catalog.js';
+export {
+  clients,
+  partners,
+  partnerAliases,
+  accounts,
+  ledgerTransactions,
+  ledgerEntries,
+} from './billing.js';
+export { machineCredentials } from './machine.js';
+export { nodes } from './nodes.js';
+export {
+  gateways,
+  sipTrunks,
+  channels,
+  simCards,
+  gatewayPorts,
+  channelPartnerPriorities,
+  channelAllowedOperators,
+  partnerCoverage,
+} from './telephony.js';
+export { partnerRates, priceBands, commissionRules } from './tariffs.js';
+export { calls, reservations } from './calls.js';
+export { recordings, recordingGrants } from './recordings.js';
+export { limitRules, limitCounters } from './limits.js';
+export { failureThresholds } from './quality.js';
+export { outboxMessages, authTokens } from './mail.js';

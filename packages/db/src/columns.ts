@@ -7,8 +7,8 @@
  */
 
 import { sql, type SQL } from 'drizzle-orm';
-import { type AnyPgColumn, timestamp, uuid } from 'drizzle-orm/pg-core';
-import type { Id } from '@zvonix/shared';
+import { bigint, type AnyPgColumn, timestamp, uuid } from 'drizzle-orm/pg-core';
+import type { Id, MoneyAmount } from '@zvonix/shared';
 
 /**
  * Первичный ключ: UUIDv7, который генерирует приложение.
@@ -55,6 +55,20 @@ export function updatedAt() {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date());
+}
+
+/**
+ * Денежная величина: целое число микроединиц валюты (1 рубль = 1 000 000).
+ *
+ * `bigint` в режиме `bigint`, а не `number`: копейки в числах с плавающей точкой
+ * теряются молча, и обнаруживается это на сверке через месяц. Тип колонки —
+ * `MoneyAmount` из `@zvonix/shared`, поэтому подставить сюда обычное число не даст компилятор.
+ *
+ * Округление выполняется один раз — при фиксации CDR, по правилу из тарифа.
+ * Ни в одном промежуточном вычислении округления быть не должно.
+ */
+export function money() {
+  return bigint({ mode: 'bigint' }).$type<MoneyAmount>();
 }
 
 /** Допустимый вид значения в ограничении: подставляется в текст SQL, поэтому проверяется. */
