@@ -118,6 +118,15 @@ backup_database() {
     | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2-)
 }
 
+# Код первого запуска (ADR-0050): печатается, только пока администратора нет. До строки
+# DEPLOY_OK — она последняя по договорённости. Сбой здесь выкладку не отменяет: выпуск
+# уже работает, а код можно получить той же командой отдельно (deploy/README.md).
+first_run_hint() {
+  sudo -u zvonix sh -c \
+    'set -a; . /etc/zvonix/zvonix.env; set +a; cd "$0/apps/api" && exec node dist/modules/identity/first-run-code.js' \
+    "$1" || echo "код первого запуска не получен — см. deploy/README.md, «Первый вход»" >&2
+}
+
 # Скачивание выпуска по токену только на чтение (ADR-0049).
 download() {
   local tag="$1" env_file="${ETC}/github.env" headers api name id
@@ -195,6 +204,7 @@ install_release() {
       point "$PREVIOUS" "$before"
     fi
     prune
+    first_run_hint "$release"
     echo "DEPLOY_OK $(head -1 "${release}/RELEASE")"
     return 0
   fi

@@ -66,7 +66,12 @@ for (const file of configs) {
 // Установщик узла (ADR-0045) и выкладка площадки (ADR-0049). Проверка механическая:
 // работают ли они, отвечает только живая машина.
 
-const SHELL_SCRIPTS = ['node/install.sh', 'deploy/deploy.sh', 'deploy/server-setup.sh'];
+const SHELL_SCRIPTS = [
+  'node/install.sh',
+  'deploy/deploy.sh',
+  'deploy/server-setup.sh',
+  'deploy/install.sh',
+];
 
 // Каждый скрипт проверяется независимо от остальных и от XML: сломанный файл не отменяет
 // проверку соседнего, иначе о второй ошибке узнавали бы только после починки первой.

@@ -69,6 +69,19 @@ export const registerSchema = z.object({
 });
 
 /**
+ * Первый запуск (ADR-0050): код из вывода выкладки и учётная запись первого администратора.
+ *
+ * Код здесь проверяется только по форме — пустой и огромный не доходят до HMAC; подходит ли
+ * он, решает сервис. Почта и пароль — по тем же правилам, что у регистрации.
+ */
+export const firstRunSchema = z.object({
+  code: z.string().trim().min(1, 'не может быть пустым').max(40, 'слишком длинный'),
+  email,
+  password,
+  fullName: z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное'),
+});
+
+/**
  * Код второго фактора: шесть цифр, возможно с пробелом посередине.
  *
  * Пробел терпится намеренно — аутентификаторы показывают код разбитым пополам,
@@ -106,6 +119,7 @@ export const disableTotpSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type FirstRunInput = z.infer<typeof firstRunSchema>;
 
 /** Запрос восстановления пароля. Ответ одинаков независимо от того, есть ли запись. */
 export const passwordResetRequestSchema = z.object({ email, captchaToken });

@@ -394,3 +394,72 @@ test.describe('таблица шире экрана', () => {
     });
   });
 });
+
+test.describe('первый запуск', () => {
+  // ADR-0050. На стенде администратор заведён — живьём проверяется закрытая дверь.
+  // Открытая — подменой ответов API в браузере: логику заведения проверяют тесты с базой,
+  // а здесь — что кабинет ведёт человека верно.
+  test('с заведённым администратором страница говорит «уже выполнен», а вход остаётся входом', async ({
+    page,
+  }) => {
+    await page.goto('/setup');
+    await expect(page.getByText('Первый запуск уже выполнен')).toBeVisible();
+    await page.getByRole('link', { name: 'Ко входу' }).click();
+    await expect(page).toHaveURL(/\/login$/u);
+    await expect(page.getByRole('button', { name: 'Войти' })).toBeVisible();
+  });
+
+  test('без администратора вход ведёт на первый запуск, и форма доводит до входа', async ({
+    page,
+  }) => {
+    let posted = 0;
+    let created = false;
+    await page.route('**/api/setup', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ json: { required: !created } });
+        return;
+      }
+      posted += 1;
+      const body = route.request().postDataJSON() as { code: string };
+      if (body.code !== 'B4PR-3N3H-CCP5') {
+        await route.fulfill({
+          status: 400,
+          json: {
+            error: {
+              code: 'validation_failed',
+              message: 'Код первого запуска не подходит',
+              details: { problems: ['code: не подходит'] },
+            },
+          },
+        });
+        return;
+      }
+      created = true;
+      await route.fulfill({ status: 201, json: { user: { id: 'x', role: 'admin' } } });
+    });
+
+    await page.goto('/login');
+    await expect(page).toHaveURL(/\/setup$/u);
+
+    await page.getByLabel('Код первого запуска').fill('AAAA-AAAA-AAAA');
+    await page.getByLabel('Адрес почты администратора').fill('owner@example.test');
+    await page.getByLabel('Имя').fill('Владелец Площадки');
+    await page.getByLabel('Пароль — не короче 12 знаков').fill('достаточно длинный пароль');
+    await page.getByLabel('Пароль ещё раз').fill('другой длинный пароль');
+    await page.getByRole('button', { name: 'Завести администратора' }).click();
+    // Несовпадение ловится до отправки: опечатка в пароле единственного администратора
+    // запирает площадку.
+    await expect(page.getByText('Пароли не совпадают')).toBeVisible();
+    expect(posted).toBe(0);
+
+    await page.getByLabel('Пароль ещё раз').fill('достаточно длинный пароль');
+    await page.getByRole('button', { name: 'Завести администратора' }).click();
+    await expect(page.getByText('Код первого запуска не подходит')).toBeVisible();
+
+    await page.getByLabel('Код первого запуска').fill('B4PR-3N3H-CCP5');
+    await page.getByRole('button', { name: 'Завести администратора' }).click();
+    await expect(page.getByText('Администратор заведён')).toBeVisible();
+    await page.getByRole('link', { name: 'Войти' }).click();
+    await expect(page).toHaveURL(/\/login$/u);
+  });
+});

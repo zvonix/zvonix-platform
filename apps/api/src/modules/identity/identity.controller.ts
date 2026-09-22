@@ -52,6 +52,7 @@ import {
   passwordResetRequestSchema,
   registerSchema,
   tokenSchema,
+  firstRunSchema,
   totpCodeSchema,
   userListQuerySchema,
 } from './schemas.js';
@@ -100,6 +101,35 @@ export class IdentityController {
   @Get('auth/captcha')
   async captchaState() {
     return this.captcha.publicState();
+  }
+
+  /**
+   * Нужен ли первый запуск (ADR-0050): на площадке ещё нет администратора.
+   *
+   * Открыт всем — кабинет решает по нему, показывать ли вместо входа форму первого
+   * запуска. О площадке ответ говорит одно: заведён ли администратор; без кода из вывода
+   * выкладки это знание ничего не открывает.
+   */
+  @Public()
+  @Get('setup')
+  async firstRunState(): Promise<{ required: boolean }> {
+    return { required: await this.identity.firstRunRequired() };
+  }
+
+  /**
+   * Первый запуск: первый администратор по коду из вывода выкладки (ADR-0050).
+   *
+   * Сессию не выдаёт: после заведения человек входит обычным входом — со своим паролем
+   * и, если подключит, вторым фактором. Отдельной двери в обход входа нет.
+   */
+  @Public()
+  @HttpCode(201)
+  @Post('setup')
+  async completeFirstRun(
+    @Body(zodBody(firstRunSchema)) body: z.infer<typeof firstRunSchema>,
+    @Meta() meta: RequestMeta,
+  ): Promise<{ user: UserResponse }> {
+    return { user: toUserResponse(await this.identity.completeFirstRun(body, meta)) };
   }
 
   /**

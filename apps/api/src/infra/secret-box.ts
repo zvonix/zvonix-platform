@@ -30,6 +30,8 @@ const NONCE_BYTES = 12;
 export const TOTP_SECRET_PURPOSE = 'zvonix:totp-secret:v1';
 export const PLATFORM_SETTING_PURPOSE = 'zvonix:platform-setting:v1';
 export const SIP_TRUNK_SECRET_PURPOSE = 'zvonix:sip-trunk-secret:v1';
+/** Не ключ шифрования, а ключ HMAC кода первого запуска (ADR-0050): назначение то же — разделить ключи. */
+export const FIRST_RUN_CODE_PURPOSE = 'zvonix:first-run-code:v1';
 
 /** Разделитель частей. Двоеточие в base64url не встречается. */
 const SEPARATOR = ':';
@@ -78,6 +80,6 @@ export function decryptSecret(stored: string, appKey: string, purpose: string): 
  * длиннее или короче нужного и распределён неравномерно. HKDF даёт из него ровно
  * тридцать два байта, пригодных для AES.
  */
-function deriveKey(appKey: string, purpose: string): Buffer {
+export function deriveKey(appKey: string, purpose: string): Buffer {
   return Buffer.from(hkdfSync('sha256', Buffer.from(appKey, 'utf8'), '', purpose, KEY_BYTES));
 }
