@@ -97,6 +97,26 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
    GITHUB_TOKEN=github_pat_…
    ```
 
+## Защита сервера
+
+Подготовка заводит сама:
+
+- **подкачку** `/swapfile` 2 ГБ, если подкачки нет вовсе (`vm.swappiness = 10`). Без неё
+  сервер с 1 ГБ памяти при нехватке убивает процессы, а с ними и звонки;
+- **fail2ban** — тюрьма `sshd`: 5 неудач за 10 минут дают час блокировки
+  (`/etc/fail2ban/jail.d/zvonix.conf`). Вход с первой попытки блокировка не задевает;
+- **`X11Forwarding no`** — `/etc/ssh/sshd_config.d/10-zvonix.conf`, проверяется `sshd -t`
+  до перечитывания.
+
+Вход root по паролю подготовка **не** отключает: без ключа у владельца это запертый сервер.
+Сначала ключ (PuTTYgen, открытая часть — в `/root/.ssh/authorized_keys`), вход по нему,
+и только потом `PasswordAuthentication no`.
+
+Обновления безопасности ставит `unattended-upgrades` из образа Ubuntu. Всё накопленное
+в образе — один раз руками, с перезагрузкой: сначала `apt-get -o DPkg::Lock::Timeout=900
+full-upgrade` (блокировку dpkg в первые минуты держит `unattended-upgrades`), затем
+`systemctl reboot`. Площадка поднимается сама — замер 2026-09-22: около минуты.
+
 ## Порты
 
 Файрвол включает `server-setup.sh`: входящее закрыто всё, кроме таблицы.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UserRole } from '@zvonix/shared';
 import {
   Coins,
@@ -24,6 +24,40 @@ import { ThemeSwitch } from '@/components/theme-switch';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
 import { useSession, type CurrentUser } from '@/lib/session';
+
+/**
+ * Кто видит версию выпуска. Номер подсказывает, какие известные уязвимости пробовать,
+ * поэтому API отдаёт его только сотрудникам (`GET /health/version`).
+ */
+const SEES_RELEASE: readonly UserRole[] = ['admin', 'support'];
+
+interface ReleaseInfo {
+  readonly version: string | null;
+  readonly commit: string | null;
+  readonly builtAt: string | null;
+}
+
+/** Какой выпуск работает: в углу панели, чтобы после выкладки было видно, что она доехала. */
+function ReleaseVersion() {
+  const release = useQuery({
+    queryKey: ['release'],
+    queryFn: () => request<ReleaseInfo>('/health/version'),
+    // Выпуск меняется только выкладкой; пяти минут хватает, чтобы открытая вкладка
+    // увидела новый без перезагрузки.
+    staleTime: 5 * 60_000,
+  });
+  if (release.data === undefined) return null;
+  const { version, commit, builtAt } = release.data;
+  const details = [
+    commit === null ? undefined : `коммит ${commit.slice(0, 7)}`,
+    builtAt === null ? undefined : `собран ${new Date(builtAt).toLocaleString('ru-RU')}`,
+  ].filter((part) => part !== undefined);
+  return (
+    <div className="num pt-1" title={details.length === 0 ? undefined : details.join(', ')}>
+      {version === null ? 'сборка не из выпуска' : `версия ${version}`}
+    </div>
+  );
+}
 
 interface NavItem {
   readonly href: string;
@@ -287,6 +321,7 @@ export function ConsoleShell({
         <div className="mt-auto px-2 pt-2 text-[11px] text-rail-ink-dim">
           {user.fullName}
           <div className="truncate">{user.email}</div>
+          {SEES_RELEASE.includes(user.role) ? <ReleaseVersion /> : null}
         </div>
       </nav>
 
