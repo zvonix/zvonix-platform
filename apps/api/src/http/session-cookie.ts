@@ -12,6 +12,8 @@
  * забытый `HttpOnly` не заметит ни один тест, кроме того, что смотрит именно сюда.
  */
 
+import type { Config } from '../infra/tokens.js';
+
 /** Имя защищённой cookie: браузер отдаёт её только с `Secure`, `Path=/` и без `Domain`. */
 const SECURE_NAME = '__Host-zvonix_session';
 
@@ -35,13 +37,16 @@ export function isSafeMethod(method: string): boolean {
 }
 
 /**
- * Ставится ли cookie с `Secure` — по тому, как платформа видна снаружи.
+ * Ставится ли cookie с `Secure` — по адресу кабинета, на источнике которого она живёт.
  *
  * Своей переменной окружения для этого нет намеренно: адрес уже задан, и второй
  * источник того же факта рано или поздно разошёлся бы с первым (ADR-0037).
+ * Принимается конфигурация, а не строка: `PUBLIC_BASE_URL` — адрес для узлов АТС,
+ * на сервере площадки это `http://127.0.0.1:8000` и при кабинете на https
+ * (ревизия ADR-0037), и выбирать между двумя адресами должна эта функция, а не вызов.
  */
-export function secureCookies(publicBaseUrl: string): boolean {
-  return publicBaseUrl.startsWith('https://');
+export function secureCookies(config: Pick<Config, 'WEB_BASE_URL'>): boolean {
+  return config.WEB_BASE_URL.startsWith('https://');
 }
 
 /**

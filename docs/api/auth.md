@@ -21,7 +21,7 @@
 
 | | |
 |---|---|
-| Имя | `__Host-zvonix_session` при `https`, `zvonix_session` при `http` |
+| Имя | `__Host-zvonix_session`, когда адрес кабинета (`WEB_BASE_URL`) на `https`; иначе `zvonix_session` |
 | Признаки | `HttpOnly`, `Path=/`, `SameSite=Strict`, `Max-Age` по сроку сессии, `Secure` при `https` |
 | Ставится | `POST /auth/login` |
 | Снимается | `POST /auth/logout`, а также любой ответ `401` на запрос **с** негодной cookie |

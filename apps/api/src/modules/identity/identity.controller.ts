@@ -71,7 +71,7 @@ export class IdentityController {
     private readonly captcha: CaptchaService,
     @Inject(APP_CONFIG) config: Config,
   ) {
-    this.secure = secureCookies(config.PUBLIC_BASE_URL);
+    this.secure = secureCookies(config);
   }
 
   /**

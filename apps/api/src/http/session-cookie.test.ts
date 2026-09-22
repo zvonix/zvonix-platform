@@ -9,9 +9,19 @@ import {
 } from './session-cookie.js';
 
 describe('признак Secure', () => {
-  it('следует за адресом платформы', () => {
-    expect(secureCookies('https://cp.example.com')).toBe(true);
-    expect(secureCookies('http://127.0.0.1:8000')).toBe(false);
+  it('следует за адресом кабинета', () => {
+    expect(secureCookies({ WEB_BASE_URL: 'https://cp.example.com' })).toBe(true);
+    expect(secureCookies({ WEB_BASE_URL: 'http://127.0.0.1:3000' })).toBe(false);
+  });
+
+  it('не смотрит на адрес для узлов: на сервере площадки он loopback и при https', () => {
+    // Так пишет окружение выкладка ADR-0049: узел на той же машине, кабинет по домену.
+    const deployed = {
+      WEB_BASE_URL: 'https://cp.zvonix.com',
+      PUBLIC_BASE_URL: 'http://127.0.0.1:8000',
+    };
+    expect(secureCookies(deployed)).toBe(true);
+    expect(secureCookies({ ...deployed, WEB_BASE_URL: 'http://localhost:8080' })).toBe(false);
   });
 });
 
