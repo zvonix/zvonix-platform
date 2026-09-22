@@ -3,9 +3,51 @@
 import * as React from 'react';
 import { cn } from 'cn';
 
+/**
+ * Прокручивается ли блок вбок сейчас. Меряется заново при смене ширины окна и таблицы:
+ * строки приходят после первого показа и раздвигают столбцы.
+ */
+function useHorizontalOverflow(ref: React.RefObject<HTMLDivElement | null>): boolean {
+  const [overflowing, setOverflowing] = React.useState(false);
+  React.useEffect(() => {
+    const element = ref.current;
+    if (element === null) return undefined;
+    const measure = () => {
+      setOverflowing(element.scrollWidth > element.clientWidth + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    if (element.firstElementChild !== null) observer.observe(element.firstElementChild);
+    return () => {
+      observer.disconnect();
+    };
+  }, [ref]);
+  return overflowing;
+}
+
+/**
+ * Прокручиваемый вбок блок получает фокус и подпись: без фокуса правую часть таблицы
+ * без мыши не увидеть (WCAG 2.1.1; axe `scrollable-region-focusable` на 390 px
+ * в восьми разделах, `pnpm ui:screens` 2026-09-22). Только пока прокрутка есть —
+ * иначе каждая таблица добавляла бы лишнюю остановку `Tab`.
+ */
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
+  const container = React.useRef<HTMLDivElement>(null);
+  const scrollable = useHorizontalOverflow(container);
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    <div
+      ref={container}
+      data-slot="table-container"
+      className="relative w-full overflow-x-auto outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      {...(scrollable
+        ? {
+            tabIndex: 0,
+            role: 'region',
+            'aria-label': props['aria-label'] ?? 'Таблица, прокручивается вбок',
+          }
+        : {})}
+    >
       <table
         data-slot="table"
         className={cn('w-full caption-bottom text-sm', className)}

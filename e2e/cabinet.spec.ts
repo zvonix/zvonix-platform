@@ -358,3 +358,39 @@ test.describe('учётные записи', () => {
     await expect(other.getByRole('button', { name: 'Изменить' })).toBeVisible();
   });
 });
+
+test.describe('таблица шире экрана', () => {
+  // Без фокуса прокручиваемый вбок блок недоступен с клавиатуры — правую часть таблицы
+  // без мыши не увидеть (axe `scrollable-region-focusable`, `pnpm ui:screens` 2026-09-22).
+  test.describe('телефон', () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+
+    test('прокручиваемая таблица берёт фокус и называет себя', async ({ page }) => {
+      await signIn(page, PEOPLE.admin);
+      await page.goto('/users');
+
+      const table = page.locator('[data-slot="table-container"]').first();
+      await expect(table).toHaveAttribute('tabindex', '0');
+      await expect(table).toHaveAttribute('role', 'region');
+      await table.focus();
+      await expect(table).toBeFocused();
+    });
+  });
+
+  test.describe('широкий экран', () => {
+    // 1920, а не 1280: на 1280 таблица учётных записей шире места и столбец действий
+    // уходит за край (замер 2026-09-22) — там фокус как раз нужен.
+    test.use({ viewport: { width: 1920, height: 1080 } });
+
+    test('та же таблица, поместившись, лишней остановки Tab не добавляет', async ({ page }) => {
+      // Обратная половина: фокус нужен только прокручиваемому блоку, иначе каждая таблица
+      // стала бы лишним нажатием Tab.
+      await signIn(page, PEOPLE.admin);
+      await page.goto('/users');
+
+      const table = page.locator('[data-slot="table-container"]').first();
+      await expect(page.getByRole('row').filter({ hasText: PEOPLE.support })).toBeVisible();
+      await expect(table).not.toHaveAttribute('tabindex', '0');
+    });
+  });
+});

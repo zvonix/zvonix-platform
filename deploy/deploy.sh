@@ -5,9 +5,11 @@
 #   zvonix-deploy --archive <файл>  выложить архив, привезённый руками
 #   zvonix-deploy --rollback        вернуться на предыдущий выпуск
 #
-# Новый выпуск ставится рядом с работающим. Миграции применяются до переключения:
-# они совместимы с прежним кодом (ADR-0005). Потом меняется ссылка и перезапускаются
-# службы. Не поднялся — ссылка возвращается на прежний выпуск. Миграции откат не откатывает.
+# Новый выпуск ставится рядом с работающим. Перед миграциями снимается копия базы
+# (/var/backups/zvonix, пять последних); без неё миграции не идут. Миграции применяются
+# до переключения: они совместимы с прежним кодом (ADR-0005). Потом меняется ссылка
+# и перезапускаются службы. Не поднялся — ссылка возвращается на прежний выпуск.
+# Миграции откат не откатывает — для этого и копия.
 set -euo pipefail
 
 ROOT=/opt/zvonix
@@ -16,6 +18,9 @@ CURRENT="${ROOT}/current"
 PREVIOUS="${ROOT}/previous"
 ETC=/etc/zvonix
 KEEP=5
+BACKUPS=/var/backups/zvonix
+# Имя базы — то, что заводит deploy/server-setup.sh.
+DATABASE=zvonix
 SERVICES=(zvonix-api zvonix-worker zvonix-web)
 API_READY=http://127.0.0.1:8000/health/ready
 WEB_READY=http://127.0.0.1:3000/login
@@ -28,7 +33,7 @@ die() {
 step() { printf '\n=== %s\n' "$*"; }
 
 [ "$(id -u)" -eq 0 ] || die "нужны права root"
-for command in curl tar sha256sum node pnpm python3 systemctl sudo find; do
+for command in curl tar sha256sum node pnpm python3 systemctl sudo find pg_dump; do
   command -v "$command" >/dev/null 2>&1 \
     || die "не найдена команда ${command} — сначала deploy/server-setup.sh"
 done
@@ -85,6 +90,32 @@ prune() {
     rm -rf -- "$release"
     echo "удалён старый выпуск ${release}"
   done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+}
+
+# Копия базы перед миграциями. Откат выпуска возвращает код, но не базу (ADR-0049):
+# данные, испорченные миграцией, возвращаются только из копии. Нет копии — нет миграций.
+# Снимает сам postgres в свой каталог: у root роли в базе нет, а копия с данными людей
+# не должна быть читаема никем, кроме владельца базы. Хранятся KEEP последних.
+backup_database() {
+  local label="$1" file old
+  file="${BACKUPS}/${label}-$(date +%Y%m%d%H%M%S).dump"
+  install -d -o postgres -g postgres -m 0700 "$BACKUPS"
+  # Из корня: у postgres нет прав на рабочий каталог root, и pg_dump ругался бы на него.
+  (cd / && sudo -u postgres pg_dump --format=custom --file="$file" "$DATABASE") || {
+    rm -f -- "$file"
+    die "копия базы не снята — миграции не применялись, работает прежний выпуск"
+  }
+  # Пустой файл удаляется: иначе он занял бы место среди KEEP и вытеснил настоящую копию.
+  if [ ! -s "$file" ]; then
+    rm -f -- "$file"
+    die "копия базы пустая — миграции не применялись, работает прежний выпуск"
+  fi
+  echo "копия базы: ${file} ($(du -h "$file" | cut -f1))"
+  while IFS= read -r old; do
+    rm -f -- "$old"
+    echo "удалена старая копия ${old}"
+  done < <(find "$BACKUPS" -maxdepth 1 -type f -name '*.dump' -printf '%T@ %p\n' \
+    | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2-)
 }
 
 # Скачивание выпуска по токену только на чтение (ADR-0049).
@@ -145,6 +176,9 @@ install_release() {
   sudo -u zvonix -H env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true \
     sh -c 'cd "$0" && pnpm install --frozen-lockfile --prod --filter "@zvonix/api..." --filter "@zvonix/worker..."' \
     "$release"
+
+  step "Копия базы"
+  backup_database "$label"
 
   step "Миграции"
   sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; cd "$0" && exec node packages/db/dist/migrate.js' \
