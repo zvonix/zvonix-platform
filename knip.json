@@ -2,7 +2,14 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs", "tests/**/*.test.ts", "e2e/**/*.spec.ts"],
+      "entry": [
+        "scripts/*.mjs",
+        "tests/**/*.test.ts",
+        "e2e/**/*.spec.ts",
+        "e2e/**/*.screens.ts",
+        "e2e/**/*.setup.ts",
+        "playwright.screens.config.ts"
+      ],
       "project": ["scripts/**/*.mjs", "tests/**/*.ts", "e2e/**/*.ts"]
     },
     "packages/*": {

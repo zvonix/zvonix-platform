@@ -10,8 +10,8 @@
     "build": "tsc --build tsconfig.build.json",
     "dev": "pnpm --filter @zvonix/api dev",
     "worker": "pnpm --filter @zvonix/worker start",
-    "check": "bash scripts/check.sh",
-    "verify": "bash scripts/check.sh",
+    "check": "node scripts/verify.mjs",
+    "verify": "node scripts/verify.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "e2e": "node scripts/e2e.mjs",
+    "ui:screens": "node scripts/ui-screens.mjs",
     "db:generate": "pnpm --filter @zvonix/db db:generate",
     "db:migrate": "pnpm --filter @zvonix/db db:migrate",
     "admin:create": "pnpm --filter @zvonix/api admin:create",
@@ -30,6 +31,7 @@
     "web:build": "pnpm --filter @zvonix/web build"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.17.0",
     "@playwright/test": "^1.63.0",
     "@swc/core": "^1.16.1",

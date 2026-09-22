@@ -63,7 +63,12 @@
 
 ## Выпуск
 
+По шагам, с разбором миграций и копией базы перед выкладкой, — навык `/release`
+([.claude/skills/release/SKILL.md](../.claude/skills/release/SKILL.md)). Коротко:
+
 ```bash
+pnpm verify                                   # последний блок — «Можно выпускать» и метка
+node scripts/migration-risk.mjs <база>        # что в новых миграциях теряет данные
 git tag v0.1.0 && git push origin v0.1.0     # на машине разработчика
 ```
 

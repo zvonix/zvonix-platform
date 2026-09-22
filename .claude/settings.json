@@ -29,10 +29,13 @@
       "Read(./secrets/**)",
       "Read(./**/*.pem)",
       "Read(./**/*.key)",
-      "Bash(git push:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
       "Bash(git reset --hard:*)",
       "Bash(git clean:*)"
-    ]
+    ],
+    "ask": ["Bash(git push:*)"]
   },
   "hooks": {
     "PreCompact": [

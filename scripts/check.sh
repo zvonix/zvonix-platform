@@ -180,6 +180,12 @@ for row in "${TIMINGS[@]}"; do
   printf '  %s  %4s c   %s\n' "$marker" "$seconds" "$name"
 done
 
+# Итог для запускалки `scripts/verify.mjs`: по коду возврата «не выполнено» не отличить
+# от «прошло», а строке о выпуске это различие и нужно. Без переменной — ничего не пишется.
+if [ -n "${CHECK_SUMMARY_FILE:-}" ]; then
+  printf '%s\n' "${TIMINGS[@]}" > "$CHECK_SUMMARY_FILE"
+fi
+
 echo ""
 if [ ${#SKIPPED[@]} -gt 0 ]; then
   echo "Не выполнено (не успех): ${#SKIPPED[@]}"
