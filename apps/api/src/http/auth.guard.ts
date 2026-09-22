@@ -90,7 +90,7 @@ export class AuthGuard implements CanActivate {
     private readonly machine: MachineService,
     @Inject(APP_CONFIG) config: Config,
   ) {
-    this.secure = secureCookies(config.PUBLIC_BASE_URL);
+    this.secure = secureCookies(config);
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

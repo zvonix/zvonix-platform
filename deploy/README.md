@@ -5,8 +5,9 @@
 
 > **Проверено на живом сервере 2026-09-22** (выпуск `v0.1.0`): `release.yml`, `server-setup.sh`
 > и `zvonix-deploy --archive`. **Ещё не запускались живьём:** скачивание выпуска сервером
-> по токену и установка одной командой
-> ([ADR-0050](../docs/adr/0050-ustanovka-odnoy-komandoy-i-pervyy-vhod.md)).
+> по токену, установка одной командой
+> ([ADR-0050](../docs/adr/0050-ustanovka-odnoy-komandoy-i-pervyy-vhod.md)) и домен
+> с сертификатом ([ADR-0049](../docs/adr/0049-vykladka-ploshchadki.md), ревизия «домен и https»).
 > Состояние — в [TASKS.md](../TASKS.md).
 
 ## Установка одной командой
@@ -21,13 +22,33 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
 | sudo --preserve-env=GITHUB_TOKEN bash -s --; unset GITHUB_TOKEN
 ```
 
-С доменом адрес кабинета добавляется в конце: `bash -s -- https://cp.example.ru`.
+Установка спросит **адрес кабинета**: домен (`cp.zvonix.com`) или Enter. Enter оставляет
+записанный адрес, а на новом сервере — кабинет без домена, через SSH-туннель. Адрес можно
+дать и сразу, в конце строки: `bash -s -- cp.zvonix.com`. Домену нужна запись DNS —
+раздел «Домен» ниже.
 Токен — раздел «Токен GitHub» ниже. Ввод скрыт, и в аргументы команд токен не попадает:
 `curl` получает его через дескриптор, скрипт — переменной окружения.
 
 [install.sh](install.sh) берёт последний выпуск, готовит сервер его же скриптами
 (`server-setup.sh` записывает токен в `github.env`) и выкладывает выпуск. Пока
 администратора нет, выкладка печатает **код первого запуска** — дальше раздел «Первый вход».
+
+## Домен
+
+До установки с доменом его запись в DNS должна указывать на сервер. У регистратора домена
+заводится одна запись:
+
+| Тип | Имя | Значение |
+|---|---|---|
+| A | `cp` | адрес сервера |
+
+Запись AAAA для этого имени не заводится, если у сервера нет своего IPv6: Let's Encrypt
+проверяет по ней первой. Новая запись расходится от минут до часа; дошла ли она —
+`getent hosts cp.zvonix.com` на сервере.
+
+Подготовка сама проверяет DNS, открывает 80 и 443, выпускает сертификат Let's Encrypt
+и перенаправляет http на https. Сертификат продлевается таймером `certbot.timer`.
+Не выпустился — сервер остаётся каким был, а подготовка называет причину.
 
 ## Что где
 
@@ -37,7 +58,8 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
 | [deploy.sh](deploy.sh) | `/usr/local/sbin/zvonix-deploy` — обновляется каждым выпуском |
 | [server-setup.sh](server-setup.sh) | запускается при подготовке; повторный запуск безопасен |
 | [systemd/](systemd/) | `/etc/systemd/system/zvonix-{api,worker,web}.service` |
-| [nginx/zvonix.conf](nginx/zvonix.conf) | шаблон `/etc/nginx/sites-available/zvonix` |
+| [nginx/zvonix.conf](nginx/zvonix.conf) | шаблон `/etc/nginx/sites-available/zvonix` — кабинет и API |
+| [nginx/zvonix-acme.conf](nginx/zvonix-acme.conf) | шаблон `/etc/nginx/sites-available/zvonix-acme` — порт 80 при домене: проверка Let's Encrypt и перенаправление на https |
 | [scripts/release-pack.mjs](../scripts/release-pack.mjs), [release.yml](../.github/workflows/release.yml) | — архив собирает GitHub Actions |
 
 | Путь на сервере | Что там |
@@ -48,18 +70,20 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
 | `/etc/zvonix/zvonix.env` | окружение площадки, `root:zvonix 0640`; выкладкой не переписывается |
 | `/etc/zvonix/secrets.env` | пароль базы и `SECRET_KEY`, только root |
 | `/etc/zvonix/github.env` | репозиторий и токен для выпусков, только root |
+| `/etc/letsencrypt/live/<домен>/` | сертификат кабинета; продлевает `certbot.timer` |
 
 ## Подготовка сервера
 
 1. **Снимок VPS.** Узел АТС на той же машине — от 2 ядер и 2–4 ГБ памяти, Ubuntu 24.04.
 2. Скопировать каталог `deploy/` на сервер и выполнить:
    ```bash
-   sudo bash deploy/server-setup.sh                          # стенд: кабинет через SSH-туннель
-   sudo bash deploy/server-setup.sh https://cp.example.ru    # когда есть домен
+   sudo bash deploy/server-setup.sh                        # адрес — записанный; на новом сервере туннель
+   sudo bash deploy/server-setup.sh cp.zvonix.com          # домен: сертификат и https
+   sudo bash deploy/server-setup.sh http://localhost:8080  # обратно на туннель
    ```
    Скрипт ставит Node 22, PostgreSQL 16, Redis 7 и nginx, заводит базу и секреты, собирает
    сайт из шаблона и включает файрвол. Повторный запуск не трогает окружение и секреты,
-   а сайт и правила файрвола обновляет.
+   кроме адреса кабинета (`WEB_BASE_URL`), а сайт и правила файрвола обновляет.
 3. **Токен GitHub** — fine-grained: *Resource owner* → организация, которой принадлежит
    репозиторий (не личный аккаунт: с ним приватный репозиторий организации отвечает `404`),
    *Only select repositories* → репозиторий площадки, *Repository permissions* →
@@ -126,15 +150,17 @@ sudo zvonix-deploy --archive zvonix-v0.1.0.tgz
 
 ## Проверка после выкладки
 
-С сервера:
+С доменом — откуда угодно:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/api/health/ready                         # {"status":"ok","database":"ok"}
-curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/login   # 200
+curl -fsS https://cp.zvonix.com/api/health/ready                         # {"status":"ok","database":"ok"}
+curl -fsS -o /dev/null -w '%{http_code}\n' https://cp.zvonix.com/login   # 200
 ```
 
-Кабинет со своей машины — через туннель: `ssh -L 8080:127.0.0.1:8080 root@<сервер>`,
-затем `http://localhost:8080`.
+Без домена — те же запросы с сервера по `http://127.0.0.1:8080`, а кабинет со своей машины —
+через туннель: `ssh -L 8080:127.0.0.1:8080 root@<сервер>`, затем `http://localhost:8080`.
+В PuTTY то же самое: Connection → SSH → Tunnels, Source port `8080`,
+Destination `127.0.0.1:8080`, Add.
 
 ## Первый вход
 

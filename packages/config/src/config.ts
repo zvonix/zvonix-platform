@@ -471,7 +471,8 @@ export const configSchema = z.object({
 
   /**
    * Адрес кабинета: из него собираются ссылки в письмах
-   * ([ADR-0029](../../../docs/adr/0029-pochta.md)).
+   * ([ADR-0029](../../../docs/adr/0029-pochta.md)), и по нему cookie входа получает
+   * `Secure` — у адреса на https ([ADR-0037](../../../docs/adr/0037-sessiya-v-brauzere.md), ревизия).
    *
    * Это **не** `PUBLIC_BASE_URL`: тот адрес control plane, куда ходят узлы АТС,
    * а по ссылке из письма идёт человек — и приходит в кабинет.

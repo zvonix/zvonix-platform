@@ -53,7 +53,7 @@
 | Конфигурация узла      | `node scripts/node-config.mjs` — XML в `node/`, синтаксис `install.sh` и скриптов выкладки |
 | Снимки экранов         | `pnpm ui:screens` — все роли на 1280 и 390, обе темы: находки и сравнение с эталоном в `test-results/ui-screens/report.md`, **сбрасывает тестовую базу**. `--update-snapshots` — снять эталон, `--serve` — поднять стенд с данными и ждать |
 | Архив выпуска          | `node scripts/release-pack.mjs <метка>` — после `pnpm build` и `pnpm web:build`; выкладка — [deploy/README.md](deploy/README.md) |
-| Установка площадки     | Одной строкой под root — [deploy/README.md](deploy/README.md), «Установка одной командой»; первого администратора кабинет заводит по коду из вывода выкладки ([ADR-0050](docs/adr/0050-ustanovka-odnoy-komandoy-i-pervyy-vhod.md)) |
+| Установка площадки     | Одной строкой под root — [deploy/README.md](deploy/README.md), «Установка одной командой»; спрашивает адрес кабинета (домен — сертификат и https ставятся сами), первого администратора кабинет заводит по коду из вывода выкладки ([ADR-0050](docs/adr/0050-ustanovka-odnoy-komandoy-i-pervyy-vhod.md)) |
 | Разбор миграций выпуска | `node scripts/migration-risk.mjs [база]` — что в новых миграциях теряет данные или не накатится; навык `/release` |
 | **Полная проверка**    | `pnpm verify` (то же — `pnpm check`) из любого терминала: запускалка находит bash, проверяет базу и Redis до первого шага и печатает строку о выпуске. Сам гейт — `bash scripts/check.sh`, его гоняет CI |
 | Сгенерировать миграцию | `pnpm db:generate` — **после `pnpm build`**: читается собранная схема |
