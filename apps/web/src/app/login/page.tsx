@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { YandexCaptcha } from '@/components/yandex-captcha';
 import { Button } from '@/components/ui/button';
@@ -43,6 +43,19 @@ export default function LoginPage() {
     retry: false,
     staleTime: 5 * 60_000,
   });
+
+  /**
+   * Пока на площадке нет администратора, входить некем: вместо формы входа — первый
+   * запуск (ADR-0050). Недоступность ответа вход не закрывает — форма остаётся.
+   */
+  const setup = useQuery({
+    queryKey: ['setup'],
+    queryFn: () => request<{ required: boolean }>('/setup'),
+    retry: false,
+  });
+  useEffect(() => {
+    if (setup.data?.required === true) router.replace('/setup');
+  }, [setup.data, router]);
 
   const login = useMutation({
     mutationFn: (input: LoginInput) =>

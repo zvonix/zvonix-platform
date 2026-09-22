@@ -37,7 +37,8 @@ import {
 } from './letters.js';
 import { decryptSecret, encryptSecret, TOTP_SECRET_PURPOSE } from '../../infra/secret-box.js';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js';
-import type { LoginInput, RegisterInput } from './schemas.js';
+import type { FirstRunInput, LoginInput, RegisterInput } from './schemas.js';
+import { acceptsFirstRunCode } from './first-run.js';
 import { hashToken, issueToken, LAST_SEEN_REFRESH_MS, tokenHashEquals } from './session-token.js';
 
 /**
@@ -79,6 +80,19 @@ const REGISTRATION_RULE: LimitRule = {
   name: 'auth.register',
   limit: 10,
   windowSeconds: 60 * 60,
+};
+
+/**
+ * Сколько раз с одного адреса можно попробовать код первого запуска (ADR-0050).
+ *
+ * Защиту несёт длина кода — шестьдесят бит, — а предел лишь тормозит того, кто засыпает
+ * форму запросами. Десять за пятнадцать минут человеку, переписывающему код с экрана,
+ * хватит с запасом.
+ */
+const FIRST_RUN_RULE: LimitRule = {
+  name: 'setup.first_admin',
+  limit: 10,
+  windowSeconds: 15 * 60,
 };
 
 /**
@@ -187,6 +201,11 @@ export interface IssuedSession {
  * Срок ожидания отдаётся честно: без него клиенту остаётся только долбить наугад,
  * а это ровно та нагрузка, от которой ограничение и защищает.
  */
+/** Первый запуск закрыт: администратор уже есть, и код ничего не открывает (ADR-0050). */
+function firstRunDone(): DomainError {
+  return conflict('Первый запуск уже выполнен — войдите учётной записью администратора');
+}
+
 function tooManyAttempts(retryAfterSeconds: number): DomainError {
   return rateLimited('Слишком много попыток. Повторите позже', {
     details: { retry_after_seconds: retryAfterSeconds },
@@ -1023,6 +1042,66 @@ export class IdentityService {
     });
 
     return toPublicUser(updated);
+  }
+
+  /** Нужен ли первый запуск: на площадке нет ни одного администратора (ADR-0050). */
+  async firstRunRequired(): Promise<boolean> {
+    return (await this.repository.countAdmins()) === 0;
+  }
+
+  /**
+   * Первый запуск: первый администратор по коду из вывода выкладки (ADR-0050).
+   *
+   * Порядок проверок значим. Предел частоты — до всего. «Уже выполнен» — раньше кода:
+   * иначе на площадке с администратором ответ «код не подходит» звал бы подбирать код,
+   * который ничего не откроет. Пароль хешируется до блокировки — хеширование тяжёлое,
+   * и держать на нём очередь незачем. Проверка «администратора нет», заведение и запись
+   * в журнал — одна транзакция под одной блокировкой: две формы с верным кодом,
+   * отправленные разом, не заведут двух администраторов.
+   */
+  async completeFirstRun(input: FirstRunInput, meta: RequestMeta): Promise<PublicUser> {
+    await this.assertWithinRate(FIRST_RUN_RULE, meta.ip);
+    if (!(await this.firstRunRequired())) throw firstRunDone();
+    if (!acceptsFirstRunCode(this.config.SECRET_KEY, input.code, new Date())) {
+      throw validationFailed('Код первого запуска не подходит', {
+        details: { problems: ['code: не подходит — возьмите код из последнего вывода выкладки'] },
+      });
+    }
+    if ((await this.repository.findByEmail(input.email)) !== undefined) {
+      throw conflict('Учётная запись с таким адресом уже есть — укажите другой адрес');
+    }
+
+    const passwordHash = await hashPassword(input.password);
+    const created = await this.repository.db.transaction(async (tx) => {
+      await this.repository.lockFirstRun(tx);
+      if ((await this.repository.countAdmins(tx)) > 0) throw firstRunDone();
+      const row = await this.repository.createUser(
+        {
+          id: newId<'user'>(),
+          email: input.email,
+          passwordHash,
+          fullName: input.fullName,
+          role: 'admin',
+          status: 'active',
+        },
+        tx,
+      );
+      await this.audit.record(
+        {
+          action: 'user.first_admin_created',
+          entityType: 'user',
+          entityId: row.id,
+          actorUserId: null,
+          actorRole: null,
+          after: { role: row.role, status: row.status },
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        },
+        tx,
+      );
+      return row;
+    });
+    return toPublicUser(created);
   }
 
   /** Создание учётной записи администратором: роли `admin` и `support` заводятся только так. */

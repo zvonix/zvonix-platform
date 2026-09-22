@@ -87,9 +87,9 @@ export interface SessionWithUser {
 export class IdentityRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async createUser(draft: NewUser): Promise<UserRow> {
+  async createUser(draft: NewUser, executor: Executor = this.database.db): Promise<UserRow> {
     try {
-      const [row] = await this.database.db.insert(users).values(draft).returning();
+      const [row] = await executor.insert(users).values(draft).returning();
       if (row === undefined) throw new Error('Вставка не вернула строку');
       return row;
     } catch (cause) {
@@ -167,6 +167,28 @@ export class IdentityRepository {
       .update(users)
       .set({ failedLoginCount: 0, lockedUntil: null, lastLoginAt: at })
       .where(eq(users.id, id));
+  }
+
+  /**
+   * Сколько учётных записей с ролью администратора — в любом состоянии: заблокированный
+   * администратор тоже закрывает первый запуск (ADR-0050), иначе блокировка единственного
+   * администратора снова открывала бы форму заведения по коду.
+   */
+  async countAdmins(executor: Executor = this.database.db): Promise<number> {
+    const [counted] = await executor
+      .select({ total: count() })
+      .from(users)
+      .where(eq(users.role, 'admin'));
+    return counted?.total ?? 0;
+  }
+
+  /**
+   * Очередь первого запуска: проверка «администратора нет» и заведение идут под одной
+   * блокировкой. Без неё две формы с верным кодом, отправленные одновременно, обе увидели
+   * бы пустоту и завели двух администраторов.
+   */
+  async lockFirstRun(executor: Executor): Promise<void> {
+    await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended('first-run', 0))`);
   }
 
   /** Пул: нужен службе, чтобы писать токен и письмо одной транзакцией (ADR-0029). */

@@ -3,14 +3,37 @@
 Решение и его причины — [ADR-0049](../docs/adr/0049-vykladka-ploshchadki.md). Здесь — порядок
 действий. Панели управления нет: сервер описан скриптами этого каталога.
 
-> **Не проверено на живом сервере.** Скрипты написаны по заготовкам, которыми тестовый стенд
-> поднимался 2026-09-13, но `deploy.sh`, `server-setup.sh` и `release.yml` в этом виде ещё
-> не запускались. Состояние — в [TASKS.md](../TASKS.md), «Первый живой звонок».
+> **Проверено на живом сервере 2026-09-22** (выпуск `v0.1.0`): `release.yml`, `server-setup.sh`
+> и `zvonix-deploy --archive`. **Ещё не запускались живьём:** скачивание выпуска сервером
+> по токену и установка одной командой
+> ([ADR-0050](../docs/adr/0050-ustanovka-odnoy-komandoy-i-pervyy-vhod.md)).
+> Состояние — в [TASKS.md](../TASKS.md).
+
+## Установка одной командой
+
+На новом сервере Ubuntu 24.04 — или на уже подготовленном: все шаги повторяемы. Под root:
+
+```bash
+read -rsp 'Токен GitHub: ' GITHUB_TOKEN && echo && export GITHUB_TOKEN && \
+curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
+  -H 'Accept: application/vnd.github.raw' \
+  https://api.github.com/repos/zvonix/zvonix-platform/contents/deploy/install.sh \
+| sudo --preserve-env=GITHUB_TOKEN bash -s --; unset GITHUB_TOKEN
+```
+
+С доменом адрес кабинета добавляется в конце: `bash -s -- https://cp.example.ru`.
+Токен — раздел «Токен GitHub» ниже. Ввод скрыт, и в аргументы команд токен не попадает:
+`curl` получает его через дескриптор, скрипт — переменной окружения.
+
+[install.sh](install.sh) берёт последний выпуск, готовит сервер его же скриптами
+(`server-setup.sh` записывает токен в `github.env`) и выкладывает выпуск. Пока
+администратора нет, выкладка печатает **код первого запуска** — дальше раздел «Первый вход».
 
 ## Что где
 
 | В репозитории | На сервере |
 |---|---|
+| [install.sh](install.sh) | не ставится — его скачивает и запускает строка установки |
 | [deploy.sh](deploy.sh) | `/usr/local/sbin/zvonix-deploy` — обновляется каждым выпуском |
 | [server-setup.sh](server-setup.sh) | запускается при подготовке; повторный запуск безопасен |
 | [systemd/](systemd/) | `/etc/systemd/system/zvonix-{api,worker,web}.service` |
@@ -113,9 +136,29 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/login   # 200
 Кабинет со своей машины — через туннель: `ssh -L 8080:127.0.0.1:8080 root@<сервер>`,
 затем `http://localhost:8080`.
 
-## Первый администратор
+## Первый вход
 
-Пароль не должен попасть ни в историю оболочки, ни в список процессов:
+Пока на площадке нет администратора, выкладка перед строкой `DEPLOY_OK` печатает:
+
+```
+Первый запуск: администратора ещё нет.
+  Кабинет:  http://localhost:8080/setup
+  Код:      B4PR-3N3H-CCP5
+  Действует до 2026-09-24 00:00 UTC.
+```
+
+Кабинет сам открывается на форме «Первый запуск»: код, почта, имя, пароль. Код живёт
+от суток до двух; истёк — свежий печатает та же команда, что зовёт выкладка:
+
+```bash
+sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; cd /opt/zvonix/current/apps/api && exec node dist/modules/identity/first-run-code.js'
+```
+
+Когда администратор есть, форма отвечает «первый запуск уже выполнен» — код больше ничего
+не открывает ([ADR-0050](../docs/adr/0050-ustanovka-odnoy-komandoy-i-pervyy-vhod.md)).
+
+**Без кабинета** — поддержка или администратор командой на сервере. Пароль не должен
+попасть ни в историю оболочки, ни в список процессов:
 
 ```bash
 read -rp 'Адрес: ' ADMIN_EMAIL && read -rsp 'Пароль: ' ADMIN_PASSWORD && echo

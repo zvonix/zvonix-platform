@@ -24,6 +24,7 @@
       "entry": [
         "src/main.ts",
         "src/modules/identity/create-admin.ts",
+        "src/modules/identity/first-run-code.ts",
         "src/testing/seed-e2e.ts",
         "src/modules/catalog/resolve-batch.ts",
         "src/modules/catalog/numbering-plan-load.ts",

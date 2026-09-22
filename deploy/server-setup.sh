@@ -133,7 +133,15 @@ EOF
   )
   echo "записан ${ENV_FILE} — остальные настройки см. .env.example"
 else
-  echo "${ENV_FILE} уже есть — не трогаю"
+  echo "${ENV_FILE} уже есть — заданное не трогаю"
+  # Переменная, появившаяся позже первой подготовки, дописывается — заданные значения
+  # не меняются. Без адреса кабинета код первого запуска (ADR-0050) показывал бы адрес
+  # по умолчанию, по которому кабинет с этой машины не открыть.
+  if ! grep -q '^WEB_BASE_URL=' "$ENV_FILE"; then
+    printf '# Адрес кабинета: письма и код первого запуска (ADR-0050).\nWEB_BASE_URL=%s\n' \
+      "$WEB_ADDRESS" >>"$ENV_FILE"
+    echo "дописан WEB_BASE_URL=${WEB_ADDRESS}"
+  fi
 fi
 chown root:zvonix "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
@@ -150,6 +158,16 @@ GITHUB_TOKEN=
 EOF
   )
   echo "заготовка ${GITHUB_ENV_FILE} — впишите репозиторий и токен"
+fi
+# Токен из окружения — так его передаёт установка одной командой (ADR-0050). Пишется,
+# только если в файле токена нет: заданный руками не переписывается.
+if [ -n "${GITHUB_TOKEN:-}" ] && ! grep -q '^GITHUB_TOKEN=.' "$GITHUB_ENV_FILE"; then
+  (
+    umask 077
+    printf 'GITHUB_REPOSITORY=%s\nGITHUB_TOKEN=%s\n' \
+      "${GITHUB_REPOSITORY:-zvonix/zvonix-platform}" "$GITHUB_TOKEN" >"$GITHUB_ENV_FILE"
+  )
+  echo "токен GitHub записан в ${GITHUB_ENV_FILE}"
 fi
 chown root:root "$GITHUB_ENV_FILE"
 chmod 0600 "$GITHUB_ENV_FILE"
