@@ -139,6 +139,75 @@ describe('подтверждение адреса', () => {
   }, 120_000);
 });
 
+describe('повторное письмо без входа', () => {
+  it('вход объясняет, что за человеком подтверждение адреса', async () => {
+    // Иначе «не активирована» читается как «ждите администратора», и человек, чья
+    // ссылка истекла, ждёт того, что не наступит.
+    const email = await registered();
+    const response = await post('/auth/login', { email, password: TEST_PASSWORD });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({
+      error: { details: { status: 'pending', email_confirmed: false } },
+    });
+  }, 120_000);
+
+  it('по верному паролю присылает новую ссылку, и она подтверждает адрес', async () => {
+    const email = await registered();
+    const first = tokenFrom((await letters(email))[0]?.body ?? '');
+
+    const response = await post('/auth/email/resend-by-password', {
+      email,
+      password: TEST_PASSWORD,
+    });
+    expect(response.statusCode).toBe(202);
+
+    const sent = await letters(email);
+    expect(sent.map((row) => row.kind)).toEqual(['email_verification', 'email_verification']);
+    // Новая ссылка гасит прежнюю: действующей остаётся одна, из последнего письма.
+    expect((await post('/auth/email/confirm', { token: first })).statusCode).toBe(401);
+    const second = tokenFrom(sent[1]?.body ?? '');
+    expect((await post('/auth/email/confirm', { token: second })).statusCode).toBe(204);
+
+    const refused = await post('/auth/login', { email, password: TEST_PASSWORD });
+    expect(refused.json()).toMatchObject({ error: { details: { email_confirmed: true } } });
+  }, 120_000);
+
+  it('на неверный пароль и неизвестный адрес отвечает одинаково и письма не шлёт', async () => {
+    // Иначе этот путь — второй вход для перебора паролей и перечисления адресов.
+    const email = await registered();
+
+    const wrong = await post('/auth/email/resend-by-password', {
+      email,
+      password: 'совершенно другой пароль',
+    });
+    const unknown = await post('/auth/email/resend-by-password', {
+      email: uniqueEmail(),
+      password: TEST_PASSWORD,
+    });
+
+    expect(wrong.statusCode).toBe(401);
+    expect(unknown.statusCode).toBe(401);
+    // Без `correlation_id`: он у каждого ответа свой.
+    type Refusal = { error: { code: string; message: string } };
+    const shape = ({ error }: Refusal) => [error.code, error.message];
+    expect(shape(wrong.json<Refusal>())).toEqual(shape(unknown.json<Refusal>()));
+    expect(await letters(email)).toHaveLength(1);
+  }, 120_000);
+
+  it('подтверждённому адресу отвечает 409', async () => {
+    const email = await registered();
+    const token = tokenFrom((await letters(email))[0]?.body ?? '');
+    expect((await post('/auth/email/confirm', { token })).statusCode).toBe(204);
+
+    const response = await post('/auth/email/resend-by-password', {
+      email,
+      password: TEST_PASSWORD,
+    });
+    expect(response.statusCode).toBe(409);
+  }, 120_000);
+});
+
 describe('восстановление пароля', () => {
   it('ответ одинаков для существующего и выдуманного адреса', async () => {
     // Разница в ответе — это способ перебрать адреса.

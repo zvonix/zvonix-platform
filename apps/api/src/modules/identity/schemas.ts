@@ -183,6 +183,13 @@ export const disableTotpSchema = z.object({
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
+/** Повторное письмо без входа: адрес и пароль вместо сессии, капча та же, что у входа. */
+export const emailResendByPasswordSchema = loginSchema.pick({
+  email: true,
+  password: true,
+  captchaToken: true,
+});
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type FirstRunInput = z.infer<typeof firstRunSchema>;
 

@@ -569,6 +569,34 @@ test.describe('ссылки из писем', () => {
     await expect(page.getByRole('heading', { name: 'Проверьте почту' })).toBeVisible();
     await expect(page.getByText(/Если адрес/u)).toBeVisible();
   });
+
+  test('вход без подтверждённой почты объясняет, что делать, и присылает письмо заново', async ({
+    page,
+  }) => {
+    // Человек с истёкшей ссылкой видел только «не активирована» и ждал администратора,
+    // а войти, чтобы попросить новое письмо, не мог (владелец, 2026-09-23). Своя запись:
+    // заявки из наполнения стенда меняют соседние тесты.
+    const email = `resend-${String(Date.now())}@e2e.zvonix.test`;
+    const registered = await page.request.post('/api/auth/register', {
+      data: {
+        email,
+        password: PASSWORD,
+        fullName: 'Лебедев Игорь',
+        cabinet: 'client',
+        answers: { companyName: 'Такси «Запад»', city: 'Пермь', phone: '+7 342 000-00-00' },
+      },
+    });
+    expect(registered.status()).toBe(202);
+
+    await page.goto('/login');
+    await page.getByLabel('Адрес почты').fill(email);
+    await page.getByLabel('Пароль').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Войти' }).click();
+
+    await expect(page.getByText('Адрес почты не подтверждён.')).toBeVisible();
+    await page.getByRole('button', { name: 'Прислать письмо ещё раз' }).click();
+    await expect(page.getByText(/Письмо ушло на/u)).toBeVisible();
+  });
 });
 
 test.describe('первый запуск', () => {
