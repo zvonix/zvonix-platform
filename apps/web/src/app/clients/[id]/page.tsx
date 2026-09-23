@@ -24,9 +24,6 @@ import { ClientChannels } from '../client-channels';
 import { DepositForm } from '../deposit-form';
 import type { ClientRow } from '../page';
 
-/** Страница списка — потолок API (`GET /clients`, `limit` не больше 200). */
-const SEARCH_PAGE = 200;
-
 /** Кнопка называет действие, а не состояние, в которое переводит. */
 const CLIENT_ACTION: Record<ClientStatus, string> = {
   pending: 'Вернуть в «ждёт допуска»',
@@ -39,21 +36,16 @@ const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
 
 /**
- * Клиент по идентификатору.
- *
- * Обработчика одного клиента в API нет ([billing.md](../../../../../../docs/api/billing.md)):
- * название и состояние приходят только списком. Поэтому карточка листает тот же
- * `GET /clients` крупными страницами до нужной записи — клиентов единицы сотен, это
- * один-два запроса. `null` — такого клиента нет: `undefined` запрос данными не считает.
+ * Клиент по идентификатору — `GET /clients/:id`
+ * ([billing.md](../../../../../../docs/api/billing.md)). `null` — такого клиента нет:
+ * `undefined` запрос данными не считает. Негодный идентификатор в адресе — тоже «нет».
  */
 async function findClient(id: string): Promise<ClientRow | null> {
-  for (let offset = 0; ; offset += SEARCH_PAGE) {
-    const page = await request<{ clients: ClientRow[]; total: number }>(
-      `/clients?limit=${String(SEARCH_PAGE)}&offset=${String(offset)}`,
-    );
-    const found = page.clients.find((client) => client.id === id);
-    if (found !== undefined) return found;
-    if (page.clients.length === 0 || offset + SEARCH_PAGE >= page.total) return null;
+  try {
+    return (await request<{ client: ClientRow }>(`/clients/${encodeURIComponent(id)}`)).client;
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 400)) return null;
+    throw error;
   }
 }
 

@@ -402,6 +402,31 @@ export class BillingService {
   }
 
   /**
+   * Одна запись с остатком — для карточки. Тем же запросом, что и список: строка
+   * карточки обязана совпадать со строкой списка, и второй способ её собрать однажды
+   * разошёлся бы с первым.
+   */
+  async clientWithBalance(id: ClientId): Promise<ClientWithBalance> {
+    const { rows } = await this.repository.listClients(
+      { id, limit: 1, offset: 0 },
+      DEFAULT_CURRENCY,
+    );
+    const [client] = rows;
+    if (client === undefined) throw notFound('Клиент не найден');
+    return client;
+  }
+
+  async partnerWithBalance(id: PartnerId): Promise<PartnerWithBalance> {
+    const { rows } = await this.repository.listPartners(
+      { id, limit: 1, offset: 0 },
+      DEFAULT_CURRENCY,
+    );
+    const [partner] = rows;
+    if (partner === undefined) throw notFound('Партнёр не найден');
+    return partner;
+  }
+
+  /**
    * Названия клиентов по идентификаторам — для чужих модулей, показывающих список,
    * в котором клиент упомянут ссылкой.
    *

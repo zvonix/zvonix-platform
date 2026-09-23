@@ -129,7 +129,7 @@ first_run_hint() {
 
 # Скачивание выпуска по токену только на чтение (ADR-0049).
 download() {
-  local tag="$1" env_file="${ETC}/github.env" headers api name id
+  local tag="$1" env_file="${ETC}/github.env" headers api name id release_id
   [ -r "$env_file" ] || die "нет ${env_file} — см. deploy/README.md, «Токен GitHub»"
   # shellcheck source=/dev/null
   . "$env_file"
@@ -148,13 +148,21 @@ download() {
   curl -fsSL --max-time 30 -H @"$headers" -H 'Accept: application/vnd.github+json' \
     -o "${WORK}/release.json" "${api}/releases/tags/${tag}" \
     || die "выпуск ${tag} не найден — или токен не даёт читать выпуски репозитория"
+  release_id="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["id"])' "${WORK}/release.json")"
+
+  # Файлы — отдельным запросом, а не полем `assets` выпуска: у v0.1.6 это поле часами
+  # приходило пустым при загруженных файлах, и выкладка отказывала на исправном выпуске
+  # (TASKS.md, 2026-09-23). Список файлов выпуска в это время отвечал верно.
+  curl -fsSL --max-time 30 -H @"$headers" -H 'Accept: application/vnd.github+json' \
+    -o "${WORK}/assets.json" "${api}/releases/${release_id}/assets?per_page=100" \
+    || die "не удалось получить список файлов выпуска ${tag}"
 
   for name in "zvonix-${tag}.tgz" "zvonix-${tag}.tgz.sha256"; do
-    id="$(python3 - "$name" "${WORK}/release.json" <<'PY'
+    id="$(python3 - "$name" "${WORK}/assets.json" <<'PY'
 import json, sys
 name, path = sys.argv[1], sys.argv[2]
 with open(path, encoding='utf-8') as source:
-    assets = json.load(source).get('assets', [])
+    assets = json.load(source)
 print(next((str(asset['id']) for asset in assets if asset.get('name') == name), ''))
 PY
 )"

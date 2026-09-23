@@ -56,6 +56,8 @@ export type LedgerTransactionRow = typeof ledgerTransactions.$inferSelect;
  * Отбор клиентов. Пустое поле означает «любое», а не «пустое».
  */
 export interface ClientFilter {
+  /** Одна запись — для карточки клиента. */
+  readonly id?: ClientId;
   readonly status?: ClientStatus;
   /** Часть названия. Регистр не важен. */
   readonly name?: string;
@@ -88,6 +90,8 @@ export interface LedgerEntryWithTransaction {
 
 /** Отбор партнёров. Пустое поле означает «любое», а не «пустое». */
 export interface PartnerFilter {
+  /** Одна запись — для карточки партнёра. */
+  readonly id?: PartnerId;
   readonly status?: PartnerStatus;
   /** Часть настоящего имени либо псевдонима. Регистр не важен. */
   readonly name?: string;
@@ -117,6 +121,7 @@ export interface PartnerWithBalance {
 
 function clientFilterCondition(filter: ClientFilter): SQL | undefined {
   const parts: SQL[] = [];
+  if (filter.id !== undefined) parts.push(eq(clients.id, filter.id));
   if (filter.status !== undefined) parts.push(eq(clients.status, filter.status));
   // Названия служб такси русские, и без явной локали сравнения поиск «такси»
   // не нашёл бы «Такси»: в локали `C` PostgreSQL кириллицу не приводит вовсе.
@@ -134,6 +139,7 @@ function clientFilterCondition(filter: ClientFilter): SQL | undefined {
  */
 function partnerFilterCondition(filter: PartnerFilter): SQL | undefined {
   const parts: SQL[] = [];
+  if (filter.id !== undefined) parts.push(eq(partners.id, filter.id));
   if (filter.status !== undefined) parts.push(eq(partners.status, filter.status));
   if (filter.name !== undefined && filter.name !== '') {
     const found = or(
