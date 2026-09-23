@@ -13,7 +13,7 @@
 
 import { Controller, Get, Query } from '@nestjs/common';
 import { Money, type ClientStatus } from '@zvonix/shared';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets } from '../../http/auth.guard.js';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 import { CurrentUser } from '../../http/request-context.js';
 import type { Principal } from '../identity/identity.service.js';
@@ -54,7 +54,7 @@ export class ClientSelfController {
    * Заодно освобождает просроченные резервы — тем же способом, что и административный
    * обработчик: зависший из-за потерянного CDR резерв иначе тихо съедает доступное.
    */
-  @Roles('client')
+  @Cabinets('client')
   @Get('client/account')
   async account(@CurrentUser() actor: Principal): Promise<{ client: SelfView; funds: FundsView }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
@@ -78,7 +78,7 @@ export class ClientSelfController {
    * а не только сумма. Спор о списании иначе не разобрать, а разбор здесь и есть
    * основной сценарий.
    */
-  @Roles('client')
+  @Cabinets('client')
   @Get('client/entries')
   async entries(
     @CurrentUser() actor: Principal,

@@ -11,23 +11,17 @@
 
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import { STAFF_ROLES } from '@zvonix/shared';
 import { z } from 'zod';
 import { AppModule } from '../../app.module.js';
 import { IdentityService } from './identity.service.js';
-
-/**
- * Роли, которые заводятся только этой командой.
- *
- * Самостоятельная регистрация их не выдаёт (`SELF_SERVICE_ROLES` — `client` и `partner`),
- * а обработчика заведения учётной записи администратором в API нет. Без этой команды
- * учётную запись поддержки завести было нечем, кроме правки в базе.
- */
-const STAFF_ROLES = ['admin', 'support'] as const;
 
 const inputSchema = z.object({
   ADMIN_EMAIL: z.string().trim().toLowerCase().pipe(z.email('не похож на адрес почты')),
   ADMIN_PASSWORD: z.string().min(12, 'не короче 12 символов'),
   ADMIN_NAME: z.string().trim().min(2, 'слишком короткое').default('Администратор'),
+  // Сотрудников площадки заводит только эта команда: регистрация даёт участника рынка,
+  // а обработчика заведения учётной записи администратором в API нет.
   ADMIN_ROLE: z.enum(STAFF_ROLES).default('admin'),
 });
 

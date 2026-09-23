@@ -5,7 +5,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
@@ -309,7 +309,8 @@ export class TelephonyController {
    * означал бы, что личность партнёра ему где-то показали. Администратор смотрит тот же
    * список — двух представлений у одного порядка быть не должно.
    */
-  @Roles('admin', 'support', 'client')
+  @Roles('admin', 'support')
+  @Cabinets('client')
   @Get('channels/:id/partner-priorities')
   async listPartnerPriorities(
     @Param('id') id: string,
@@ -329,7 +330,8 @@ export class TelephonyController {
    * канал с порядком, которого клиент не задавал, — а порядок здесь и есть суть.
    * Пустой список снимает ограничение: канал возвращается к перебору всех партнёров.
    */
-  @Roles('admin', 'client')
+  @Roles('admin')
+  @Cabinets('client')
   @Put('channels/:id/partner-priorities')
   async setPartnerPriorities(
     @Param('id') id: string,
@@ -350,7 +352,8 @@ export class TelephonyController {
    * Пустой список означает «все операторы»: иначе новый канал не смог бы позвонить,
    * пока кто-то его не заполнит.
    */
-  @Roles('admin', 'support', 'client')
+  @Roles('admin', 'support')
+  @Cabinets('client')
   @Get('channels/:id/allowed-operators')
   async listAllowedOperators(
     @Param('id') id: string,
@@ -364,7 +367,8 @@ export class TelephonyController {
   }
 
   /** `PUT`, а не `POST`: список заменяется целиком. Пустой снимает ограничение. */
-  @Roles('admin', 'client')
+  @Roles('admin')
+  @Cabinets('client')
   @Put('channels/:id/allowed-operators')
   async setAllowedOperators(
     @Param('id') id: string,

@@ -48,7 +48,7 @@ interface IssuedWithLabel {
 
 export default function MyIntegrationPage() {
   return (
-    <ConsoleShell title="Интеграция" requireRole="client">
+    <ConsoleShell title="Интеграция" cabinet="client">
       {() => <Integration />}
     </ConsoleShell>
   );

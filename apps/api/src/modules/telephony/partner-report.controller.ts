@@ -5,7 +5,7 @@
 import { Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodQuery } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
@@ -43,7 +43,8 @@ export class PartnerReportController {
    * названного партнёра. `total` — число всех подходящих, а не размер страницы: без него
    * «здесь нет — значит, шёл не через площадку» было бы неправдой за первой страницей.
    */
-  @Roles('partner', 'admin', 'support')
+  @Roles('admin', 'support')
+  @Cabinets('partner')
   @Get('partner/calls')
   async listCalls(
     @CurrentUser() actor: Principal,
@@ -75,7 +76,8 @@ export class PartnerReportController {
    * определение чего угодно, а внешний источник держит два запроса в секунду на всю
    * платформу.
    */
-  @Roles('partner', 'admin')
+  @Roles('admin')
+  @Cabinets('partner')
   @Post('calls/:id/wrong-network')
   @HttpCode(200)
   async reportWrongNetwork(

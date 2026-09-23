@@ -5,7 +5,14 @@ const valid = {
   email: 'ivan@example.com',
   password: 'достаточно длинный пароль',
   fullName: 'Иван Петров',
-  role: 'client' as const,
+  cabinet: 'client' as const,
+  answers: { companyName: 'Такси Мир', city: 'Екатеринбург', phone: '+7 900 000-00-00' },
+};
+
+const partner = {
+  ...valid,
+  cabinet: 'partner' as const,
+  answers: { region: 'Свердловская область', phone: '+7 900 000-00-00', operators: ['МТС'] },
 };
 
 describe('схема регистрации', () => {
@@ -31,16 +38,37 @@ describe('схема регистрации', () => {
     expect(registerSchema.safeParse({ ...valid, password: 'я'.repeat(201) }).success).toBe(false);
   });
 
-  it('не позволяет зарегистрироваться администратором', () => {
-    // Роли admin и support заводит только администратор — иначе доступ ко всей
-    // платформе получает любой, кто отправил форму.
-    expect(registerSchema.safeParse({ ...valid, role: 'admin' }).success).toBe(false);
-    expect(registerSchema.safeParse({ ...valid, role: 'support' }).success).toBe(false);
+  it('не позволяет заявиться сотрудником площадки', () => {
+    // Роли admin и support заводит только команда admin:create — иначе доступ ко всей
+    // платформе получает любой, кто отправил форму. Заявка бывает только на кабинет.
+    expect(registerSchema.safeParse({ ...valid, cabinet: 'admin' }).success).toBe(false);
+    expect(registerSchema.safeParse({ ...valid, role: 'admin' }).success).toBe(true);
+    expect(registerSchema.parse({ ...valid, role: 'admin' })).not.toHaveProperty('role');
   });
 
-  it('принимает обе роли самостоятельной регистрации', () => {
-    expect(registerSchema.safeParse({ ...valid, role: 'partner' }).success).toBe(true);
-    expect(registerSchema.safeParse({ ...valid, role: 'client' }).success).toBe(true);
+  it('принимает заявку и клиента, и партнёра — каждую со своей анкетой', () => {
+    expect(registerSchema.safeParse(valid).success).toBe(true);
+    expect(registerSchema.safeParse(partner).success).toBe(true);
+  });
+
+  it('анкета одного кабинета не подходит к другому', () => {
+    // Иначе партнёр мог бы прислать анкету службы такси без операторов своих SIM,
+    // и администратору было бы нечего сверять.
+    expect(registerSchema.safeParse({ ...valid, cabinet: 'partner' }).success).toBe(false);
+    expect(registerSchema.safeParse({ ...partner, cabinet: 'client' }).success).toBe(false);
+  });
+
+  it('партнёр называет хотя бы одного оператора', () => {
+    expect(
+      registerSchema.safeParse({ ...partner, answers: { ...partner.answers, operators: [] } })
+        .success,
+    ).toBe(false);
+  });
+
+  it('лишние поля анкеты отвергаются, а не хранятся молча', () => {
+    expect(
+      registerSchema.safeParse({ ...valid, answers: { ...valid.answers, лишнее: 'да' } }).success,
+    ).toBe(false);
   });
 
   it('отвергает адрес, не похожий на почту', () => {

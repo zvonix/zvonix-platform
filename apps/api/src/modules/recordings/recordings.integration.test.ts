@@ -412,13 +412,24 @@ describe('выдача человеку', () => {
     const recording = await uploadedRecording();
     const { IdentityService } = await import('../identity/identity.service.js');
     const email = uniqueEmail();
-    await api().get(IdentityService).createByAdmin({
+    const partnerUser = await api().get(IdentityService).createByAdmin({
       email,
       password: TEST_PASSWORD,
       fullName: 'Партнёр',
-      role: 'partner',
+      role: 'member',
       status: 'active',
     });
+    // Карточка партнёра обязательна: без неё защитник не пустит в кабинет вовсе, и тест
+    // проверял бы не то. Проверяется другое — чужой вызов при своём кабинете.
+    expect(
+      (
+        await post('/partners', {
+          ownerUserId: partnerUser.id,
+          name: 'Партнёр',
+          displayName: unique('Партнёр'),
+        })
+      ).statusCode,
+    ).toBe(201);
     const token = (
       await api().inject({
         method: 'POST',

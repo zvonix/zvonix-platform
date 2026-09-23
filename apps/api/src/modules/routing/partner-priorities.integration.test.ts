@@ -61,13 +61,14 @@ async function get(url: string) {
   return api().inject({ method: 'GET', url, headers: auth() });
 }
 
-async function createUser(role: 'client' | 'partner'): Promise<string> {
+/** Участник рынка: кабинеты ему дают карточки, которые заводит тест (ADR-0052). */
+async function createUser(): Promise<string> {
   const { IdentityService } = await import('../identity/identity.service.js');
   const created = await api().get(IdentityService).createByAdmin({
     email: uniqueEmail(),
     password: TEST_PASSWORD,
     fullName: 'Владелец',
-    role,
+    role: 'member',
     status: 'active',
   });
   return created.id;
@@ -81,11 +82,15 @@ interface Partner {
 }
 
 /** Подтверждённый партнёр со шлюзом, портом и активной SIM нужного оператора. */
-async function createPartner(operatorId: string, concurrency: number): Promise<Partner> {
+async function createPartner(
+  operatorId: string,
+  concurrency: number,
+  ownerUserId?: string,
+): Promise<Partner> {
   const displayName = unique('Партнёр');
   const partner = (
     await post('/partners', {
-      ownerUserId: await createUser('partner'),
+      ownerUserId: ownerUserId ?? (await createUser()),
       name: 'Иванов Иван',
       displayName,
     })
@@ -134,9 +139,13 @@ async function createPartner(operatorId: string, concurrency: number): Promise<P
 /** Клиент с активным каналом, деньгами и разрешённым номером назначения. */
 async function createChannel(
   operatorId: string,
+  ownerUserId?: string,
 ): Promise<{ channel: string; destination: string }> {
   const client = (
-    await post('/clients', { ownerUserId: await createUser('client'), name: unique('Такси') })
+    await post('/clients', {
+      ownerUserId: ownerUserId ?? (await createUser()),
+      name: unique('Такси'),
+    })
   ).json<{ client: { id: string } }>().client.id;
 
   await withDatabase(async (execute) => {
@@ -172,6 +181,7 @@ async function createChannel(
 
 interface Preview {
   outcome: string;
+  reason?: string;
   candidates: { sim_card_id: string }[];
 }
 
@@ -401,5 +411,61 @@ describe('анонимность партнёра', () => {
       ],
     });
     expect(response.statusCode).toBe(400);
+  }, 120_000);
+});
+
+describe('свои SIM (ADR-0052)', () => {
+  it('вызов не уходит на SIM того же человека, даже если других кандидатов нет', async () => {
+    // Один человек — и служба такси, и партнёр. Его звонок на его же SIM гонял бы
+    // деньги по кругу через комиссию площадки. Отказ — «нет SIM»: клиенту незачем
+    // знать, что причиной был он сам как партнёр.
+    const operator = (await post('/operators', { name: unique('Оператор') })).json<{
+      operator: { id: string };
+    }>().operator.id;
+    const person = await createUser();
+    await createPartner(operator, 2, person);
+    const { channel, destination } = await createChannel(operator, person);
+
+    const alone = await route(channel, destination);
+    expect(alone.outcome).toBe('rejected');
+    expect(alone.reason).toBe('no_sim_available');
+
+    // Появился чужой партнёр — вызов уходит к нему.
+    const stranger = await createPartner(operator, 2);
+    expect(chosenSim(await route(channel, destination))).toBe(stranger.simId);
+  }, 120_000);
+
+  it('своего партнёра клиент не видит в списке для порядка перебора', async () => {
+    const operator = (await post('/operators', { name: unique('Оператор') })).json<{
+      operator: { id: string };
+    }>().operator.id;
+    const person = await createUser();
+    const own = await createPartner(operator, 1, person);
+    await createChannel(operator, person);
+    const other = await createPartner(operator, 1);
+
+    const email = (
+      await withDatabase(async (execute) =>
+        execute(sql`select email from users where id = ${person}`),
+      )
+    ).rows[0] as { email: string } | undefined;
+    if (email === undefined) throw new Error('Учётная запись не найдена');
+    const login = await api().inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: email.email, password: TEST_PASSWORD },
+    });
+    const listed = (
+      await api().inject({
+        method: 'GET',
+        url: '/partner-aliases',
+        headers: { authorization: `Bearer ${login.json<{ token: string }>().token}` },
+      })
+    )
+      .json<{ partners: { display_name: string }[] }>()
+      .partners.map((row) => row.display_name);
+
+    expect(listed).toContain(other.displayName);
+    expect(listed).not.toContain(own.displayName);
   }, 120_000);
 });

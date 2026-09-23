@@ -6,6 +6,7 @@ import { WriteRateGuard } from './http/write-rate.guard.js';
 import { InfraModule } from './infra/infra.module.js';
 import { AuditHttpModule } from './modules/audit/audit-http.module.js';
 import { AuditModule } from './modules/audit/audit.module.js';
+import { ApplicationsModule } from './modules/applications/applications.module.js';
 import { BillingModule } from './modules/billing/billing.module.js';
 import { CatalogModule } from './modules/catalog/catalog.module.js';
 import { HealthModule } from './modules/health/health.module.js';
@@ -37,6 +38,7 @@ import { TelephonyModule } from './modules/telephony/telephony.module.js';
     RecordingsModule,
     CatalogModule,
     BillingModule,
+    ApplicationsModule,
     HealthModule,
   ],
   providers: [

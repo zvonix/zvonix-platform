@@ -22,6 +22,8 @@ const PEOPLE = {
   support: 'support@e2e.zvonix.test',
   client: 'client@e2e.zvonix.test',
   partner: 'partner@e2e.zvonix.test',
+  /** Служба такси, у которой есть и свои SIM: один вход, два кабинета (ADR-0052). */
+  both: 'both@e2e.zvonix.test',
 } as const;
 
 async function signIn(page: Page, email: string): Promise<void> {
@@ -78,6 +80,70 @@ test.describe('разводка по ролям', () => {
       await expect(page).toHaveURL(home);
     });
   }
+});
+
+test.describe('один вход — два кабинета', () => {
+  test('переключатель в шапке ведёт в другой кабинет, меню меняется вместе с ним', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.both);
+    await expect(page).toHaveURL(/\/my\/calls$/u);
+
+    const switcher = page.getByRole('navigation', { name: 'Кабинет' });
+    await switcher.getByRole('link', { name: 'Партнёр' }).click();
+    await expect(page).toHaveURL(/\/partner\/calls$/u);
+    await expect(switcher.getByText('Партнёр')).toHaveAttribute('aria-current', 'page');
+
+    const rail = page.getByRole('navigation', { name: 'Разделы' });
+    await expect(rail.getByRole('link', { name: 'Моё оборудование' })).toBeVisible();
+    await expect(rail.getByRole('link', { name: 'Мои линии' })).toHaveCount(0);
+  });
+
+  test('у кого кабинет один, переключателя нет, а в меню — заявка на второй', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await expect(page.getByRole('navigation', { name: 'Кабинет' })).toHaveCount(0);
+    await page.getByRole('link', { name: 'Стать партнёром' }).click();
+    await expect(page.getByRole('heading', { name: 'Заявка: кабинет партнёра' })).toBeVisible();
+  });
+});
+
+test.describe('заявки', () => {
+  test('регистрация отправляет заявку и говорит, что дальше', async ({ page }) => {
+    await page.goto('/register');
+    await page.getByRole('button', { name: /Партнёр/u }).click();
+    await page.getByLabel('Ваше имя').fill('Орлов Максим');
+    await page.getByLabel('Почта — она же логин').fill('orlov@e2e.zvonix.test');
+    await page.getByLabel('Пароль').fill('очень-длинный-пароль');
+    await page.getByLabel('Регион, где стоят шлюзы').fill('Пермский край');
+    await page.getByRole('button', { name: 'МТС' }).click();
+    await page.getByLabel('Телефон').fill('+7 902 111-22-33');
+    await page.getByLabel(/Согласен/u).check();
+    await page.getByRole('button', { name: 'Отправить заявку' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Заявка отправлена' })).toBeVisible();
+  });
+
+  test('администратор одобряет партнёра окном с псевдонимом', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/applications');
+    const row = page.getByRole('row', { name: /Смирнов Олег Петрович/u });
+    await row.getByRole('button', { name: 'Одобрить' }).click();
+
+    const dialog = page.getByRole('alertdialog');
+    await dialog.getByLabel('Псевдоним для клиентов').fill('Партнёр 40');
+    await dialog.getByRole('button', { name: 'Одобрить и открыть кабинет' }).click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole('row', { name: /Смирнов Олег Петрович/u })).toHaveCount(0);
+  });
+
+  test('без подтверждённой почты одобрить нельзя, и экран говорит почему', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/applications');
+    const row = page.getByRole('row', { name: /Кузнецова Мария/u });
+    await expect(row.getByText('почта не подтверждена — одобрить пока нельзя')).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Одобрить' })).toBeDisabled();
+  });
 });
 
 test.describe('версия выпуска в углу панели', () => {

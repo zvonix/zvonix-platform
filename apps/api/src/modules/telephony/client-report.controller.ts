@@ -13,7 +13,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodQuery } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
@@ -42,7 +42,7 @@ export class ClientReportController {
    * По их идентификаторам клиент настраивает порядок партнёров и разрешённых
    * операторов — обработчики те же, что и у администратора, владение проверяет служба.
    */
-  @Roles('client')
+  @Cabinets('client')
   @Get('client/channels')
   async channels(@CurrentUser() actor: Principal): Promise<{ channels: ClientChannelView[] }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
@@ -58,7 +58,7 @@ export class ClientReportController {
    * переведённая. Чужой канал в отборе отсеивать не нужно: рядом стоит отбор
    * по клиенту, и чужой канал просто не даст ни одной строки.
    */
-  @Roles('client')
+  @Cabinets('client')
   @Get('client/calls')
   async listCalls(
     @CurrentUser() actor: Principal,

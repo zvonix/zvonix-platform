@@ -30,7 +30,7 @@ import type {
   SimStatus,
 } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
@@ -137,7 +137,7 @@ export class PartnerEquipmentController {
    * Карты без порта отдаются отдельным списком: это заведённая, но не вставленная
    * ёмкость, и она нигде больше не видна — в шлюзах её нет по определению.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Get('partner/equipment')
   async equipment(@CurrentUser() actor: Principal): Promise<{
     gateways: GatewayView[];
@@ -206,7 +206,7 @@ export class PartnerEquipmentController {
    * партнёр их и вводит, настраивая GOIP. Пока шлюз заводил администратор, пароль
    * обязан был дойти до партнёра перепиской.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Post('partner/gateways')
   async createGateway(
     @Body(zodBody(partnerGatewaySchema)) body: z.infer<typeof partnerGatewaySchema>,
@@ -240,7 +240,7 @@ export class PartnerEquipmentController {
    * Списание необратимо и потому недоступно оттуда, где шлюз уже отключён площадкой:
    * иначе её рычаг обходился бы связкой «списал — завёл новый».
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Post('partner/gateways/:id/status')
   async setGatewayStatus(
     @Param('id') id: string,
@@ -264,7 +264,7 @@ export class PartnerEquipmentController {
    * Меняются и имя, и пароль: имя уже засветилось в записи регистрации и в логах узла,
    * а перенастраивать оборудование партнёру всё равно придётся.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Post('partner/gateways/:id/credentials')
   async resetCredentials(
     @Param('id') id: string,
@@ -285,7 +285,7 @@ export class PartnerEquipmentController {
   }
 
   /** Порт под SIM. Номер — тот, что подписан на корпусе устройства. */
-  @Roles('partner')
+  @Cabinets('partner')
   @Post('partner/gateways/:id/ports')
   async addPort(
     @Param('id') id: string,
@@ -307,7 +307,7 @@ export class PartnerEquipmentController {
    * а не предупреждение ([ADR-0013](../../../../../docs/adr/0013-opredelenie-operatora.md)).
    * Карта заводится неактивной: включает её отдельное действие.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Post('partner/sim-cards')
   async createSim(
     @Body(zodBody(partnerSimSchema)) body: z.infer<typeof partnerSimSchema>,
@@ -336,7 +336,7 @@ export class PartnerEquipmentController {
    * проверки владения. Включение проходит только с подтверждённым оператором,
    * списание — только у карты вне порта.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Post('partner/sim-cards/:id/status')
   async setSimStatus(
     @Param('id') id: string,
@@ -355,7 +355,7 @@ export class PartnerEquipmentController {
   }
 
   /** Вставить SIM в порт или вынуть её оттуда. И порт, и карта обязаны быть своими. */
-  @Roles('partner')
+  @Cabinets('partner')
   @Post('partner/gateway-ports/:id/sim')
   async assignSim(
     @Param('id') id: string,

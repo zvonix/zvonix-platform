@@ -20,7 +20,7 @@ interface Account {
 
 export default function MyMoneyPage() {
   return (
-    <ConsoleShell title="Деньги" requireRole="client">
+    <ConsoleShell title="Деньги" cabinet="client">
       {() => <MyMoney />}
     </ConsoleShell>
   );

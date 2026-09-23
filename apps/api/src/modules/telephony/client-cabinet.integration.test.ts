@@ -548,10 +548,17 @@ describe('доступ', () => {
     expect((await get('/client/tariffs')).statusCode).toBe(403);
   }, 120_000);
 
-  it('учётной записи без клиента отвечает 404, а не пустотой', async () => {
+  it('участнику без карточки клиента отказ называет причину, а не отвечает пустотой', async () => {
+    // Кабинет открывает владение карточкой, а не роль (ADR-0052): учётная запись без
+    // неё — незавершённое подключение, и отказ говорит именно это.
     const orphan = await createClientUser();
-    expect((await get('/client/account', as(orphan.token))).statusCode).toBe(404);
-    expect((await get('/client/channels', as(orphan.token))).statusCode).toBe(404);
+    for (const url of ['/client/account', '/client/channels']) {
+      const response = await get(url, as(orphan.token));
+      expect(response.statusCode).toBe(403);
+      expect(response.json<{ error: { message: string } }>().error.message).toBe(
+        'Кабинет клиента не подключён',
+      );
+    }
   }, 120_000);
 
   it('без входа не отдаётся ничего', async () => {

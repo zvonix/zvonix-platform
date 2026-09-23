@@ -11,6 +11,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
+  PARTNER_APPLICATION,
   prepareEnvironment,
   resetDatabase,
   startApi,
@@ -105,7 +106,7 @@ beforeAll(async () => {
       email: `applicant.${MARK}@example.test`,
       password: TEST_PASSWORD,
       fullName: 'Пётр Заявкин',
-      role: 'partner',
+      ...PARTNER_APPLICATION,
     },
   });
   expect(applied.statusCode).toBe(202);
@@ -139,7 +140,8 @@ describe('отбор', () => {
     const found = await list(`status=pending&email=${MARK}`);
     expect(found.users).toHaveLength(1);
     expect(found.users[0]?.email).toBe(`applicant.${MARK}@example.test`);
-    expect(found.users[0]?.role).toBe('partner');
+    // Регистрация заводит участника рынка; вид кабинета — в его заявке (ADR-0052).
+    expect(found.users[0]?.role).toBe('member');
     // Адрес не подтверждён — главный вопрос при разборе заявки.
     expect(found.users[0]?.email_confirmed_at).toBeNull();
   }, 120_000);

@@ -34,7 +34,7 @@ interface Tariff {
 
 export default function MyPricesPage() {
   return (
-    <ConsoleShell title="Мои цены" requireRole="client">
+    <ConsoleShell title="Мои цены" cabinet="client">
       {() => <MyPrices />}
     </ConsoleShell>
   );

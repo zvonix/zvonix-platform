@@ -8,11 +8,13 @@
 
 import { Injectable } from '@nestjs/common';
 import { and, count, desc, eq, gt, inArray, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
-import { authTokens, sessions, users } from '@zvonix/db/schema';
+import { applications, authTokens, sessions, users } from '@zvonix/db/schema';
 import { containsIgnoringCase, toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import {
   newId,
+  type ApplicationStatus,
   type AuthTokenPurpose,
+  type Cabinet,
   type Id,
   type UserRole,
   type UserStatus,
@@ -30,6 +32,14 @@ export type AuthTokenRow = typeof authTokens.$inferSelect;
 // там же, где метод, а определение остаётся одно на весь проект.
 export type { Executor };
 export type SessionRow = typeof sessions.$inferSelect;
+export type ApplicationId = Id<'application'>;
+export type ApplicationRow = typeof applications.$inferSelect;
+
+/** Заявка вместе с заявителем: администратору нужно решить, кого он пускает. */
+export interface ApplicationWithApplicant {
+  readonly application: ApplicationRow;
+  readonly applicant: UserRow;
+}
 
 export interface NewUser {
   readonly id: UserId;
@@ -104,8 +114,8 @@ export class IdentityRepository {
     return row;
   }
 
-  async findById(id: UserId): Promise<UserRow | undefined> {
-    const [row] = await this.database.db.select().from(users).where(eq(users.id, id));
+  async findById(id: UserId, executor: Executor = this.database.db): Promise<UserRow | undefined> {
+    const [row] = await executor.select().from(users).where(eq(users.id, id));
     return row;
   }
 
@@ -371,14 +381,102 @@ export class IdentityRepository {
     return updated.length > 0;
   }
 
-  async setStatus(id: UserId, status: UserStatus): Promise<UserRow> {
-    const [row] = await this.database.db
-      .update(users)
-      .set({ status })
-      .where(eq(users.id, id))
+  async setStatus(
+    id: UserId,
+    status: UserStatus,
+    executor: Executor = this.database.db,
+  ): Promise<UserRow> {
+    const [row] = await executor.update(users).set({ status }).where(eq(users.id, id)).returning();
+    if (row === undefined) throw new Error('Обновление не вернуло строку');
+    return row;
+  }
+
+  // --- Заявки на кабинет (ADR-0052) -----------------------------------------
+
+  async createApplication(
+    draft: { userId: UserId; kind: Cabinet; answers: Record<string, unknown> },
+    executor: Executor = this.database.db,
+  ): Promise<ApplicationRow> {
+    try {
+      const [row] = await executor
+        .insert(applications)
+        .values({ id: newId<'application'>(), ...draft })
+        .returning();
+      if (row === undefined) throw new Error('Вставка не вернула строку');
+      return row;
+    } catch (cause) {
+      // Вторая открытая заявка того же вида упирается в `applications_open_key`
+      // и становится `conflict`.
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /**
+   * Заявка под блокировкой — для решения по ней.
+   *
+   * `FOR UPDATE`: два администратора, одобряющие одну заявку одновременно, иначе
+   * оба прочли бы `submitted` и оба завели бы карточку.
+   */
+  async lockApplication(
+    id: ApplicationId,
+    executor: Executor,
+  ): Promise<ApplicationRow | undefined> {
+    const [row] = await executor
+      .select()
+      .from(applications)
+      .where(eq(applications.id, id))
+      .for('update');
+    return row;
+  }
+
+  async decideApplication(
+    id: ApplicationId,
+    decision: {
+      status: Exclude<ApplicationStatus, 'submitted'>;
+      decidedByUserId: UserId | null;
+      decidedAt: Date | null;
+      decisionNote: string | null;
+    },
+    executor: Executor,
+  ): Promise<ApplicationRow> {
+    const [row] = await executor
+      .update(applications)
+      .set({ ...decision, updatedAt: new Date() })
+      .where(eq(applications.id, id))
       .returning();
     if (row === undefined) throw new Error('Обновление не вернуло строку');
     return row;
+  }
+
+  /** Очередь заявок: новые сверху, с заявителем. */
+  async listApplications(filter: {
+    status?: ApplicationStatus;
+    limit: number;
+    offset: number;
+  }): Promise<{ rows: ApplicationWithApplicant[]; total: number }> {
+    const where = filter.status === undefined ? undefined : eq(applications.status, filter.status);
+    const rows = await this.database.db
+      .select({ application: applications, applicant: users })
+      .from(applications)
+      .innerJoin(users, eq(users.id, applications.userId))
+      .where(where)
+      .orderBy(desc(applications.createdAt), desc(applications.id))
+      .limit(filter.limit)
+      .offset(filter.offset);
+    const [counted] = await this.database.db
+      .select({ total: count() })
+      .from(applications)
+      .where(where);
+    return { rows, total: counted?.total ?? 0 };
+  }
+
+  /** Заявки одного человека — для его кабинета. */
+  async listApplicationsOf(userId: UserId): Promise<ApplicationRow[]> {
+    return this.database.db
+      .select()
+      .from(applications)
+      .where(eq(applications.userId, userId))
+      .orderBy(desc(applications.createdAt), desc(applications.id));
   }
 
   async createSession(draft: NewSession): Promise<SessionRow> {

@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { USER_ROLES, USER_STATUSES, type UserRole } from '@zvonix/shared';
+import { APPLICATION_STATUSES, USER_ROLES, USER_STATUSES } from '@zvonix/shared';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 
 /**
@@ -43,15 +43,6 @@ const email = z
 const password = z.string().min(12, 'не короче 12 символов').max(200, 'не длиннее 200 символов');
 
 /**
- * Роли, доступные при самостоятельной регистрации.
- *
- * `admin` и `support` заводит только администратор: иначе доступ ко всей платформе
- * получает любой, кто отправил форму. `satisfies` следит, чтобы список не разошёлся
- * с перечислением домена — опечатка в роли здесь была бы принята схемой молча.
- */
-const SELF_SERVICE_ROLES = ['client', 'partner'] as const satisfies readonly UserRole[];
-
-/**
  * Токен проверки «я не робот» ([ADR-0031](../../../../../docs/adr/0031-nastroyki-ploshchadki.md)).
  *
  * Необязателен в схеме, а не в правиле: обязательность зависит от настройки площадки,
@@ -60,12 +51,86 @@ const SELF_SERVICE_ROLES = ['client', 'partner'] as const satisfies readonly Use
  */
 const captchaToken = z.string().trim().max(4096, 'слишком длинный').optional();
 
-export const registerSchema = z.object({
-  email,
-  password,
-  fullName: z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное'),
-  role: z.enum(SELF_SERVICE_ROLES),
-  captchaToken,
+/**
+ * Телефон для связи по заявке. Проверяется форма, а не принадлежность номера:
+ * администратор звонит по нему сам, и приведение к одному виду здесь не нужно.
+ */
+const phone = z
+  .string()
+  .trim()
+  .regex(/^\+?[\d\s()-]{10,20}$/u, 'не похож на телефон');
+
+/** Необязательное число «примерно»: пустое поле формы приходит как отсутствие поля. */
+const roughCount = z
+  .number()
+  .int('целое число')
+  .min(1, 'не меньше 1')
+  .max(1_000_000, 'слишком много');
+
+/**
+ * Анкета службы такси ([ADR-0052](../../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)).
+ * Название становится названием карточки клиента при одобрении.
+ */
+const clientAnswers = z
+  .object({
+    companyName: z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное'),
+    city: z.string().trim().min(2, 'слишком короткое').max(100, 'слишком длинное'),
+    phone,
+    callsPerDay: roughCount.optional(),
+  })
+  .strict();
+
+/**
+ * Анкета партнёра. Операторы — названиями, как их знает человек: справочник площадки
+ * ему до одобрения не открыт, и сверяет их администратор.
+ */
+const partnerAnswers = z
+  .object({
+    region: z.string().trim().min(2, 'слишком короткое').max(100, 'слишком длинное'),
+    phone,
+    simCount: roughCount.optional(),
+    operators: z
+      .array(z.string().trim().min(1, 'пустое название').max(50, 'слишком длинное'))
+      .min(1, 'назовите хотя бы одного оператора')
+      .max(10, 'не больше десяти'),
+  })
+  .strict();
+
+/**
+ * Заявка на кабинет: вид кабинета и анкета именно этого вида. Сотрудника площадки
+ * заявкой не получить: вид — только клиент или партнёр.
+ */
+export const applicationSchema = z.discriminatedUnion('cabinet', [
+  z.object({ cabinet: z.literal('client'), answers: clientAnswers }),
+  z.object({ cabinet: z.literal('partner'), answers: partnerAnswers }),
+]);
+export type ApplicationInput = z.infer<typeof applicationSchema>;
+
+/**
+ * Регистрация — учётная запись участника и первая заявка одной формой
+ * (ADR-0052). Роль не выбирается: самостоятельно заводится только участник рынка,
+ * `admin` и `support` заводит команда `admin:create`.
+ */
+export const registerSchema = z
+  .object({
+    email,
+    password,
+    fullName: z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное'),
+    captchaToken,
+  })
+  .and(applicationSchema);
+
+/** Отказ по заявке: причина уходит человеку письмом, поэтому обязательна. */
+export const rejectApplicationSchema = z.object({
+  note: z.string().trim().min(3, 'назовите причину').max(1000, 'слишком длинная'),
+});
+
+/**
+ * Одобрение заявки. Псевдоним нужен только партнёру — под ним его увидят клиенты
+ * (ADR-0014), и выбирает его администратор, а не сам партнёр.
+ */
+export const approveApplicationSchema = z.object({
+  displayName: z.string().trim().min(2, 'слишком короткий').max(60, 'слишком длинный').optional(),
 });
 
 /**
@@ -155,5 +220,17 @@ export const userListQuerySchema = z.object({
     .string()
     .optional()
     .transform((raw) => boundedLimit(raw, USER_PAGE_MAX)),
+  offset: z.string().optional().transform(boundedOffset),
+});
+
+/** Потолок страницы очереди заявок — таблица, которую читает человек. */
+const APPLICATION_PAGE_MAX = 200;
+
+export const applicationListQuerySchema = z.object({
+  status: optionalParameter.pipe(z.enum(APPLICATION_STATUSES).optional()),
+  limit: z
+    .string()
+    .optional()
+    .transform((raw) => boundedLimit(raw, APPLICATION_PAGE_MAX)),
   offset: z.string().optional().transform(boundedOffset),
 });

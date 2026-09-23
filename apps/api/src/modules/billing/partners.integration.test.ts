@@ -45,16 +45,31 @@ interface PartnerView {
   readonly created_at: string;
 }
 
-async function account(role: 'admin' | 'client'): Promise<Record<string, string>> {
+/**
+ * Вход администратора либо клиента. Клиенту заводится карточка: кабинет открывает
+ * владение ею, а не роль (ADR-0052), и без неё список псевдонимов ему закрыт.
+ */
+async function account(kind: 'admin' | 'client'): Promise<Record<string, string>> {
   const email = uniqueEmail();
   const { IdentityService } = await import('../identity/identity.service.js');
-  await api().get(IdentityService).createByAdmin({
-    email,
-    password: TEST_PASSWORD,
-    fullName: 'Иван Петров',
-    role,
-    status: 'active',
-  });
+  const user = await api()
+    .get(IdentityService)
+    .createByAdmin({
+      email,
+      password: TEST_PASSWORD,
+      fullName: 'Иван Петров',
+      role: kind === 'admin' ? 'admin' : 'member',
+      status: 'active',
+    });
+  if (kind === 'client') {
+    const created = await api().inject({
+      method: 'POST',
+      url: '/clients',
+      headers: adminAuth,
+      payload: { ownerUserId: user.id, name: `${MARK} Такси` },
+    });
+    expect(created.statusCode).toBe(201);
+  }
 
   const response = await api().inject({
     method: 'POST',

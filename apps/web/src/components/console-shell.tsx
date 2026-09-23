@@ -1,10 +1,12 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { UserRole } from '@zvonix/shared';
+import { isStaffRole, type Cabinet, type StaffRole, type UserRole } from '@zvonix/shared';
 import {
   Coins,
+  Inbox,
   KeyRound,
+  Plus,
   LogOut,
   PhoneCall,
   Radio,
@@ -23,6 +25,14 @@ import { useEffect } from 'react';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
+import {
+  CABINET_HOME,
+  cabinetOfPath,
+  homeCabinet,
+  rememberCabinet,
+  useCabinets,
+  type OwnedCabinets,
+} from '@/lib/cabinets';
 import { useSession, type CurrentUser } from '@/lib/session';
 
 /**
@@ -30,6 +40,10 @@ import { useSession, type CurrentUser } from '@/lib/session';
  * поэтому API отдаёт его только сотрудникам (`GET /health/version`).
  */
 const SEES_RELEASE: readonly UserRole[] = ['admin', 'support'];
+
+/** Как называется кабинет в переключателе и в отказе «раздел доступен из кабинета …». */
+const CABINET_NAME: Record<Cabinet, string> = { client: 'Клиент', partner: 'Партнёр' };
+const CABINET_GENITIVE: Record<Cabinet, string> = { client: 'клиента', partner: 'партнёра' };
 
 interface ReleaseInfo {
   readonly version: string | null;
@@ -71,17 +85,20 @@ interface NavGroup {
 }
 
 /**
- * Разделы по ролям — **только существующие**.
+ * Разделы сотрудников по ролям и разделы кабинетов участника — **только существующие**.
  *
  * Пункт, ведущий в ненаписанный раздел, хуже отсутствующего: он обещает, что там
  * что-то есть. Остальные разделы прототипа появятся здесь по мере готовности,
  * их список — в [ROADMAP.md](../../../../docs/ROADMAP.md), этап 5.
  */
-const NAVIGATION: Record<UserRole, readonly NavGroup[]> = {
+const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
   admin: [
     {
       title: 'Участники',
-      items: [{ href: '/users', label: 'Учётные записи', Icon: Users }],
+      items: [
+        { href: '/applications', label: 'Заявки', Icon: Inbox },
+        { href: '/users', label: 'Учётные записи', Icon: Users },
+      ],
     },
     {
       title: 'Терминация',
@@ -107,6 +124,56 @@ const NAVIGATION: Record<UserRole, readonly NavGroup[]> = {
       ],
     },
   ],
+  /**
+   * Поддержка видит **только то, что читает**.
+   *
+   * Право на чтение у роли есть в API с самого появления обработчиков, а кабинета
+   * не было вовсе: учётная запись поддержки заводилась и открывала пустой экран.
+   * Разделы, написанные с оглядкой на роль (`useCanChange`), открыты ей полностью —
+   * действия на них не показываются ([DESIGN.md](../../../../docs/DESIGN.md)):
+   * нарисованная кнопка, отвечающая отказом, обещает возможность, которой нет.
+   *
+   * Настройки площадки закрыты и останутся закрытыми: там не «действия, недоступные
+   * роли», а **секреты** — пароль почты и серверный ключ капчи. У них и обработчик
+   * чтения помечен `@Roles('admin')`, так что раздел открывался бы пустым отказом.
+   */
+  support: [
+    {
+      title: 'Участники',
+      items: [
+        { href: '/applications', label: 'Заявки', Icon: Inbox },
+        { href: '/users', label: 'Учётные записи', Icon: Users },
+      ],
+    },
+    {
+      title: 'Терминация',
+      items: [
+        { href: '/partners', label: 'Партнёры и оборудование', Icon: Radio },
+        { href: '/nodes', label: 'Узлы АТС', Icon: Server },
+        { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
+        { href: '/limits', label: 'Запреты и лимиты', Icon: ShieldBan },
+      ],
+    },
+    {
+      title: 'Деньги',
+      items: [
+        { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
+        { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
+      ],
+    },
+    {
+      title: 'Служебное',
+      items: [{ href: '/audit', label: 'Журнал действий', Icon: ScrollText }],
+    },
+  ],
+};
+
+/**
+ * Разделы кабинетов участника рынка
+ * ([ADR-0052](../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)): у одного человека
+ * их может быть два, и меню берётся по кабинету страницы, а не по роли.
+ */
+const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
   /**
    * Кабинет партнёра.
    *
@@ -148,45 +215,6 @@ const NAVIGATION: Record<UserRole, readonly NavGroup[]> = {
       ],
     },
   ],
-  /**
-   * Поддержка видит **только то, что читает**.
-   *
-   * Право на чтение у роли есть в API с самого появления обработчиков, а кабинета
-   * не было вовсе: учётная запись поддержки заводилась и открывала пустой экран.
-   * Разделы, написанные с оглядкой на роль (`useCanChange`), открыты ей полностью —
-   * действия на них не показываются ([DESIGN.md](../../../../docs/DESIGN.md)):
-   * нарисованная кнопка, отвечающая отказом, обещает возможность, которой нет.
-   *
-   * Настройки площадки закрыты и останутся закрытыми: там не «действия, недоступные
-   * роли», а **секреты** — пароль почты и серверный ключ капчи. У них и обработчик
-   * чтения помечен `@Roles('admin')`, так что раздел открывался бы пустым отказом.
-   */
-  support: [
-    {
-      title: 'Участники',
-      items: [{ href: '/users', label: 'Учётные записи', Icon: Users }],
-    },
-    {
-      title: 'Терминация',
-      items: [
-        { href: '/partners', label: 'Партнёры и оборудование', Icon: Radio },
-        { href: '/nodes', label: 'Узлы АТС', Icon: Server },
-        { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
-        { href: '/limits', label: 'Запреты и лимиты', Icon: ShieldBan },
-      ],
-    },
-    {
-      title: 'Деньги',
-      items: [
-        { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
-        { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
-      ],
-    },
-    {
-      title: 'Служебное',
-      items: [{ href: '/audit', label: 'Журнал действий', Icon: ScrollText }],
-    },
-  ],
 };
 
 /** Роли, которым открыт раздел: одна или несколько — вызывающему удобнее без обёртки. */
@@ -213,6 +241,7 @@ const ROLE_GENITIVE: Record<UserRole, string> = {
   partner: 'партнёра',
   client: 'клиента',
   support: 'поддержки',
+  member: 'участника',
 };
 
 /**
@@ -227,15 +256,27 @@ export function ConsoleShell({
   title,
   children,
   requireRole,
+  cabinet,
 }: {
   title: string;
   children: (user: CurrentUser) => React.ReactNode;
+  /** Раздел сотрудников: открыт перечисленным ролям. */
   requireRole?: UserRole | readonly UserRole[];
+  /** Раздел кабинета участника: открыт владельцу карточки этого вида (ADR-0052). */
+  cabinet?: Cabinet;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const session = useSession();
+  const cabinets = useCabinets();
   const queryClient = useQueryClient();
+  const pageCabinet = cabinet ?? cabinetOfPath(pathname);
+  const ownsPageCabinet =
+    pageCabinet !== undefined && cabinets.data !== undefined && cabinets.data[pageCabinet] !== null;
+
+  useEffect(() => {
+    if (ownsPageCabinet) rememberCabinet(pageCabinet);
+  }, [ownsPageCabinet, pageCabinet]);
 
   const denied = session.error instanceof ApiError && session.error.needsLogin;
 
@@ -253,7 +294,8 @@ export function ConsoleShell({
     },
   });
 
-  if (session.isPending || denied) {
+  const staff = session.data !== undefined && isStaffRole(session.data.role);
+  if (session.isPending || denied || (!staff && cabinets.isPending)) {
     return <ShellSkeleton title={title} />;
   }
 
@@ -282,7 +324,14 @@ export function ConsoleShell({
     );
   }
 
-  const groups = NAVIGATION[user.role];
+  const owned = cabinets.data;
+  const current = isStaffRole(user.role)
+    ? undefined
+    : (pageCabinet ?? (owned === undefined ? undefined : homeCabinet(owned)));
+  const cabinetGroups = current === undefined ? [] : CABINET_NAVIGATION[current];
+  const groups = isStaffRole(user.role)
+    ? STAFF_NAVIGATION[user.role]
+    : [...cabinetGroups, ...secondCabinetGroup(owned)];
 
   return (
     <div className="grid min-h-dvh grid-rows-[auto_1fr] md:grid-cols-[210px_1fr] md:grid-rows-1">
@@ -326,9 +375,14 @@ export function ConsoleShell({
       </nav>
 
       <div className="flex min-w-0 flex-col">
-        <header className="flex items-center gap-3 border-b border-border bg-card px-4 py-2.5">
+        {/* Переносится, а не выдавливает: на телефоне переключатель кабинетов с темой
+            и выходом в одну строку с заголовком не помещаются. */}
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-4 py-2.5">
           <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {owned !== undefined && current !== undefined ? (
+              <CabinetSwitch owned={owned} current={current} />
+            ) : null}
             <ThemeSwitch />
             <button
               type="button"
@@ -349,12 +403,77 @@ export function ConsoleShell({
             <p role="alert" className="text-crit">
               Раздел доступен {cabinetsOf(allowed(requireRole))}.
             </p>
+          ) : cabinet !== undefined && isStaffRole(user.role) ? (
+            <p role="alert" className="text-crit">
+              Раздел доступен только из кабинета {CABINET_GENITIVE[cabinet]}.
+            </p>
+          ) : cabinets.error !== null && cabinet !== undefined ? (
+            <p role="alert" className="text-crit">
+              {cabinets.error.message}
+            </p>
+          ) : cabinet !== undefined && owned?.[cabinet] === null ? (
+            <p role="alert">
+              Кабинет {CABINET_GENITIVE[cabinet]} у вас не подключён. Подключается заявкой, которую
+              одобряет администратор площадки.
+            </p>
           ) : (
             children(user)
           )}
         </main>
       </div>
     </div>
+  );
+}
+
+/**
+ * Путь ко второму кабинету: пока его нет, в меню — заявка на него, после одобрения —
+ * переключатель в шапке. Без кабинетов вовсе — заявка на любой.
+ */
+function secondCabinetGroup(owned: OwnedCabinets | undefined): readonly NavGroup[] {
+  if (owned === undefined) return [];
+  if (owned.client !== null && owned.partner !== null) return [];
+  const missing =
+    owned.client === null && owned.partner === null
+      ? { href: '/apply', label: 'Подать заявку' }
+      : owned.client === null
+        ? { href: '/apply?cabinet=client', label: 'Стать клиентом' }
+        : { href: '/apply?cabinet=partner', label: 'Стать партнёром' };
+  return [{ title: 'Второй кабинет', items: [{ ...missing, Icon: Plus }] }];
+}
+
+/**
+ * Переключатель кабинетов в шапке — только когда их два (ADR-0052).
+ *
+ * Это ссылки, а не переключение состояния: кабинет определяется адресом страницы,
+ * и другой кабинет — просто другая страница, которую можно открыть в соседней вкладке.
+ */
+function CabinetSwitch({ owned, current }: { owned: OwnedCabinets; current: Cabinet }) {
+  if (owned.client === null || owned.partner === null) return null;
+  return (
+    <nav
+      aria-label="Кабинет"
+      className="flex gap-0.5 rounded-md border border-border bg-muted p-0.5"
+    >
+      {(['client', 'partner'] as const).map((kind) =>
+        kind === current ? (
+          <span
+            key={kind}
+            aria-current="page"
+            className="rounded bg-card px-2.5 py-1 font-semibold shadow-[0_0_0_1px_var(--border)]"
+          >
+            {CABINET_NAME[kind]}
+          </span>
+        ) : (
+          <Link
+            key={kind}
+            href={CABINET_HOME[kind]}
+            className="rounded px-2.5 py-1 text-muted-foreground hover:text-foreground"
+          >
+            {CABINET_NAME[kind]}
+          </Link>
+        ),
+      )}
+    </nav>
   );
 }
 

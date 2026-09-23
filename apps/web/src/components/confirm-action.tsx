@@ -54,6 +54,7 @@ export function ConfirmAction({
   size = 'sm',
   disabled = false,
   className,
+  children,
 }: {
   /** Подпись кнопки, открывающей окно. */
   label: ReactNode;
@@ -74,6 +75,12 @@ export function ConfirmAction({
   size?: 'xs' | 'sm' | 'default';
   disabled?: boolean;
   className?: string;
+  /**
+   * Поля, без которых действие не выполнить: причина отказа, псевдоним. Короткое действие
+   * с парой полей — окно по центру ([DESIGN.md](../../../../docs/DESIGN.md), «Окно,
+   * страница или панель»), и у него те же фокус, Escape и защита от двойной отправки.
+   */
+  children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
@@ -167,6 +174,8 @@ export function ConfirmAction({
         <AlertDialogDescription asChild>
           <div className="flex flex-col gap-2">{consequence}</div>
         </AlertDialogDescription>
+
+        {children}
 
         {failure !== undefined && <ErrorNote error={failure} />}
 

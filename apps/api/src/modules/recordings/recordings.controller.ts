@@ -9,7 +9,7 @@
 import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { CurrentUser, Meta } from '../../http/request-context.js';
 import type { Principal, RequestMeta } from '../identity/identity.service.js';
@@ -36,7 +36,8 @@ export class RecordingsController {
    * открыл ему разовый доступ по спорному вызову
    * ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
    */
-  @Roles('admin', 'support', 'client', 'partner')
+  @Roles('admin', 'support')
+  @Cabinets('client', 'partner')
   @Post(':id/link')
   async listenLink(
     @Param('id') id: string,

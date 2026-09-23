@@ -43,6 +43,12 @@ import {
   type UserId,
 } from './billing.repository.js';
 
+/** Карточки, которыми владеет участник рынка: по одной на вид кабинета (ADR-0052). */
+export interface OwnedCabinets {
+  readonly client: ClientId | undefined;
+  readonly partner: PartnerId | undefined;
+}
+
 /** Половина движения: счёт и сумма со знаком. Плюс — приход, минус — расход. */
 export interface PostingLine {
   readonly accountId: AccountId;
@@ -275,7 +281,9 @@ export class BillingService {
     const partner = await this.repository.findPartner(partnerId);
     if (partner === undefined) throw notFound('Партнёр не найден');
 
-    if (actor.role === 'partner') {
+    // Администратор меняет признак любому партнёру; остальных защитник пустил
+    // по кабинету партнёра, и признак они меняют только своему.
+    if (actor.role !== 'admin') {
       const own = await this.repository.findPartnerOwnedBy(actor.userId);
       // `not_found`, а не `permission_denied`: чужой партнёр не должен подтверждаться
       // разницей ответов.
@@ -424,21 +432,12 @@ export class BillingService {
    * Публичный вход вместо чтения таблицы псевдонимов соседним модулем
    * (ARCHITECTURE.md, «Границы модулей»).
    */
-  async listOfferedAliases(): Promise<(PartnerAliasRow & { listensToRecordings: boolean })[]> {
-    return this.repository.listOfferedAliases();
+  async listOfferedAliases(
+    exceptOwner?: UserId,
+  ): Promise<(PartnerAliasRow & { listensToRecordings: boolean })[]> {
+    return this.repository.listOfferedAliases(exceptOwner);
   }
 
-  /**
-   * Клиент, которым владеет учётная запись.
-   *
-   * Единственный вход клиентского контура: идентификатор клиента там нигде не
-   * принимается — он выводится отсюда, из сессии. Иначе клиенту пришлось бы верить
-   * на слово, чей счёт он открывает.
-   *
-   * Нет клиента — `404`, а не пустой ответ: учётная запись с ролью `client`,
-   * к которой клиент ещё не привязан, — это незавершённое заведение, и человек
-   * обязан увидеть, что дело не в его настройках.
-   */
   /**
    * Клиент по идентификатору, полученному **от опознанного предъявителя**.
    *
@@ -453,11 +452,37 @@ export class BillingService {
     return client;
   }
 
+  /**
+   * Клиент, которым владеет учётная запись.
+   *
+   * Единственный вход клиентского контура: идентификатор клиента там нигде не
+   * принимается — он выводится отсюда, из сессии. Иначе клиенту пришлось бы верить
+   * на слово, чей счёт он открывает.
+   *
+   * Нет клиента — `404`, а не пустой ответ. Защитник пускает в кабинет клиента только
+   * владельца карточки (ADR-0052), так что сюда без неё приходит лишь обработчик,
+   * открытый и сотрудникам, — и «у вас ничего нет» было бы неправдой.
+   */
   async requireClientOwnedBy(userId: UserId): Promise<ClientRow> {
     const own = await this.repository.findClientOwnedBy(userId);
     const client = own === undefined ? undefined : await this.repository.findClient(own.id);
     if (client === undefined) throw notFound('Клиент не найден');
     return client;
+  }
+
+  /**
+   * Кабинеты участника рынка — карточки, которыми он владеет
+   * ([ADR-0052](../../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)).
+   *
+   * Спрашивает защитник на каждом входе в собственный контур: кабинет открывает
+   * владение, а не роль. Два запроса идут параллельно — по индексам владельца.
+   */
+  async cabinetsOf(userId: UserId): Promise<OwnedCabinets> {
+    const [client, partner] = await Promise.all([
+      this.repository.findClientOwnedBy(userId),
+      this.repository.findPartnerOwnedBy(userId),
+    ]);
+    return { client: client?.id, partner: partner?.id };
   }
 
   /**
@@ -494,26 +519,61 @@ export class BillingService {
    * **Один владелец — один клиент**, по той же причине, что и у партнёра:
    * `findClientOwnedBy` берёт первую попавшуюся строку, и второй клиент у того же
    * человека оказался бы для него самого недоступен — он не увидел бы ни своих каналов,
-   * ни своих записей разговоров.
+   * ни своих записей разговоров. Гонку двух одновременных заведений закрывает
+   * уникальный индекс владельца, проверка здесь — ради понятного отказа.
+   *
+   * Запись, счёт и строка журнала `client.created` — одна транзакция: заведение
+   * меняет, кому площадка разрешает звонить, и без записи в журнале оно недоделано.
+   * Переданный `executor` — транзакция вызывающего (одобрение заявки, ADR-0052).
+   * Состояние по умолчанию `pending`: включает человек.
    */
-  async createClient(draft: {
-    ownerUserId: UserId;
-    name: string;
-    overdraftLimit: MoneyAmount;
-  }): Promise<ClientRow> {
-    const existing = await this.repository.findClientOwnedBy(draft.ownerUserId);
+  async createClient(
+    draft: {
+      ownerUserId: UserId;
+      name: string;
+      overdraftLimit: MoneyAmount;
+      status?: ClientStatus;
+    },
+    actor: { userId: UserId; role: UserRole },
+    executor?: Executor,
+  ): Promise<ClientRow> {
+    if (executor === undefined) {
+      return this.repository.db.transaction((tx) => this.createClient(draft, actor, tx));
+    }
+
+    const existing = await this.repository.findClientOwnedBy(draft.ownerUserId, executor);
     if (existing !== undefined) {
       throw conflict('У этой учётной записи уже есть клиент');
     }
 
-    const client = await this.repository.createClient({
-      ownerUserId: draft.ownerUserId,
-      name: draft.name,
-      status: 'pending',
-      overdraftLimit: draft.overdraftLimit,
-    });
+    const client = await this.repository.createClient(
+      {
+        ownerUserId: draft.ownerUserId,
+        name: draft.name,
+        status: draft.status ?? 'pending',
+        overdraftLimit: draft.overdraftLimit,
+      },
+      executor,
+    );
     // Счёт заводится сразу: клиент без счёта — участник, которому некуда начислить.
-    await this.accountOf('client', client.id);
+    await this.repository.ensureAccount('client', client.id, DEFAULT_CURRENCY, executor);
+
+    await this.audit.record(
+      {
+        action: 'client.created',
+        entityType: 'client',
+        entityId: client.id,
+        actorUserId: actor.userId,
+        actorRole: actor.role,
+        after: {
+          owner_user_id: client.ownerUserId,
+          name: client.name,
+          status: client.status,
+          overdraft_limit: Money.format(client.overdraftLimit),
+        },
+      },
+      executor,
+    );
 
     return client;
   }
@@ -618,24 +678,51 @@ export class BillingService {
    * по нему намерение слушать записи. Отказ на входе дешевле, чем запись, которую
    * потом не открыть.
    */
-  async createPartner(draft: {
-    ownerUserId: UserId;
-    name: string;
-    displayName: string;
-  }): Promise<PartnerRow> {
-    const existing = await this.repository.findPartnerOwnedBy(draft.ownerUserId);
+  async createPartner(
+    draft: {
+      ownerUserId: UserId;
+      name: string;
+      displayName: string;
+    },
+    actor: { userId: UserId; role: UserRole },
+    executor?: Executor,
+  ): Promise<PartnerRow> {
+    if (executor === undefined) {
+      return this.repository.db.transaction((tx) => this.createPartner(draft, actor, tx));
+    }
+
+    const existing = await this.repository.findPartnerOwnedBy(draft.ownerUserId, executor);
     if (existing !== undefined) {
       throw conflict('У этой учётной записи уже есть партнёр');
     }
 
-    const partner = await this.repository.createPartner({
-      ownerUserId: draft.ownerUserId,
-      name: draft.name,
-      status: 'pending',
-    });
-    await this.repository.setPartnerAlias(partner.id, draft.displayName);
+    const partner = await this.repository.createPartner(
+      { ownerUserId: draft.ownerUserId, name: draft.name, status: 'pending' },
+      executor,
+    );
+    // Псевдоним в той же транзакции: занятое имя раньше оставляло партнёра без
+    // псевдонима, и клиенты видели бы его пустым местом.
+    await this.repository.setPartnerAlias(partner.id, draft.displayName, executor);
     // Счёт заводится сразу: партнёр без счёта — участник, которому некуда начислить.
-    await this.accountOf('partner', partner.id);
+    await this.repository.ensureAccount('partner', partner.id, DEFAULT_CURRENCY, executor);
+
+    // Настоящее имя в журнал попадает: журнал читают только администратор и поддержка.
+    await this.audit.record(
+      {
+        action: 'partner.created',
+        entityType: 'partner',
+        entityId: partner.id,
+        actorUserId: actor.userId,
+        actorRole: actor.role,
+        after: {
+          owner_user_id: partner.ownerUserId,
+          name: partner.name,
+          display_name: draft.displayName,
+          status: partner.status,
+        },
+      },
+      executor,
+    );
 
     return partner;
   }

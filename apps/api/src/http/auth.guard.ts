@@ -15,13 +15,16 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import {
+  isStaffRole,
   permissionDenied,
   unauthenticated,
+  type Cabinet,
   type MachineKeyKind,
   type UserRole,
 } from '@zvonix/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { APP_CONFIG, type Config } from '../infra/tokens.js';
+import { BillingService } from '../modules/billing/billing.service.js';
 import { IdentityService, type Principal } from '../modules/identity/identity.service.js';
 import { readBearer } from '../modules/identity/session-token.js';
 import { readMachineKey } from '../modules/machine/machine-key.js';
@@ -42,6 +45,9 @@ import {
  */
 export const PUBLIC_KEY = 'zvonix:public';
 const ROLES_KEY = 'zvonix:roles';
+const CABINETS_KEY = 'zvonix:cabinets';
+
+const CABINET_GENITIVE: Record<Cabinet, string> = { client: 'клиента', partner: 'партнёра' };
 export const MACHINE_KEY = 'zvonix:machine';
 export const UNMETERED_KEY = 'zvonix:unmetered';
 
@@ -51,6 +57,18 @@ export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(PUBLIC
 /** Обработчик доступен только перечисленным ролям. */
 export const Roles = (...roles: UserRole[]): MethodDecorator & ClassDecorator =>
   SetMetadata(ROLES_KEY, roles);
+
+/**
+ * Обработчик открыт участнику рынка, у которого есть кабинет одного из перечисленных
+ * видов ([ADR-0052](../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)).
+ *
+ * Кабинет открывает **владение** карточкой клиента или партнёра, а не роль: у участника
+ * роль одна на оба кабинета. Рядом с `@Roles` пометки складываются через «или» —
+ * `@Roles('admin', 'support') @Cabinets('client')` пускает сотрудника и клиента.
+ * Сотрудника площадки эта пометка не пускает никогда: кабинетов у него нет.
+ */
+export const Cabinets = (...cabinets: Cabinet[]): MethodDecorator & ClassDecorator =>
+  SetMetadata(CABINETS_KEY, cabinets);
 
 /**
  * Обработчик машинного контура: узел АТС или клиентская интеграция (ADR-0019).
@@ -88,6 +106,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly identity: IdentityService,
     private readonly machine: MachineService,
+    private readonly billing: BillingService,
     @Inject(APP_CONFIG) config: Config,
   ) {
     this.secure = secureCookies(config);
@@ -113,17 +132,31 @@ export class AuthGuard implements CanActivate {
     const principal = await this.authenticateHuman(request, context);
     request.principal = principal;
 
-    const allowed = this.reflector.getAllAndOverride<UserRole[] | undefined>(ROLES_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (allowed !== undefined && allowed.length > 0 && !allowed.includes(principal.role)) {
-      // Роль — только первый рубеж. Владение конкретным объектом проверяет сервис:
-      // партнёр не должен видеть чужие звонки, а клиент — чужие записи.
-      throw permissionDenied('Недостаточно прав');
+    const targets = [context.getHandler(), context.getClass()];
+    const roles =
+      this.reflector.getAllAndOverride<UserRole[] | undefined>(ROLES_KEY, targets) ?? [];
+    const cabinets =
+      this.reflector.getAllAndOverride<Cabinet[] | undefined>(CABINETS_KEY, targets) ?? [];
+    if (roles.length === 0 && cabinets.length === 0) return true;
+
+    if (roles.includes(principal.role)) return true;
+    if (cabinets.length > 0 && !isStaffRole(principal.role)) {
+      const owned = await this.billing.cabinetsOf(principal.userId);
+      if (cabinets.some((cabinet) => owned[cabinet] !== undefined)) return true;
     }
 
-    return true;
+    // Роль и кабинет — только первый рубеж. Владение конкретным объектом проверяет
+    // сервис: партнёр не должен видеть чужие звонки, а клиент — чужие записи.
+    //
+    // Участнику без нужной карточки отказ называет причину: это не «чужое», а
+    // незавершённое подключение, и человек должен понять, что ему нужна заявка.
+    const [only] = cabinets;
+    if (cabinets.length === 1 && only !== undefined && !isStaffRole(principal.role)) {
+      throw permissionDenied(`Кабинет ${CABINET_GENITIVE[only]} не подключён`, {
+        details: { cabinet: only },
+      });
+    }
+    throw permissionDenied('Недостаточно прав');
   }
 
   /**

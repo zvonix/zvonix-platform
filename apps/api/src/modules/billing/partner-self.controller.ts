@@ -14,7 +14,7 @@
 
 import { Controller, Get, Query } from '@nestjs/common';
 import { Money, type PartnerStatus } from '@zvonix/shared';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets } from '../../http/auth.guard.js';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 import { CurrentUser } from '../../http/request-context.js';
 import type { Principal } from '../identity/identity.service.js';
@@ -52,7 +52,7 @@ export class PartnerSelfController {
    * счёта, партнёру платят, а не он платит. Остаток здесь — то, что причитается
    * к выплате; сами выплаты появятся на шестом этапе и уменьшат его проводкой.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Get('partner/account')
   async account(
     @CurrentUser() actor: Principal,
@@ -83,7 +83,7 @@ export class PartnerSelfController {
    * она. Спор о начислении иначе не разобрать, а разбор здесь и есть основной сценарий —
    * партнёр сверяет наши числа со счётом своего оператора.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Get('partner/entries')
   async entries(
     @CurrentUser() actor: Principal,

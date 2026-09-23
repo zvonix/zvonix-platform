@@ -569,6 +569,7 @@ export class TelephonyRepository {
       conditions.push(
         sql`(${channelPartnerPriorities.id} is not null or not exists (select 1 from ${channelPartnerPriorities} as configured where configured.channel_id = ${channelId}))`,
       );
+      conditions.push(notOwnTermination(channelId));
     }
 
     return this.db
@@ -1000,6 +1001,7 @@ export class TelephonyRepository {
       conditions.push(
         sql`(${channelPartnerPriorities.id} is not null or not exists (select 1 from ${channelPartnerPriorities} as configured where configured.channel_id = ${channelId}))`,
       );
+      conditions.push(notOwnTermination(channelId));
     }
 
     return this.db
@@ -1324,4 +1326,23 @@ function coversRegion(
         )}]::text[]`;
 
   return sql`coalesce((select bool_or(${partnerCoverage.regionKey} = any(${wanted})) from ${partnerCoverage} where ${partnerCoverage.partnerId} = ${partnerColumn}), true)`;
+}
+
+/**
+ * Условие «вызов этой линии не уходит на железо её же владельца»
+ * ([ADR-0052](../../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)).
+ *
+ * Один человек может быть и службой такси, и партнёром. Его звонки на его же SIM
+ * гоняли бы деньги по кругу через комиссию площадки и портили показатели качества,
+ * поэтому такой партнёр для его линий не кандидат вовсе. Сравниваются **владельцы
+ * карточек**, а не карточки: у клиента и партнёра разные идентификаторы, общий у них
+ * только человек.
+ *
+ * Условие стоит в самом отборе по линии, а не в маршрутизации: разбор причины отказа
+ * спрашивает тот же отбор, и исключённый партнёр не превращается там в «SIM есть,
+ * но не зарегистрирована». Если свободны были только свои SIM, отказ — «нет SIM»:
+ * клиенту незачем знать, что причиной был он сам как партнёр.
+ */
+function notOwnTermination(channelId: ChannelId): SQL {
+  return sql`${partners.ownerUserId} <> (select line_owner.owner_user_id from ${clients} as line_owner join ${channels} as line on line.client_id = line_owner.id where line.id = ${channelId})`;
 }

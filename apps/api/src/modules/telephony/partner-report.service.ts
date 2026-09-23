@@ -8,6 +8,7 @@
 
 import { Injectable } from '@nestjs/common';
 import {
+  isStaffRole,
   notFound,
   parseMsisdn,
   rateLimited,
@@ -93,7 +94,9 @@ export class PartnerReportService {
     // проверяется, обслуживал ли этот вызов кто-то другой.
     if (found === undefined) throw notFound('Вызов не найден');
 
-    if (requester.role === 'partner') {
+    // Администратор сообщает о любом вызове; остальных защитник пустил по кабинету
+    // партнёра, и сообщают они только о вызовах через свои SIM.
+    if (requester.role !== 'admin') {
       const partner = await this.billing.findPartnerOwnedBy(requester.userId);
       if (partner === undefined || partner.id !== found.partnerId) {
         throw notFound('Вызов не найден');
@@ -133,14 +136,14 @@ export class PartnerReportService {
    * Чей это партнёр.
    *
    * Партнёр видит только свои вызовы, администратор и поддержка — вызовы названного
-   * партнёра. Роль здесь первый рубеж, а не единственный: роль `partner` говорит лишь
-   * о том, что человек партнёр, но не о том, какой.
+   * партнёра. Кабинет здесь первый рубеж, а не единственный: защитник проверил, что
+   * у человека есть карточка партнёра, но не то, о каком партнёре он спрашивает.
    */
   private async subjectOf(
     requester: { userId: Id<'user'>; role: UserRole },
     partnerId: Id<'partner'> | undefined,
   ): Promise<Id<'partner'>> {
-    if (requester.role === 'partner') {
+    if (!isStaffRole(requester.role)) {
       const partner = await this.billing.findPartnerOwnedBy(requester.userId);
       if (partner === undefined) throw notFound('Партнёр не найден');
       return partner.id;
