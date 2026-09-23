@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { CABINET_HOME, homeCabinet, useCabinets } from '@/lib/cabinets';
 import type { CurrentUser } from '@/lib/session';
+import { Onboarding } from './onboarding';
 
 /**
  * Корень кабинета: разводит вошедшего.
@@ -53,10 +54,5 @@ function Home({ user }: { user: CurrentUser }) {
     );
   }
   if (cabinets.isPending) return null;
-  return (
-    <p role="status">
-      Кабинетов у вас пока нет: клиент или партнёр подключается заявкой, которую одобряет
-      администратор площадки.
-    </p>
-  );
+  return <Onboarding user={user} />;
 }

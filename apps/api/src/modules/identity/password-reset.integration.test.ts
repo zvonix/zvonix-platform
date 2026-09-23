@@ -107,6 +107,21 @@ describe('подтверждение адреса', () => {
     });
     expect(stored.email_confirmed_at).not.toBeNull();
     expect(stored.status).toBe('pending');
+
+    // Свой признак заявитель видит сам: экран заявки говорит, остался ли за ним этот шаг.
+    // Войти можно только с открытым входом — его открывает администратор.
+    await withDatabase(async (execute) => {
+      await execute(sql`update users set status = 'active' where email = ${email}`);
+    });
+    const session = await login(email, TEST_PASSWORD);
+    const me = await api().inject({
+      method: 'GET',
+      url: '/auth/me',
+      headers: { authorization: `Bearer ${session ?? ''}` },
+    });
+    expect(
+      me.json<{ user: { email_confirmed_at: string | null } }>().user.email_confirmed_at,
+    ).not.toBeNull();
   }, 120_000);
 
   it('ссылка срабатывает один раз', async () => {

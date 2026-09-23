@@ -5,6 +5,7 @@ import { APPLICATION_STATUSES, type ApplicationStatus, type Cabinet } from '@zvo
 import { Suspense, useState } from 'react';
 import { Choice } from '@/components/choice';
 import { ConfirmAction } from '@/components/confirm-action';
+import { ConfirmEmailButton } from '@/components/confirm-email-button';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { PageNav } from '@/components/page-nav';
@@ -233,7 +234,15 @@ function ApplicationRow({
           {APPLICATION_STATUS_NAME[application.status]}
         </span>
         {open && !application.applicant.email_confirmed && (
-          <div className="pt-1 text-warn">почта не подтверждена — одобрить пока нельзя</div>
+          <div className="flex flex-col items-start gap-1 pt-1">
+            <span className="text-warn">почта не подтверждена — одобрить пока нельзя</span>
+            {canChange && (
+              <ConfirmEmailButton
+                userId={application.applicant.id}
+                email={application.applicant.email}
+              />
+            )}
+          </div>
         )}
       </TableCell>
       <TableCell>

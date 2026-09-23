@@ -191,15 +191,10 @@ export class MailService implements OnApplicationShutdown {
    * ([ADR-0030](../../../../../docs/adr/0030-predel-pisem-na-adres.md)) сюда не относится
    * по той же причине: адрес называет администратор, а не посторонний.
    */
-  async sendTest(recipient?: string): Promise<{ delivered: boolean; error: string | null }> {
+  async sendTest(to: string): Promise<{ delivered: boolean; error: string | null }> {
     const mail = await this.settings.mail();
     if (mail.host === '') {
       throw validationFailed('Почта не настроена: задайте mail.host');
-    }
-
-    const to = recipient ?? mail.testRecipient;
-    if (to === '') {
-      throw validationFailed('Некуда отправлять: задайте адрес или настройку mail.test_recipient');
     }
 
     try {

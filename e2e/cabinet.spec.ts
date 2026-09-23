@@ -144,6 +144,40 @@ test.describe('заявки', () => {
     await expect(row.getByText('почта не подтверждена — одобрить пока нельзя')).toBeVisible();
     await expect(row.getByRole('button', { name: 'Одобрить' })).toBeDisabled();
   });
+
+  test('письмо не дошло — администратор подтверждает адрес вручную, и одобрить можно', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/applications');
+    const row = page.getByRole('row', { name: /Кузнецова Мария/u });
+    await row.getByRole('button', { name: 'Подтвердить почту' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('журнал');
+    await dialog.getByRole('button', { name: 'Подтвердить адрес' }).click();
+
+    await expect(row.getByText('почта не подтверждена — одобрить пока нельзя')).toHaveCount(0);
+    await expect(row.getByRole('button', { name: 'Одобрить' })).toBeEnabled();
+  });
+});
+
+test.describe('кабинета ещё нет', () => {
+  test('экран говорит, где заявка и что осталось сделать самому', async ({ page }) => {
+    // Раньше здесь была одна фраза «кабинетов пока нет», а в меню — «Второй кабинет».
+    await signIn(page, 'waiting@e2e.zvonix.test');
+    await expect(
+      page.getByRole('heading', { name: 'Заявка на кабинет партнёра на проверке' }),
+    ).toBeVisible();
+    await expect(page.getByText(/Подтвердите адрес/u)).toBeVisible();
+    await page.getByRole('button', { name: 'Прислать письмо ещё раз' }).click();
+    await expect(page.getByText(/Письмо отправлено ещё раз/u)).toBeVisible();
+
+    const rail = page.getByRole('navigation', { name: 'Разделы' });
+    await expect(rail.getByText('Второй кабинет')).toHaveCount(0);
+    await expect(rail.getByRole('link', { name: 'Моя заявка' })).toBeVisible();
+    // Имя в углу меню: кабинет читал `fullName`, а API отдаёт `full_name`.
+    await expect(rail.getByText('Соколов Андрей')).toBeVisible();
+  });
 });
 
 test.describe('версия выпуска в углу панели', () => {
@@ -482,6 +516,58 @@ test.describe('таблица шире экрана', () => {
       await expect(page.getByRole('row').filter({ hasText: PEOPLE.support })).toBeVisible();
       await expect(table).not.toHaveAttribute('tabindex', '0');
     });
+  });
+});
+
+test.describe('ссылки из писем', () => {
+  // Страниц не было: письмо с подтверждением адреса уходило, а ссылка из него вела
+  // на 404 (владелец, 2026-09-23). Выдуманный код доходит до API и получает его отказ —
+  // значит, страница есть и спрашивает нужный обработчик.
+  test('подтверждение адреса: страница есть и говорит, что ссылка устарела', async ({ page }) => {
+    await page.goto('/confirm-email?token=vydumannyy-kod-dlya-proverki');
+    await expect(page.getByRole('heading', { name: 'Подтверждение адреса' })).toBeVisible();
+    await expect(page.getByText(/Ссылка недействительна/u)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Перейти ко входу' })).toBeVisible();
+  });
+
+  test('подтверждение без кода в ссылке объясняет, что ссылку обрезали', async ({ page }) => {
+    await page.goto('/confirm-email');
+    await expect(page.getByText(/нет кода подтверждения/u)).toBeVisible();
+  });
+
+  test('обрезанная почтовой программой ссылка — «недействительна», а не отказ проверки', async ({
+    page,
+  }) => {
+    await page.goto('/confirm-email?token=abc');
+    await expect(page.getByText(/Ссылка недействительна/u)).toBeVisible();
+    await expect(page.getByText('Данные запроса не прошли проверку')).toHaveCount(0);
+  });
+
+  test('новый пароль: несовпадение видно до отправки, устаревшая ссылка — после', async ({
+    page,
+  }) => {
+    await page.goto('/reset-password?token=vydumannyy-kod-dlya-proverki');
+    await page.getByLabel('Новый пароль').fill('Новый-пароль-2026');
+    await page.getByLabel('Ещё раз').fill('Другой-пароль-2026');
+    await expect(page.getByText('Пароли не совпадают')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Сохранить пароль' })).toBeDisabled();
+
+    await page.getByLabel('Ещё раз').fill('Новый-пароль-2026');
+    await page.getByRole('button', { name: 'Сохранить пароль' }).click();
+    await expect(page.getByText(/Ссылка недействительна/u)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Запросить новую ссылку' })).toBeVisible();
+  });
+
+  test('«Забыли пароль?» со входа ведёт к заявке, ответ не выдаёт, есть ли адрес', async ({
+    page,
+  }) => {
+    await page.goto('/login');
+    await page.getByRole('link', { name: 'Забыли пароль?' }).click();
+    await expect(page).toHaveURL(/\/forgot-password$/u);
+    await page.getByLabel('Адрес почты').fill('nikogo-net@e2e.zvonix.test');
+    await page.getByRole('button', { name: 'Прислать ссылку' }).click();
+    await expect(page.getByRole('heading', { name: 'Проверьте почту' })).toBeVisible();
+    await expect(page.getByText(/Если адрес/u)).toBeVisible();
   });
 });
 

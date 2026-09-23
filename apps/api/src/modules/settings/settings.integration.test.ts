@@ -230,9 +230,27 @@ describe('почта берёт настройки отсюда', () => {
       method: 'POST',
       url: '/settings/mail/test',
       headers: auth(),
-      payload: {},
+      payload: { recipient: 'admin@example.test' },
     });
     expect(response.statusCode).toBe(400);
+  });
+
+  it('пробное письмо без адреса — отказ: адрес по умолчанию больше не хранится', async () => {
+    await change({ 'mail.host': 'smtp.example.test' });
+    const response = await api().inject({
+      method: 'POST',
+      url: '/settings/mail/test',
+      headers: auth(),
+      payload: {},
+    });
+    await change({ 'mail.host': '' });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('прежней настройки адреса пробного письма в списке нет', async () => {
+    const response = await api().inject({ method: 'GET', url: '/settings', headers: auth() });
+    const keys = response.json<{ settings: { key: string }[] }>().settings.map((row) => row.key);
+    expect(keys).not.toContain('mail.test_recipient');
   });
 });
 

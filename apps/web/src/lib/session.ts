@@ -7,9 +7,11 @@ import { request } from './api';
 export interface CurrentUser {
   readonly id: string;
   readonly email: string;
-  readonly fullName: string;
+  /** Имя — как отдаёт API. Прежде здесь стояло `fullName`, и имя в углу меню не показывалось никогда. */
+  readonly full_name: string;
   readonly role: UserRole;
   readonly status: UserStatus;
+  readonly email_confirmed_at: string | null;
 }
 
 const SESSION_QUERY_KEY = ['auth', 'me'] as const;

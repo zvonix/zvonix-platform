@@ -48,7 +48,6 @@ export interface MailSettings {
   readonly user: string;
   readonly password: string;
   readonly from: string;
-  readonly testRecipient: string;
 }
 
 export interface CaptchaSettings {
@@ -84,7 +83,6 @@ export class SettingsService {
       user: this.text(values, 'mail.user'),
       password: this.text(values, 'mail.password'),
       from: this.text(values, 'mail.from'),
-      testRecipient: this.text(values, 'mail.test_recipient'),
     };
   }
 

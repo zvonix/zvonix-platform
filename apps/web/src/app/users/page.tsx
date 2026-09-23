@@ -1,10 +1,17 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { USER_ROLES, USER_STATUSES, type UserRole, type UserStatus } from '@zvonix/shared';
+import {
+  isStaffRole,
+  USER_ROLES,
+  USER_STATUSES,
+  type UserRole,
+  type UserStatus,
+} from '@zvonix/shared';
 import { Suspense, useState } from 'react';
 import { Choice } from '@/components/choice';
 import { ConfirmAction } from '@/components/confirm-action';
+import { ConfirmEmailButton } from '@/components/confirm-email-button';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { FilterInput } from '@/components/filter-input';
@@ -215,7 +222,10 @@ function RowGroup({ user, self, canChange }: { user: UserRow; self: boolean; can
       </TableCell>
       <TableCell>
         {user.email_confirmed_at === null ? (
-          <span className="text-warn">нет</span>
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-warn">нет</span>
+            {canChange && <ConfirmEmailButton userId={user.id} email={user.email} />}
+          </span>
         ) : (
           <span className="num text-muted-foreground">{moment(user.email_confirmed_at)}</span>
         )}
@@ -306,6 +316,9 @@ function StatusChoice({ user, onDone }: { user: UserRow; onDone: () => void }) {
 
   const busy = activate.isPending || confirmStatus.isPending;
   const failed = asApiError(activate.error);
+  // Участнику вход без подтверждённого адреса не открывается — API ответит отказом,
+  // поэтому кнопка недоступна сразу и говорит почему (владелец, 2026-09-23).
+  const unconfirmed = !isStaffRole(user.role) && user.email_confirmed_at === null;
 
   return (
     <div className="flex min-h-0 flex-col">
@@ -319,6 +332,7 @@ function StatusChoice({ user, onDone }: { user: UserRow; onDone: () => void }) {
                 variant="outline"
                 size="sm"
                 aria-disabled={busy}
+                disabled={unconfirmed}
                 className="aria-disabled:opacity-50"
                 onClick={() => {
                   if (!busy) activate.mutate();
@@ -339,6 +353,17 @@ function StatusChoice({ user, onDone }: { user: UserRow; onDone: () => void }) {
             ),
           )}
         </div>
+        {unconfirmed && user.status !== 'active' && (
+          <div className="flex flex-col gap-2 rounded-md bg-warn-soft px-3 py-2 text-warn">
+            <span>
+              Адрес не подтверждён — вход не открыть. Человек подтверждает его по ссылке из письма;
+              если письмо не доходит, а адрес вы проверили иначе, подтвердите вручную.
+            </span>
+            <span className="self-start">
+              <ConfirmEmailButton userId={user.id} email={user.email} />
+            </span>
+          </div>
+        )}
         {failed !== undefined && <ErrorNote error={failed} />}
       </div>
 

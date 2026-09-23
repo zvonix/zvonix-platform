@@ -42,11 +42,6 @@ export const SETTINGS = {
     fallback: 'Zvonix <no-reply@localhost>',
     hint: 'Отправитель в заголовке письма',
   },
-  'mail.test_recipient': {
-    kind: 'string',
-    fallback: '',
-    hint: 'Куда уходит пробное письмо из админки',
-  },
 
   'captcha.site_key': {
     kind: 'string',
