@@ -1,0 +1,19 @@
+<configuration name="switch.conf" description="Ядро узла">
+  <settings>
+    <param name="colorize-console" value="false"/>
+    <param name="loglevel" value="info"/>
+    <param name="dump-cores" value="no"/>
+
+    <!-- Потолок на узел: при исчерпании ядро отвечает перегрузкой, а не деградирует. -->
+    <param name="max-sessions" value="1000"/>
+    <param name="sessions-per-second" value="30"/>
+
+    <!--
+      Диапазон голоса. deploy/server-setup.sh читает эти две строки, открывая файрвол:
+      держать их на одной строке каждую и не комментировать.
+    -->
+    <param name="rtp-start-port" value="16384"/>
+    <param name="rtp-end-port" value="32768"/>
+    <param name="rtp-enable-zrtp" value="false"/>
+  </settings>
+</configuration>

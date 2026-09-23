@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<!--
+  Корень конфигурации узла Zvonix (ADR-0051).
+
+  Установщик кладёт этот набор вместо штатного целиком: что здесь не описано,
+  того на узле нет. Штатный набор FreeSWITCH — демонстрационный, и он пускал сканеры
+  с паролем 1234 (2026-09-22). Правится в репозитории, в node/conf/, а не на узле:
+  повторная установка приведёт узел к набору.
+-->
+<document type="freeswitch/xml">
+  <X-PRE-PROCESS cmd="include" data="vars.xml"/>
+
+  <section name="configuration" description="Модули">
+    <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>
+  </section>
+
+  <section name="dialplan" description="Запасной диалплан: основной даёт площадка">
+    <X-PRE-PROCESS cmd="include" data="dialplan/*.xml"/>
+  </section>
+
+  <section name="directory" description="Пусто: учётные записи даёт площадка">
+    <X-PRE-PROCESS cmd="include" data="directory/*.xml"/>
+  </section>
+</document>

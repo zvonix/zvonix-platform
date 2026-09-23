@@ -1,0 +1,21 @@
+<include>
+  <!--
+    Глобальные переменные узла (ADR-0051). Метки @@…@@ подставляет установщик.
+
+    domain — SIP_REALM площадки. Он входит в a1-hash каждой учётной записи
+    (docs/api/telephony.md, «Realm один на всю платформу»): узел с другим доменом
+    не принял бы ни одного пароля.
+  -->
+  <X-PRE-PROCESS cmd="set" data="domain=@@SIP_REALM@@"/>
+  <X-PRE-PROCESS cmd="set" data="domain_name=$${domain}"/>
+
+  <!--
+    Кодеки. GOIP и GSM в России говорят на G.711 A-law (PCMA) — он первым, чтобы
+    не перекодировать. G.729 и G.723 собраны только для пропуска, без перекодирования.
+    Opus — для приложения партнёра на Android и софтфонов (ADR-0012).
+  -->
+  <X-PRE-PROCESS cmd="set" data="global_codec_prefs=PCMA,PCMU,G729,OPUS"/>
+  <X-PRE-PROCESS cmd="set" data="outbound_codec_prefs=PCMA,PCMU,G729"/>
+
+  <X-PRE-PROCESS cmd="set" data="console_loglevel=info"/>
+</include>

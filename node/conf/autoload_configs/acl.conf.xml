@@ -1,0 +1,8 @@
+<configuration name="acl.conf" description="Списки сетей">
+  <!--
+    Своих списков нет: нужны только встроенные — loopback.auto для ESL, nat.auto
+    и localnet.auto для профиля SIP. Файл есть, чтобы FreeSWITCH не искал штатный.
+  -->
+  <network-lists>
+  </network-lists>
+</configuration>

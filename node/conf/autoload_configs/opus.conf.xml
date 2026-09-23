@@ -1,0 +1,13 @@
+<configuration name="opus.conf" description="Кодек Opus">
+  <!--
+    Без этого файла mod_opus загружается, но пишет [ERR] на каждом старте (проверено
+    2026-09-22). Opus нужен приложению партнёра на Android и софтфонам (ADR-0012):
+    связь у них мобильная, поэтому включена коррекция потерь.
+  -->
+  <settings>
+    <param name="use-vbr" value="1"/>
+    <param name="complexity" value="10"/>
+    <param name="keep-fec-enabled" value="1"/>
+    <param name="packet-loss-percent" value="10"/>
+  </settings>
+</configuration>

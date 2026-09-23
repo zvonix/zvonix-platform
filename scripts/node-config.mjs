@@ -17,8 +17,31 @@ import { SyntaxValidator } from 'fast-xml-validator';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const NODE_DIR = path.join(ROOT, 'node');
 
-/** Подстановки, которые заполняет скрипт установки. В шаблонах они обязаны быть. */
-const PLACEHOLDERS = ['@@CONTROL_PLANE@@', '@@KEY_ID@@', '@@KEY_SECRET@@'];
+/**
+ * Подстановки, которые заполняет скрипт установки, — по файлам. Файл связи с площадкой
+ * без адреса или ключа означает, что они вписаны намертво: на узле это неработающая
+ * конфигурация либо чужой секрет в репозитории.
+ */
+const PLACEHOLDERS = {
+  'autoload_configs/xml_curl.conf.xml': ['@@CONTROL_PLANE@@', '@@KEY_ID@@', '@@KEY_SECRET@@'],
+  'autoload_configs/json_cdr.conf.xml': ['@@CONTROL_PLANE@@', '@@KEY_ID@@', '@@KEY_SECRET@@'],
+  'vars.xml': ['@@SIP_REALM@@'],
+  'autoload_configs/event_socket.conf.xml': ['@@ESL_PASSWORD@@'],
+};
+
+/**
+ * Чего в наборе быть не должно (ADR-0051). Каждое — то, через что 2026-09-22 на узел
+ * входили сканеры, пока на нём лежала штатная конфигурация.
+ */
+const FORBIDDEN = [
+  [/<user\s/u, 'учётная запись в статическом каталоге — учётные записи даёт только площадка'],
+  // По значению, а не по слову: комментарии набора называют эти пароли, объясняя запрет.
+  [/data="default_password=/u, 'штатный пароль пользователей'],
+  [/value="ClueCon"/u, 'штатный пароль ESL'],
+  [/name="listen-ip"\s+value="(?!127\.0\.0\.1")/u, 'ESL слушает не только 127.0.0.1'],
+  [/name="auth-calls"\s+value="false"/u, 'вызовы без проверки пароля'],
+  [/name="accept-blind-(reg|auth)"\s+value="true"/u, 'регистрация без проверки пароля'],
+];
 
 const problems = [];
 
@@ -52,12 +75,21 @@ for (const file of configs) {
     continue;
   }
 
-  // Шаблон без подстановок означает, что адрес или ключ вписаны намертво.
-  // На узле это либо неработающая конфигурация, либо чужой секрет в репозитории.
-  for (const placeholder of PLACEHOLDERS) {
+  const name = path.relative(path.join(NODE_DIR, 'conf'), file).split(path.sep).join('/');
+  for (const placeholder of PLACEHOLDERS[name] ?? []) {
     if (!content.includes(placeholder)) {
       problems.push(`${relative(file)}: нет подстановки ${placeholder}`);
     }
+  }
+  for (const [pattern, meaning] of FORBIDDEN) {
+    if (pattern.test(content)) problems.push(`${relative(file)}: ${meaning}`);
+  }
+}
+
+// Набор без обязательного файла — это узел на штатном файле вместо нашего.
+for (const name of Object.keys(PLACEHOLDERS)) {
+  if (!configs.some((file) => file === path.join(NODE_DIR, 'conf', name))) {
+    problems.push(`node/conf/${name}: нет файла`);
   }
 }
 
@@ -68,6 +100,7 @@ for (const file of configs) {
 
 const SHELL_SCRIPTS = [
   'node/install.sh',
+  'node/build-freeswitch.sh',
   'deploy/deploy.sh',
   'deploy/server-setup.sh',
   'deploy/install.sh',

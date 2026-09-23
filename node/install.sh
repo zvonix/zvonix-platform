@@ -9,9 +9,9 @@
 # Скрипт обменивает токен на постоянный ключ и подставляет его в конфигурацию.
 #
 # Этот файл — **шаблон**. Его отдаёт control plane по `GET /install.sh`, подставляя
-# свой адрес, параметры репозитория пакетов и **сами шаблоны конфигурации** внутрь
-# (ADR-0045). Поэтому скрипт ничего не читает с диска: у него нет шага, на котором
-# он может оказаться без своих файлов. Прежняя редакция читала `./conf` рядом с собой
+# свой адрес, SIP-домен, параметры репозитория пакетов и **весь набор конфигурации
+# узла** внутрь (ADR-0045, ADR-0051). Поэтому скрипт ничего не читает с диска: у него
+# нет шага, на котором он может оказаться без своих файлов. Прежняя редакция читала `./conf` рядом с собой
 # и в конвейере `curl | bash` не находила ничего — `$0` там равно `bash`.
 #
 # Целевая ОС — Ubuntu. Скрипт идемпотентен: повторный запуск с новым токеном
@@ -21,12 +21,23 @@ set -euo pipefail
 
 TOKEN="${1:-}"
 CONTROL_PLANE="${ZVONIX_CONTROL_PLANE:-@@CONTROL_PLANE@@}"
+# SIP-домен площадки: входит в a1-hash каждой учётной записи (docs/api/telephony.md),
+# поэтому узел не выбирает его, а берёт у площадки (ADR-0051).
+SIP_REALM="${ZVONIX_SIP_REALM:-@@SIP_REALM@@}"
 PACKAGE_REPO="${ZVONIX_PACKAGE_REPO:-@@PACKAGE_REPO@@}"
 PACKAGE_SUITE="${ZVONIX_PACKAGE_SUITE:-@@PACKAGE_SUITE@@}"
 PACKAGE_KEY_FINGERPRINT="${ZVONIX_PACKAGE_KEY_FINGERPRINT:-@@PACKAGE_KEY_FINGERPRINT@@}"
 CONF_DIR="${ZVONIX_CONF_DIR:-}"
 STATE_DIR="${ZVONIX_STATE_DIR:-/var/lib/zvonix}"
 KEYRING="/usr/share/keyrings/zvonix-packages.gpg"
+
+# Control plane заменяет в этом файле **каждое** вхождение целой метки. Поэтому целая
+# метка стоит только в присваиваниях выше, а проверки «не подставлено» и замена меток
+# в шаблонах XML собирают её из частей: целая, она сама стала бы подставленным значением.
+# Так и было до первого живого запуска (2026-09-22): проверка сравнивала адрес сам
+# с собой и отказывала всегда, отпечаток ключа подписи не сверялся, а в конфигурацию
+# FreeSWITCH вместо адреса площадки ушла бы метка.
+MARK='@@'
 
 die() {
   echo "Ошибка: $*" >&2
@@ -44,7 +55,10 @@ require() {
 
 [ -n "$TOKEN" ] || die "не передан токен установки. Команду выдаёт панель управления"
 [ "$(id -u)" -eq 0 ] || die "нужны права root: запускайте через sudo"
-[ "$CONTROL_PLANE" != "@@CONTROL_PLANE@@" ] || die "адрес control plane не подставлен"
+case "$CONTROL_PLANE" in
+  "" | *"$MARK"*) die "адрес control plane не подставлен" ;;
+esac
+[[ "$SIP_REALM" =~ ^[a-z0-9.-]+$ ]] || die "SIP-домен площадки не подставлен или недопустим: «${SIP_REALM}»"
 # Репозиторий нужен ровно затем, чтобы **поставить** FreeSWITCH. Если он уже стоит,
 # ставить нечего, и требовать адрес значило бы не пускать на узел, которому он не нужен.
 # Первый узел площадки поднимается именно так: FreeSWITCH на нём собран руками,
@@ -54,7 +68,7 @@ if command -v freeswitch >/dev/null 2>&1; then
 else
   NEED_PACKAGES=yes
   case "$PACKAGE_REPO" in
-    ""|"@@PACKAGE_REPO@@")
+    "" | *"$MARK"*)
       die "FreeSWITCH не установлен, а репозиторий пакетов не задан. Задайте NODE_PACKAGE_REPO_URL на площадке или поставьте FreeSWITCH на этот сервер" ;;
   esac
   [ -n "$PACKAGE_SUITE" ] || die "не задан выпуск Ubuntu для репозитория пакетов"
@@ -136,7 +150,7 @@ else
   cp "$KEY_TMP" "$KEY_BIN"
 fi
 
-if [ -n "$PACKAGE_KEY_FINGERPRINT" ] && [ "$PACKAGE_KEY_FINGERPRINT" != "@@PACKAGE_KEY_FINGERPRINT@@" ]; then
+if [ -n "$PACKAGE_KEY_FINGERPRINT" ] && [[ "$PACKAGE_KEY_FINGERPRINT" != *"$MARK"* ]]; then
   EXPECTED="$(echo "$PACKAGE_KEY_FINGERPRINT" | tr -d ' :' | tr '[:lower:]' '[:upper:]')"
   ACTUAL="$(gpg --show-keys --with-colons "$KEY_BIN" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')"
   [ -n "$ACTUAL" ] || die "не удалось прочитать отпечаток скачанного ключа подписи"
@@ -207,81 +221,130 @@ if [ "$NEED_PACKAGES" = yes ]; then
     freeswitch-mod-sndfile freeswitch-mod-event-socket
 fi
 
-# --- Конфигурация ------------------------------------------------------------
+# --- Конфигурация (ADR-0051) --------------------------------------------------
+# Узел получает **свой набор целиком**, а не дописку в штатный. Штатный набор
+# FreeSWITCH — демонстрационный: 24 пользователя с паролем 1234, контекст default,
+# принимающий вызовы, ESL на всех адресах с ClueCon. С ним на узел за полчаса вошли
+# сканеры (2026-09-22). Что в наборе не описано, того на узле нет.
 
 install -d -m 0750 "$STATE_DIR" "${STATE_DIR}/cdr-failed" "${STATE_DIR}/rec"
-install -d -m 0755 "${CONF_DIR}/autoload_configs"
 
-# Секрет попадает в файлы конфигурации, и это единственный способ, которым
-# FreeSWITCH умеет аутентифицироваться (ADR-0019). Права закрываются сразу:
-# кто получил root на узле, получил и ключ, но остальным его видеть незачем.
+# Секреты попадают в файлы конфигурации — так FreeSWITCH умеет аутентифицироваться
+# (ADR-0019). Права закрываются сразу: кто получил root на узле, получил и ключ,
+# но остальным его видеть незачем.
 umask 077
 
-# Шаблоны лежат внутри самого скрипта: их вложил control plane, отдавая его.
-# Подстановки `@@KEY_ID@@` и `@@KEY_SECRET@@` он оставил нетронутыми — ключа
-# на его стороне не существует, он появляется только здесь.
-xml_curl_template() {
-  cat <<'ZVONIX_TEMPLATE_EOF'
-@@TEMPLATE_XML_CURL@@
-ZVONIX_TEMPLATE_EOF
+# Пароль ESL порождается здесь при первой установке и лежит в /etc/fs_cli.conf
+# (только root): оттуда его берёт fs_cli, и повторная установка его не меняет.
+FS_CLI_CONF=/etc/fs_cli.conf
+ESL_PASSWORD=""
+if [ -f "$FS_CLI_CONF" ]; then
+  ESL_PASSWORD="$(sed -n 's/^password => //p' "$FS_CLI_CONF" | head -1)"
+fi
+if [[ ! "$ESL_PASSWORD" =~ ^[0-9a-f]{32,}$ ]]; then
+  ESL_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+  printf '[default]\nhost => 127.0.0.1\nport => 8021\npassword => %s\n' "$ESL_PASSWORD" >"$FS_CLI_CONF"
+fi
+chmod 0600 "$FS_CLI_CONF"
+
+# Набор собирается рядом с каталогом конфигурации — на той же файловой системе,
+# чтобы подмена была переименованием, а не копированием.
+STAGE="${CONF_DIR}.zvonix-new"
+rm -rf "$STAGE"
+install -d -m 0750 "$STAGE"
+
+conf_file() {
+  install -d -m 0750 "${STAGE}/$(dirname "$1")"
+  cat >"${STAGE}/$1"
 }
 
-json_cdr_template() {
-  cat <<'ZVONIX_TEMPLATE_EOF'
-@@TEMPLATE_JSON_CDR@@
-ZVONIX_TEMPLATE_EOF
+# Файлы набора вложил control plane, отдавая скрипт: читать с диска нечего.
+stage_conf() {
+@@CONF_FILES@@
 }
 
-apply_template() {
-  local produce="$1" target="$2"
+stage_conf
+# Транки к партнёрам по SIP собирает агент узла сюда (ADR-0039); пока агента нет, пусто.
+install -d -m 0750 "${STAGE}/zvonix-gateways"
 
-  "$produce" | sed \
-    -e "s|@@CONTROL_PLANE@@|${CONTROL_PLANE}|g" \
-    -e "s|@@KEY_ID@@|${KEY_ID}|g" \
-    -e "s|@@KEY_SECRET@@|${KEY_SECRET}|g" \
-    > "$target"
-  chmod 0640 "$target"
-  echo "Записан $target"
-}
+find "$STAGE" -type f -name '*.xml' -exec sed -i \
+  -e "s|${MARK}CONTROL_PLANE${MARK}|${CONTROL_PLANE}|g" \
+  -e "s|${MARK}SIP_REALM${MARK}|${SIP_REALM}|g" \
+  -e "s|${MARK}KEY_ID${MARK}|${KEY_ID}|g" \
+  -e "s|${MARK}KEY_SECRET${MARK}|${KEY_SECRET}|g" \
+  -e "s|${MARK}ESL_PASSWORD${MARK}|${ESL_PASSWORD}|g" \
+  {} +
+if grep -rqE "${MARK}[A-Z_]+${MARK}" "$STAGE"; then
+  die "в наборе конфигурации остались незаполненные метки: $(grep -rlE "${MARK}[A-Z_]+${MARK}" "$STAGE" | tr '\n' ' ')"
+fi
 
-# --- Загрузка модулей ---------------------------------------------------------
-# Собранный модуль сам собой не загружается: его имя должно стоять в списке
-# автозагрузки. Штатная конфигурация FreeSWITCH держит `mod_xml_curl`
-# **закомментированным**, а `mod_json_cdr` не упоминает вовсе — проверено на живой
-# установке 1.10.12. Без этого узел настраивается, выглядит рабочим и при этом
-# не спрашивает маршрут и не шлёт CDR: то есть не звонит и не выставляет счетов.
-
-ensure_module() {
-  local module="$1"
-  local file="${CONF_DIR}/autoload_configs/modules.conf.xml"
-
-  [ -f "$file" ] || die "не найден ${file} — FreeSWITCH установлен не полностью"
-
-  # Сначала снимаем комментарий, если строка есть, но выключена.
-  sed -i "s|<!--[[:space:]]*<load module=\"${module}\"/>[[:space:]]*-->|<load module=\"${module}\"/>|" "$file"
-
-  # Если строки нет вовсе — дописываем перед закрывающим тегом.
-  if ! grep -q "<load module=\"${module}\"/>" "$file"; then
-    sed -i "s|</modules>|  <load module=\"${module}\"/>\n  </modules>|" "$file"
+# Прежний каталог не удаляется, а откладывается: штатный — один раз, в .before-zvonix,
+# прежний наш — в .previous. Есть с чем сравнить и куда откатиться.
+if [ -e "$CONF_DIR" ]; then
+  if [ ! -e "${CONF_DIR}.before-zvonix" ]; then
+    mv "$CONF_DIR" "${CONF_DIR}.before-zvonix"
+  else
+    rm -rf "${CONF_DIR}.previous"
+    mv "$CONF_DIR" "${CONF_DIR}.previous"
   fi
-}
-
-ensure_module mod_xml_curl
-ensure_module mod_json_cdr
-echo "Модули маршрута и CDR включены в автозагрузку"
-
-apply_template xml_curl_template "${CONF_DIR}/autoload_configs/xml_curl.conf.xml"
-apply_template json_cdr_template "${CONF_DIR}/autoload_configs/json_cdr.conf.xml"
-
-chown -R freeswitch:freeswitch "$STATE_DIR" "$CONF_DIR" 2>/dev/null || true
+fi
+mv "$STAGE" "$CONF_DIR"
+chown -R freeswitch:freeswitch "$STATE_DIR" "$CONF_DIR"
+echo "Конфигурация FreeSWITCH заменена набором площадки: ${CONF_DIR}"
 
 # --- Запуск ------------------------------------------------------------------
 
 systemctl enable freeswitch >/dev/null 2>&1 || true
 systemctl restart freeswitch
 
+for attempt in $(seq 1 30); do
+  fs_cli -p "$ESL_PASSWORD" -x status >/dev/null 2>&1 && break
+  sleep 1
+done
+# Состояние — из общего списка профилей: `sofia status profile zvonix` показывает
+# настройки профиля, а слова RUNNING в нём нет (проверено на живом узле 2026-09-22).
+fs_cli -p "$ESL_PASSWORD" -x "sofia status" 2>/dev/null | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING' \
+  || die "профиль SIP zvonix не поднялся — journalctl -u freeswitch и журнал FreeSWITCH"
+
+# --- Защита от подбора паролей SIP (ADR-0051, ревизия) -----------------------
+# Каждая неудачная попытка регистрации — это запрос учётной записи у площадки. Один
+# сканер давал больше сотни попыток в секунду и занимал половину процессора API:
+# способ положить площадку, не трогая её саму (замер на живом узле 2026-09-22).
+
+fail2ban_file() {
+  install -d -m 0755 "/etc/fail2ban/$(dirname "$1")"
+  cat >"/etc/fail2ban/$1"
+  chmod 0644 "/etc/fail2ban/$1"
+}
+
+if ! command -v fail2ban-client >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y -qq fail2ban python3-systemd \
+    || echo "ВНИМАНИЕ: fail2ban не установился — подбор паролей SIP никто не остановит" >&2
+fi
+
+if command -v fail2ban-client >/dev/null 2>&1; then
+  # Каталог журнала — у самого FreeSWITCH: у сборки из исходников он под её префиксом.
+  FREESWITCH_LOG="$(fs_cli -p "$ESL_PASSWORD" -x 'global_getvar log_dir' 2>/dev/null)/freeswitch.log"
+  if [ -f "$FREESWITCH_LOG" ]; then
+@@FAIL2BAN_FILES@@
+    sed -i "s|${MARK}FREESWITCH_LOG${MARK}|${FREESWITCH_LOG}|" /etc/fail2ban/jail.d/zvonix-freeswitch.conf
+    systemctl enable fail2ban >/dev/null 2>&1 || true
+    systemctl restart fail2ban
+    for attempt in $(seq 1 15); do
+      fail2ban-client ping >/dev/null 2>&1 && break
+      sleep 1
+    done
+    fail2ban-client status zvonix-freeswitch >/dev/null 2>&1 \
+      && echo "Подбор паролей SIP закрывается: 20 неудач за 10 минут — час блокировки" \
+      || echo "ВНИМАНИЕ: тюрьма zvonix-freeswitch не поднялась — journalctl -u fail2ban" >&2
+  else
+    echo "ВНИМАНИЕ: журнал FreeSWITCH не найден (${FREESWITCH_LOG}) — защита от подбора паролей SIP не включена" >&2
+  fi
+fi
+
 echo
-echo "Готово. Узел «${NODE_NAME}» настроен."
+echo "Готово. Узел «${NODE_NAME}» настроен, профиль SIP zvonix работает."
 echo
 echo "Проверить, что ключ принимается с этого адреса:"
 echo "  curl -fsS -u '${KEY_ID}:<секрет>' ${CONTROL_PLANE}/machine/self"

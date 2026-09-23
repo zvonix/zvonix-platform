@@ -1,0 +1,18 @@
+<include>
+  <!--
+    Запасной диалплан (ADR-0051). Маршрут на каждый вызов даёт площадка по mod_xml_curl,
+    и сюда FreeSWITCH приходит, только когда её ответа нет: не отвечает, не уложилась
+    в timeout, ответ не разобран. Контракт на этот случай один — узел ведёт себя как
+    перегруженный и отвечает 503, а не звонит «как-нибудь» (docs/api/node.md,
+    «Когда control plane недоступен»). Штатный контекст default на этом месте
+    принимал вызовы сканеров.
+  -->
+  <context name="zvonix">
+    <extension name="zvonix-control-plane-unavailable">
+      <condition field="destination_number" expression="^.*$">
+        <action application="set" data="zvonix_reject_reason=control_plane_unavailable"/>
+        <action application="respond" data="503 Service Unavailable"/>
+      </condition>
+    </extension>
+  </context>
+</include>
