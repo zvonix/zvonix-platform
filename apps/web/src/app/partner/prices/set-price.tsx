@@ -3,6 +3,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { TERMINATION_KINDS, type TerminationKind } from '@zvonix/shared';
 import { useState } from 'react';
+import { DialogField, FormDialog } from '@/components/form-dialog';
+import { Button } from '@/components/ui/button';
+import { DialogClose } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { TERMINATION_KIND_NAME } from '@/lib/labels';
 import { money, numberFromInput } from '@/lib/money';
@@ -55,9 +59,58 @@ const EMPTY: Draft = {
  * тарифицируется настоящий вызов.
  */
 export function SetPrice({ directions }: { directions: readonly Direction[] }) {
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+
+  return (
+    <div className="flex flex-wrap items-baseline gap-3">
+      <FormDialog
+        label="Назначить цену"
+        title="Назначить цену"
+        description="Цена начинает действовать сразу и не переоценивает прошлое."
+        variant="outline"
+        disabled={directions.length === 0}
+        open={open}
+        onOpenChange={(next) => {
+          // Пока цена отправляется, окно не закрывается: иначе ответ пришёл бы в пустоту.
+          if (!pending) setOpen(next);
+        }}
+      >
+        <PriceForm
+          directions={directions}
+          onPending={setPending}
+          onSaved={() => {
+            setOpen(false);
+          }}
+        />
+      </FormDialog>
+      {directions.length === 0 && (
+        <span className="text-muted-foreground">
+          Площадка не открыла ни одного направления с коридором цен — назначать цену пока не по
+          чему.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Поля окна «Назначить цену».
+ *
+ * Не `DialogForm`: отказ по коридору показывается с числами ({@link Refusal}), а общая
+ * строка отказа окна их не знает.
+ */
+function PriceForm({
+  directions,
+  onPending,
+  onSaved,
+}: {
+  directions: readonly Direction[];
+  onPending: (pending: boolean) => void;
+  onSaved: () => void;
+}) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Draft>(EMPTY);
-  const [open, setOpen] = useState(false);
 
   const chosen = directions.find((direction) => direction.operator_id === draft.operatorId);
 
@@ -79,56 +132,36 @@ export function SetPrice({ directions }: { directions: readonly Direction[] }) {
           minimumDurationSeconds: draft.minimumDurationSeconds,
         },
       }),
+    onMutate: () => {
+      onPending(true);
+    },
+    onSettled: () => {
+      onPending(false);
+    },
     onSuccess: () => {
-      setDraft(EMPTY);
-      setOpen(false);
+      onSaved();
       void queryClient.invalidateQueries({ queryKey: ['partner', 'rates'] });
     },
   });
 
-  if (!open) {
-    return (
-      <div className="flex flex-wrap items-baseline gap-3">
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(true);
-          }}
-          disabled={directions.length === 0}
-          className="rounded-md border border-border px-2 py-1 hover:bg-muted disabled:opacity-50"
-        >
-          Назначить цену
-        </button>
-        {directions.length === 0 && (
-          <span className="text-muted-foreground">
-            Площадка не открыла ни одного направления с коридором цен — назначать цену пока не по
-            чему.
-          </span>
-        )}
-      </div>
-    );
-  }
-
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3"
+      className="flex min-h-0 flex-col"
       onSubmit={(event) => {
         event.preventDefault();
-        save.mutate();
+        if (!save.isPending) save.mutate();
       }}
     >
-      <h3 className="font-semibold">Назначить цену</h3>
-
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Оператор</span>
+      <div className="grid min-h-0 gap-3 overflow-y-auto px-5 pb-4 sm:grid-cols-2">
+        <DialogField label="Оператор">
           <select
             required
+            autoFocus
             value={draft.operatorId}
             onChange={(event) => {
               setDraft({ ...draft, operatorId: event.target.value });
             }}
-            className="h-9 w-[240px] rounded-md border border-input bg-transparent px-2"
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2"
           >
             <option value="">выберите</option>
             {directions.map((direction) => (
@@ -137,16 +170,15 @@ export function SetPrice({ directions }: { directions: readonly Direction[] }) {
               </option>
             ))}
           </select>
-        </label>
+        </DialogField>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Через что</span>
+        <DialogField label="Через что">
           <select
             value={draft.terminationKind}
             onChange={(event) => {
               setDraft({ ...draft, terminationKind: event.target.value as TerminationKind });
             }}
-            className="h-9 w-[150px] rounded-md border border-input bg-transparent px-2"
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2"
           >
             {TERMINATION_KINDS.map((kind) => (
               <option key={kind} value={kind}>
@@ -154,114 +186,115 @@ export function SetPrice({ directions }: { directions: readonly Direction[] }) {
               </option>
             ))}
           </select>
-        </label>
+        </DialogField>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Регион</span>
-          <input
+        <DialogField label="Регион" wide>
+          <Input
             value={draft.region}
             placeholder="любой"
+            autoComplete="off"
             onChange={(event) => {
               setDraft({ ...draft, region: event.target.value });
             }}
-            className="h-9 w-[190px] rounded-md border border-input bg-transparent px-2"
           />
-        </label>
-      </div>
+        </DialogField>
 
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">За минуту</span>
-          <input
+        <DialogField label="За минуту">
+          <Input
             required
+            className="num"
             inputMode="decimal"
+            autoComplete="off"
             value={draft.pricePerMinute}
             onChange={(event) => {
               setDraft({ ...draft, pricePerMinute: event.target.value });
             }}
-            className="num h-9 w-[120px] rounded-md border border-input bg-transparent px-2"
           />
-        </label>
+        </DialogField>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">За соединение</span>
-          <input
+        <DialogField label="За соединение">
+          <Input
+            className="num"
             inputMode="decimal"
+            autoComplete="off"
             placeholder="0"
             value={draft.connectionFee}
             onChange={(event) => {
               setDraft({ ...draft, connectionFee: event.target.value });
             }}
-            className="num h-9 w-[120px] rounded-md border border-input bg-transparent px-2"
           />
-        </label>
+        </DialogField>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Шаг, с</span>
-          <input
+        <DialogField label="Шаг, с">
+          <Input
             type="number"
+            className="num"
             min={1}
             max={3600}
             value={draft.billingIncrementSeconds}
             onChange={(event) => {
               setDraft({ ...draft, billingIncrementSeconds: event.target.value });
             }}
-            className="num h-9 w-[90px] rounded-md border border-input bg-transparent px-2"
           />
-        </label>
+        </DialogField>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Минимум, с</span>
-          <input
+        <DialogField label="Минимум, с">
+          <Input
             type="number"
+            className="num"
             min={0}
             max={3600}
             value={draft.minimumDurationSeconds}
             onChange={(event) => {
               setDraft({ ...draft, minimumDurationSeconds: event.target.value });
             }}
-            className="num h-9 w-[90px] rounded-md border border-input bg-transparent px-2"
           />
-        </label>
-      </div>
+        </DialogField>
 
-      {chosen !== undefined && (
-        <p className="text-muted-foreground">
-          Коридор по этому направлению: {money(chosen.min_price)} — {money(chosen.max_price)}.
-          Сравнивается не цена за минуту, а стоимость вызова в 60 секунд по всему тарифу — плата за
-          соединение и минимальная длительность входят в неё. Если по региону задан свой коридор, он
-          строже этого, и точные числа придут в отказе.
+        {chosen !== undefined && (
+          <p className="text-muted-foreground sm:col-span-2">
+            Коридор по этому направлению: {money(chosen.min_price)} — {money(chosen.max_price)}.
+            Сравнивается не цена за минуту, а стоимость вызова в 60 секунд по всему тарифу — плата
+            за соединение и минимальная длительность входят в неё. Если по региону задан свой
+            коридор, он строже этого, и точные числа придут в отказе.
+          </p>
+        )}
+
+        {save.error !== null && (
+          <div className="sm:col-span-2">
+            <Refusal error={save.error} />
+          </div>
+        )}
+
+        <p className="text-muted-foreground sm:col-span-2">
+          Цена начинает действовать сразу и не переоценивает прошлое: прежняя строка остаётся в
+          истории, а вызовы, тарифицированные по ней, пересчитаны не будут. В списке — только
+          направления, открытые площадкой: по остальным цену не назначить, и просить её об этом
+          нужно отдельно.
         </p>
-      )}
-
-      {save.error !== null && <Refusal error={save.error} />}
-
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={save.isPending}
-          className="rounded-md bg-rail px-3 py-1 text-rail-ink hover:bg-rail-active disabled:opacity-50"
-        >
-          Назначить
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(false);
-            save.reset();
-          }}
-          className="rounded-md border border-border px-3 py-1 hover:bg-muted"
-        >
-          Отмена
-        </button>
       </div>
 
-      <p className="text-muted-foreground">
-        Цена начинает действовать сразу и не переоценивает прошлое: прежняя строка остаётся в
-        истории, а вызовы, тарифицированные по ней, пересчитаны не будут. В списке — только
-        направления, открытые площадкой: по остальным цену не назначить, и просить её об этом нужно
-        отдельно.
-      </p>
+      <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
+        <Button
+          type="submit"
+          size="sm"
+          aria-disabled={save.isPending}
+          className="aria-disabled:opacity-50"
+        >
+          {save.isPending ? 'Назначаем…' : 'Назначить цену'}
+        </Button>
+        <DialogClose asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-disabled={save.isPending}
+            className="aria-disabled:opacity-50"
+          >
+            Отмена
+          </Button>
+        </DialogClose>
+      </div>
     </form>
   );
 }

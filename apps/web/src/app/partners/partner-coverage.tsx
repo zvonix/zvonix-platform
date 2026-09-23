@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCanChange } from '@/lib/access';
@@ -37,7 +38,6 @@ const asApiError = (error: unknown): ApiError | undefined =>
 export function PartnerCoverage({ partnerId }: { partnerId: string }) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
-  const [adding, setAdding] = useState('');
 
   const list = useQuery({
     queryKey: ['coverage', partnerId],
@@ -48,23 +48,19 @@ export function PartnerCoverage({ partnerId }: { partnerId: string }) {
     await queryClient.invalidateQueries({ queryKey: ['coverage', partnerId] });
   };
 
-  const save = useMutation({
-    mutationFn: (regions: string[]) =>
-      request<unknown>(`/partners/${partnerId}/coverage`, {
-        method: 'PUT',
-        body: { regions },
-      }),
-    onSuccess: refresh,
-  });
+  // Обработчик заменяет список целиком: каждое изменение отправляет весь новый список.
+  const replace = (regions: string[]) =>
+    request<unknown>(`/partners/${partnerId}/coverage`, { method: 'PUT', body: { regions } });
+
+  // Добавление и удаление — разные мутации: отказ добавления показывает его окно,
+  // а отказ удаления — строка под списком.
+  const add = useMutation({ mutationFn: replace, onSuccess: refresh });
+  const remove = useMutation({ mutationFn: replace, onSuccess: refresh });
 
   // Опустошение списка — отдельное действие со своим подтверждением: оно не сужает,
   // а расширяет покрытие до всех регионов. Отказ показывается в окне подтверждения.
   const clear = useMutation({
-    mutationFn: () =>
-      request<unknown>(`/partners/${partnerId}/coverage`, {
-        method: 'PUT',
-        body: { regions: [] },
-      }),
+    mutationFn: () => replace([]),
     onSuccess: () => atMost(refresh()),
   });
 
@@ -72,8 +68,8 @@ export function PartnerCoverage({ partnerId }: { partnerId: string }) {
   const regions = list.data?.regions ?? [];
   const names = regions.map((row) => row.region);
   const listError = asApiError(list.error);
-  const saveError = asApiError(save.error);
-  const busy = save.isPending || clear.isPending;
+  const removeError = asApiError(remove.error);
+  const busy = add.isPending || remove.isPending || clear.isPending;
 
   return (
     <div className="flex flex-col gap-2">
@@ -90,48 +86,18 @@ export function PartnerCoverage({ partnerId }: { partnerId: string }) {
       )}
 
       {canChange && loaded && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            const value = adding.trim();
-            if (value.length < 2 || names.includes(value)) return;
-            // Поле чистится только после добавления: удаление соседнего региона идёт той же
-            // мутацией и стирало набранное.
-            save.mutate([...names, value], {
-              onSuccess: () => {
-                setAdding('');
-              },
-            });
-          }}
-          className="flex flex-wrap items-end gap-2"
+        <FormDialog
+          label="Добавить регион"
+          title="Добавить регион покрытия"
+          variant="outline"
+          disabled={busy}
+          className="self-start"
         >
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Добавить регион</span>
-            <Input
-              className="w-[260px]"
-              value={adding}
-              autoComplete="off"
-              placeholder="Республика Татарстан"
-              onChange={(event) => {
-                setAdding(event.target.value);
-              }}
-            />
-          </label>
-          <Button
-            type="submit"
-            variant="outline"
-            size="sm"
-            disabled={busy || adding.trim().length < 2 || names.includes(adding.trim())}
-          >
-            Добавить
-          </Button>
-          {names.includes(adding.trim()) && (
-            <p className="w-full text-warn">Этот регион уже в списке.</p>
-          )}
-        </form>
+          <AddRegionForm names={names} onAdd={(value) => add.mutateAsync([...names, value])} />
+        </FormDialog>
       )}
 
-      {saveError !== undefined && <ErrorNote error={saveError} />}
+      {removeError !== undefined && <ErrorNote error={removeError} />}
 
       <div className="flex flex-wrap gap-2">
         {regions.map((row) => (
@@ -168,7 +134,7 @@ export function PartnerCoverage({ partnerId }: { partnerId: string }) {
                   size="xs"
                   disabled={busy}
                   onClick={() => {
-                    save.mutate(names.filter((name) => name !== row.region));
+                    remove.mutate(names.filter((name) => name !== row.region));
                   }}
                 >
                   Убрать
@@ -178,5 +144,49 @@ export function PartnerCoverage({ partnerId }: { partnerId: string }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * Добавление региона — поле окна. Список отправляется целиком, поэтому окно получает
+ * текущие названия: повтор отсекается до запроса, а не отказом API.
+ */
+function AddRegionForm({
+  names,
+  onAdd,
+}: {
+  names: readonly string[];
+  onAdd: (region: string) => Promise<unknown>;
+}) {
+  const [value, setValue] = useState('');
+  const region = value.trim();
+  const duplicate = names.includes(region);
+
+  return (
+    <DialogForm
+      submitLabel="Добавить регион"
+      canSubmit={region.length >= 2 && !duplicate}
+      onSubmit={() => onAdd(region)}
+    >
+      <DialogField
+        label="Регион"
+        hint={
+          duplicate
+            ? 'Этот регион уже в списке.'
+            : 'Написание приводится к ключу: «Красноярский кр.» и «Красноярский край» — один регион.'
+        }
+        wide
+      >
+        <Input
+          value={value}
+          autoComplete="off"
+          autoFocus
+          placeholder="Республика Татарстан"
+          onChange={(event) => {
+            setValue(event.target.value);
+          }}
+        />
+      </DialogField>
+    </DialogForm>
   );
 }

@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { DialogField, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
+import { DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -45,65 +47,45 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * тарифицированный вчера, не должен переоцениваться сегодняшней наценкой
  * ([ADR-0010](../../../../../docs/adr/0010-model-billinga.md)).
  *
- * Добавление — через подтверждение, которое называет охват и долю: форма заполнена
- * заранее, и раньше одно нажатие заводило наценку 15 % на всю площадку. Доля
+ * Добавление — окном, а в нём через подтверждение, которое называет охват и долю: форма
+ * заполнена заранее, и раньше одно нажатие заводило наценку 15 % на всю площадку. Доля
  * разбирается строкой: пустое поле больше не становится наценкой 0 %, а `0,285` — 28
  * сотыми вместо отказа (ui-review, 2026-09-14).
  */
 export function CommissionRules() {
   const canChange = useCanChange();
-  const queryClient = useQueryClient();
   const clients = useClients();
   const [open, setOpen] = useState(false);
-  const [clientId, setClientId] = useState('');
-  const [fixedFee, setFixedFee] = useState('0');
-  const [share, setShare] = useState('15');
 
   const list = useQuery({
     queryKey: ['commission-rules'],
     queryFn: () => request<{ rules: CommissionRule[] }>('/commission-rules'),
   });
 
-  const add = useMutation({
-    mutationFn: (input: { basisPoints: number; fee: string }) =>
-      request<unknown>('/commission-rules', {
-        method: 'POST',
-        body: {
-          ...(clientId === '' ? {} : { clientId }),
-          fixedFee: input.fee,
-          percentBasisPoints: input.basisPoints,
-        },
-      }),
-    onSuccess: () => {
-      setOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['commission-rules'] });
-    },
-  });
-
   const listError = asApiError(list.error);
-  const basisPoints = basisPointsFromPercent(share);
-  const shareValid = basisPoints !== undefined && basisPoints <= MAX_BASIS_POINTS;
-  const fee = moneyFromInput(fixedFee);
-  const ready = shareValid && fee !== undefined;
   const rules = list.data?.rules ?? [];
   const noDefault = list.data !== undefined && !rules.some((rule) => rule.client_id === null);
-  const clientName = clients.nameOf(clientId) ?? clientId;
 
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline gap-3">
         <h2 className="font-semibold">Наценка платформы</h2>
         {canChange && (
-          <Button
+          <FormDialog
+            label="Добавить правило"
+            title="Новое правило наценки"
+            description="Начинает действовать сейчас; прежние правила не отменяются."
             variant="outline"
-            size="sm"
             className="ml-auto"
-            onClick={() => {
-              setOpen(!open);
-            }}
+            open={open}
+            onOpenChange={setOpen}
           >
-            {open ? 'Отменить' : 'Добавить правило'}
-          </Button>
+            <NewCommissionRule
+              onAdded={() => {
+                setOpen(false);
+              }}
+            />
+          </FormDialog>
         )}
       </div>
 
@@ -112,106 +94,6 @@ export function CommissionRules() {
           Правила по умолчанию нет: клиент, у которого нет своего правила, не сможет позвонить —
           вызов отклонится с причиной «нет тарифа». Добавьте правило без клиента.
         </p>
-      )}
-
-      {canChange && open && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-          }}
-          className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-card p-3"
-        >
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Клиент</span>
-            <select
-              value={clientId}
-              onChange={(event) => {
-                setClientId(event.target.value);
-              }}
-              className="h-9 w-[240px] rounded-md border border-input bg-transparent px-2"
-            >
-              <option value="">все — правило по умолчанию</option>
-              {clients.rows.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Доля, %</span>
-            <Input
-              className="num w-[100px]"
-              inputMode="decimal"
-              autoComplete="off"
-              value={share}
-              onChange={(event) => {
-                setShare(event.target.value);
-              }}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Фикс за вызов, ₽</span>
-            <Input
-              className="num w-[120px]"
-              inputMode="decimal"
-              autoComplete="off"
-              value={fixedFee}
-              onChange={(event) => {
-                setFixedFee(event.target.value);
-              }}
-            />
-          </label>
-
-          <ConfirmAction
-            label="Добавить"
-            variant="default"
-            tone="neutral"
-            disabled={!ready}
-            title={
-              clientId === ''
-                ? 'Наценка по умолчанию — для всех клиентов'
-                : `Наценка для клиента «${clientName}»`
-            }
-            consequence={
-              <>
-                <p>
-                  Доля <b className="num">{shareValid ? percent(String(basisPoints)) : ''}</b> и
-                  фикс <b className="num">{fee === undefined ? '' : money(fee)}</b> за вызов
-                  начинают действовать сейчас —{' '}
-                  {clientId === ''
-                    ? 'для всех клиентов, у которых нет своего правила.'
-                    : `для клиента «${clientName}».`}
-                </p>
-                <p>
-                  Прежние правила не отменяются: прошлые вызовы тарифицированы по тем, что
-                  действовали на момент разговора.
-                </p>
-              </>
-            }
-            confirmLabel="Добавить правило"
-            onConfirm={() => add.mutateAsync({ basisPoints: basisPoints ?? 0, fee: fee ?? '0' })}
-          />
-
-          {!shareValid && (
-            <p className="w-full text-warn">
-              Доля обязательна: число от 0 до 100, не больше двух знаков после запятой — например 15
-              или 12,5.
-            </p>
-          )}
-          {fee === undefined && (
-            <p className="w-full text-warn">
-              Фикс — сумма в рублях, не больше шести знаков после запятой; ноль — без фикса.
-            </p>
-          )}
-
-          <p className="w-full text-muted-foreground">
-            Правило начинает действовать сейчас и не отменяет прежние: прошлые вызовы тарифицированы
-            по тем, что действовали на момент разговора.
-          </p>
-        </form>
       )}
 
       {listError !== undefined && <ErrorNote error={listError} />}
@@ -259,5 +141,147 @@ export function CommissionRules() {
         </Table>
       </div>
     </section>
+  );
+}
+
+/**
+ * Поля окна «Новое правило наценки». Кнопка окна не заводит правило сама, а открывает
+ * подтверждение поверх него: оно называет охват и долю, и отказ API показывается там же.
+ * Окно закрывается вызывающим, когда правило заведено.
+ */
+function NewCommissionRule({ onAdded }: { onAdded: () => void }) {
+  const queryClient = useQueryClient();
+  const clients = useClients();
+  const [clientId, setClientId] = useState('');
+  const [fixedFee, setFixedFee] = useState('0');
+  const [share, setShare] = useState('15');
+
+  const add = useMutation({
+    mutationFn: (input: { basisPoints: number; fee: string }) =>
+      request<unknown>('/commission-rules', {
+        method: 'POST',
+        body: {
+          ...(clientId === '' ? {} : { clientId }),
+          fixedFee: input.fee,
+          percentBasisPoints: input.basisPoints,
+        },
+      }),
+    onSuccess: () => {
+      onAdded();
+      void queryClient.invalidateQueries({ queryKey: ['commission-rules'] });
+    },
+  });
+
+  const basisPoints = basisPointsFromPercent(share);
+  const shareValid = basisPoints !== undefined && basisPoints <= MAX_BASIS_POINTS;
+  const fee = moneyFromInput(fixedFee);
+  const ready = shareValid && fee !== undefined;
+  const clientName = clients.nameOf(clientId) ?? clientId;
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+      }}
+      className="flex min-h-0 flex-col"
+    >
+      <div className="grid min-h-0 gap-3 overflow-y-auto px-5 pb-4 sm:grid-cols-2">
+        <DialogField label="Клиент" wide>
+          <select
+            value={clientId}
+            autoFocus
+            onChange={(event) => {
+              setClientId(event.target.value);
+            }}
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2"
+          >
+            <option value="">все — правило по умолчанию</option>
+            {clients.rows.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
+        </DialogField>
+
+        <DialogField label="Доля, %">
+          <Input
+            className="num"
+            inputMode="decimal"
+            autoComplete="off"
+            value={share}
+            onChange={(event) => {
+              setShare(event.target.value);
+            }}
+          />
+        </DialogField>
+
+        <DialogField label="Фикс за вызов, ₽">
+          <Input
+            className="num"
+            inputMode="decimal"
+            autoComplete="off"
+            value={fixedFee}
+            onChange={(event) => {
+              setFixedFee(event.target.value);
+            }}
+          />
+        </DialogField>
+
+        {!shareValid && (
+          <p className="text-warn sm:col-span-2">
+            Доля обязательна: число от 0 до 100, не больше двух знаков после запятой — например 15
+            или 12,5.
+          </p>
+        )}
+        {fee === undefined && (
+          <p className="text-warn sm:col-span-2">
+            Фикс — сумма в рублях, не больше шести знаков после запятой; ноль — без фикса.
+          </p>
+        )}
+
+        <p className="text-muted-foreground sm:col-span-2">
+          Правило начинает действовать сейчас и не отменяет прежние: прошлые вызовы тарифицированы
+          по тем, что действовали на момент разговора.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
+        <ConfirmAction
+          label="Добавить"
+          variant="default"
+          tone="neutral"
+          disabled={!ready}
+          title={
+            clientId === ''
+              ? 'Наценка по умолчанию — для всех клиентов'
+              : `Наценка для клиента «${clientName}»`
+          }
+          consequence={
+            <>
+              <p>
+                Доля <b className="num">{shareValid ? percent(String(basisPoints)) : ''}</b> и фикс{' '}
+                <b className="num">{fee === undefined ? '' : money(fee)}</b> за вызов начинают
+                действовать сейчас —{' '}
+                {clientId === ''
+                  ? 'для всех клиентов, у которых нет своего правила.'
+                  : `для клиента «${clientName}».`}
+              </p>
+              <p>
+                Прежние правила не отменяются: прошлые вызовы тарифицированы по тем, что действовали
+                на момент разговора.
+              </p>
+            </>
+          }
+          confirmLabel="Добавить правило"
+          onConfirm={() => add.mutateAsync({ basisPoints: basisPoints ?? 0, fee: fee ?? '0' })}
+        />
+        <DialogClose asChild>
+          <Button type="button" variant="outline" size="sm">
+            Отмена
+          </Button>
+        </DialogClose>
+      </div>
+    </form>
   );
 }

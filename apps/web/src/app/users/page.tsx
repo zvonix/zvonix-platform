@@ -8,8 +8,10 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { FilterInput } from '@/components/filter-input';
+import { FormDialog } from '@/components/form-dialog';
 import { PageNav } from '@/components/page-nav';
 import { Button } from '@/components/ui/button';
+import { DialogClose } from '@/components/ui/dialog';
 import {
   Table,
   TableBody,
@@ -29,7 +31,7 @@ import { useUrlState } from '@/lib/url-state';
 
 const PAGE_SIZE = 50;
 
-/** Столько же колонок у раскрытой строки: без этого подтверждение схлопывается в первую. */
+/** Столько колонок у строк-сообщений «загружаем» и «записей нет». */
 const COLUMNS = 9;
 
 /** Кнопка называет действие, а не состояние, в которое переводит. */
@@ -75,8 +77,6 @@ function UsersTable() {
   // Запрос общий с оболочкой кабинета: второго обращения к `/auth/me` не будет.
   const selfId = useSession().data?.id;
   const url = useUrlState();
-  const queryClient = useQueryClient();
-  const [editing, setEditing] = useState<string | undefined>(undefined);
 
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
   const search = new URLSearchParams(url.query);
@@ -87,36 +87,6 @@ function UsersTable() {
     queryFn: () => request<{ users: UserRow[]; total: number }>(`/users?${search.toString()}`),
   });
 
-  const invalidate = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ['users'] });
-  };
-
-  const activate = useMutation({
-    mutationFn: (id: string) =>
-      request<unknown>(`/users/${id}/status`, {
-        method: 'PATCH',
-        body: { status: 'active' },
-      }),
-    onSuccess: async () => {
-      setEditing(undefined);
-      await invalidate();
-    },
-  });
-
-  // Подтверждаемый перевод — своей мутацией: отказ виден в окне подтверждения.
-  const confirmStatus = useMutation({
-    mutationFn: (input: { id: string; status: UserStatus }) =>
-      request<unknown>(`/users/${input.id}/status`, {
-        method: 'PATCH',
-        body: { status: input.status },
-      }),
-    onSuccess: async () => {
-      setEditing(undefined);
-      await atMost(invalidate());
-    },
-  });
-
-  const error = asApiError(activate.error);
   const listError = asApiError(list.error);
 
   return (
@@ -168,7 +138,6 @@ function UsersTable() {
 
       {!canChange && <ReadOnly what="состояние учётных записей" />}
 
-      {error !== undefined && <ErrorNote error={error} />}
       {listError !== undefined && <ErrorNote error={listError} />}
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
@@ -204,21 +173,7 @@ function UsersTable() {
             )}
 
             {list.data?.users.map((user) => (
-              <RowGroup
-                key={user.id}
-                user={user}
-                self={user.id === selfId}
-                canChange={canChange}
-                open={editing === user.id}
-                busy={activate.isPending || confirmStatus.isPending}
-                onToggle={() => {
-                  setEditing(editing === user.id ? undefined : user.id);
-                }}
-                onActivate={() => {
-                  activate.mutate(user.id);
-                }}
-                onConfirmStatus={(status) => confirmStatus.mutateAsync({ id: user.id, status })}
-              />
+              <RowGroup key={user.id} user={user} self={user.id === selfId} canChange={canChange} />
             ))}
           </TableBody>
         </Table>
@@ -228,7 +183,7 @@ function UsersTable() {
 }
 
 /**
- * Строка учётной записи и раскрытый выбор нового состояния.
+ * Строка учётной записи; «Изменить» открывает окно выбора нового состояния.
  *
  * **Свою запись администратор не меняет** — API отвечает на это отказом: одно неверное
  * нажатие закрыло бы все его сессии, а вернуть его мог бы только другой администратор.
@@ -236,116 +191,164 @@ function UsersTable() {
  * одним нажатием, всё, что вход закрывает, — через подтверждение с последствием
  * (ui-review, 2026-09-14).
  */
-function RowGroup({
-  user,
-  self,
-  canChange,
-  open,
-  busy,
-  onToggle,
-  onActivate,
-  onConfirmStatus,
-}: {
-  user: UserRow;
-  self: boolean;
-  canChange: boolean;
-  open: boolean;
-  busy: boolean;
-  onToggle: () => void;
-  onActivate: () => void;
-  onConfirmStatus: (status: UserStatus) => Promise<unknown>;
-}) {
+function RowGroup({ user, self, canChange }: { user: UserRow; self: boolean; canChange: boolean }) {
+  const [open, setOpen] = useState(false);
   const locked = isFuture(user.locked_until);
   const changeable = canChange && !self && user.status !== 'disabled';
 
   return (
-    <>
-      <TableRow>
-        <TableCell>
-          <span className="num">{user.email}</span>
-          {locked && (
-            <span className="ml-2 rounded-sm bg-crit-soft px-1 text-crit">
-              вход закрыт до {moment(user.locked_until)}
-            </span>
-          )}
-        </TableCell>
-        <TableCell>{user.full_name}</TableCell>
-        <TableCell>{ROLE_NAME[user.role]}</TableCell>
-        <TableCell>
-          <span className={`rounded-sm px-1.5 py-0.5 ${statusTone(user.status)}`}>
-            {STATUS_NAME[user.status]}
+    <TableRow>
+      <TableCell>
+        <span className="num">{user.email}</span>
+        {locked && (
+          <span className="ml-2 rounded-sm bg-crit-soft px-1 text-crit">
+            вход закрыт до {moment(user.locked_until)}
           </span>
-        </TableCell>
-        <TableCell>
-          {user.email_confirmed_at === null ? (
-            <span className="text-warn">нет</span>
-          ) : (
-            <span className="num text-muted-foreground">{moment(user.email_confirmed_at)}</span>
-          )}
-        </TableCell>
-        <TableCell>
-          {user.totp_enabled ? 'включён' : <span className="text-muted-foreground">нет</span>}
-        </TableCell>
-        <TableCell>
-          <span className="num text-muted-foreground">{moment(user.last_login_at)}</span>
-        </TableCell>
-        <TableCell>
-          <span className="num text-muted-foreground">{moment(user.created_at)}</span>
-        </TableCell>
-        <TableCell className="whitespace-normal">
-          {canChange && self && (
-            <span className="text-muted-foreground">
-              ваша запись — состояние меняет другой администратор
-            </span>
-          )}
-          {canChange && !self && user.status === 'disabled' && (
-            <span className="text-muted-foreground">закрыта навсегда</span>
-          )}
-          {changeable && (
-            <Button variant="outline" size="sm" onClick={onToggle} aria-expanded={open}>
-              {open ? 'Отменить' : 'Изменить'}
-            </Button>
-          )}
-        </TableCell>
-      </TableRow>
+        )}
+      </TableCell>
+      <TableCell>{user.full_name}</TableCell>
+      <TableCell>{ROLE_NAME[user.role]}</TableCell>
+      <TableCell>
+        <span className={`rounded-sm px-1.5 py-0.5 ${statusTone(user.status)}`}>
+          {STATUS_NAME[user.status]}
+        </span>
+      </TableCell>
+      <TableCell>
+        {user.email_confirmed_at === null ? (
+          <span className="text-warn">нет</span>
+        ) : (
+          <span className="num text-muted-foreground">{moment(user.email_confirmed_at)}</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {user.totp_enabled ? 'включён' : <span className="text-muted-foreground">нет</span>}
+      </TableCell>
+      <TableCell>
+        <span className="num text-muted-foreground">{moment(user.last_login_at)}</span>
+      </TableCell>
+      <TableCell>
+        <span className="num text-muted-foreground">{moment(user.created_at)}</span>
+      </TableCell>
+      <TableCell className="whitespace-normal">
+        {canChange && self && (
+          <span className="text-muted-foreground">
+            ваша запись — состояние меняет другой администратор
+          </span>
+        )}
+        {canChange && !self && user.status === 'disabled' && (
+          <span className="text-muted-foreground">закрыта навсегда</span>
+        )}
+        {changeable && (
+          <FormDialog
+            label="Изменить"
+            variant="outline"
+            title={`Состояние учётной записи ${user.email}`}
+            description={
+              <>
+                Сейчас — {STATUS_NAME[user.status].toLowerCase()}. Действие попадает в журнал вместе
+                с тем, что было до.
+              </>
+            }
+            open={open}
+            onOpenChange={setOpen}
+          >
+            <StatusChoice
+              user={user}
+              onDone={() => {
+                setOpen(false);
+              }}
+            />
+          </FormDialog>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
 
-      {open && changeable && (
-        <TableRow className="bg-muted/40 hover:bg-muted/40">
-          <TableCell colSpan={COLUMNS} className="whitespace-normal">
-            <div className="flex flex-col gap-2">
-              <p className="text-muted-foreground">
-                Новое состояние для <span className="num">{user.email}</span>. Действие попадает в
-                журнал вместе с тем, что было до.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {USER_STATUSES.filter((status) => status !== user.status).map((status) =>
-                  status === 'active' ? (
-                    <Button
-                      key={status}
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      onClick={onActivate}
-                    >
-                      {USER_ACTION[status]}
-                    </Button>
-                  ) : (
-                    <ConfirmAction
-                      key={status}
-                      label={USER_ACTION[status]}
-                      title={`${USER_ACTION[status]}: ${user.email}`}
-                      consequence={<p>{STATUS_MEANING[status]}</p>}
-                      confirmLabel={USER_ACTION[status]}
-                      disabled={busy}
-                      onConfirm={() => onConfirmStatus(status)}
-                    />
-                  ),
-                )}
-              </div>
-            </div>
-          </TableCell>
-        </TableRow>
-      )}
-    </>
+/**
+ * Содержимое окна «Изменить»: по кнопке на каждое состояние, кроме нынешнего.
+ *
+ * Мутации живут здесь, а не на странице: окно монтируется открытым, и отказ прошлого
+ * открытия не встречает человека в следующем. Отказ открытия входа показывается в окне,
+ * отказ подтверждаемого перевода — в окне подтверждения поверх него.
+ */
+function StatusChoice({ user, onDone }: { user: UserRow; onDone: () => void }) {
+  const queryClient = useQueryClient();
+
+  const invalidate = async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: ['users'] });
+  };
+
+  const activate = useMutation({
+    mutationFn: () =>
+      request<unknown>(`/users/${user.id}/status`, {
+        method: 'PATCH',
+        body: { status: 'active' },
+      }),
+    onSuccess: async () => {
+      onDone();
+      await invalidate();
+    },
+  });
+
+  // Подтверждаемый перевод — своей мутацией: отказ виден в окне подтверждения.
+  const confirmStatus = useMutation({
+    mutationFn: (status: UserStatus) =>
+      request<unknown>(`/users/${user.id}/status`, {
+        method: 'PATCH',
+        body: { status },
+      }),
+    onSuccess: async () => {
+      onDone();
+      await atMost(invalidate());
+    },
+  });
+
+  const busy = activate.isPending || confirmStatus.isPending;
+  const failed = asApiError(activate.error);
+
+  return (
+    <div className="flex min-h-0 flex-col">
+      <div className="flex flex-col gap-3 overflow-y-auto px-5 pb-4">
+        <div className="flex flex-wrap gap-2">
+          {USER_STATUSES.filter((status) => status !== user.status).map((status) =>
+            status === 'active' ? (
+              <Button
+                key={status}
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-disabled={busy}
+                className="aria-disabled:opacity-50"
+                onClick={() => {
+                  if (!busy) activate.mutate();
+                }}
+              >
+                {activate.isPending ? 'Выполняем…' : USER_ACTION[status]}
+              </Button>
+            ) : (
+              <ConfirmAction
+                key={status}
+                label={USER_ACTION[status]}
+                title={`${USER_ACTION[status]}: ${user.email}`}
+                consequence={<p>{STATUS_MEANING[status]}</p>}
+                confirmLabel={USER_ACTION[status]}
+                disabled={busy}
+                onConfirm={() => confirmStatus.mutateAsync(status)}
+              />
+            ),
+          )}
+        </div>
+        {failed !== undefined && <ErrorNote error={failed} />}
+      </div>
+
+      <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
+        <DialogClose asChild>
+          <Button type="button" variant="outline" size="sm">
+            Отмена
+          </Button>
+        </DialogClose>
+      </div>
+    </div>
   );
 }

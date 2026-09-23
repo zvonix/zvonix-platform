@@ -22,6 +22,7 @@ import {
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { MobileMenuButton, MobileTabs, SideNav, type NavGroup } from '@/components/shell-nav';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
@@ -71,17 +72,6 @@ function ReleaseVersion() {
       {version === null ? 'сборка не из выпуска' : `версия ${version}`}
     </div>
   );
-}
-
-interface NavItem {
-  readonly href: string;
-  readonly label: string;
-  readonly Icon: typeof Settings2;
-}
-
-interface NavGroup {
-  readonly title: string;
-  readonly items: readonly NavItem[];
 }
 
 /**
@@ -186,9 +176,14 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
     {
       title: 'Мой кабинет',
       items: [
-        { href: '/partner/calls', label: 'Вызовы через меня', Icon: PhoneCall },
-        { href: '/partner/equipment', label: 'Моё оборудование', Icon: Radio },
-        { href: '/partner/prices', label: 'Мои цены', Icon: ReceiptText },
+        { href: '/partner/calls', label: 'Вызовы через меня', short: 'Вызовы', Icon: PhoneCall },
+        {
+          href: '/partner/equipment',
+          label: 'Моё оборудование',
+          short: 'Оборудование',
+          Icon: Radio,
+        },
+        { href: '/partner/prices', label: 'Мои цены', short: 'Цены', Icon: ReceiptText },
         { href: '/partner/money', label: 'Деньги', Icon: Wallet },
       ],
     },
@@ -333,51 +328,25 @@ export function ConsoleShell({
     ? STAFF_NAVIGATION[user.role]
     : [...cabinetGroups, ...secondCabinetGroup(owned)];
 
+  const footer = (
+    <>
+      {user.fullName}
+      <div className="truncate">{user.email}</div>
+      {SEES_RELEASE.includes(user.role) ? <ReleaseVersion /> : null}
+    </>
+  );
+  // У партнёра на телефоне — нижние вкладки: он работает с телефона в поле.
+  const tabs = current === 'partner';
+
   return (
-    <div className="grid min-h-dvh grid-rows-[auto_1fr] md:grid-cols-[210px_1fr] md:grid-rows-1">
-      <nav
-        className="flex flex-col gap-4 bg-rail px-2 py-3 text-rail-ink md:min-h-dvh"
-        aria-label="Разделы"
-      >
-        <div className="px-2 text-[15px] font-semibold tracking-tight text-white">Zvonix</div>
+    <div className="flex min-h-dvh">
+      <SideNav groups={groups} footer={footer} />
 
-        {groups.map((group) => (
-          <div key={group.title} className="flex flex-col gap-0.5">
-            <div className="px-2 pb-1 text-[10px] font-semibold tracking-widest text-rail-ink-dim uppercase">
-              {group.title}
-            </div>
-            {group.items.map((item) => {
-              const current = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-current={current ? 'page' : undefined}
-                  className={
-                    current
-                      ? 'flex items-center gap-2 rounded-md bg-rail-active px-2 py-1.5 text-white'
-                      : 'flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-rail-active hover:text-white'
-                  }
-                >
-                  <item.Icon size={14} strokeWidth={2} aria-hidden />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
-
-        <div className="mt-auto px-2 pt-2 text-[11px] text-rail-ink-dim">
-          {user.fullName}
-          <div className="truncate">{user.email}</div>
-          {SEES_RELEASE.includes(user.role) ? <ReleaseVersion /> : null}
-        </div>
-      </nav>
-
-      <div className="flex min-w-0 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         {/* Переносится, а не выдавливает: на телефоне переключатель кабинетов с темой
             и выходом в одну строку с заголовком не помещаются. */}
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-4 py-2.5">
+          {!tabs && <MobileMenuButton groups={groups} footer={footer} />}
           <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {owned !== undefined && current !== undefined ? (
@@ -398,7 +367,7 @@ export function ConsoleShell({
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 p-4">
+        <main className={`min-w-0 flex-1 p-4 ${tabs ? 'pb-20 md:pb-4' : ''}`}>
           {requireRole !== undefined && !allowed(requireRole).includes(user.role) ? (
             <p role="alert" className="text-crit">
               Раздел доступен {cabinetsOf(allowed(requireRole))}.
@@ -421,6 +390,8 @@ export function ConsoleShell({
           )}
         </main>
       </div>
+
+      {tabs && <MobileTabs groups={groups} footer={footer} />}
     </div>
   );
 }
@@ -485,11 +456,11 @@ function CabinetSwitch({ owned, current }: { owned: OwnedCabinets; current: Cabi
  */
 function ShellSkeleton({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
-    <div className="grid min-h-dvh grid-rows-[auto_1fr] md:grid-cols-[210px_1fr] md:grid-rows-1">
-      <div className="bg-rail px-2 py-3 md:min-h-dvh">
+    <div className="flex min-h-dvh">
+      <div className="hidden w-[232px] bg-rail px-2 py-3 md:block">
         <div className="px-2 text-[15px] font-semibold tracking-tight text-white">Zvonix</div>
       </div>
-      <div className="flex min-w-0 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center border-b border-border bg-card px-4 py-2.5">
           <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
         </header>

@@ -4,9 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
-import { ErrorNote } from '@/components/error-note';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { OneTimeSecret } from '@/components/one-time-secret';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -16,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ApiError, request } from '@/lib/api';
+import { request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
 import { moment } from '@/lib/format';
 
@@ -53,9 +52,6 @@ export default function MyIntegrationPage() {
     </ConsoleShell>
   );
 }
-
-const asApiError = (error: unknown): ApiError | undefined =>
-  error instanceof ApiError ? error : undefined;
 
 function Integration() {
   const queryClient = useQueryClient();
@@ -115,12 +111,20 @@ function Integration() {
         </OneTimeSecret>
       )}
 
-      <AddKey
-        onIssued={async (key, label) => {
-          setIssued({ key, label });
-          await refresh();
-        }}
-      />
+      <div>
+        <FormDialog
+          label="Завести ключ"
+          title="Новый ключ"
+          description="Секрет покажется один раз — сразу после заведения."
+        >
+          <AddKey
+            onIssued={async (key, label) => {
+              setIssued({ key, label });
+              await refresh();
+            }}
+          />
+        </FormDialog>
+      </div>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
@@ -184,14 +188,13 @@ function Integration() {
 }
 
 /**
- * Заведение ключа.
+ * Заведение ключа — поля окна «Новый ключ».
  *
  * Список адресов необязателен: диспетчерская может стоять за меняющимся адресом,
  * и пустой список — выбор клиента, а не недосмотр. Заполненный при этом сильнее всего
  * прочего: украденный ключ вне этих адресов бесполезен.
  */
 function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Promise<void> }) {
-  const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
   const [ips, setIps] = useState('');
 
@@ -208,89 +211,46 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
         },
       }),
     onSuccess: async (created) => {
-      const issuedFor = label;
-      setLabel('');
-      setIps('');
-      setOpen(false);
-      await onIssued(created.key, issuedFor);
+      await onIssued(created.key, label);
     },
   });
 
-  const error = asApiError(add.error);
-  const ready = label.trim() !== '';
-
-  if (!open) {
-    return (
-      <div>
-        <Button
-          size="sm"
-          onClick={() => {
-            setOpen(true);
-          }}
-        >
-          Завести ключ
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <form
-      className="flex max-w-[720px] flex-col gap-2 rounded-lg border border-border bg-card p-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (ready) add.mutate();
-      }}
+    <DialogForm
+      submitLabel="Завести и показать секрет"
+      canSubmit={label.trim() !== ''}
+      onSubmit={() => add.mutateAsync()}
     >
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Назначение</span>
-          <Input
-            className="w-[260px]"
-            value={label}
-            autoComplete="off"
-            placeholder="Диспетчерская, основной сервер"
-            onChange={(event) => {
-              setLabel(event.target.value);
-            }}
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Адреса, откуда принимать</span>
-          <Input
-            className="num w-[280px]"
-            value={ips}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="необязательно: 203.0.113.7"
-            onChange={(event) => {
-              setIps(event.target.value);
-            }}
-          />
-        </label>
-        <Button type="submit" size="sm" disabled={!ready || add.isPending}>
-          {add.isPending ? 'Заводим…' : 'Завести'}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setOpen(false);
+      <DialogField
+        label="Назначение"
+        hint="Обязательно — по нему ключ узнают в списке, когда его понадобится отозвать."
+      >
+        <Input
+          value={label}
+          autoComplete="off"
+          autoFocus
+          placeholder="Диспетчерская, основной сервер"
+          onChange={(event) => {
+            setLabel(event.target.value);
           }}
-        >
-          Отмена
-        </Button>
-      </div>
-
-      <p className="text-muted-foreground">
-        Назначение обязательно — по нему ключ узнают в списке, когда его понадобится отозвать.
-        Адреса перечисляются через запятую. Пустое поле означает «откуда угодно» — это допустимо, но
-        заполненный список остаётся единственной защитой на случай, если ключ утечёт.
-      </p>
-
-      {error !== undefined && <ErrorNote error={error} />}
-    </form>
+        />
+      </DialogField>
+      <DialogField
+        label="Адреса, откуда принимать"
+        hint="Через запятую. Пустое поле означает «откуда угодно» — это допустимо, но заполненный список остаётся единственной защитой на случай, если ключ утечёт."
+      >
+        <Input
+          className="num"
+          value={ips}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="необязательно: 203.0.113.7"
+          onChange={(event) => {
+            setIps(event.target.value);
+          }}
+        />
+      </DialogField>
+    </DialogForm>
   );
 }
 

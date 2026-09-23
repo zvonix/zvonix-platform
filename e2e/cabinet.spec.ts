@@ -268,7 +268,10 @@ test.describe('клиент заводит доступ своей систем�
     // перепиской. Теперь он появляется там же, где его и вставляют.
     await page.getByRole('button', { name: 'Завести ключ' }).click();
     await page.getByLabel('Назначение').fill('Диспетчерская на проверке');
-    await page.getByRole('button', { name: 'Завести', exact: true }).click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Завести и показать секрет' })
+      .click();
 
     await expect(page.getByText('Ключ «Диспетчерская на проверке»')).toBeVisible();
     await expect(page.getByText(/zvx_client_/u).first()).toBeVisible();
@@ -280,7 +283,10 @@ test.describe('клиент заводит доступ своей систем�
 
     await page.getByRole('button', { name: 'Завести ключ' }).click();
     await page.getByLabel('Назначение').fill('Ключ на отзыв');
-    await page.getByRole('button', { name: 'Завести', exact: true }).click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Завести и показать секрет' })
+      .click();
     await expect(page.getByText('Ключ «Ключ на отзыв»')).toBeVisible();
 
     const row = page.getByRole('row').filter({ hasText: 'Ключ на отзыв' });
@@ -315,7 +321,7 @@ test.describe('партнёр заводит своё оборудование',
     // шлюз партнёр не мог ничем: ни кнопки, ни обработчика.
     await page.getByRole('button', { name: 'Завести шлюз' }).click();
     await page.getByLabel('Название').fill('GOIP на проверке');
-    await page.getByRole('button', { name: 'Завести', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Завести шлюз' }).click();
 
     // Пароль показывается один раз и приходит туда же, где партнёр настраивает железо.
     await expect(page.getByText('Доступ для этого шлюза')).toBeVisible();
@@ -336,7 +342,7 @@ test.describe('партнёр заводит своё оборудование',
     await page.getByRole('button', { name: 'Завести SIM' }).click();
     await page.getByLabel('Номер карты').fill('+7 913 555-00-17');
     await page.getByLabel('Оператор').selectOption({ label: 'МегаФон' });
-    await page.getByRole('button', { name: 'Завести', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Завести SIM' }).click();
 
     // Источник оператора на стенде выключен: карта заводится и ждёт подтверждения.
     await expect(
@@ -351,7 +357,7 @@ test.describe('партнёр заводит своё оборудование',
 
     await page.getByRole('button', { name: 'Завести шлюз' }).click();
     await page.getByLabel('Название').fill('Шлюз на выключение');
-    await page.getByRole('button', { name: 'Завести', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Завести шлюз' }).click();
 
     const card = page.getByRole('region', { name: 'Шлюз на выключение' });
     await card.getByRole('button', { name: 'Включить' }).click();
@@ -375,7 +381,7 @@ test.describe('партнёр заводит своё оборудование',
 
     await page.getByRole('button', { name: 'Завести шлюз' }).click();
     await page.getByLabel('Название').fill('Шлюз на списание');
-    await page.getByRole('button', { name: 'Завести', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Завести шлюз' }).click();
     await expect(page.getByText('Шлюз на списание')).toBeVisible();
 
     // Окно называет последствие, а не «вы уверены?»: списание стоит рядом с «выключить»,
@@ -413,16 +419,16 @@ test.describe('список, который заменяется целиком'
     await page
       .getByRole('row')
       .filter({ hasText: 'Иванов Иван Иванович' })
-      .getByRole('button', { name: 'Открыть' })
+      .getByRole('link', { name: /Открыть/u })
       .click();
 
     await expect(page.getByText('Загружаем покрытие…')).toBeVisible();
-    await expect(page.getByLabel('Добавить регион')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Добавить регион' })).toHaveCount(0);
     // И не «список пуст — берёт любой регион»: до ответа это неправда.
     await expect(page.getByText('Список пуст')).toHaveCount(0);
 
     release();
-    await expect(page.getByLabel('Добавить регион')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Добавить регион' })).toBeVisible();
   });
 });
 

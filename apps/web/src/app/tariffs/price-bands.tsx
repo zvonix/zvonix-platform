@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { DialogField, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
+import { DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -44,54 +46,21 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * Прежний текст экрана «коридоров нет — цена ничем не ограничена» говорил обратное
  * (ui-review, 2026-09-14).
  *
- * Добавление — через подтверждение: проверка коридора идёт при назначении цены,
+ * Добавление — окном, а в нём через подтверждение: проверка коридора идёт при назначении цены,
  * поэтому суженный коридор оставляет уже назначенные цены снаружи, и это стоит сказать
  * до нажатия, а не найти потом в нарушениях.
  */
 export function PriceBands() {
   const canChange = useCanChange();
-  const queryClient = useQueryClient();
   const operators = useOperators();
   const [open, setOpen] = useState(false);
-  const [operatorId, setOperatorId] = useState('');
-  const [region, setRegion] = useState('');
-  const [minPrice, setMinPrice] = useState('');
-  const [maxPrice, setMaxPrice] = useState('');
 
   const list = useQuery({
     queryKey: ['price-bands'],
     queryFn: () => request<{ bands: PriceBand[] }>('/price-bands'),
   });
 
-  const add = useMutation({
-    mutationFn: (input: { min: string; max: string }) =>
-      request<unknown>('/price-bands', {
-        method: 'POST',
-        body: {
-          operatorId,
-          ...(region.trim() === '' ? {} : { region: region.trim() }),
-          minPrice: input.min,
-          maxPrice: input.max,
-        },
-      }),
-    onSuccess: () => {
-      setOpen(false);
-      setRegion('');
-      setMinPrice('');
-      setMaxPrice('');
-      // По префиксу: заодно обновляются и нарушения коридора, ключ которых начинается так же.
-      void queryClient.invalidateQueries({ queryKey: ['price-bands'] });
-    },
-  });
-
   const listError = asApiError(list.error);
-  const min = moneyFromInput(minPrice);
-  const max = moneyFromInput(maxPrice);
-  // Сравнение в микроединицах, а не числами с плавающей точкой: границы — деньги.
-  const inverted = min !== undefined && max !== undefined && microunits(max) < microunits(min);
-  const ready = operatorId !== '' && min !== undefined && max !== undefined && !inverted;
-  const operatorName = operators.nameOf(operatorId) ?? 'оператор';
-  const regionName = region.trim() === '' ? 'все регионы' : region.trim();
 
   return (
     <section className="flex flex-col gap-2">
@@ -101,122 +70,23 @@ export function PriceBands() {
           границы — стоимость вызова в 60 секунд, а не цена за минуту
         </span>
         {canChange && (
-          <Button
+          <FormDialog
+            label="Добавить коридор"
+            title="Новый коридор цен"
+            description="Границы — стоимость вызова в 60 секунд, а не цена за минуту."
             variant="outline"
-            size="sm"
             className="ml-auto"
-            onClick={() => {
-              setOpen(!open);
-            }}
+            open={open}
+            onOpenChange={setOpen}
           >
-            {open ? 'Отменить' : 'Добавить коридор'}
-          </Button>
+            <NewPriceBand
+              onAdded={() => {
+                setOpen(false);
+              }}
+            />
+          </FormDialog>
         )}
       </div>
-
-      {canChange && open && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-          }}
-          className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-card p-3"
-        >
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Оператор</span>
-            <select
-              value={operatorId}
-              disabled={!operators.ready}
-              onChange={(event) => {
-                setOperatorId(event.target.value);
-              }}
-              className="h-9 w-[280px] rounded-md border border-input bg-transparent px-2"
-            >
-              <option value="">
-                {operators.ready ? 'выберите оператора' : 'загружаем операторов…'}
-              </option>
-              {operators.rows.map((operator) => (
-                <option key={operator.id} value={operator.id}>
-                  {operator.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Регион</span>
-            <Input
-              className="w-[200px]"
-              autoComplete="off"
-              value={region}
-              placeholder="все регионы"
-              onChange={(event) => {
-                setRegion(event.target.value);
-              }}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Не ниже, ₽</span>
-            <Input
-              className="num w-[110px]"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="0,50"
-              value={minPrice}
-              onChange={(event) => {
-                setMinPrice(event.target.value);
-              }}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Не выше, ₽</span>
-            <Input
-              className="num w-[110px]"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="3,00"
-              value={maxPrice}
-              onChange={(event) => {
-                setMaxPrice(event.target.value);
-              }}
-            />
-          </label>
-
-          <ConfirmAction
-            label="Добавить"
-            variant="default"
-            tone="neutral"
-            disabled={!ready}
-            title={`Коридор цен: ${operatorName}, ${regionName}`}
-            consequence={
-              <>
-                <p>
-                  Партнёры смогут назначать цену по этому направлению только в границах от{' '}
-                  <b className="num">{min === undefined ? '' : money(min)}</b> до{' '}
-                  <b className="num">{max === undefined ? '' : money(max)}</b> за вызов в 60 секунд.
-                  Коридор действует с этой минуты.
-                </p>
-                <p>
-                  Уже назначенные цены за его границами останутся и будут считаться по-прежнему, но
-                  попадут в «Нарушения коридора» — их придётся пересмотреть.
-                </p>
-              </>
-            }
-            confirmLabel="Добавить коридор"
-            onConfirm={() => add.mutateAsync({ min: min ?? '0', max: max ?? '0' })}
-          />
-
-          {((minPrice !== '' && min === undefined) || (maxPrice !== '' && max === undefined)) && (
-            <p className="w-full text-warn">
-              Границы — суммы в рублях, не больше шести знаков после запятой: например 0,50.
-            </p>
-          )}
-          {inverted && (
-            <p className="w-full text-warn">Верхняя граница ниже нижней — поменяйте их местами.</p>
-          )}
-        </form>
-      )}
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
@@ -271,5 +141,156 @@ export function PriceBands() {
         </Table>
       </div>
     </section>
+  );
+}
+
+/**
+ * Поля окна «Новый коридор цен». Кнопка окна не заводит коридор сама, а открывает
+ * подтверждение поверх него; отказ API показывается там же. Окно закрывается
+ * вызывающим, когда коридор заведён.
+ */
+function NewPriceBand({ onAdded }: { onAdded: () => void }) {
+  const queryClient = useQueryClient();
+  const operators = useOperators();
+  const [operatorId, setOperatorId] = useState('');
+  const [region, setRegion] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+
+  const add = useMutation({
+    mutationFn: (input: { min: string; max: string }) =>
+      request<unknown>('/price-bands', {
+        method: 'POST',
+        body: {
+          operatorId,
+          ...(region.trim() === '' ? {} : { region: region.trim() }),
+          minPrice: input.min,
+          maxPrice: input.max,
+        },
+      }),
+    onSuccess: () => {
+      onAdded();
+      // По префиксу: заодно обновляются и нарушения коридора, ключ которых начинается так же.
+      void queryClient.invalidateQueries({ queryKey: ['price-bands'] });
+    },
+  });
+
+  const min = moneyFromInput(minPrice);
+  const max = moneyFromInput(maxPrice);
+  // Сравнение в микроединицах, а не числами с плавающей точкой: границы — деньги.
+  const inverted = min !== undefined && max !== undefined && microunits(max) < microunits(min);
+  const ready = operatorId !== '' && min !== undefined && max !== undefined && !inverted;
+  const operatorName = operators.nameOf(operatorId) ?? 'оператор';
+  const regionName = region.trim() === '' ? 'все регионы' : region.trim();
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+      }}
+      className="flex min-h-0 flex-col"
+    >
+      <div className="grid min-h-0 gap-3 overflow-y-auto px-5 pb-4 sm:grid-cols-2">
+        <DialogField label="Оператор">
+          <select
+            value={operatorId}
+            disabled={!operators.ready}
+            autoFocus
+            onChange={(event) => {
+              setOperatorId(event.target.value);
+            }}
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2"
+          >
+            <option value="">
+              {operators.ready ? 'выберите оператора' : 'загружаем операторов…'}
+            </option>
+            {operators.rows.map((operator) => (
+              <option key={operator.id} value={operator.id}>
+                {operator.name}
+              </option>
+            ))}
+          </select>
+        </DialogField>
+
+        <DialogField label="Регион">
+          <Input
+            autoComplete="off"
+            value={region}
+            placeholder="все регионы"
+            onChange={(event) => {
+              setRegion(event.target.value);
+            }}
+          />
+        </DialogField>
+
+        <DialogField label="Не ниже, ₽">
+          <Input
+            className="num"
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="0,50"
+            value={minPrice}
+            onChange={(event) => {
+              setMinPrice(event.target.value);
+            }}
+          />
+        </DialogField>
+
+        <DialogField label="Не выше, ₽">
+          <Input
+            className="num"
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="3,00"
+            value={maxPrice}
+            onChange={(event) => {
+              setMaxPrice(event.target.value);
+            }}
+          />
+        </DialogField>
+
+        {((minPrice !== '' && min === undefined) || (maxPrice !== '' && max === undefined)) && (
+          <p className="text-warn sm:col-span-2">
+            Границы — суммы в рублях, не больше шести знаков после запятой: например 0,50.
+          </p>
+        )}
+        {inverted && (
+          <p className="text-warn sm:col-span-2">
+            Верхняя граница ниже нижней — поменяйте их местами.
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
+        <ConfirmAction
+          label="Добавить"
+          variant="default"
+          tone="neutral"
+          disabled={!ready}
+          title={`Коридор цен: ${operatorName}, ${regionName}`}
+          consequence={
+            <>
+              <p>
+                Партнёры смогут назначать цену по этому направлению только в границах от{' '}
+                <b className="num">{min === undefined ? '' : money(min)}</b> до{' '}
+                <b className="num">{max === undefined ? '' : money(max)}</b> за вызов в 60 секунд.
+                Коридор действует с этой минуты.
+              </p>
+              <p>
+                Уже назначенные цены за его границами останутся и будут считаться по-прежнему, но
+                попадут в «Нарушения коридора» — их придётся пересмотреть.
+              </p>
+            </>
+          }
+          confirmLabel="Добавить коридор"
+          onConfirm={() => add.mutateAsync({ min: min ?? '0', max: max ?? '0' })}
+        />
+        <DialogClose asChild>
+          <Button type="button" variant="outline" size="sm">
+            Отмена
+          </Button>
+        </DialogClose>
+      </div>
+    </form>
   );
 }

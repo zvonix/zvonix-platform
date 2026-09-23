@@ -4,8 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
-import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -49,8 +49,6 @@ const asApiError = (error: unknown): ApiError | undefined =>
 export function BlockedNumbers() {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
-  const [prefix, setPrefix] = useState('');
-  const [note, setNote] = useState('');
 
   const list = useQuery({
     queryKey: ['blocked-numbers'],
@@ -64,11 +62,7 @@ export function BlockedNumbers() {
   const block = useMutation({
     mutationFn: (input: { prefix: string; note: string }) =>
       request<{ rule: Rule }>('/blocked-numbers', { method: 'POST', body: input }),
-    onSuccess: async () => {
-      setPrefix('');
-      setNote('');
-      await refresh();
-    },
+    onSuccess: refresh,
   });
 
   const unblock = useMutation({
@@ -77,14 +71,19 @@ export function BlockedNumbers() {
     onSuccess: () => atMost(refresh()),
   });
 
-  const trimmedPrefix = prefix.trim();
-  const trimmedNote = note.trim();
-  const ready = trimmedPrefix !== '' && trimmedNote.length >= 3;
-  const failed = asApiError(block.error ?? list.error);
+  // Отказ запрета показывает его окно, здесь — только отказ списка.
+  const failed = asApiError(list.error);
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-[15px] font-semibold tracking-tight">Чёрный список номеров</h2>
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h2 className="text-[15px] font-semibold tracking-tight">Чёрный список номеров</h2>
+        {canChange && (
+          <FormDialog label="Запретить номер" title="Запрет номера" className="ml-auto">
+            <BlockForm onBlock={(input) => block.mutateAsync(input)} />
+          </FormDialog>
+        )}
+      </div>
       <p className="text-muted-foreground">
         Правило — префикс: точный номер есть префикс длиной одиннадцать. Пишется так, как его видит
         человек — <span className="num">8-809</span> приводится к <span className="num">7809</span>.
@@ -94,56 +93,7 @@ export function BlockedNumbers() {
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
-      {canChange ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (ready) block.mutate({ prefix: trimmedPrefix, note: trimmedNote });
-          }}
-          className="flex flex-wrap items-end gap-2"
-        >
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Префикс</span>
-            <Input
-              className="num w-[140px]"
-              inputMode="tel"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="8-809"
-              value={prefix}
-              onChange={(event) => {
-                setPrefix(event.target.value);
-              }}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Почему запрещено</span>
-            <Input
-              className="w-[360px]"
-              autoComplete="off"
-              placeholder="Платный диапазон"
-              value={note}
-              onChange={(event) => {
-                setNote(event.target.value);
-              }}
-            />
-          </label>
-
-          <Button type="submit" size="sm" disabled={!ready || block.isPending}>
-            {block.isPending ? 'Запрещаем…' : 'Запретить'}
-          </Button>
-
-          {trimmedPrefix !== '' && trimmedNote.length < 3 && (
-            <p className="w-full text-warn">
-              Назовите основание — не короче трёх знаков: по нему запрет потом снимают или
-              оставляют.
-            </p>
-          )}
-        </form>
-      ) : (
-        <ReadOnly what="запреты" />
-      )}
+      {!canChange && <ReadOnly what="запреты" />}
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
@@ -207,5 +157,59 @@ export function BlockedNumbers() {
         </Table>
       </div>
     </section>
+  );
+}
+
+/** Поля окна «Запрет номера». */
+function BlockForm({
+  onBlock,
+}: {
+  onBlock: (input: { prefix: string; note: string }) => Promise<unknown>;
+}) {
+  const [prefix, setPrefix] = useState('');
+  const [note, setNote] = useState('');
+
+  const trimmedPrefix = prefix.trim();
+  const trimmedNote = note.trim();
+  const ready = trimmedPrefix !== '' && trimmedNote.length >= 3;
+
+  return (
+    <DialogForm
+      submitLabel="Запретить"
+      canSubmit={ready}
+      onSubmit={() => onBlock({ prefix: trimmedPrefix, note: trimmedNote })}
+    >
+      <DialogField label="Префикс">
+        <Input
+          className="num"
+          inputMode="tel"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="8-809"
+          autoFocus
+          value={prefix}
+          onChange={(event) => {
+            setPrefix(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <DialogField label="Почему запрещено">
+        <Input
+          autoComplete="off"
+          placeholder="Платный диапазон"
+          value={note}
+          onChange={(event) => {
+            setNote(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      {trimmedPrefix !== '' && trimmedNote.length < 3 && (
+        <p className="text-warn sm:col-span-2">
+          Назовите основание — не короче трёх знаков: по нему запрет потом снимают или оставляют.
+        </p>
+      )}
+    </DialogForm>
   );
 }
