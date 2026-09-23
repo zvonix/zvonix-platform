@@ -8,7 +8,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -17,6 +17,9 @@ import { prepareEnvironment, resetDatabase, startApi } from '../../testing/harne
 
 const REPO = 'https://packages.zvonix.test/ubuntu';
 const FINGERPRINT = 'A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4';
+
+/** Набор конфигурации узла в репозитории — с ним сверяется разложенное на «узле». */
+const NODE_CONF = path.join(import.meta.dirname, '..', '..', '..', '..', '..', 'node', 'conf');
 
 prepareEnvironment({
   NODE_PACKAGE_REPO_URL: REPO,
@@ -84,8 +87,8 @@ describe('установщик узла', () => {
       '@@PACKAGE_REPO@@',
       '@@PACKAGE_SUITE@@',
       '@@PACKAGE_KEY_FINGERPRINT@@',
-      '@@TEMPLATE_XML_CURL@@',
-      '@@TEMPLATE_JSON_CDR@@',
+      '@@CONF_FILES@@',
+      '@@FAIL2BAN_FILES@@',
     ]) {
       expect(`${placeholder} осталась: ${String(script.includes(placeholder))}`).toBe(
         `${placeholder} осталась: false`,
@@ -95,6 +98,91 @@ describe('установщик узла', () => {
     // Адрес control plane — отдельно: одноимённая подстановка живёт и в XML, поэтому
     // проверяется именно строка присвоения, а не наличие где-нибудь в файле.
     expect(script).toContain('CONTROL_PLANE="${ZVONIX_CONTROL_PLANE:-http');
+  });
+
+  it('подставленное значение стоит только в своём присваивании', () => {
+    // Площадка заменяет **каждое** вхождение метки. Метка, стоявшая ещё и в проверке
+    // «не подставлено», превращалась в то же значение, и скрипт сравнивал адрес сам
+    // с собой: первый живой запуск (2026-09-22) отказал с «адрес control plane
+    // не подставлен», а отпечаток ключа подписи молча не сверялся.
+    const occurrences = (value: string) => script.split(value).length - 1;
+    expect(occurrences('http://127.0.0.1:8000')).toBe(1);
+    expect(occurrences(REPO)).toBe(1);
+    expect(occurrences(FINGERPRINT)).toBe(1);
+    expect(occurrences('sip.zvonix.test')).toBe(1);
+  });
+
+  it('узел раскладывает набор целиком, и в нём не остаётся ни одной метки', () => {
+    // Настоящий bash, настоящий раздел конфигурации из собранного скрипта (ADR-0051).
+    // Пока `sed` на узле искал целую метку, площадка успевала заменить и её: в конфигурацию
+    // FreeSWITCH уходило `@@CONTROL_PLANE@@/node/directory`, и узел не спросил бы маршрут.
+    const start = script.indexOf('conf_file() {');
+    const end = script.indexOf('# Прежний каталог не удаляется');
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+
+    const directory = mkdtempSync(path.join(tmpdir(), 'zvonix-conf-'));
+    const stage = path.join(directory, 'stage');
+    const file = path.join(directory, 'stage.sh');
+    const eslPassword = 'e'.repeat(48);
+    writeFileSync(
+      file,
+      [
+        'set -euo pipefail',
+        "MARK='@@'",
+        'die() { echo "$*" >&2; exit 1; }',
+        // Проверяется раскладка, а не права: в Git Bash под Windows `install -m` отказывает
+        // менять права каталога. Права набора видит живая установка на Ubuntu.
+        'install() { local a=(); while [ $# -gt 0 ]; do case "$1" in -m) shift 2 ;; -d) shift ;; *) a+=("$1"); shift ;; esac; done; mkdir -p "${a[@]}"; }',
+        `STAGE='${stage.replaceAll('\\', '/')}'`,
+        'mkdir -p "$STAGE"',
+        'CONTROL_PLANE=https://cp.zvonix.test',
+        'SIP_REALM=sip.zvonix.test',
+        'KEY_ID=zvx_node_test',
+        'KEY_SECRET=secret',
+        `ESL_PASSWORD=${eslPassword}`,
+        script.slice(start, end),
+      ].join('\n'),
+      'utf8',
+    );
+    execFileSync('bash', [file], { stdio: 'pipe' });
+
+    // Набор лёг целиком: ровно те файлы, что лежат в node/conf, плюс каталог транков.
+    const listed = (root: string) =>
+      readdirSync(root, { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => path.relative(root, path.join(entry.parentPath, entry.name)))
+        .map((name) => name.split(path.sep).join('/'))
+        .sort();
+    expect(listed(stage)).toEqual(listed(NODE_CONF));
+    expect(existsSync(path.join(stage, 'zvonix-gateways'))).toBe(true);
+
+    const read = (name: string) => readFileSync(path.join(stage, name), 'utf8');
+    expect(read('autoload_configs/xml_curl.conf.xml')).toContain(
+      'https://cp.zvonix.test/node/directory',
+    );
+    expect(read('autoload_configs/xml_curl.conf.xml')).toContain('zvx_node_test');
+    expect(read('vars.xml')).toContain('data="domain=sip.zvonix.test"');
+    expect(read('autoload_configs/event_socket.conf.xml')).toContain(`value="${eslPassword}"`);
+    // `$$` в строке замены `replaceAll` превращается в `$`: `$${local_ip_v4}` стал бы
+    // переменной канала вместо глобальной, и профиль не нашёл бы свой адрес.
+    expect(read('autoload_configs/sofia.conf.xml')).toContain('value="$${local_ip_v4}"');
+
+    // Метки — латиницей: комментарии набора пишут «@@…@@», объясняя их.
+    for (const name of listed(stage)) {
+      expect(`${name}: ${String(/@@[A-Z_]+@@/u.test(read(name)))}`).toBe(`${name}: false`);
+    }
+  });
+
+  it('фильтр и тюрьма fail2ban вложены: подбор паролей SIP кладёт площадку', () => {
+    // Каждая неудачная регистрация — запрос учётной записи у площадки: один сканер
+    // с сотней попыток в секунду занимал половину процессора API (живой узел 2026-09-22).
+    expect(script).toContain("fail2ban_file 'filter.d/zvonix-freeswitch.conf'");
+    expect(script).toContain("fail2ban_file 'jail.d/zvonix-freeswitch.conf'");
+    expect(script).toContain('SIP auth failure');
+    // Журнал у сборки из исходников лежит под её префиксом — путь подставляет узел.
+    expect(script).toContain('@@FREESWITCH_LOG@@');
+    expect(script).toContain('global_getvar log_dir');
   });
 
   it('собранный скрипт исполним: внутрь вложен XML, и это могло его сломать', () => {

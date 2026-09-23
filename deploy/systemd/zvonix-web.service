@@ -19,6 +19,10 @@ ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=30
+# Сервер Next на SIGTERM выходит с кодом 143, и без этой строки каждая выкладка писала
+# в журнал «Failed with result 'exit-code'» — ложную тревогу (замер 2026-09-22).
+# Настоящее падение с другим кодом по-прежнему провал и перезапуск.
+SuccessExitStatus=143
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

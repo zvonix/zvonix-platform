@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Админка — партнёры</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+Condensed:wght@500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;line-height:1.4}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer}
+input,select{font:inherit}
+:focus-visible{outline:2px solid #E08A52;outline-offset:1px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; display: grid; grid-template-columns: {{navW}} 1fr; background: {{c.bg}}; color: {{c.ink}}; overflow: hidden; position: relative;">
+
+  <nav aria-label="Разделы" style="background: {{c.rail}}; color: {{c.railInk}}; display: flex; flex-direction: column; padding: 12px 10px; gap: 12px; min-width: 0; overflow: hidden;">
+    <div style="{{navHeadStyle}}">
+      <sc-if value="{{navOpen}}" hint-placeholder-val="{{true}}">
+        <span style="font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600; font-size: 19px; color: #ffffff; letter-spacing: -0.01em;">Zvonix</span>
+        <span style="font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: {{c.railDim}};">{{navKind}}</span>
+      </sc-if>
+      <button type="button" onClick="{{toggleNav}}" aria-label="{{navToggleLabel}}" aria-expanded="{{navExpanded}}" title="{{navToggleLabel}}" style="{{navToggleStyle}}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM9 3v18"></path><path d="{{navChevron}}"></path></svg>
+      </button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px; flex-grow: 1; min-height: 0; overflow-y: auto;">
+      <sc-for list="{{nav}}" as="group" hint-placeholder-count="5">
+        <div style="display: flex; flex-direction: column; gap: 1px;">
+          <sc-if value="{{group.showTitle}}" hint-placeholder-val="{{true}}">
+            <div style="padding: 0 8px 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: {{c.railDim}};">{{group.title}}</div>
+          </sc-if>
+          <sc-if value="{{group.showRule}}" hint-placeholder-val="{{false}}">
+            <div style="height: 1px; margin: 0 6px 6px; background: {{c.railActive}};"></div>
+          </sc-if>
+          <sc-for list="{{group.items}}" as="item" hint-placeholder-count="3">
+            <a href="{{item.href}}" aria-label="{{item.aria}}" aria-current="{{item.current}}" title="{{item.tip}}" style="{{item.style}}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0;"><path d="{{item.icon}}"></path></svg>
+              <sc-if value="{{item.showLabel}}" hint-placeholder-val="{{true}}">
+                <span style="flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{item.label}}</span>
+              </sc-if>
+              <sc-if value="{{item.badge}}" hint-placeholder-val="{{false}}"><span style="{{item.badgeStyle}}">{{item.badge}}</span></sc-if>
+            </a>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+    <div style="{{navFootStyle}}">
+      <span aria-hidden="true" style="width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: {{c.railActive}}; color: #ffffff; font-size: 11px; font-weight: 600;">{{navUser.initials}}</span>
+      <sc-if value="{{navOpen}}" hint-placeholder-val="{{true}}">
+        <span style="display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 11px; color: {{c.railDim}};">
+          <span style="color: {{c.railInk}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{navUser.name}}</span>
+          <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{navUser.mail}}</span>
+          <span style="font-family: 'IBM Plex Mono', monospace;">{{navUser.extra}}</span>
+        </span>
+      </sc-if>
+    </div>
+  </nav>
+
+  <div style="display: flex; flex-direction: column; min-width: 0;">
+    <header style="height: 52px; box-sizing: border-box; display: flex; align-items: center; gap: 16px; padding: 0 24px; background: {{c.surface}}; border-bottom: 1px solid {{c.line}};">
+      <label style="display: flex; align-items: center; gap: 8px; width: 420px; height: 32px; box-sizing: border-box; padding: 0 10px; border: 1px solid {{c.line}}; border-radius: 6px; background: {{c.sunken}}; color: {{c.faint}};">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input aria-label="Поиск" placeholder="Номер, партнёр, SIM, вызов…" style="flex-grow: 1; border: 0; outline: 0; background: transparent; color: {{c.ink}};">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 1px 5px; border: 1px solid {{c.line}}; border-radius: 4px;">Ctrl K</span>
+      </label>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 12px; color: {{c.muted}};">
+        <span style="display: flex; align-items: center; gap: 6px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{c.ok}};"></span>Узел «Основной» на связи</span>
+        <button type="button" onClick="{{toggleTheme}}" aria-label="Сменить тему" style="height: 32px; padding: 0 10px; border: 1px solid {{c.line}}; border-radius: 6px; background: transparent; color: {{c.ink}};">{{themeLabel}}</button>
+      </div>
+    </header>
+
+    <main style="flex-grow: 1; overflow: hidden; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: flex; align-items: flex-end; gap: 16px;">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <h1 style="margin: 0; font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600; font-size: 24px;">Партнёры</h1>
+          <span style="color: {{c.muted}};">19 партнёров · 12 на связи · 2 ждут проверки · свободно 84 SIM из 132</span>
+        </div>
+        <a href="PartnerNew.dc.html" style="margin-left: auto; display: flex; align-items: center; box-sizing: border-box; height: 34px; padding: 0 14px; border: 0; border-radius: 6px; background: {{c.accent}}; color: {{c.accentInk}}; font-weight: 600;">Завести партнёра</a>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div role="group" aria-label="Состояние" style="display: flex; padding: 3px; gap: 2px; border-radius: 7px; background: {{c.sunken}}; border: 1px solid {{c.line}};">
+          <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+            <button type="button" onClick="{{t.pick}}" aria-pressed="{{t.pressed}}" style="{{t.style}}">{{t.label}} <span style="font-family: 'IBM Plex Mono', monospace; color: {{c.faint}};">{{t.count}}</span></button>
+          </sc-for>
+        </div>
+        <label style="display: flex; align-items: center; gap: 6px; height: 32px; box-sizing: border-box; padding: 0 10px; border: 1px solid {{c.line}}; border-radius: 6px; background: {{c.surface}};">
+          <span style="color: {{c.muted}};">Найти</span>
+          <input placeholder="имя, псевдоним, телефон" style="width: 220px; border: 0; outline: 0; background: transparent; color: {{c.ink}};">
+        </label>
+      </div>
+
+      <div style="flex-grow: 1; min-height: 0; border-radius: 8px; background: {{c.surface}}; border: 1px solid {{c.line}}; overflow: hidden;">
+        <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+          <colgroup>
+            <col style="width: 250px;"><col style="width: 130px;"><col style="width: 170px;"><col style="width: 150px;"><col style="width: 170px;"><col style="width: 110px;"><col style="width: 130px;"><col>
+          </colgroup>
+          <thead>
+            <tr style="background: {{c.sunken}};">
+              <sc-for list="{{columns}}" as="col" hint-placeholder-count="8"><th scope="col" style="{{col.style}}">{{col.label}}</th></sc-for>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{rows}}" as="r" hint-placeholder-count="12">
+              <tr style="height: 44px; border-top: 1px solid {{c.lineSoft}};">
+                <td style="padding: 0 12px;">
+                  <a href="#" style="display: flex; flex-direction: column;">
+                    <span style="font-weight: 500;">{{r.name}}</span>
+                    <span style="font-size: 12px; color: {{c.muted}};">для клиентов — {{r.alias}}</span>
+                  </a>
+                </td>
+                <td style="padding: 0 12px;"><button type="button" onClick="{{r.openStatus}}" title="Сменить состояние" aria-haspopup="dialog" style="{{r.pillStyle}}">{{r.state}} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></td>
+                <td style="padding: 0 12px;">
+                  <span style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px;">{{r.gw}}</span>
+                    <span style="flex-grow: 1; height: 5px; border-radius: 3px; background: {{c.lineSoft}}; overflow: hidden;"><span style="{{r.gwBar}}"></span></span>
+                  </span>
+                </td>
+                <td style="padding: 0 12px; font-family: 'IBM Plex Mono', monospace; font-size: 12px;">{{r.sim}}</td>
+                <td style="padding: 0 12px; color: {{c.muted}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.operators}}</td>
+                <td style="padding: 0 12px; text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: {{r.asrColor}};">{{r.asr}}</td>
+                <td style="padding: 0 12px; text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px;">{{r.earned}}</td>
+                <td style="padding: 0 12px; color: {{c.muted}};">{{r.seen}}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <sc-if value="{{statusOpen}}" hint-placeholder-val="{{true}}">
+    <div onClick="{{closeStatus}}" style="position: absolute; inset: 0; background: rgba(8, 14, 20, 0.45);"></div>
+    <div role="dialog" aria-modal="true" aria-labelledby="st-title" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 560px; box-sizing: border-box; border-radius: 12px; background: {{c.surface}}; border: 1px solid {{c.line}}; box-shadow: 0 24px 64px rgba(8, 14, 20, 0.35); display: flex; flex-direction: column;">
+      <div style="display: flex; align-items: flex-start; gap: 12px; padding: 20px 22px 14px;">
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <h2 id="st-title" style="margin: 0; font-family: 'IBM Plex Sans Condensed', sans-serif; font-size: 20px; font-weight: 600;">Состояние партнёра</h2>
+          <span style="color: {{c.muted}};">{{st.name}} · сейчас «{{st.state}}»</span>
+        </div>
+        <button type="button" onClick="{{closeStatus}}" aria-label="Закрыть" style="margin-left: auto; width: 32px; height: 32px; border: 1px solid {{c.line}}; border-radius: 6px; background: transparent; color: {{c.ink}}; font-size: 16px;">×</button>
+      </div>
+      <div style="padding: 0 22px 18px; display: flex; flex-direction: column; gap: 14px;">
+        <fieldset style="margin: 0; padding: 0; border: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;">
+          <legend style="font-weight: 500; padding: 0 0 6px;">Новое состояние</legend>
+          <sc-for list="{{stOptions}}" as="o" hint-placeholder-count="3">
+            <button type="button" onClick="{{o.pick}}" aria-pressed="{{o.pressed}}" style="{{o.style}}">
+              <span style="font-weight: 600;">{{o.label}}</span>
+              <span style="font-size: 12px; color: {{c.muted}};">{{o.text}}</span>
+            </button>
+          </sc-for>
+        </fieldset>
+        <sc-if value="{{stClosing}}" hint-placeholder-val="{{false}}">
+          <div role="alert" style="padding: 10px 12px; border-radius: 8px; background: {{c.critSoft}}; color: {{c.crit}}; font-size: 13px;">Закрытие необратимо: шлюзы партнёра отключатся, вернуть его в работу будет нельзя. Заработанное за месяц — {{st.earned}} — останется к выплате.</div>
+        </sc-if>
+        <label style="display: flex; flex-direction: column; gap: 5px;">
+          <span style="font-weight: 500;">Причина</span>
+          <textarea rows="3" placeholder="Например: SIM массово блокируются, ждём замены карт" style="box-sizing: border-box; padding: 8px 10px; border: 1px solid {{c.line}}; border-radius: 6px; background: {{c.surface}}; color: {{c.ink}}; font: inherit; resize: vertical;"></textarea>
+          <span style="font-size: 12px; color: {{c.muted}};">Попадёт в журнал действий вместе с прежним состоянием</span>
+        </label>
+      </div>
+      <div style="display: flex; gap: 8px; padding: 14px 22px; border-top: 1px solid {{c.lineSoft}};">
+        <button type="button" style="{{stSubmitStyle}}">{{stSubmit}}</button>
+        <button type="button" onClick="{{closeStatus}}" style="height: 36px; padding: 0 14px; border: 1px solid {{c.line}}; border-radius: 6px; background: transparent; color: {{c.ink}};">Отмена</button>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false,"section":"Тема"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { dark: null, tab: 'все', statusRow: 9, nextStatus: 'работает' };
+  }
+  renderVals() {
+    var dark = this.state.dark === null ? !!this.props.dark : this.state.dark;
+    var light = {bg:'#F2F4F6',surface:'#FFFFFF',sunken:'#F7F9FA',ink:'#0E1A24',muted:'#526374',faint:'#617080',line:'#DCE2E8',lineSoft:'#E9EDF1',rail:'#0E1A24',railInk:'#C5D1DC',railDim:'#8D9DAD',railActive:'#1D2B38',accent:'#B8582A',accentInk:'#FFFFFF',accentSoft:'#F6E6DB',ok:'#1E8A5A',okSoft:'#DDF0E6',warn:'#8C5F0E',warnSoft:'#F6ECD4',crit:'#B83A31',critSoft:'#F8DFDC'};
+    var darkP = {bg:'#0A1016',surface:'#111A22',sunken:'#0D151C',ink:'#E3EBF2',muted:'#97A8B8',faint:'#8394A4',line:'#223040',lineSoft:'#18232D',rail:'#070C11',railInk:'#B8C6D3',railDim:'#8395A6',railActive:'#18242F',accent:'#E08A52',accentInk:'#1A0F08',accentSoft:'#3A2417',ok:'#4DB889',okSoft:'#12291F',warn:'#D6A847',warnSoft:'#2A2112',crit:'#E0706A',critSoft:'#2D1715'};
+    var c = dark ? darkP : light;
+    var self = this;
+    var navSpec = [
+      {title:'Работа',items:[['Обзор','Main.dc.html',false,'','grid'],['Разбор вызовов','Calls.dc.html',false,'','phone'],['Покрытие','#',false,'','signal']]},
+      {title:'Участники',items:[['Партнёры','Partners.dc.html',true,'2','users'],['Клиенты','#',false,'','building'],['Заявки и учётные записи','#',false,'3','inbox']]},
+      {title:'Телефония',items:[['Узлы АТС','#',false,'','server'],['Запреты и лимиты','#',false,'','ban']]},
+      {title:'Деньги',items:[['Тарифы и коридоры','#',false,'','sliders'],['Проводки','#',false,'','ledger'],['Выплаты','#',false,'2','wallet']]},
+      {title:'Служебное',items:[['Журнал действий','#',false,'','history'],['Настройки','#',false,'','gear']]}
+    ];
+    var navKind = 'админка';
+    var navUser = {initials:'СГ', name:'Сергей Грейд', mail:'sgrade@mail.ru', extra:'версия v0.1.4'};
+    var ICONS = {
+      home:'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+      grid:'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+      phone:'M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z',
+      signal:'M4 20v-4M9 20v-8M14 20V8M19 20V4',
+      users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8',
+      building:'M3 21h18M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2',
+      inbox:'M22 12h-6l-2 3h-4l-2-3H2M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z',
+      server:'M4 3h16v7H4zM4 14h16v7H4zM8 6.5h.01M8 17.5h.01',
+      ban:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM4.9 4.9l14.2 14.2',
+      sliders:'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+      ledger:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+      wallet:'M20 12V8H6a2 2 0 0 1 0-4h12v4M4 6v12a2 2 0 0 0 2 2h14v-4M18 12a2 2 0 0 0 0 4h4v-4z',
+      history:'M3 3v5h5M3.05 13A9 9 0 1 0 6 5.3L3 8M12 7v5l4 2',
+      gear:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+      lines:'M4 6h16M4 12h16M4 18h10',
+      tag:'M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7.5 7.5h.01',
+      key:'M15.5 7.5 19 4M21 2l-9.6 9.6M15.5 7.5l3 3L22 7l-3-3M7.5 21a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11z',
+      chart:'M3 3v18h18M7 15l4-4 3 3 5-6',
+      bell:'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0',
+      sim:'M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM9 12h6v5H9z',
+      people:'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6'
+    };
+    var navOpen = this.state.navOpen !== false;
+    var navW = navOpen ? '232px' : '64px';
+    var nav = navSpec.map(function (g, gi) {
+      return {title:g.title, showTitle: navOpen && !!g.title, showRule: !navOpen && gi > 0,
+        items:g.items.map(function (it) {
+          var active = !!it[2];
+          var badge = it[3] || '';
+          return {label:it[0], href:it[1], badge:badge, icon:ICONS[it[4]], current: active ? 'page' : 'false', showLabel: navOpen,
+            aria: it[0] + (badge ? ', ' + badge : ''),
+            tip: navOpen ? '' : it[0] + (badge ? ' · ' + badge : ''),
+            style:'position:relative;display:flex;align-items:center;gap:10px;height:34px;box-sizing:border-box;border-radius:6px;font-size:13px;' + (navOpen ? 'padding:0 8px;' : 'padding:0;justify-content:center;') + (active ? 'background:' + c.railActive + ';color:#ffffff;box-shadow:inset 2px 0 0 ' + c.accent + ';' : 'color:' + c.railInk + ';'),
+            badgeStyle: navOpen
+              ? 'font-family:IBM Plex Mono,monospace;font-size:11px;padding:0 6px;border-radius:9px;background:' + c.accent + ';color:' + c.accentInk + ';'
+              : 'position:absolute;top:2px;right:4px;min-width:15px;height:15px;box-sizing:border-box;padding:0 4px;border-radius:8px;font-family:IBM Plex Mono,monospace;font-size:10px;line-height:15px;text-align:center;background:' + c.accent + ';color:' + c.accentInk + ';'};
+        })};
+    });
+    var navVals = {nav:nav, navW:navW, navOpen:navOpen, navKind:navKind, navUser:navUser,
+      navExpanded: navOpen ? 'true' : 'false',
+      navToggleLabel: navOpen ? 'Свернуть меню' : 'Развернуть меню',
+      navChevron: navOpen ? 'M16 9l-3 3 3 3' : 'M13 9l3 3-3 3',
+      navHeadStyle:'display:flex;align-items:center;gap:8px;height:32px;' + (navOpen ? 'padding-left:8px;' : 'justify-content:center;'),
+      navToggleStyle:'width:32px;height:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:' + c.railDim + ';' + (navOpen ? 'margin-left:auto;' : ''),
+      navFootStyle:'display:flex;align-items:center;gap:10px;padding:10px ' + (navOpen ? '8px' : '0') + ' 0;border-top:1px solid ' + c.railActive + ';' + (navOpen ? '' : 'justify-content:center;'),
+      toggleNav: function () { self.setState({navOpen: !navOpen}); }};
+    var tabs = [['все','19'],['работают','15'],['на проверке','2'],['приостановлены','2']].map(function (t) {
+      var on = self.state.tab === t[0];
+      return {label:t[0], count:t[1], pressed: on ? 'true' : 'false', pick:function(){ self.setState({tab:t[0]}); },
+        style:'height:26px;padding:0 10px;border:0;border-radius:5px;font-size:12px;font-weight:500;' + (on ? 'background:' + c.surface + ';color:' + c.ink + ';box-shadow:0 0 0 1px ' + c.line + ';' : 'background:transparent;color:' + c.muted + ';')};
+    });
+    var th = 'text-align:left;padding:8px 12px;font-size:11px;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;color:' + c.muted + ';border-bottom:1px solid ' + c.line + ';';
+    var columns = ['Партнёр','Состояние','Шлюзы на связи','SIM свободно','Операторы','ASR 7 дн.','Заработок, мес.','Последний отклик'].map(function (l, i) {
+      return {label:l, style: th + (i === 5 || i === 6 ? 'text-align:right;' : '')};
+    });
+    var pill = {'работает':[c.okSoft,c.ok],'на проверке':[c.warnSoft,c.warn],'приостановлен':[c.critSoft,c.crit]};
+    var raw = [
+      ['Иванов Иван Иванович','Партнёр 17','работает',3,4,'22 / 32','МТС, T2, Мегафон','68,4 %','24 180,00 ₽','14 с назад'],
+      ['Смирнова Ольга Петровна','Партнёр 4','работает',2,2,'12 / 16','Мегафон, Билайн','71,2 %','18 960,50 ₽','8 с назад'],
+      ['ООО «Связь-Урал»','Партнёр 11','работает',4,4,'18 / 40','T2, МТС','64,9 %','41 305,00 ₽','3 с назад'],
+      ['Петров Алексей Сергеевич','Партнёр 2','работает',1,2,'3 / 8','МТС, Мегафон','59,8 %','9 412,20 ₽','1 мин назад'],
+      ['Кузнецов Дмитрий Олегович','Партнёр 9','работает',2,2,'6 / 16','МТС','66,0 %','12 870,00 ₽','20 с назад'],
+      ['Воробьёва Анна Игоревна','Партнёр 13','работает',1,1,'2 / 4','Йота','73,5 %','3 204,80 ₽','40 с назад'],
+      ['Сидоров Павел Андреевич','Партнёр 5','работает',0,2,'0 / 8','Билайн','—','6 118,00 ₽','3 ч назад'],
+      ['Морозов Кирилл Витальевич','Партнёр 21','на проверке',0,1,'0 / 8','МТС, T2','—','—','не отвечал'],
+      ['Лебедева Мария Сергеевна','Партнёр 22','на проверке',0,0,'—','Мегафон','—','—','не отвечал'],
+      ['Новиков Артём Павлович','Партнёр 8','приостановлен',1,1,'0 / 4','T2','41,3 %','2 118,40 ₽','5 мин назад'],
+      ['Фёдоров Илья Романович','Партнёр 15','работает',2,3,'9 / 24','МТС, Билайн','62,7 %','15 042,10 ₽','11 с назад'],
+      ['Егорова Светлана Юрьевна','Партнёр 19','работает',1,1,'4 / 8','T2','69,1 %','7 330,00 ₽','25 с назад']
+    ];
+    var rows = raw.map(function (r, idx) {
+      var p = pill[r[2]];
+      var ratio = r[4] === 0 ? 0 : r[3] / r[4];
+      var barColor = ratio === 1 ? c.ok : ratio === 0 ? c.crit : c.warn;
+      return {name:r[0],alias:r[1],state:r[2],gw: r[4] === 0 ? 'нет шлюзов' : r[3] + ' из ' + r[4],sim:r[5],operators:r[6],asr:r[7],earned:r[8],seen:r[9],
+        asrColor: r[7] !== '—' && parseFloat(r[7]) < 50 ? c.crit : c.ink,
+        gwBar:'display:block;height:100%;width:' + Math.round(ratio * 100) + '%;background:' + barColor + ';',
+        pillStyle:'display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border:0;border-radius:10px;font-size:12px;font-weight:500;background:' + p[0] + ';color:' + p[1] + ';',
+        openStatus: function () { self.setState({statusRow: idx, nextStatus: r[2] === 'работает' ? 'приостановлен' : 'работает'}); }};
+    });
+    var stRow = this.state.statusRow === null ? null : rows[this.state.statusRow];
+    var next = this.state.nextStatus;
+    var stOptions = [
+      ['работает','Шлюзы принимают звонки'],
+      ['приостановлен','Звонки не идут, всё сохранено'],
+      ['закрыт','Навсегда, без возврата']
+    ].map(function (o) {
+      var on = next === o[0];
+      var danger = o[0] === 'закрыт';
+      var current = stRow && stRow.state === o[0];
+      return {label:o[0] + (current ? ' · сейчас' : ''), text:o[1], pressed: on ? 'true' : 'false',
+        pick: function () { self.setState({nextStatus:o[0]}); },
+        style:'display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:10px 12px;border-radius:8px;color:' + c.ink + ';' + (on ? 'border:2px solid ' + (danger ? c.crit : c.accent) + ';background:' + (danger ? c.critSoft : c.accentSoft) + ';' : 'border:1px solid ' + c.line + ';background:' + c.surface + ';')};
+    });
+    var closing = next === 'закрыт';
+    return Object.assign(navVals, {c:c, tabs:tabs, columns:columns, rows:rows,
+      statusOpen: stRow !== null, st: stRow || rows[0], stOptions:stOptions, stClosing:closing,
+      stSubmit: closing ? 'Закрыть навсегда' : 'Сменить состояние',
+      stSubmitStyle:'height:36px;padding:0 16px;border:0;border-radius:6px;font-weight:600;' + (closing ? 'background:' + c.crit + ';color:#ffffff;' : 'background:' + c.accent + ';color:' + c.accentInk + ';'),
+      closeStatus: function () { self.setState({statusRow:null}); },
+      themeLabel: dark ? 'Светлая тема' : 'Тёмная тема',
+      toggleTheme: function () { self.setState({dark: !dark}); }});
+  }
+}
+</script>
+</body>
+</html>

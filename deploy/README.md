@@ -216,6 +216,13 @@ sudo -u zvonix env ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" s
 unset ADMIN_PASSWORD
 ```
 
+## SIP-домен площадки
+
+`SIP_REALM` в `/etc/zvonix/zvonix.env` — общий SIP-домен площадки, например `sip.zvonix.com`.
+Он входит в хеш пароля каждого шлюза и каждой линии, поэтому задаётся **до выдачи первого
+пароля**: смена потом означает перевыпуск всех. Подготовка его не пишет — без строки
+действует заглушка `sip.zvonix.local`. После правки — `systemctl restart zvonix-api zvonix-worker`.
+
 ## Узел АТС на этой же машине
 
 В кабинете: «Узлы» → завести узел → команда установки. Площадка на этом же сервере,

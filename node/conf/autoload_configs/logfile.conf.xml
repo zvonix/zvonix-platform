@@ -1,0 +1,17 @@
+<configuration name="logfile.conf" description="Журнал в файл">
+  <settings>
+    <param name="rotate-on-hup" value="true"/>
+  </settings>
+  <profiles>
+    <profile name="default">
+      <settings>
+        <!-- 10 МБ на файл, десять файлов: журнал не съест диск под потоком сканеров. -->
+        <param name="rollover" value="10485760"/>
+        <param name="maximum-rotate" value="10"/>
+      </settings>
+      <mappings>
+        <map name="all" value="info,notice,warning,err,crit,alert"/>
+      </mappings>
+    </profile>
+  </profiles>
+</configuration>

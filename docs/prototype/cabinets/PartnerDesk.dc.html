@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Кабинет партнёра — главная</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+Condensed:wght@500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.45}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:2px solid #E08A52;outline-offset:1px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; display: grid; grid-template-columns: {{navW}} 1fr; background: {{c.bg}}; color: {{c.ink}}; overflow: hidden;">
+
+  <nav aria-label="Разделы" style="background: {{c.rail}}; color: {{c.railInk}}; display: flex; flex-direction: column; padding: 12px 10px; gap: 12px; min-width: 0; overflow: hidden;">
+    <div style="{{navHeadStyle}}">
+      <sc-if value="{{navOpen}}" hint-placeholder-val="{{true}}">
+        <span style="font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600; font-size: 19px; color: #ffffff; letter-spacing: -0.01em;">Zvonix</span>
+        <span style="font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: {{c.railDim}};">{{navKind}}</span>
+      </sc-if>
+      <button type="button" onClick="{{toggleNav}}" aria-label="{{navToggleLabel}}" aria-expanded="{{navExpanded}}" title="{{navToggleLabel}}" style="{{navToggleStyle}}">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM9 3v18"></path><path d="{{navChevron}}"></path></svg>
+      </button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px; flex-grow: 1; min-height: 0; overflow-y: auto;">
+      <sc-for list="{{nav}}" as="group" hint-placeholder-count="5">
+        <div style="display: flex; flex-direction: column; gap: 1px;">
+          <sc-if value="{{group.showTitle}}" hint-placeholder-val="{{true}}">
+            <div style="padding: 0 8px 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: {{c.railDim}};">{{group.title}}</div>
+          </sc-if>
+          <sc-if value="{{group.showRule}}" hint-placeholder-val="{{false}}">
+            <div style="height: 1px; margin: 0 6px 6px; background: {{c.railActive}};"></div>
+          </sc-if>
+          <sc-for list="{{group.items}}" as="item" hint-placeholder-count="3">
+            <a href="{{item.href}}" aria-label="{{item.aria}}" aria-current="{{item.current}}" title="{{item.tip}}" style="{{item.style}}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0;"><path d="{{item.icon}}"></path></svg>
+              <sc-if value="{{item.showLabel}}" hint-placeholder-val="{{true}}">
+                <span style="flex-grow: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{item.label}}</span>
+              </sc-if>
+              <sc-if value="{{item.badge}}" hint-placeholder-val="{{false}}"><span style="{{item.badgeStyle}}">{{item.badge}}</span></sc-if>
+            </a>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+    <div style="{{navFootStyle}}">
+      <span aria-hidden="true" style="width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: {{c.railActive}}; color: #ffffff; font-size: 11px; font-weight: 600;">{{navUser.initials}}</span>
+      <sc-if value="{{navOpen}}" hint-placeholder-val="{{true}}">
+        <span style="display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 11px; color: {{c.railDim}};">
+          <span style="color: {{c.railInk}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{navUser.name}}</span>
+          <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{navUser.mail}}</span>
+          <span style="font-family: 'IBM Plex Mono', monospace;">{{navUser.extra}}</span>
+        </span>
+      </sc-if>
+    </div>
+  </nav>
+
+  <div style="display: flex; flex-direction: column; min-width: 0; min-height: 0;">
+    <header style="height: 56px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 0 28px; background: {{c.surface}}; border-bottom: 1px solid {{c.line}};">
+      <h1 style="margin: 0; font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600; font-size: 22px;">Главная</h1>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+        <div role="group" aria-label="Кабинет" style="display: flex; padding: 3px; gap: 2px; border-radius: 8px; background: {{c.sunken}}; border: 1px solid {{c.line}};">
+          <a href="Client.dc.html" style="height: 30px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px; font-size: 13px; color: {{c.muted}};">Клиент</a>
+          <span aria-current="page" style="height: 30px; display: flex; align-items: center; padding: 0 12px; border-radius: 6px; background: {{c.surface}}; box-shadow: 0 0 0 1px {{c.line}}; font-size: 13px; font-weight: 600;">Партнёр</span>
+        </div>
+        <button type="button" onClick="{{toggleTheme}}" aria-label="Сменить тему" style="height: 36px; padding: 0 12px; border: 1px solid {{c.line}}; border-radius: 8px; background: transparent; color: {{c.ink}}; font-size: 13px;">{{themeLabel}}</button>
+      </div>
+    </header>
+
+    <main style="flex-grow: 1; min-height: 0; overflow: auto; padding: 24px 28px; display: flex; flex-direction: column; gap: 18px;">
+      <div style="display: grid; grid-template-columns: 1.4fr repeat(3, minmax(0, 1fr)); gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; border-radius: 12px; background: {{c.surface}}; border: 1px solid {{c.line}};">
+          <span style="font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: {{c.muted}};">К выплате</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 32px; font-weight: 500; letter-spacing: -0.03em;">3 240,00 ₽</span>
+          <span style="font-size: 13px; color: {{c.muted}};">Сегодня <span style="color: {{c.ok}}; font-weight: 600;">+412,80 ₽</span> · следующая выплата [дата]</span>
+        </div>
+        <sc-for list="{{sims}}" as="s" hint-placeholder-count="3">
+          <div style="{{s.style}}">
+            <span style="font-size: 12px; font-weight: 500;">{{s.label}}</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 28px; font-weight: 500;">{{s.value}}</span>
+            <span style="font-size: 12px;">{{s.note}}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <div role="alert" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; background: {{c.critSoft}};">
+        <span style="width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: {{c.crit}};"></span>
+        <span style="font-weight: 600;">SIM 7999 ••• 11 заблокирована оператором</span>
+        <span style="color: {{c.muted}};">GOIP-8 «Дом», порт 3. Звонки на неё не идут — замените карту или разблокируйте у оператора.</span>
+        <a href="#" style="margin-left: auto; font-weight: 600; color: {{c.crit}};">К порту →</a>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 18px; align-items: start;">
+        <section style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; align-items: center;">
+            <h2 style="margin: 0; font-size: 16px; font-weight: 600;">Шлюзы</h2>
+            <a href="#" style="margin-left: auto; height: 34px; display: flex; align-items: center; box-sizing: border-box; padding: 0 14px; border: 1px solid {{c.line}}; border-radius: 8px; font-size: 13px;">Завести шлюз</a>
+          </div>
+          <sc-for list="{{gateways}}" as="g" hint-placeholder-count="3">
+            <a href="#" style="display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: center; padding: 14px 16px; border-radius: 12px; background: {{c.surface}}; border: 1px solid {{c.line}};">
+              <span style="display: flex; flex-direction: column; gap: 3px;">
+                <span style="display: flex; align-items: center; gap: 8px;"><span style="{{g.dotStyle}}"></span><span style="font-weight: 600;">{{g.name}}</span></span>
+                <span style="font-size: 13px; color: {{c.muted}};">{{g.seen}}</span>
+                <span style="font-size: 12px; color: {{c.muted}};">{{g.note}}</span>
+              </span>
+              <span style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px;">
+                <sc-for list="{{g.ports}}" as="p" hint-placeholder-count="8"><span title="{{p.title}}" style="{{p.style}}">{{p.label}}</span></sc-for>
+              </span>
+            </a>
+          </sc-for>
+        </section>
+
+        <section style="border-radius: 12px; background: {{c.surface}}; border: 1px solid {{c.line}}; overflow: hidden;">
+          <div style="display: flex; align-items: center; padding: 14px 18px;">
+            <h2 style="margin: 0; font-size: 16px; font-weight: 600;">Звонки через ваши SIM</h2>
+            <a href="#" style="margin-left: auto; font-size: 13px; font-weight: 600; color: {{c.accent}};">Все →</a>
+          </div>
+          <sc-for list="{{calls}}" as="k" hint-placeholder-count="7">
+            <div style="display: grid; grid-template-columns: 64px minmax(0, 1fr) 46px 76px; gap: 10px; align-items: center; padding: 8px 18px; border-top: 1px solid {{c.lineSoft}}; font-size: 13px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: {{c.muted}};">{{k.time}}</span>
+              <span style="display: flex; flex-direction: column; line-height: 1.3;"><span>{{k.sim}}</span><span style="font-size: 12px; color: {{c.muted}};">{{k.where}}</span></span>
+              <span style="text-align: right; font-family: 'IBM Plex Mono', monospace;">{{k.duration}}</span>
+              <span style="text-align: right; font-family: 'IBM Plex Mono', monospace; color: {{c.ok}};">{{k.earned}}</span>
+            </div>
+          </sc-for>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false,"section":"Тема"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { dark: null }; }
+  renderVals() {
+    var dark = this.state.dark === null ? !!this.props.dark : this.state.dark;
+    var light = {bg:'#F2F4F6',surface:'#FFFFFF',sunken:'#F7F9FA',ink:'#0E1A24',muted:'#526374',faint:'#617080',line:'#DCE2E8',lineSoft:'#E9EDF1',rail:'#0E1A24',railInk:'#C5D1DC',railDim:'#8D9DAD',railActive:'#1D2B38',accent:'#B8582A',accentInk:'#FFFFFF',accentSoft:'#F6E6DB',ok:'#1E8A5A',okSoft:'#DDF0E6',warn:'#8C5F0E',warnSoft:'#F6ECD4',crit:'#B83A31',critSoft:'#F8DFDC'};
+    var darkP = {bg:'#0A1016',surface:'#111A22',sunken:'#0D151C',ink:'#E3EBF2',muted:'#97A8B8',faint:'#8394A4',line:'#223040',lineSoft:'#18232D',rail:'#070C11',railInk:'#B8C6D3',railDim:'#8395A6',railActive:'#18242F',accent:'#E08A52',accentInk:'#1A0F08',accentSoft:'#3A2417',ok:'#4DB889',okSoft:'#12291F',warn:'#D6A847',warnSoft:'#2A2112',crit:'#E0706A',critSoft:'#2D1715'};
+    var c = dark ? darkP : light;
+    var self = this;
+    var navSpec = [
+      {title:'',items:[['Главная','PartnerDesk.dc.html',true,'','home'],['Шлюзы и SIM','#',false,'1','server'],['Цены','#',false,'','tag'],['Звонки','#',false,'','phone'],['Статистика','#',false,'','chart']]},
+      {title:'Деньги',items:[['Заработок и выплаты','#',false,'','wallet'],['Реквизиты','#',false,'','ledger']]},
+      {title:'Настройки',items:[['Уведомления','#',false,'','bell'],['Приложение Android','#',false,'','sim']]}
+    ];
+    var navKind = 'партнёр';
+    var navUser = {initials:'ТМ', name:'Такси Мир', mail:'disp@taximir.ru', extra:'для клиентов — Партнёр 23'};
+    var ICONS = {
+      home:'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+      grid:'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+      phone:'M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z',
+      signal:'M4 20v-4M9 20v-8M14 20V8M19 20V4',
+      users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8',
+      building:'M3 21h18M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2',
+      inbox:'M22 12h-6l-2 3h-4l-2-3H2M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z',
+      server:'M4 3h16v7H4zM4 14h16v7H4zM8 6.5h.01M8 17.5h.01',
+      ban:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM4.9 4.9l14.2 14.2',
+      sliders:'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+      ledger:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+      wallet:'M20 12V8H6a2 2 0 0 1 0-4h12v4M4 6v12a2 2 0 0 0 2 2h14v-4M18 12a2 2 0 0 0 0 4h4v-4z',
+      history:'M3 3v5h5M3.05 13A9 9 0 1 0 6 5.3L3 8M12 7v5l4 2',
+      gear:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
+      lines:'M4 6h16M4 12h16M4 18h10',
+      tag:'M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7.5 7.5h.01',
+      key:'M15.5 7.5 19 4M21 2l-9.6 9.6M15.5 7.5l3 3L22 7l-3-3M7.5 21a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11z',
+      chart:'M3 3v18h18M7 15l4-4 3 3 5-6',
+      bell:'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0',
+      sim:'M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM9 12h6v5H9z',
+      people:'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6'
+    };
+    var navOpen = this.state.navOpen !== false;
+    var navW = navOpen ? '232px' : '64px';
+    var nav = navSpec.map(function (g, gi) {
+      return {title:g.title, showTitle: navOpen && !!g.title, showRule: !navOpen && gi > 0,
+        items:g.items.map(function (it) {
+          var active = !!it[2];
+          var badge = it[3] || '';
+          return {label:it[0], href:it[1], badge:badge, icon:ICONS[it[4]], current: active ? 'page' : 'false', showLabel: navOpen,
+            aria: it[0] + (badge ? ', ' + badge : ''),
+            tip: navOpen ? '' : it[0] + (badge ? ' · ' + badge : ''),
+            style:'position:relative;display:flex;align-items:center;gap:10px;height:34px;box-sizing:border-box;border-radius:6px;font-size:13px;' + (navOpen ? 'padding:0 8px;' : 'padding:0;justify-content:center;') + (active ? 'background:' + c.railActive + ';color:#ffffff;box-shadow:inset 2px 0 0 ' + c.accent + ';' : 'color:' + c.railInk + ';'),
+            badgeStyle: navOpen
+              ? 'font-family:IBM Plex Mono,monospace;font-size:11px;padding:0 6px;border-radius:9px;background:' + c.accent + ';color:' + c.accentInk + ';'
+              : 'position:absolute;top:2px;right:4px;min-width:15px;height:15px;box-sizing:border-box;padding:0 4px;border-radius:8px;font-family:IBM Plex Mono,monospace;font-size:10px;line-height:15px;text-align:center;background:' + c.accent + ';color:' + c.accentInk + ';'};
+        })};
+    });
+    var navVals = {nav:nav, navW:navW, navOpen:navOpen, navKind:navKind, navUser:navUser,
+      navExpanded: navOpen ? 'true' : 'false',
+      navToggleLabel: navOpen ? 'Свернуть меню' : 'Развернуть меню',
+      navChevron: navOpen ? 'M16 9l-3 3 3 3' : 'M13 9l3 3-3 3',
+      navHeadStyle:'display:flex;align-items:center;gap:8px;height:32px;' + (navOpen ? 'padding-left:8px;' : 'justify-content:center;'),
+      navToggleStyle:'width:32px;height:32px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:' + c.railDim + ';' + (navOpen ? 'margin-left:auto;' : ''),
+      navFootStyle:'display:flex;align-items:center;gap:10px;padding:10px ' + (navOpen ? '8px' : '0') + ' 0;border-top:1px solid ' + c.railActive + ';' + (navOpen ? '' : 'justify-content:center;'),
+      toggleNav: function () { self.setState({navOpen: !navOpen}); }};
+    var tile = function (bg, fg, border) { return 'display:flex;flex-direction:column;gap:2px;padding:14px 16px;border-radius:12px;background:' + bg + ';color:' + fg + ';' + (border ? 'border:1px solid ' + c.line + ';' : ''); };
+    var sims = [
+      {value:'14',label:'В разговоре',note:'из 20 SIM',style:tile(c.okSoft, c.ok)},
+      {value:'5',label:'Свободны',note:'ждут звонка',style:tile(c.surface, c.ink, true)},
+      {value:'1',label:'Заблокирована',note:'нужна замена',style:tile(c.critSoft, c.crit)}
+    ];
+    var port = function (st, n) {
+      var bg = st === 'talk' ? c.ok : st === 'free' ? c.okSoft : st === 'block' ? c.crit : c.lineSoft;
+      var fg = st === 'talk' ? '#ffffff' : st === 'free' ? c.ok : st === 'block' ? '#ffffff' : c.muted;
+      var title = {talk:'разговор',free:'свободна',block:'заблокирована',empty:'пусто'}[st];
+      return {label:String(n), title:'Порт ' + n + ' — ' + title, style:'height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:IBM Plex Mono,monospace;font-size:12px;font-weight:500;background:' + bg + ';color:' + fg + ';'};
+    };
+    var gw = function (name, seen, online, states, note) {
+      return {name:name, seen:seen, note:note, dotStyle:'width:9px;height:9px;border-radius:50%;background:' + (online ? c.ok : c.crit) + ';',
+        ports: states.map(function (s, i) { return port(s, i + 1); })};
+    };
+    var gateways = [
+      gw('GOIP-8 «Дом»','на связи',true,['talk','talk','block','talk','talk','free','talk','talk'],'МТС ×5, T2 ×3 · 214 звонков сегодня'),
+      gw('GOIP-8 «Гараж»','на связи',true,['talk','talk','talk','talk','talk','talk','talk','free'],'Мегафон ×8 · 188 звонков сегодня'),
+      gw('GOIP-4 «Дача»','нет связи 3 ч — проверьте питание и интернет',false,['empty','empty','empty','empty'],'Билайн ×4 · звонки не идут')
+    ];
+    var calls = [
+      ['14:38','МТС · 7912 ••• 02','GOIP-8 «Дом», порт 1','2:14','+1,02 ₽'],
+      ['14:37','T2 · 7950 ••• 17','GOIP-8 «Дом», порт 6','0:48','+0,41 ₽'],
+      ['14:36','Мегафон · 7922 ••• 40','GOIP-8 «Гараж», порт 4','3:02','+1,38 ₽'],
+      ['14:35','МТС · 7912 ••• 55','GOIP-8 «Дом», порт 5','1:10','+0,55 ₽'],
+      ['14:34','Мегафон · 7922 ••• 08','GOIP-8 «Гараж», порт 2','4:41','+2,11 ₽'],
+      ['14:33','T2 · 7950 ••• 31','GOIP-8 «Дом», порт 7','0:32','+0,30 ₽'],
+      ['14:31','МТС · 7912 ••• 02','GOIP-8 «Дом», порт 1','1:56','+0,90 ₽']
+    ].map(function (k) { return {time:k[0], sim:k[1], where:k[2], duration:k[3], earned:k[4]}; });
+    return Object.assign(navVals, {c:c, sims:sims, gateways:gateways, calls:calls,
+      themeLabel: dark ? 'Светлая тема' : 'Тёмная тема',
+      toggleTheme: function () { self.setState({dark: !dark}); }});
+  }
+}
+</script>
+</body>
+</html>

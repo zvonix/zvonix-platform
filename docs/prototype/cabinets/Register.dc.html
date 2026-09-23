@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Регистрация</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans+Condensed:wght@500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.45}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer}
+input{font:inherit}
+:focus-visible{outline:2px solid #E08A52;outline-offset:1px}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; display: grid; grid-template-columns: 560px 1fr; background: {{c.bg}}; color: {{c.ink}}; overflow: hidden;">
+  <aside style="display: flex; flex-direction: column; gap: 28px; padding: 48px 56px; background: #0E1A24; color: #C5D1DC;">
+    <span style="font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600; font-size: 24px; color: #ffffff;">Zvonix</span>
+    <h1 style="margin: 24px 0 0; font-family: 'IBM Plex Sans Condensed', sans-serif; font-weight: 600; font-size: 40px; line-height: 1.1; color: #ffffff; text-wrap: balance;">{{pitch.title}}</h1>
+    <p style="margin: 0; font-size: 16px; line-height: 1.55; max-width: 42ch;">{{pitch.text}}</p>
+    <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px;">
+      <sc-for list="{{pitch.points}}" as="pt" hint-placeholder-count="3">
+        <li style="display: grid; grid-template-columns: 28px 1fr; gap: 10px; font-size: 15px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; color: #E08A52;">{{pt.n}}</span>
+          <span>{{pt.text}}</span>
+        </li>
+      </sc-for>
+    </ul>
+    <span style="margin-top: auto; font-size: 13px; color: #8D9DAD;">Заявку проверяет администратор площадки. Ответ придёт на почту.</span>
+  </aside>
+
+  <main style="display: flex; justify-content: center; align-items: flex-start; padding: 48px 56px; overflow: auto;">
+    <form style="width: 560px; display: flex; flex-direction: column; gap: 18px;">
+      <div style="display: flex; align-items: baseline;">
+        <h2 style="margin: 0; font-family: 'IBM Plex Sans Condensed', sans-serif; font-size: 28px; font-weight: 600;">Заявка на подключение</h2>
+        <a href="#" style="margin-left: auto; font-size: 14px; color: {{c.accent}}; font-weight: 600;">Уже есть вход? Войти</a>
+      </div>
+
+      <fieldset style="margin: 0; padding: 0; border: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
+        <legend style="font-weight: 600; padding: 0 0 8px;">Кто вы</legend>
+        <sc-for list="{{roles}}" as="r" hint-placeholder-count="2">
+          <button type="button" onClick="{{r.pick}}" aria-pressed="{{r.pressed}}" style="{{r.style}}">
+            <span style="font-weight: 600; font-size: 15px;">{{r.title}}</span>
+            <span style="font-size: 13px; color: {{c.muted}};">{{r.text}}</span>
+          </button>
+        </sc-for>
+      </fieldset>
+
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;">
+        <sc-for list="{{fields}}" as="f" hint-placeholder-count="6">
+          <label style="{{f.wrapStyle}}">
+            <span style="font-weight: 500;">{{f.label}}</span>
+            <input type="{{f.type}}" placeholder="{{f.placeholder}}" autocomplete="{{f.auto}}" style="height: 40px; box-sizing: border-box; padding: 0 12px; border: 1px solid {{c.line}}; border-radius: 8px; background: {{c.surface}}; color: {{c.ink}};">
+            <span style="font-size: 12px; color: {{c.muted}};">{{f.hint}}</span>
+          </label>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{isPartner}}" hint-placeholder-val="{{false}}">
+        <fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 6px;">
+          <legend style="font-weight: 500; padding: 0 0 6px;">Операторы ваших SIM</legend>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <sc-for list="{{operators}}" as="o" hint-placeholder-count="5">
+              <button type="button" onClick="{{o.toggle}}" aria-pressed="{{o.pressed}}" style="{{o.style}}">{{o.label}}</button>
+            </sc-for>
+          </div>
+          <span style="font-size: 12px; color: {{c.muted}};">Звонки пойдут только внутри сети каждой SIM — такие звонки у вас бесплатны</span>
+        </fieldset>
+      </sc-if>
+
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 8px; border: 1px dashed {{c.line}}; color: {{c.muted}}; font-size: 13px;">[проверка «я не робот» — Яндекс SmartCaptcha]</div>
+
+      <label style="display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: {{c.muted}};">
+        <input type="checkbox" style="width: 18px; height: 18px; margin: 1px 0 0; accent-color: {{c.accent}};">
+        <span>Согласен с <a href="#" style="color: {{c.accent}};">условиями площадки</a> и обработкой персональных данных</span>
+      </label>
+
+      <button type="button" style="height: 46px; border: 0; border-radius: 8px; background: {{c.accent}}; color: {{c.accentInk}}; font-size: 15px; font-weight: 600;">Отправить заявку</button>
+      <span style="font-size: 13px; color: {{c.muted}};">Войти можно будет после одобрения. Второй кабинет — клиента или партнёра — потом подключается из первого, тем же логином.</span>
+    </form>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false,"section":"Тема"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { role: 'client', ops: {'МТС':true} }; }
+  renderVals() {
+    var dark = !!this.props.dark;
+    var light = {bg:'#F2F4F6',surface:'#FFFFFF',ink:'#0E1A24',muted:'#526374',line:'#CFD7DF',accent:'#B8582A',accentInk:'#FFFFFF',accentSoft:'#F6E6DB'};
+    var darkP = {bg:'#0A1016',surface:'#111A22',ink:'#E3EBF2',muted:'#97A8B8',line:'#2A3947',accent:'#E08A52',accentInk:'#1A0F08',accentSoft:'#3A2417'};
+    var c = dark ? darkP : light;
+    var self = this;
+    var partner = this.state.role === 'partner';
+    var roles = [
+      {id:'client',title:'Служба такси',text:'Звоню водителям и пассажирам через площадку'},
+      {id:'partner',title:'Партнёр',text:'Есть SIM и GOIP — хочу зарабатывать на звонках'}
+    ].map(function (r) {
+      var on = self.state.role === r.id;
+      r.pressed = on ? 'true' : 'false';
+      r.pick = function () { self.setState({role:r.id}); };
+      r.style = 'display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:14px 16px;border-radius:10px;min-height:76px;' + (on ? 'border:2px solid ' + c.accent + ';background:' + c.accentSoft + ';color:' + c.ink + ';' : 'border:1px solid ' + c.line + ';background:' + c.surface + ';color:' + c.ink + ';');
+      return r;
+    });
+    var full = 'display:flex;flex-direction:column;gap:5px;grid-column:1 / -1;';
+    var half = 'display:flex;flex-direction:column;gap:5px;';
+    var common = [
+      ['Ваше имя','text','Иван Петров','','name',half],
+      ['Телефон','tel','+7 900 000-00-00','Позвоним, если будут вопросы по заявке','tel',half],
+      ['Почта — она же логин','email','ivan@example.ru','','email',half],
+      ['Пароль','password','не короче 12 символов','','new-password',half]
+    ];
+    var specific = partner ? [
+      ['Регион, где стоят шлюзы','text','Свердловская область','','address-level1',half],
+      ['Сколько у вас SIM','text','например, 16','Можно примерно','off',half]
+    ] : [
+      ['Название службы такси','text','Такси Мир','Так вас увидит администратор','organization',half],
+      ['Город','text','Екатеринбург','','address-level2',half],
+      ['Сколько звонков в день примерно','text','например, 800','Поможет заранее подготовить ёмкость','off',full]
+    ];
+    var fields = common.concat(specific).map(function (f) {
+      return {label:f[0], type:f[1], placeholder:f[2], hint:f[3], auto:f[4], wrapStyle:f[5]};
+    });
+    var operators = ['МТС','T2','Мегафон','Билайн','Йота'].map(function (o) {
+      var on = !!self.state.ops[o];
+      return {label:o, pressed: on ? 'true' : 'false',
+        toggle:function(){ var ops = Object.assign({}, self.state.ops); ops[o] = !on; self.setState({ops:ops}); },
+        style:'height:40px;padding:0 16px;border-radius:20px;font-size:14px;' + (on ? 'border:1px solid ' + c.accent + ';background:' + c.accentSoft + ';color:' + c.ink + ';font-weight:600;' : 'border:1px solid ' + c.line + ';background:transparent;color:' + c.muted + ';')};
+    });
+    var pitch = partner ? {
+      title:'Ваши SIM звонят — вы получаете деньги',
+      text:'Подключите GOIP с SIM-картами: площадка направит на них звонки служб такси внутри сети каждой SIM. Вы назначаете цену в пределах коридора и видите заработок по каждой карте.',
+      points:[{n:'01',text:'Заявка и проверка — [срок проверки]'},{n:'02',text:'Шлюз подключается по инструкции из кабинета'},{n:'03',text:'Выплаты [график выплат], по каждому звонку — отчёт'}]
+    } : {
+      title:'Звонки водителям и пассажирам — дешевле и без сбоев',
+      text:'Площадка отправляет звонки вашей диспетчерской через SIM-карты нужного оператора: внутри сети дешевле, а номер получателя видит мобильный номер, а не городской.',
+      points:[{n:'01',text:'Заявка и проверка — [срок проверки]'},{n:'02',text:'Линии настраиваются в кабинете за минуты'},{n:'03',text:'Каждый звонок и каждое списание — в отчёте'}]
+    };
+    return {c:c, roles:roles, fields:fields, operators:operators, pitch:pitch, isPartner:partner};
+  }
+}
+</script>
+</body>
+</html>

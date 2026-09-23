@@ -11,7 +11,7 @@
  */
 
 import { Controller, Get, Header, Res } from '@nestjs/common';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Inject } from '@nestjs/common';
@@ -37,10 +37,20 @@ const NODE_DIR = path.join(
 );
 
 const INSTALL_SCRIPT = path.join(NODE_DIR, 'install.sh');
-const TEMPLATES = {
-  '@@TEMPLATE_XML_CURL@@': path.join(NODE_DIR, 'conf', 'autoload_configs', 'xml_curl.conf.xml'),
-  '@@TEMPLATE_JSON_CDR@@': path.join(NODE_DIR, 'conf', 'autoload_configs', 'json_cdr.conf.xml'),
-} as const;
+/** Набор конфигурации узла целиком ([ADR-0051](../../../../../docs/adr/0051-svoya-konfiguraciya-uzla.md)). */
+const CONF_DIR = path.join(NODE_DIR, 'conf');
+
+/** Фильтр и тюрьма fail2ban для подбора паролей SIP — раскладываются в /etc/fail2ban. */
+const FAIL2BAN_DIR = path.join(NODE_DIR, 'fail2ban');
+
+/** Граница вложенного файла в скрипте: строки с ней в файлах набора быть не может. */
+const CONF_EOF = 'ZVONIX_CONF_EOF';
+
+/**
+ * Имя файла набора ложится в скрипт в одинарных кавычках: латиница, цифры и `_./-`,
+ * без выхода наверх. Иначе имя стало бы кодом, исполняемым на узле от root.
+ */
+const CONF_NAME = /^(?!.*\.\.)[a-z0-9_][a-z0-9_./-]*$/u;
 
 @Controller()
 export class NodeInstallController {
@@ -68,28 +78,73 @@ export class NodeInstallController {
   }
 
   /**
-   * Собирает скрипт: сначала параметры, потом шаблоны.
+   * Собирает скрипт: сначала параметры, потом набор конфигурации.
    *
-   * Порядок строгий. Обратный затёр бы `@@KEY_ID@@` и `@@KEY_SECRET@@` **внутри**
-   * вложенного XML — а их подставляет сам скрипт на узле: до обмена токена ключа
-   * не существует, и здесь его взять неоткуда.
+   * Порядок строгий. Обратный затёр бы метки **внутри** вложенных файлов — а их
+   * подставляет сам скрипт на узле: ключа до обмена токена не существует, пароль ESL
+   * порождается там же.
+   *
+   * Замена — функцией, а не строкой: в строке замены `replaceAll` читает `$$` как `$`,
+   * а набор полон `$${domain}` и `$${local_ip_v4}` — они молча стали бы `${…}`.
    */
   private async compose(repository: string): Promise<string> {
-    const [source, xmlCurl, jsonCdr] = await Promise.all([
-      this.read(INSTALL_SCRIPT),
-      this.read(TEMPLATES['@@TEMPLATE_XML_CURL@@']),
-      this.read(TEMPLATES['@@TEMPLATE_JSON_CDR@@']),
-    ]);
+    const [source, files] = await Promise.all([this.read(INSTALL_SCRIPT), this.confFiles()]);
 
-    const withSettings = source
-      .replaceAll('@@CONTROL_PLANE@@', this.config.PUBLIC_BASE_URL.replace(/\/+$/u, ''))
-      .replaceAll('@@PACKAGE_REPO@@', repository.replace(/\/+$/u, ''))
-      .replaceAll('@@PACKAGE_SUITE@@', this.config.NODE_PACKAGE_SUITE)
-      .replaceAll('@@PACKAGE_KEY_FINGERPRINT@@', this.config.NODE_PACKAGE_KEY_FINGERPRINT);
+    const settings: Record<string, string> = {
+      '@@CONTROL_PLANE@@': this.config.PUBLIC_BASE_URL.replace(/\/+$/u, ''),
+      '@@SIP_REALM@@': this.config.SIP_REALM,
+      '@@PACKAGE_REPO@@': repository.replace(/\/+$/u, ''),
+      '@@PACKAGE_SUITE@@': this.config.NODE_PACKAGE_SUITE,
+      '@@PACKAGE_KEY_FINGERPRINT@@': this.config.NODE_PACKAGE_KEY_FINGERPRINT,
+    };
+    let script = source;
+    for (const [mark, value] of Object.entries(settings)) {
+      script = script.replaceAll(mark, () => value);
+    }
+    return script
+      .replaceAll('@@CONF_FILES@@', () => files.conf)
+      .replaceAll('@@FAIL2BAN_FILES@@', () => files.fail2ban);
+  }
 
-    return withSettings
-      .replaceAll('@@TEMPLATE_XML_CURL@@', xmlCurl.trimEnd())
-      .replaceAll('@@TEMPLATE_JSON_CDR@@', jsonCdr.trimEnd());
+  /** Файлы набора — вызовами `<функция> <имя> <<'ZVONIX_CONF_EOF'`, по порядку имён. */
+  private async confFiles(): Promise<{ conf: string; fail2ban: string }> {
+    return {
+      conf: await this.embed(CONF_DIR, 'conf_file'),
+      fail2ban: await this.embed(FAIL2BAN_DIR, 'fail2ban_file'),
+    };
+  }
+
+  /** Каталог целиком — блоками `<функция> '<имя>' <<'ZVONIX_CONF_EOF'`. */
+  private async embed(directory: string, command: string): Promise<string> {
+    let entries;
+    try {
+      entries = await readdir(directory, { recursive: true, withFileTypes: true });
+    } catch {
+      throw dependencyUnavailable('Установщик узла недоступен', {
+        details: { file: directory, remedy: 'В артефакт выкладки не попал каталог node/.' },
+      });
+    }
+    const names = entries
+      .filter((entry) => entry.isFile())
+      .map((entry) =>
+        path.relative(directory, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'),
+      )
+      .sort();
+
+    const blocks: string[] = [];
+    for (const name of names) {
+      const content = (await this.read(path.join(directory, name))).trimEnd();
+      if (!CONF_NAME.test(name) || content.split('\n').includes(CONF_EOF)) {
+        throw dependencyUnavailable('Установщик узла недоступен', {
+          details: {
+            file: name,
+            remedy: `Имя файла набора — латиница, цифры и «_./-»; строки «${CONF_EOF}» в нём быть не может.`,
+          },
+        });
+      }
+      blocks.push(`${command} '${name}' <<'${CONF_EOF}'\n${content}\n${CONF_EOF}`);
+    }
+    return blocks.join('\n');
   }
 
   /**

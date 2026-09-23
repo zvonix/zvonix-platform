@@ -1,0 +1,89 @@
+<configuration name="sofia.conf" description="SIP узла">
+  <!--
+    Один профиль, zvonix, на 5060 — для всех, кто регистрируется к нам: GOIP партнёров
+    и линии клиентов (ADR-0051). Штатного external на 5080, IPv6-профилей и шлюзов-примеров
+    нет: открыто только то, что здесь перечислено.
+  -->
+  <global_settings>
+    <param name="log-level" value="0"/>
+    <param name="debug-presence" value="0"/>
+  </global_settings>
+
+  <profiles>
+    <profile name="zvonix">
+      <!--
+        Транки к партнёрам по SIP (ADR-0039): их собирает агент узла по
+        GET /node/sip-gateways в каталог zvonix-gateways/. Агента ещё нет — каталог пуст.
+      -->
+      <gateways>
+        <X-PRE-PROCESS cmd="include" data="../zvonix-gateways/*.xml"/>
+      </gateways>
+
+      <settings>
+        <!-- Сканерам — ни имени, ни версии АТС. -->
+        <param name="user-agent-string" value="Zvonix"/>
+        <param name="debug" value="0"/>
+        <param name="sip-trace" value="no"/>
+        <!-- Неудачи проверки пароля — в журнал: их читает человек и fail2ban. -->
+        <param name="log-auth-failures" value="true"/>
+
+        <param name="context" value="zvonix"/>
+        <param name="dialplan" value="XML"/>
+
+        <param name="sip-ip" value="$${local_ip_v4}"/>
+        <param name="sip-port" value="5060"/>
+        <param name="rtp-ip" value="$${local_ip_v4}"/>
+        <!-- Узел стоит на публичном адресе: внешний адрес — он же (сервер за NAT не поддержан). -->
+        <param name="ext-sip-ip" value="$${local_ip_v4}"/>
+        <param name="ext-rtp-ip" value="$${local_ip_v4}"/>
+        <param name="rtp-timer-name" value="timerfd"/>
+
+        <param name="inbound-codec-prefs" value="$${global_codec_prefs}"/>
+        <param name="outbound-codec-prefs" value="$${outbound_codec_prefs}"/>
+        <param name="inbound-codec-negotiation" value="generous"/>
+        <!-- GOIP передаёт клавиши и событиями, и звуком: принимаются оба. -->
+        <param name="dtmf-type" value="rfc2833"/>
+        <param name="liberal-dtmf" value="true"/>
+
+        <!--
+          Проверка пароля — всегда. Учётные записи даёт только площадка по mod_xml_curl,
+          статический каталог пуст (directory/zvonix.xml), так что «записи нет» подменить нечем.
+          Realm — SIP_REALM площадки: он входит в a1-hash, и регистрация на любое имя
+          сервера сводится к нему.
+        -->
+        <param name="auth-calls" value="true"/>
+        <param name="auth-all-packets" value="false"/>
+        <param name="accept-blind-reg" value="false"/>
+        <param name="accept-blind-auth" value="false"/>
+        <param name="inbound-reg-force-matching-username" value="true"/>
+        <param name="challenge-realm" value="$${domain}"/>
+        <param name="force-register-domain" value="$${domain}"/>
+        <param name="force-register-db-domain" value="$${domain}"/>
+        <param name="force-subscription-domain" value="$${domain}"/>
+        <param name="nonce-ttl" value="60"/>
+
+        <!--
+          GOIP партнёров стоят за домашними роутерами. Отвечать по адресу, с которого
+          пришёл запрос, и пинговать зарегистрированных за NAT: иначе дырка в роутере
+          закроется, и вызов к шлюзу не дойдёт, хотя регистрация будет числиться.
+        -->
+        <param name="apply-nat-acl" value="nat.auto"/>
+        <param name="local-network-acl" value="localnet.auto"/>
+        <param name="aggressive-nat-detection" value="true"/>
+        <param name="NDLB-received-in-nat-reg-contact" value="true"/>
+        <param name="nat-options-ping" value="true"/>
+        <param name="unregister-on-options-fail" value="true"/>
+
+        <!-- Ни присутствия, ни переадресаций по REFER: ни то ни другое узлу не нужно. -->
+        <param name="manage-presence" value="false"/>
+        <param name="disable-transfer" value="true"/>
+        <param name="enable-3pcc" value="false"/>
+
+        <!-- Вызов без голоса пять минут кладётся: зависший вызов — это зависший резерв денег. -->
+        <param name="rtp-timeout-sec" value="300"/>
+        <param name="rtp-hold-timeout-sec" value="1800"/>
+        <param name="suppress-cng" value="true"/>
+      </settings>
+    </profile>
+  </profiles>
+</configuration>

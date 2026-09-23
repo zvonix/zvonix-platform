@@ -3,3 +3,5 @@ dist
 pnpm-lock.yaml
 *.md
 .next
+# Доски образца — копия холста дизайна один в один; форматирование ломает {{…}} в style
+docs/prototype/cabinets
