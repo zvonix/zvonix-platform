@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
+import { useSession } from '@/lib/session';
 import { SettingField, labelOf, type DraftValue, type SettingView } from './setting-field';
 
 const SETTINGS_QUERY_KEY = ['settings'] as const;
@@ -218,13 +219,18 @@ function SettingsForm() {
  * «не работает» неотличимо от «не тот пароль».
  */
 function TestLetter() {
-  const [recipient, setRecipient] = useState('');
+  // Проверяющий почти всегда шлёт письмо себе: адрес входа подставлен сразу, его можно
+  // заменить. Отдельной настройки «адрес для пробного письма» больше нет — два поля
+  // для одного письма путали (владелец, 2026-09-23).
+  const own = useSession().data?.email ?? '';
+  const [typed, setTyped] = useState<string | undefined>(undefined);
+  const recipient = (typed ?? own).trim();
 
   const send = useMutation({
     mutationFn: () =>
       request<TestResult>('/settings/mail/test', {
         method: 'POST',
-        body: recipient === '' ? {} : { recipient },
+        body: { recipient },
         // Письмо идёт наружу, и у соединения с почтовым сервером свои пределы — до 15 с
         // на шаг. Кабинет ждёт дольше них, иначе ответ сервера, ради которого проверка
         // и существует, не доходил бы до экрана.
@@ -237,9 +243,8 @@ function TestLetter() {
   return (
     <div className="mt-3 flex flex-col gap-2 border-t border-border-soft pt-3">
       <p className="text-muted-foreground">
-        Пробное письмо идёт мимо очереди и возвращает ответ почтового сервера. Пустой адрес — письмо
-        уйдёт на адрес из настройки выше. Сохраните изменения перед отправкой: проверяются
-        сохранённые настройки, а не то, что набрано в полях.
+        Пробное письмо идёт мимо очереди и возвращает ответ почтового сервера. Сохраните изменения
+        перед отправкой: проверяются сохранённые настройки, а не то, что набрано в полях.
       </p>
       <div className="flex flex-wrap gap-2">
         <Input
@@ -247,17 +252,17 @@ function TestLetter() {
           aria-label="Адрес для пробного письма"
           autoComplete="off"
           spellCheck={false}
-          placeholder="name@example.ru — или пусто…"
+          placeholder="name@example.ru"
           className="max-w-[240px]"
-          value={recipient}
+          value={typed ?? own}
           onChange={(event) => {
-            setRecipient(event.target.value);
+            setTyped(event.target.value);
           }}
         />
         <Button
           type="button"
           variant="outline"
-          disabled={send.isPending}
+          disabled={send.isPending || recipient === ''}
           onClick={() => {
             send.mutate();
           }}

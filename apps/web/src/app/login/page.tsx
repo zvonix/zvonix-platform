@@ -177,6 +177,12 @@ export default function LoginPage() {
           <Button type="submit" disabled={login.isPending}>
             {login.isPending ? 'Проверяем…' : 'Войти'}
           </Button>
+          <Link
+            href="/forgot-password"
+            className="text-center text-muted-foreground hover:text-foreground"
+          >
+            Забыли пароль?
+          </Link>
         </form>
         <p className="pt-3 text-center text-muted-foreground">
           Нет входа?{' '}

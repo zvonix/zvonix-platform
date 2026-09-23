@@ -325,6 +325,18 @@ export class IdentityController {
     await this.identity.resetTotp(parseId(id, 'user'), actor.userId, actor.role);
   }
 
+  /** Подтвердить адрес вручную — когда письмо не доходит, а адрес проверен иначе. */
+  @Roles('admin')
+  @Post('users/:id/email/confirm')
+  async confirmEmailByAdmin(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+    @Meta() meta: RequestMeta,
+  ): Promise<{ user: UserResponse }> {
+    const user = await this.identity.confirmEmailByAdmin(actor, parseId(id, 'user'), meta);
+    return { user: toUserResponse(user) };
+  }
+
   @Roles('admin')
   @Patch('users/:id/status')
   async changeStatus(
@@ -371,6 +383,7 @@ function toUserResponse(user: PublicUser): UserResponse {
     full_name: user.fullName,
     role: user.role,
     status: user.status,
+    email_confirmed_at: user.emailConfirmedAt?.toISOString() ?? null,
     created_at: user.createdAt.toISOString(),
   };
 }
@@ -378,7 +391,6 @@ function toUserResponse(user: PublicUser): UserResponse {
 function toAdminUserResponse(user: AdminUser): AdminUserResponse {
   return {
     ...toUserResponse(user),
-    email_confirmed_at: user.emailConfirmedAt?.toISOString() ?? null,
     totp_enabled: user.totpEnabled,
     last_login_at: user.lastLoginAt?.toISOString() ?? null,
     locked_until: user.lockedUntil?.toISOString() ?? null,

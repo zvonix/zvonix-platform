@@ -172,6 +172,8 @@ export interface PublicUser {
   readonly fullName: string;
   readonly role: UserRole;
   readonly status: UserStatus;
+  /** Подтверждён ли адрес: заявитель видит, что осталось сделать ему самому. */
+  readonly emailConfirmedAt: Date | null;
   readonly createdAt: Date;
 }
 
@@ -184,7 +186,6 @@ export interface PublicUser {
  * Блокировка до срока отвечает на «почему человек не может войти, пароль верный».
  */
 export interface AdminUser extends PublicUser {
-  readonly emailConfirmedAt: Date | null;
   readonly totpEnabled: boolean;
   readonly lastLoginAt: Date | null;
   readonly lockedUntil: Date | null;
@@ -238,6 +239,7 @@ function toPublicUser(row: UserRow): PublicUser {
     fullName: row.fullName,
     role: row.role,
     status: row.status,
+    emailConfirmedAt: row.emailConfirmedAt,
     createdAt: row.createdAt,
   };
 }
@@ -1129,6 +1131,16 @@ export class IdentityService {
       throw conflict('Учётная запись закрыта: это состояние окончательное');
     }
 
+    // Участнику вход не открывается, пока адрес не подтверждён: иначе вход получает
+    // тот, кто вписал чужой адрес (владелец, 2026-09-23). Подтвердить можно ссылкой
+    // из письма или вручную — `confirmEmailByAdmin`. Сотрудников заводит администратор,
+    // и письма подтверждения у них нет вовсе.
+    if (status === 'active' && !isStaffRole(target.role) && target.emailConfirmedAt === null) {
+      throw conflict('Адрес почты не подтверждён — вход не открыть', {
+        details: { reason: 'email_unconfirmed' },
+      });
+    }
+
     const updated = await this.repository.setStatus(id, status);
     const revoked =
       status === 'active' ? 0 : await this.repository.revokeAllSessions(id, new Date());
@@ -1145,6 +1157,33 @@ export class IdentityService {
       userAgent: meta.userAgent,
     });
 
+    return toPublicUser(updated);
+  }
+
+  /**
+   * Подтверждение адреса администратором — когда письмо не доходит, а адрес проверен
+   * иначе, например звонком (владелец, 2026-09-23). Действие человека за другого, поэтому
+   * в журнале: кто подтвердил и за кого. Повтор ничего не меняет и в журнал не пишется.
+   */
+  async confirmEmailByAdmin(actor: Principal, id: UserId, meta: RequestMeta): Promise<PublicUser> {
+    const target = await this.repository.findById(id);
+    if (target === undefined) throw notFound('Учётная запись не найдена');
+    if (target.emailConfirmedAt !== null) return toPublicUser(target);
+
+    const now = new Date();
+    const updated = await this.repository.setEmailConfirmed(id, now);
+    if (updated === undefined) throw notFound('Учётная запись не найдена');
+    await this.audit.record({
+      action: 'user.email_confirmed',
+      entityType: 'user',
+      entityId: id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { email_confirmed_at: null },
+      after: { email_confirmed_at: now.toISOString(), by: 'admin' },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
     return toPublicUser(updated);
   }
 

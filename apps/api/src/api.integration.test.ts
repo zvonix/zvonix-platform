@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyMigrations, createDatabase } from '@zvonix/db';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { CORRELATION_ID_HEADER } from './http/correlation-id.hook.js';
-import { CLIENT_APPLICATION, PARTNER_APPLICATION } from './testing/harness.js';
+import { CLIENT_APPLICATION, PARTNER_APPLICATION, withDatabase } from './testing/harness.js';
 
 const url =
   process.env['TEST_DATABASE_URL'] ?? 'postgresql://zvonix:zvonix@127.0.0.1:5432/zvonix_test';
@@ -542,7 +542,7 @@ describe('права администратора', () => {
     expect(response.json()).toMatchObject({ error: { code: 'permission_denied' } });
   });
 
-  it('администратор активирует запись, и та может войти', async () => {
+  it('администратор подтверждает адрес, активирует запись, и та может войти', async () => {
     const adminEmail = uniqueEmail();
     await api().get(IdentityService).createByAdmin({
       email: adminEmail,
@@ -555,6 +555,36 @@ describe('права администратора', () => {
 
     const partnerEmail = uniqueEmail();
     const partnerId = await register(partnerEmail, PARTNER_APPLICATION);
+
+    // С неподтверждённым адресом вход не открывается: его получил бы тот, кто вписал
+    // чужой адрес (владелец, 2026-09-23).
+    const refused = await api().inject({
+      method: 'PATCH',
+      url: `/users/${partnerId}/status`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { status: 'active' },
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ error: { details: { reason: 'email_unconfirmed' } } });
+
+    // Письмо не дошло, адрес проверен иначе — администратор подтверждает вручную.
+    const confirmed = await api().inject({
+      method: 'POST',
+      url: `/users/${partnerId}/email/confirm`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(confirmed.statusCode).toBe(201);
+    expect(
+      confirmed.json<{ user: { email_confirmed_at: string | null } }>().user.email_confirmed_at,
+    ).not.toBeNull();
+
+    const audited = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select actor_user_id from audit_log where action = 'user.email_confirmed' and entity_id = ${partnerId}`,
+      );
+      return result.rows;
+    });
+    expect(audited).toHaveLength(1);
 
     const patched = await api().inject({
       method: 'PATCH',

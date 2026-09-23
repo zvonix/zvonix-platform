@@ -34,7 +34,6 @@ const LABELS: Record<string, string> = {
   'mail.user': 'Имя для входа',
   'mail.password': 'Пароль',
   'mail.from': 'Отправитель',
-  'mail.test_recipient': 'Адрес для пробного письма',
   'captcha.site_key': 'Ключ страницы',
   'captcha.server_key': 'Серверный ключ',
   'captcha.on_register': 'При регистрации',

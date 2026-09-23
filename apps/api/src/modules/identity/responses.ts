@@ -27,6 +27,8 @@ export interface UserResponse {
   readonly full_name: string;
   readonly role: UserRole;
   readonly status: UserStatus;
+  /** Подтверждён ли адрес: заявитель видит на своём экране, что осталось сделать ему. */
+  readonly email_confirmed_at: string | null;
   readonly created_at: string;
 }
 
@@ -38,7 +40,6 @@ export interface UserResponse {
  * и приходят.
  */
 export interface AdminUserResponse extends UserResponse {
-  readonly email_confirmed_at: string | null;
   readonly totp_enabled: boolean;
   readonly last_login_at: string | null;
   readonly locked_until: string | null;

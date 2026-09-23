@@ -228,6 +228,20 @@ async function main(): Promise<void> {
       }
     }
 
+    // Вход открыт вручную, а заявка не одобрена — кабинета нет. Так выглядел первый
+    // живой партнёр (2026-09-23): экран обязан сказать, где заявка и что делать.
+    const waiting = await identity.createByAdmin({
+      email: 'waiting@e2e.zvonix.test',
+      password: PASSWORD,
+      fullName: 'Соколов Андрей',
+      role: 'member',
+      status: 'active',
+    });
+    await identity.createApplication(parseId(waiting.id, 'user'), {
+      cabinet: 'partner',
+      answers: { region: 'Тверская область', phone: '+7 910 000-11-22', operators: ['МТС'] },
+    });
+
     process.stdout.write(
       'Стенд наполнен: роли, клиент с линией, подтверждённый партнёр, человек с двумя ' +
         'кабинетами, оператор, две заявки.\n',

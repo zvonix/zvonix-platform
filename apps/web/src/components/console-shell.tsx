@@ -330,7 +330,7 @@ export function ConsoleShell({
 
   const footer = (
     <>
-      {user.fullName}
+      {user.full_name}
       <div className="truncate">{user.email}</div>
       {SEES_RELEASE.includes(user.role) ? <ReleaseVersion /> : null}
     </>
@@ -403,12 +403,22 @@ export function ConsoleShell({
 function secondCabinetGroup(owned: OwnedCabinets | undefined): readonly NavGroup[] {
   if (owned === undefined) return [];
   if (owned.client !== null && owned.partner !== null) return [];
+  // Без кабинетов вовсе «второй кабинет» — неправда: это первый, и путь к нему — заявка.
+  if (owned.client === null && owned.partner === null) {
+    return [
+      {
+        title: 'Подключение',
+        items: [
+          { href: '/', label: 'Моя заявка', Icon: Inbox },
+          { href: '/apply', label: 'Подать заявку', Icon: Plus },
+        ],
+      },
+    ];
+  }
   const missing =
-    owned.client === null && owned.partner === null
-      ? { href: '/apply', label: 'Подать заявку' }
-      : owned.client === null
-        ? { href: '/apply?cabinet=client', label: 'Стать клиентом' }
-        : { href: '/apply?cabinet=partner', label: 'Стать партнёром' };
+    owned.client === null
+      ? { href: '/apply?cabinet=client', label: 'Стать клиентом' }
+      : { href: '/apply?cabinet=partner', label: 'Стать партнёром' };
   return [{ title: 'Второй кабинет', items: [{ ...missing, Icon: Plus }] }];
 }
 
