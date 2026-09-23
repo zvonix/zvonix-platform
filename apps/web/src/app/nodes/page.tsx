@@ -2,13 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NODE_OFFLINE_AFTER_MS, type NodeStatus } from '@zvonix/shared';
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
+import { DialogForm, FormDialog } from '@/components/form-dialog';
 import { OneTimeSecret } from '@/components/one-time-secret';
 import { ReadOnly } from '@/components/read-only';
-import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -65,8 +65,6 @@ export default function NodesPage() {
 function NodesView() {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
-  const [opened, setOpened] = useState<string | undefined>(undefined);
   const [install, setInstall] = useState<Install | undefined>(undefined);
 
   const list = useQuery({
@@ -92,7 +90,6 @@ function NodesView() {
       request<Provisioned>('/nodes', { method: 'POST', body: { ...draft } }),
     onSuccess: async (provisioned) => {
       remember(provisioned);
-      setCreating(false);
       await refresh();
     },
   });
@@ -105,7 +102,6 @@ function NodesView() {
       }),
     onSuccess: async (provisioned) => {
       remember(provisioned);
-      setOpened(undefined);
       await refresh();
     },
   });
@@ -118,13 +114,13 @@ function NodesView() {
         method: 'POST',
       }),
     onSuccess: async () => {
-      setOpened(undefined);
       await atMost(refresh());
     },
   });
 
   const busy = provision.isPending || reissue.isPending || decommission.isPending;
-  const failed = asApiError(provision.error ?? reissue.error ?? list.error);
+  // Отказы заведения и перевыпуска показывает их окно, здесь — только отказ списка.
+  const failed = asApiError(list.error);
 
   return (
     <div className="flex flex-col gap-3">
@@ -134,16 +130,14 @@ function NodesView() {
           звонит ни один канал: маршрут запрашивает узел, и спросить его некому.
         </p>
         {canChange ? (
-          <Button
-            size="sm"
+          <FormDialog
+            label="Завести узел"
+            title="Новый узел"
+            description="После заведения кабинет один раз покажет команду установки для сервера."
             className="ml-auto"
-            onClick={() => {
-              setCreating(!creating);
-            }}
-            aria-expanded={creating}
           >
-            {creating ? 'Свернуть' : 'Завести узел'}
-          </Button>
+            <NewNodeForm onCreate={(draft) => provision.mutateAsync(draft)} />
+          </FormDialog>
         ) : (
           // Обёртка — блок, а не `span`: внутри `ReadOnly` абзац, и строчный элемент
           // вокруг абзаца — недопустимая разметка.
@@ -187,18 +181,6 @@ function NodesView() {
         </OneTimeSecret>
       )}
 
-      {creating && canChange && (
-        <NewNodeForm
-          busy={provision.isPending}
-          onCreate={(draft) => {
-            provision.mutate(draft);
-          }}
-          onCancel={() => {
-            setCreating(false);
-          }}
-        />
-      )}
-
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
@@ -234,15 +216,9 @@ function NodesView() {
               <NodeRows
                 key={node.id}
                 node={node}
-                open={opened === node.id}
                 busy={busy}
                 canChange={canChange}
-                onToggle={() => {
-                  setOpened(opened === node.id ? undefined : node.id);
-                }}
-                onReissue={(allowedIps) => {
-                  reissue.mutate({ id: node.id, allowedIps });
-                }}
+                onReissue={(allowedIps) => reissue.mutateAsync({ id: node.id, allowedIps })}
                 onDecommission={() => decommission.mutateAsync(node.id)}
               />
             ))}
@@ -255,110 +231,99 @@ function NodesView() {
 
 function NodeRows({
   node,
-  open,
   busy,
   canChange,
-  onToggle,
   onReissue,
   onDecommission,
 }: {
   node: Node;
-  open: boolean;
   busy: boolean;
   canChange: boolean;
-  onToggle: () => void;
-  onReissue: (allowedIps: string[]) => void;
+  onReissue: (allowedIps: string[]) => Promise<unknown>;
   onDecommission: () => Promise<unknown>;
 }) {
   const closed = node.status === 'decommissioned';
 
   return (
-    <Fragment>
-      <TableRow>
-        <TableCell>
-          {node.name}
-          <span className="num block text-faint" translate="no">
-            {node.hostname ?? 'машина не отвечала'}
+    <TableRow>
+      <TableCell>
+        {node.name}
+        <span className="num block text-faint" translate="no">
+          {node.hostname ?? 'машина не отвечала'}
+        </span>
+      </TableCell>
+
+      <TableCell>
+        <span
+          className={`rounded-md px-2 py-0.5 ${nodeTone(node.status)}`}
+          title={NODE_STATUS_MEANING[node.status]}
+        >
+          {NODE_STATUS_NAME[node.status]}
+        </span>
+      </TableCell>
+
+      <TableCell>
+        {node.sip_address === null ? (
+          <span className="text-faint">не задан</span>
+        ) : (
+          <span className="num" translate="no">
+            {node.sip_address}
           </span>
-        </TableCell>
+        )}
+      </TableCell>
 
-        <TableCell>
-          <span className={`rounded-md px-2 py-0.5 ${nodeTone(node.status)}`}>
-            {NODE_STATUS_NAME[node.status]}
-          </span>
-        </TableCell>
+      <TableCell className="num text-right">{node.active_calls}</TableCell>
 
-        <TableCell>
-          {node.sip_address === null ? (
-            <span className="text-faint">не задан</span>
-          ) : (
-            <span className="num" translate="no">
-              {node.sip_address}
-            </span>
-          )}
-        </TableCell>
+      <TableCell>
+        <Heartbeat at={node.last_heartbeat_at} closed={closed} />
+      </TableCell>
 
-        <TableCell className="num text-right">{node.active_calls}</TableCell>
+      <TableCell>
+        {node.agent_version === null ? (
+          <span className="text-faint">—</span>
+        ) : (
+          <span className="num">{node.agent_version}</span>
+        )}
+      </TableCell>
 
-        <TableCell>
-          <Heartbeat at={node.last_heartbeat_at} closed={closed} />
-        </TableCell>
+      <TableCell>
+        {/*
+          Два действия разной тяжести: перевыпуск команды обратим и идёт окном с полем,
+          вывод из эксплуатации необратим и идёт через подтверждение с последствием
+          (DESIGN.md, «Опасные действия»).
+        */}
+        {canChange && !closed && (
+          <div className="flex justify-end gap-2">
+            <FormDialog
+              label="Новая команда"
+              title={`Новая команда установки для «${node.name}»`}
+              description={`Состояние сейчас: ${NODE_STATUS_MEANING[node.status]}`}
+              variant="outline"
+              disabled={busy}
+            >
+              <ReissueInstall onReissue={onReissue} />
+            </FormDialog>
 
-        <TableCell>
-          {node.agent_version === null ? (
-            <span className="text-faint">—</span>
-          ) : (
-            <span className="num">{node.agent_version}</span>
-          )}
-        </TableCell>
-
-        <TableCell>
-          {canChange && !closed && (
-            <Button variant="outline" size="sm" onClick={onToggle} aria-expanded={open}>
-              {open ? 'Отменить' : 'Изменить'}
-            </Button>
-          )}
-        </TableCell>
-      </TableRow>
-
-      {open && (
-        <TableRow className="bg-muted/40 hover:bg-muted/40">
-          <TableCell colSpan={COLUMNS} className="whitespace-normal">
-            {/*
-              Два действия разной тяжести: перевыпуск команды обратим и идёт формой,
-              вывод из эксплуатации необратим и идёт через подтверждение с последствием
-              (DESIGN.md). Раньше вывод срабатывал с первого нажатия на кнопку, которая
-              сама и была «подтверждением» (ui-review, 2026-09-14).
-            */}
-            <div className="flex flex-col gap-2">
-              <p className="text-muted-foreground">
-                Состояние сейчас: {NODE_STATUS_MEANING[node.status]}
-              </p>
-              <div className="flex flex-wrap items-start gap-2">
-                <ReissueInstall busy={busy} onReissue={onReissue} />
-
-                <ConfirmAction
-                  label="Вывести из эксплуатации"
-                  title={`Вывести узел «${node.name}» из эксплуатации`}
-                  consequence={
-                    <>
-                      <p>Все ключи узла отзываются, вызовы через него прекращаются.</p>
-                      <p>
-                        Запись остаётся: на неё ссылаются CDR. Состояние окончательное — вернуть
-                        узел в работу нельзя, понадобится завести новый.
-                      </p>
-                    </>
-                  }
-                  confirmLabel="Вывести навсегда"
-                  disabled={busy}
-                  onConfirm={onDecommission}
-                />
-              </div>
-            </div>
-          </TableCell>
-        </TableRow>
-      )}
-    </Fragment>
+            <ConfirmAction
+              label="Вывести"
+              title={`Вывести узел «${node.name}» из эксплуатации`}
+              consequence={
+                <>
+                  <p>Все ключи узла отзываются, вызовы через него прекращаются.</p>
+                  <p>
+                    Запись остаётся: на неё ссылаются CDR. Состояние окончательное — вернуть узел в
+                    работу нельзя, понадобится завести новый.
+                  </p>
+                </>
+              }
+              confirmLabel="Вывести навсегда"
+              disabled={busy}
+              onConfirm={onDecommission}
+            />
+          </div>
+        )}
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -369,36 +334,20 @@ function NodeRows({
  * принадлежит токену, а не узлу, и старый токен здесь как раз и перестаёт работать.
  * Форма без этого поля молча снимала бы защиту, поставленную при заведении.
  */
-function ReissueInstall({
-  busy,
-  onReissue,
-}: {
-  busy: boolean;
-  onReissue: (allowedIps: string[]) => void;
-}) {
+function ReissueInstall({ onReissue }: { onReissue: (allowedIps: string[]) => Promise<unknown> }) {
   const [allowedIps, setAllowedIps] = useState('');
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        onReissue(parseAddresses(allowedIps));
-      }}
-      className="flex max-w-[420px] flex-col gap-2 rounded-md border border-border bg-card p-2"
-    >
-      <span className="font-medium">Выдать новую команду установки</span>
-      <span className="text-muted-foreground">
+    <DialogForm submitLabel="Выдать команду" onSubmit={() => onReissue(parseAddresses(allowedIps))}>
+      <p className="text-muted-foreground sm:col-span-2">
         Прежний токен перестаёт работать. Нужно, когда установка отложилась больше чем на час.
-      </span>
-      <AllowedIpsField value={allowedIps} onChange={setAllowedIps} />
-      <span className="text-muted-foreground">
-        Адреса задаются заново: ограничение принадлежит токену, а не узлу, и прежнее уходит вместе
-        со старым токеном. Пусто — установка примется с любого адреса.
-      </span>
-      <Button type="submit" variant="outline" size="sm" disabled={busy} className="self-start">
-        Выдать команду
-      </Button>
-    </form>
+      </p>
+      <AllowedIpsField
+        value={allowedIps}
+        onChange={setAllowedIps}
+        hint="Адреса задаются заново: ограничение принадлежит токену, а не узлу, и прежнее уходит вместе со старым токеном. Пусто — установка примется с любого адреса."
+      />
+    </DialogForm>
   );
 }
 

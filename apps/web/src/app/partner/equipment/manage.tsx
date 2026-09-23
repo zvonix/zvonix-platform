@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { SipCredentials, type SipAccount } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,6 +25,8 @@ import type { Gateway, Sim } from './equipment';
  * Все обращения идут в собственный контур `/partner/*`: идентификатор партнёра там
  * выводится из сессии, и подставить чужой нечего.
  *
+ * Заведение шлюза и SIM и новый порт — окнами по центру: отказ показывает окно.
+ *
  * Необратимое и останавливающее связь — списание и перевыпуск доступа — идёт через
  * `ConfirmAction`. У каждого такого действия своя мутация: отказ показывается в окне
  * подтверждения, и в общей строке ошибок он повторился бы вторым сообщением.
@@ -40,55 +43,32 @@ function useRefresh(): () => Promise<void> {
 const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
 
-/** Заведение шлюза. Учётные данные SIP показываются здесь же и один раз. */
+/** Заведение шлюза. Учётные данные SIP показываются на странице и один раз. */
 export function AddGateway() {
   const refresh = useRefresh();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [model, setModel] = useState('');
-  const [type, setType] = useState<'goip' | 'android'>('goip');
-  const [portCount, setPortCount] = useState('8');
   const [account, setAccount] = useState<SipAccount | undefined>(undefined);
 
   const add = useMutation({
-    mutationFn: () =>
-      request<{ account: SipAccount }>('/partner/gateways', {
-        method: 'POST',
-        body: {
-          name,
-          type,
-          ...(model.trim() === '' ? {} : { model: model.trim() }),
-          portCount: integerFromInput(portCount),
-        },
-      }),
+    mutationFn: (draft: GatewayDraft) =>
+      request<{ account: SipAccount }>('/partner/gateways', { method: 'POST', body: { ...draft } }),
     onSuccess: async (created) => {
       // Панель с паролем закрывает человек: закрыть её — то же, что потерять пароль.
       setAccount(created.account);
-      setOpen(false);
-      setName('');
-      setModel('');
       await refresh();
     },
   });
 
-  const error = asApiError(add.error);
-  const ports = integerFromInput(portCount);
-  const portsValid = ports !== undefined && ports <= 256;
-  const nameValid = name.trim().length >= 2;
-  const ready = nameValid && portsValid;
-
   return (
     <div className="flex flex-col gap-2">
       <div>
-        <Button
+        <FormDialog
+          label="Завести шлюз"
+          title="Новый шлюз"
+          description="Пароль SIP кабинет покажет один раз — сразу после заведения."
           variant="outline"
-          size="sm"
-          onClick={() => {
-            setOpen(!open);
-          }}
         >
-          {open ? 'Отменить' : 'Завести шлюз'}
-        </Button>
+          <GatewayForm onCreate={(draft) => add.mutateAsync(draft)} />
+        </FormDialog>
       </div>
 
       {account !== undefined && (
@@ -100,94 +80,107 @@ export function AddGateway() {
           }}
         />
       )}
-
-      {open && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (ready) add.mutate();
-          }}
-          className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-card p-3"
-        >
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Название</span>
-            <Input
-              className="w-[220px]"
-              value={name}
-              placeholder="GOIP в офисе"
-              autoComplete="off"
-              onChange={(event) => {
-                setName(event.target.value);
-              }}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Вид</span>
-            <select
-              value={type}
-              onChange={(event) => {
-                setType(event.target.value === 'android' ? 'android' : 'goip');
-              }}
-              className="h-9 w-[160px] rounded-md border border-input bg-transparent px-2"
-            >
-              <option value="goip">GOIP</option>
-              <option value="android">Телефон Android</option>
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Модель</span>
-            <Input
-              className="w-[180px]"
-              value={model}
-              placeholder="GoIP-8"
-              autoComplete="off"
-              onChange={(event) => {
-                setModel(event.target.value);
-              }}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Портов</span>
-            <Input
-              className="num w-[90px]"
-              inputMode="numeric"
-              autoComplete="off"
-              value={portCount}
-              onChange={(event) => {
-                setPortCount(event.target.value);
-              }}
-            />
-          </label>
-
-          <Button type="submit" size="sm" disabled={!ready || add.isPending}>
-            {add.isPending ? 'Заводим…' : 'Завести'}
-          </Button>
-
-          {/* Почему кнопка неактивна, говорится прямо: иначе её не отличить от сломанной. */}
-          {name !== '' && !nameValid && (
-            <p className="w-full text-warn">Название — не короче двух знаков.</p>
-          )}
-          {!portsValid && <p className="w-full text-warn">Число портов — целое, от 0 до 256.</p>}
-
-          <p className="w-full text-muted-foreground">
-            Шлюз заводится выключенным: пароль SIP выдаётся сразу, но регистрацию на узле он получит
-            только после включения. Настройте оборудование, потом включайте.
-          </p>
-        </form>
-      )}
-
-      {error !== undefined && <ErrorNote error={error} />}
     </div>
+  );
+}
+
+interface GatewayDraft {
+  readonly name: string;
+  readonly type: 'goip' | 'android';
+  readonly model?: string;
+  readonly portCount: number;
+}
+
+/** Поля окна «Новый шлюз». */
+function GatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promise<unknown> }) {
+  const [name, setName] = useState('');
+  const [model, setModel] = useState('');
+  const [type, setType] = useState<'goip' | 'android'>('goip');
+  const [portCount, setPortCount] = useState('8');
+
+  const ports = integerFromInput(portCount);
+  const portsValid = ports !== undefined && ports <= 256;
+  const nameValid = name.trim().length >= 2;
+
+  return (
+    <DialogForm
+      submitLabel="Завести шлюз"
+      canSubmit={nameValid && portsValid}
+      onSubmit={async () => {
+        if (ports === undefined) return;
+        await onCreate({
+          name,
+          type,
+          ...(model.trim() === '' ? {} : { model: model.trim() }),
+          portCount: ports,
+        });
+      }}
+    >
+      <DialogField label="Название">
+        <Input
+          value={name}
+          placeholder="GOIP в офисе"
+          autoComplete="off"
+          autoFocus
+          onChange={(event) => {
+            setName(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <DialogField label="Вид">
+        <select
+          value={type}
+          onChange={(event) => {
+            setType(event.target.value === 'android' ? 'android' : 'goip');
+          }}
+          className="h-9 w-full rounded-md border border-input bg-transparent px-2"
+        >
+          <option value="goip">GOIP</option>
+          <option value="android">Телефон Android</option>
+        </select>
+      </DialogField>
+
+      <DialogField label="Модель">
+        <Input
+          value={model}
+          placeholder="GoIP-8"
+          autoComplete="off"
+          onChange={(event) => {
+            setModel(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <DialogField label="Портов">
+        <Input
+          className="num"
+          inputMode="numeric"
+          autoComplete="off"
+          value={portCount}
+          onChange={(event) => {
+            setPortCount(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      {/* Почему кнопка неактивна, говорится прямо: иначе её не отличить от сломанной. */}
+      {name !== '' && !nameValid && (
+        <p className="text-warn sm:col-span-2">Название — не короче двух знаков.</p>
+      )}
+      {!portsValid && <p className="text-warn sm:col-span-2">Число портов — целое, от 0 до 256.</p>}
+
+      <p className="text-muted-foreground sm:col-span-2">
+        Шлюз заводится выключенным: пароль SIP выдаётся сразу, но регистрацию на узле он получит
+        только после включения. Настройте оборудование, потом включайте.
+      </p>
+    </DialogForm>
   );
 }
 
 /** Включение, выключение, новый порт, перевыпуск доступа и списание — по одному шлюзу. */
 export function GatewayActions({ gateway }: { gateway: Gateway }) {
   const refresh = useRefresh();
-  const [portNumber, setPortNumber] = useState('');
   const [account, setAccount] = useState<SipAccount | undefined>(undefined);
 
   const activate = useMutation({
@@ -222,15 +215,12 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
   });
 
   const addPort = useMutation({
-    mutationFn: () =>
+    mutationFn: (portNumber: number) =>
       request<unknown>(`/partner/gateways/${gateway.id}/ports`, {
         method: 'POST',
-        body: { portNumber: integerFromInput(portNumber) },
+        body: { portNumber },
       }),
-    onSuccess: async () => {
-      setPortNumber('');
-      await refresh();
-    },
+    onSuccess: refresh,
   });
 
   const reset = useMutation({
@@ -243,10 +233,9 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
     },
   });
 
-  const error = asApiError(activate.error ?? addPort.error);
+  // Отказ нового порта показывает его окно, здесь — только отказ включения.
+  const error = asApiError(activate.error);
   const nextPort = String((gateway.ports.at(-1)?.port_number ?? 0) + 1);
-  const port = integerFromInput(portNumber);
-  const portValid = port !== undefined && port >= 1 && port <= 256;
   // Списание шлюза вынимает карты из его портов: порта после списания не существует.
   // Их число называется до подтверждения, а не после — отменить будет нечем.
   const occupied = gateway.ports.filter((slot) => slot.sim !== null).length;
@@ -293,35 +282,13 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
           </Button>
         )}
 
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (portValid) addPort.mutate();
-          }}
-          className="flex items-end gap-2"
+        <FormDialog
+          label="Добавить порт"
+          title={`Новый порт шлюза «${gateway.name}»`}
+          variant="outline"
         >
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Новый порт</span>
-            <Input
-              className="num w-[90px]"
-              inputMode="numeric"
-              autoComplete="off"
-              value={portNumber}
-              placeholder={nextPort}
-              onChange={(event) => {
-                setPortNumber(event.target.value);
-              }}
-            />
-          </label>
-          <Button
-            type="submit"
-            variant="outline"
-            size="sm"
-            disabled={!portValid || addPort.isPending}
-          >
-            Добавить
-          </Button>
-        </form>
+          <PortForm initial={nextPort} onAdd={(portNumber) => addPort.mutateAsync(portNumber)} />
+        </FormDialog>
 
         <ConfirmAction
           label="Перевыпустить доступ"
@@ -359,10 +326,6 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
         )}
       </div>
 
-      {portNumber !== '' && !portValid && (
-        <p className="text-warn">Номер порта — целое число от 1 до 256.</p>
-      )}
-
       {account !== undefined && (
         <SipCredentials
           account={account}
@@ -378,113 +341,133 @@ export function GatewayActions({ gateway }: { gateway: Gateway }) {
   );
 }
 
+/** Поле окна «Новый порт»: номер предлагается следующим за последним. */
+function PortForm({
+  initial,
+  onAdd,
+}: {
+  initial: string;
+  onAdd: (portNumber: number) => Promise<unknown>;
+}) {
+  const [portNumber, setPortNumber] = useState(initial);
+  const port = integerFromInput(portNumber);
+  const portValid = port !== undefined && port >= 1 && port <= 256;
+
+  return (
+    <DialogForm
+      submitLabel="Добавить порт"
+      canSubmit={portValid}
+      onSubmit={async () => {
+        if (port !== undefined) await onAdd(port);
+      }}
+    >
+      <DialogField label="Номер порта">
+        <Input
+          className="num"
+          inputMode="numeric"
+          autoComplete="off"
+          autoFocus
+          value={portNumber}
+          onChange={(event) => {
+            setPortNumber(event.target.value);
+          }}
+        />
+      </DialogField>
+      {portNumber !== '' && !portValid && (
+        <p className="text-warn sm:col-span-2">Номер порта — целое число от 1 до 256.</p>
+      )}
+    </DialogForm>
+  );
+}
+
 /** Заведение SIM. Оператора сверяет источник — заявление на слово не принимается. */
 export function AddSim() {
   const refresh = useRefresh();
+
+  const add = useMutation({
+    mutationFn: (input: { msisdn: string; operatorId: string }) =>
+      request<unknown>('/partner/sim-cards', { method: 'POST', body: input }),
+    onSuccess: refresh,
+  });
+
+  return (
+    <div>
+      <FormDialog label="Завести SIM" title="Новая SIM" variant="outline">
+        <SimForm onCreate={(input) => add.mutateAsync(input)} />
+      </FormDialog>
+    </div>
+  );
+}
+
+/** Поля окна «Новая SIM». */
+function SimForm({
+  onCreate,
+}: {
+  onCreate: (input: { msisdn: string; operatorId: string }) => Promise<unknown>;
+}) {
   const operators = useOperators();
-  const [open, setOpen] = useState(false);
   const [msisdn, setMsisdn] = useState('');
   const [operatorId, setOperatorId] = useState('');
 
-  const add = useMutation({
-    mutationFn: () =>
-      request<unknown>('/partner/sim-cards', {
-        method: 'POST',
-        body: { msisdn, operatorId },
-      }),
-    onSuccess: async () => {
-      setOpen(false);
-      setMsisdn('');
-      await refresh();
-    },
-  });
-
-  const error = asApiError(add.error);
   const operatorsError = asApiError(operators.error);
   const ready = msisdn.trim() !== '' && operatorId !== '';
 
   return (
-    <div className="flex flex-col gap-2">
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setOpen(!open);
+    <DialogForm
+      submitLabel="Завести SIM"
+      canSubmit={ready}
+      onSubmit={() => onCreate({ msisdn, operatorId })}
+    >
+      <DialogField label="Номер карты">
+        <Input
+          className="num"
+          inputMode="tel"
+          autoComplete="off"
+          spellCheck={false}
+          autoFocus
+          value={msisdn}
+          placeholder="+7 913 042-41-23"
+          onChange={(event) => {
+            setMsisdn(event.target.value);
           }}
-        >
-          {open ? 'Отменить' : 'Завести SIM'}
-        </Button>
-      </div>
+        />
+      </DialogField>
 
-      {open && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (ready) add.mutate();
+      {/*
+        Пока справочник не пришёл, выбор не открывается: пустой список до ответа
+        выглядит так же, как пустой в ответе, и форму было не отправить без объяснения.
+      */}
+      <DialogField label="Оператор">
+        <select
+          value={operatorId}
+          disabled={!operators.ready}
+          onChange={(event) => {
+            setOperatorId(event.target.value);
           }}
-          className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-card p-3"
+          className="h-9 w-full rounded-md border border-input bg-transparent px-2"
         >
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Номер карты</span>
-            <Input
-              className="num w-[200px]"
-              inputMode="tel"
-              autoComplete="off"
-              spellCheck={false}
-              value={msisdn}
-              placeholder="+7 913 042-41-23"
-              onChange={(event) => {
-                setMsisdn(event.target.value);
-              }}
-            />
-          </label>
+          <option value="">
+            {operators.ready ? 'выберите оператора' : 'загружаем операторов…'}
+          </option>
+          {operators.rows.map((operator) => (
+            <option key={operator.id} value={operator.id}>
+              {operator.name}
+            </option>
+          ))}
+        </select>
+      </DialogField>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Оператор</span>
-            {/*
-              Пока справочник не пришёл, выбор не открывается: пустой список до ответа
-              выглядит так же, как пустой в ответе, и форму было не отправить без объяснения.
-            */}
-            <select
-              value={operatorId}
-              disabled={!operators.ready}
-              onChange={(event) => {
-                setOperatorId(event.target.value);
-              }}
-              className="h-9 w-[220px] rounded-md border border-input bg-transparent px-2"
-            >
-              <option value="">
-                {operators.ready ? 'выберите оператора' : 'загружаем операторов…'}
-              </option>
-              {operators.rows.map((operator) => (
-                <option key={operator.id} value={operator.id}>
-                  {operator.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <Button type="submit" size="sm" disabled={!ready || add.isPending}>
-            {add.isPending ? 'Заводим…' : 'Завести'}
-          </Button>
-
-          {operatorsError !== undefined && (
-            <div className="w-full">
-              <ErrorNote error={operatorsError} />
-            </div>
-          )}
-
-          <p className="w-full max-w-prose text-muted-foreground">
-            Оператора площадка проверяет по самому номеру. Если он окажется другим — карта не
-            заведётся: у вас безлимит только внутри своей сети, и вызов через чужую сеть уйдёт за
-            ваш счёт.
-          </p>
-        </form>
+      {operatorsError !== undefined && (
+        <div className="sm:col-span-2">
+          <ErrorNote error={operatorsError} />
+        </div>
       )}
 
-      {error !== undefined && <ErrorNote error={error} />}
-    </div>
+      <p className="text-muted-foreground sm:col-span-2">
+        Оператора площадка проверяет по самому номеру. Если он окажется другим — карта не заведётся:
+        у вас безлимит только внутри своей сети, и вызов через чужую сеть уйдёт за ваш счёт.
+      </p>
+    </DialogForm>
   );
 }
 

@@ -5,8 +5,8 @@ import { LIMIT_METRICS, LIMIT_WINDOWS, type LimitMetric, type LimitWindow } from
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
-import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -61,6 +61,8 @@ const SUBJECT_NAME: Record<SubjectKind, string> = {
   sim: 'SIM',
 };
 
+const isSubjectKind = (value: string): value is SubjectKind => value in SUBJECT_FIELD;
+
 const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
 
@@ -75,6 +77,8 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * ограничено и насколько израсходовано, было нельзя ниоткуда, а `limit_exceeded`
  * в разборе вызовов оставался причиной без объяснения.
  *
+ * Заведение и правка предела — окнами по центру, снятие — подтверждением из строки.
+ *
  * Предел разбирается строго: `Number.parseInt` читал «1 000» как 1, и лимит «тысяча
  * вызовов» сохранялся лимитом в один вызов (ui-review, 2026-09-14).
  */
@@ -86,12 +90,6 @@ export function LimitRules() {
   const channels = useChannels();
   const partners = usePartners();
   const sims = useSimCards();
-
-  const [subject, setSubject] = useState('');
-  const [window, setWindow] = useState<LimitWindow>('day');
-  const [metric, setMetric] = useState<LimitMetric>('calls');
-  const [value, setValue] = useState('');
-  const [editing, setEditing] = useState<string | undefined>(undefined);
 
   const list = useQuery({
     queryKey: ['limits'],
@@ -105,10 +103,7 @@ export function LimitRules() {
   const add = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       request<{ limit: Rule }>('/limits', { method: 'POST', body }),
-    onSuccess: async () => {
-      setValue('');
-      await refresh();
-    },
+    onSuccess: refresh,
   });
 
   const change = useMutation({
@@ -117,25 +112,19 @@ export function LimitRules() {
         method: 'PUT',
         body: { value: input.value },
       }),
-    onSuccess: async () => {
-      setEditing(undefined);
-      await refresh();
-    },
+    onSuccess: refresh,
   });
 
   // Снятие идёт через подтверждение, и его отказ показывается там же.
   const remove = useMutation({
     mutationFn: (id: string) => request<{ limit: Rule }>(`/limits/${id}`, { method: 'DELETE' }),
     onSuccess: async () => {
-      setEditing(undefined);
       await atMost(refresh());
     },
   });
 
-  const amount = integerFromInput(value);
-  const valueValid = amount !== undefined && amount >= 1 && amount <= LIMIT_MAX;
-  const ready = subject !== '' && valueValid;
-  const failed = asApiError(add.error ?? change.error ?? list.error);
+  // Отказы заведения и правки показывает их окно, здесь — только отказ списка.
+  const failed = asApiError(list.error);
 
   /**
    * Кого ограничивает правило: у лимита заполнено ровно одно из четырёх полей.
@@ -161,7 +150,14 @@ export function LimitRules() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-[15px] font-semibold tracking-tight">Лимиты по окнам</h2>
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h2 className="text-[15px] font-semibold tracking-tight">Лимиты по окнам</h2>
+        {canChange && (
+          <FormDialog label="Завести лимит" title="Новый лимит" className="ml-auto">
+            <NewLimitForm onCreate={(body) => add.mutateAsync(body)} />
+          </FormDialog>
+        )}
+      </div>
       <p className="text-muted-foreground">
         Окно календарное и в UTC, а не скользящее: видно, когда счётчик обнулится — в полночь, в
         понедельник, первого числа. Звонки считаются штуками, минуты — секундами: разговор в 90
@@ -170,131 +166,7 @@ export function LimitRules() {
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
-      {canChange ? (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!ready) return;
-            const [kind, id] = subject.split(':');
-            if (kind === undefined || id === undefined) return;
-            add.mutate({
-              [SUBJECT_FIELD[kind as SubjectKind]]: id,
-              window,
-              metric,
-              value: amount,
-            });
-          }}
-          className="flex flex-wrap items-end gap-2"
-        >
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Кого ограничиваем</span>
-            {/*
-              Один список вместо связки «сначала род, потом объект»: субъектов на площадке
-              десятки, и лишний шаг здесь дороже длины списка. Когда SIM станут сотнями,
-              понадобится поиск по мере ввода — тогда и появится.
-            */}
-            <select
-              value={subject}
-              onChange={(event) => {
-                setSubject(event.target.value);
-              }}
-              className="h-9 w-[280px] rounded-md border border-input bg-transparent px-2"
-            >
-              <option value="">выберите</option>
-              <optgroup label="Клиенты">
-                {clients.rows.map((row) => (
-                  <option key={row.id} value={`client:${row.id}`}>
-                    {row.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Каналы">
-                {channels.rows.map((row) => (
-                  <option key={row.id} value={`channel:${row.id}`}>
-                    {row.name}
-                    {row.ownerId === undefined ? '' : ` · ${clients.nameOf(row.ownerId) ?? ''}`}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Партнёры">
-                {partners.rows.map((row) => (
-                  <option key={row.id} value={`partner:${row.id}`}>
-                    {row.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="SIM">
-                {sims.rows.map((row) => (
-                  <option key={row.id} value={`sim:${row.id}`}>
-                    {row.name}
-                    {row.ownerId === undefined ? '' : ` · ${partners.nameOf(row.ownerId) ?? ''}`}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Не больше</span>
-            <Input
-              className="num w-[110px]"
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="100"
-              value={value}
-              onChange={(event) => {
-                setValue(event.target.value);
-              }}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Чего</span>
-            <select
-              value={metric}
-              onChange={(event) => {
-                setMetric(event.target.value as LimitMetric);
-              }}
-              className="h-9 w-[180px] rounded-md border border-input bg-transparent px-2"
-            >
-              {LIMIT_METRICS.map((item) => (
-                <option key={item} value={item}>
-                  {LIMIT_METRIC_NAME[item]}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">За окно</span>
-            <select
-              value={window}
-              onChange={(event) => {
-                setWindow(event.target.value as LimitWindow);
-              }}
-              className="h-9 w-[130px] rounded-md border border-input bg-transparent px-2"
-            >
-              {LIMIT_WINDOWS.map((item) => (
-                <option key={item} value={item}>
-                  {LIMIT_WINDOW_NAME[item]}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <Button type="submit" size="sm" disabled={!ready || add.isPending}>
-            {add.isPending ? 'Заводим…' : 'Завести лимит'}
-          </Button>
-
-          {value !== '' && !valueValid && (
-            <p className="w-full text-warn">
-              Предел — целое число от 1 до 10 000 000: без запятой и букв.
-            </p>
-          )}
-        </form>
-      ) : (
-        <ReadOnly what="лимиты" />
-      )}
+      {!canChange && <ReadOnly what="лимиты" />}
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
@@ -328,6 +200,7 @@ export function LimitRules() {
 
             {list.data?.limits.map((rule) => {
               const subjectOf = describe(rule);
+              const subjectTitle = `${SUBJECT_NAME[subjectOf.kind].toLowerCase()} «${subjectOf.name}»`;
               return (
                 <TableRow key={rule.id}>
                   <TableCell>
@@ -352,31 +225,33 @@ export function LimitRules() {
                   </TableCell>
 
                   <TableCell>
-                    {canChange &&
-                      (editing === rule.id ? (
-                        <ChangeValue
-                          rule={rule}
-                          subject={subjectOf}
-                          busy={change.isPending || remove.isPending}
-                          onSave={(next) => {
-                            change.mutate({ id: rule.id, value: next });
-                          }}
-                          onRemove={() => remove.mutateAsync(rule.id)}
-                          onCancel={() => {
-                            setEditing(undefined);
-                          }}
-                        />
-                      ) : (
-                        <Button
+                    {canChange && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <FormDialog
+                          label="Изменить"
                           variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setEditing(rule.id);
-                          }}
+                          title={`Предел лимита: ${subjectTitle}`}
+                          description={
+                            <>
+                              Сейчас <span className="num">{rule.value}</span>{' '}
+                              {LIMIT_METRIC_NAME[rule.metric]} {LIMIT_WINDOW_NAME[rule.window]}.
+                            </>
+                          }
                         >
-                          Изменить
-                        </Button>
-                      ))}
+                          <ChangeValue
+                            rule={rule}
+                            onSave={(next) => change.mutateAsync({ id: rule.id, value: next })}
+                          />
+                        </FormDialog>
+                        <RemoveLimit
+                          rule={rule}
+                          subjectTitle={subjectTitle}
+                          isSim={subjectOf.kind === 'sim'}
+                          busy={remove.isPending}
+                          onRemove={() => remove.mutateAsync(rule.id)}
+                        />
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
               );
@@ -388,27 +263,145 @@ export function LimitRules() {
   );
 }
 
-/**
- * Правка предела и снятие лимита.
- *
- * Снятие уносит и счётчики — это и есть способ обнулить израсходованное, когда предел
- * исчерпан по ошибке, а ждать конца окна нельзя. Именно поэтому оно через
- * подтверждение: у SIM это снятие защиты, и раньше срабатывало с первого нажатия.
- */
+/** Поля окна «Новый лимит». */
+function NewLimitForm({
+  onCreate,
+}: {
+  onCreate: (body: Record<string, unknown>) => Promise<unknown>;
+}) {
+  const clients = useClients();
+  const channels = useChannels();
+  const partners = usePartners();
+  const sims = useSimCards();
+
+  const [subject, setSubject] = useState('');
+  const [window, setWindow] = useState<LimitWindow>('day');
+  const [metric, setMetric] = useState<LimitMetric>('calls');
+  const [value, setValue] = useState('');
+
+  const amount = integerFromInput(value);
+  const valueValid = amount !== undefined && amount >= 1 && amount <= LIMIT_MAX;
+  const [kind = '', id = ''] = subject.split(':');
+  const ready = isSubjectKind(kind) && id !== '' && valueValid;
+
+  return (
+    <DialogForm
+      submitLabel="Завести лимит"
+      canSubmit={ready}
+      onSubmit={async () => {
+        if (!isSubjectKind(kind)) return;
+        await onCreate({ [SUBJECT_FIELD[kind]]: id, window, metric, value: amount });
+      }}
+    >
+      {/*
+        Один список вместо связки «сначала род, потом объект»: субъектов на площадке
+        десятки, и лишний шаг здесь дороже длины списка. Когда SIM станут сотнями,
+        понадобится поиск по мере ввода — тогда и появится.
+      */}
+      <DialogField label="Кого ограничиваем" wide>
+        <select
+          value={subject}
+          autoFocus
+          onChange={(event) => {
+            setSubject(event.target.value);
+          }}
+          className="h-9 w-full rounded-md border border-input bg-transparent px-2"
+        >
+          <option value="">выберите</option>
+          <optgroup label="Клиенты">
+            {clients.rows.map((row) => (
+              <option key={row.id} value={`client:${row.id}`}>
+                {row.name}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Каналы">
+            {channels.rows.map((row) => (
+              <option key={row.id} value={`channel:${row.id}`}>
+                {row.name}
+                {row.ownerId === undefined ? '' : ` · ${clients.nameOf(row.ownerId) ?? ''}`}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Партнёры">
+            {partners.rows.map((row) => (
+              <option key={row.id} value={`partner:${row.id}`}>
+                {row.name}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="SIM">
+            {sims.rows.map((row) => (
+              <option key={row.id} value={`sim:${row.id}`}>
+                {row.name}
+                {row.ownerId === undefined ? '' : ` · ${partners.nameOf(row.ownerId) ?? ''}`}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+      </DialogField>
+
+      <DialogField label="Не больше">
+        <Input
+          className="num"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="100"
+          value={value}
+          onChange={(event) => {
+            setValue(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <DialogField label="Чего">
+        <select
+          value={metric}
+          onChange={(event) => {
+            setMetric(event.target.value as LimitMetric);
+          }}
+          className="h-9 w-full rounded-md border border-input bg-transparent px-2"
+        >
+          {LIMIT_METRICS.map((item) => (
+            <option key={item} value={item}>
+              {LIMIT_METRIC_NAME[item]}
+            </option>
+          ))}
+        </select>
+      </DialogField>
+
+      <DialogField label="За окно">
+        <select
+          value={window}
+          onChange={(event) => {
+            setWindow(event.target.value as LimitWindow);
+          }}
+          className="h-9 w-full rounded-md border border-input bg-transparent px-2"
+        >
+          {LIMIT_WINDOWS.map((item) => (
+            <option key={item} value={item}>
+              {LIMIT_WINDOW_NAME[item]}
+            </option>
+          ))}
+        </select>
+      </DialogField>
+
+      {value !== '' && !valueValid && (
+        <p className="text-warn sm:col-span-2">
+          Предел — целое число от 1 до 10 000 000: без запятой и букв.
+        </p>
+      )}
+    </DialogForm>
+  );
+}
+
+/** Поле окна правки предела. */
 function ChangeValue({
   rule,
-  subject,
-  busy,
   onSave,
-  onRemove,
-  onCancel,
 }: {
   rule: Rule;
-  subject: { kind: SubjectKind; name: string };
-  busy: boolean;
-  onSave: (value: number) => void;
-  onRemove: () => Promise<unknown>;
-  onCancel: () => void;
+  onSave: (value: number) => Promise<unknown>;
 }) {
   const [value, setValue] = useState(String(rule.value));
   const amount = integerFromInput(value);
@@ -416,51 +409,73 @@ function ChangeValue({
   const changed = valid && amount !== rule.value;
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (changed) onSave(amount);
+    <DialogForm
+      submitLabel="Сохранить предел"
+      canSubmit={changed}
+      onSubmit={async () => {
+        if (amount !== undefined) await onSave(amount);
       }}
-      className="flex flex-wrap items-center gap-2"
     >
-      <Input
-        aria-label="Новый предел"
-        className="num w-[110px]"
-        inputMode="numeric"
-        autoComplete="off"
-        value={value}
-        onChange={(event) => {
-          setValue(event.target.value);
-        }}
-      />
-      <Button type="submit" size="sm" disabled={!changed || busy}>
-        Сохранить
-      </Button>
-      <ConfirmAction
-        label="Снять лимит"
-        title={`Снять лимит: ${SUBJECT_NAME[subject.kind].toLowerCase()} «${subject.name}»`}
-        consequence={
-          <>
+      <DialogField label="Новый предел">
+        <Input
+          className="num"
+          inputMode="numeric"
+          autoComplete="off"
+          autoFocus
+          value={value}
+          onChange={(event) => {
+            setValue(event.target.value);
+          }}
+        />
+      </DialogField>
+      {!valid && (
+        <p className="text-warn sm:col-span-2">Предел — целое число от 1 до 10 000 000.</p>
+      )}
+    </DialogForm>
+  );
+}
+
+/**
+ * Снятие лимита.
+ *
+ * Снятие уносит и счётчики — это и есть способ обнулить израсходованное, когда предел
+ * исчерпан по ошибке, а ждать конца окна нельзя. Именно поэтому оно через
+ * подтверждение: у SIM это снятие защиты, и раньше срабатывало с первого нажатия.
+ */
+function RemoveLimit({
+  rule,
+  subjectTitle,
+  isSim,
+  busy,
+  onRemove,
+}: {
+  rule: Rule;
+  subjectTitle: string;
+  isSim: boolean;
+  busy: boolean;
+  onRemove: () => Promise<unknown>;
+}) {
+  return (
+    <ConfirmAction
+      label="Снять лимит"
+      title={`Снять лимит: ${subjectTitle}`}
+      consequence={
+        <>
+          <p>
+            Лимит удаляется вместе со счётчиком израсходованного: ограничения на{' '}
+            {LIMIT_METRIC_NAME[rule.metric]} {LIMIT_WINDOW_NAME[rule.window]} больше не будет.
+          </p>
+          {isSim && (
             <p>
-              Лимит удаляется вместе со счётчиком израсходованного: ограничения на{' '}
-              {LIMIT_METRIC_NAME[rule.metric]} {LIMIT_WINDOW_NAME[rule.window]} больше не будет.
+              Для SIM это снятие защиты: оператор блокирует карту за нечеловеческий профиль трафика,
+              а потерянная SIM означает потерянного партнёра.
             </p>
-            {subject.kind === 'sim' && (
-              <p>
-                Для SIM это снятие защиты: оператор блокирует карту за нечеловеческий профиль
-                трафика, а потерянная SIM означает потерянного партнёра.
-              </p>
-            )}
-          </>
-        }
-        confirmLabel="Снять лимит"
-        disabled={busy}
-        onConfirm={onRemove}
-      />
-      <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-        Отмена
-      </Button>
-      {!valid && <span className="w-full text-warn">Предел — целое число от 1 до 10 000 000.</span>}
-    </form>
+          )}
+        </>
+      }
+      confirmLabel="Снять лимит"
+      disabled={busy}
+      onConfirm={onRemove}
+    />
   );
 }

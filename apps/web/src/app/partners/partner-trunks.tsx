@@ -12,6 +12,7 @@ import {
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -84,8 +85,6 @@ const asApiError = (error: unknown): ApiError | undefined =>
 export function PartnerTrunks({ partnerId }: { partnerId: string }) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
-  const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<string | undefined>(undefined);
 
   const list = useQuery({
     queryKey: ['sip-trunks', partnerId],
@@ -105,19 +104,13 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
   const create = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       request<unknown>('/sip-trunks', { method: 'POST', body: { partnerId, ...body } }),
-    onSuccess: async () => {
-      setCreating(false);
-      await refresh();
-    },
+    onSuccess: refresh,
   });
 
   const update = useMutation({
     mutationFn: (input: { id: string; changes: Record<string, unknown> }) =>
       request<unknown>(`/sip-trunks/${input.id}`, { method: 'PATCH', body: input.changes }),
-    onSuccess: async () => {
-      setEditing(undefined);
-      await refresh();
-    },
+    onSuccess: refresh,
   });
 
   const activate = useMutation({
@@ -138,7 +131,8 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
     onSuccess: () => atMost(refresh()),
   });
 
-  const failed = asApiError(list.error ?? create.error ?? update.error ?? activate.error);
+  // Отказы заведения и правки показывают их окна, здесь — только отказы списка и включения.
+  const failed = asApiError(list.error ?? activate.error);
   const trunks = list.data?.trunks ?? [];
   const busy = activate.isPending || confirmStatus.isPending;
 
@@ -147,17 +141,19 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
       <div className="flex items-baseline gap-3">
         <h3 className="font-semibold">SIP-транки</h3>
         {canChange && (
-          <Button
+          <FormDialog
+            label="Завести транк"
+            title="Новый транк"
             variant="outline"
-            size="sm"
             className="ml-auto"
-            onClick={() => {
-              setCreating(!creating);
-            }}
-            aria-expanded={creating}
           >
-            {creating ? 'Свернуть' : 'Завести транк'}
-          </Button>
+            <NewTrunkForm
+              nodes={nodes.data ?? []}
+              nodesReady={nodes.isSuccess}
+              nodesError={asApiError(nodes.error)}
+              onCreate={(body) => create.mutateAsync(body)}
+            />
+          </FormDialog>
         )}
       </div>
 
@@ -168,18 +164,6 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
       </p>
 
       {failed !== undefined && <ErrorNote error={failed} />}
-
-      {canChange && creating && (
-        <NewTrunkForm
-          nodes={nodes.data ?? []}
-          nodesReady={nodes.isSuccess}
-          nodesError={asApiError(nodes.error)}
-          busy={create.isPending}
-          onCreate={(body) => {
-            create.mutate(body);
-          }}
-        />
-      )}
 
       <div className="overflow-x-auto rounded-md border border-border bg-card">
         <Table>
@@ -272,29 +256,18 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                 <TableCell className="num text-right">{trunk.max_concurrent_calls}</TableCell>
 
                 <TableCell>
-                  {canChange &&
-                    (editing === trunk.id ? (
-                      <EditTrunk
+                  {canChange && (
+                    <FormDialog
+                      label="Настроить"
+                      title={`Настроить транк «${trunk.name}»`}
+                      variant="outline"
+                    >
+                      <EditTrunkForm
                         trunk={trunk}
-                        busy={update.isPending}
-                        onSave={(changes) => {
-                          update.mutate({ id: trunk.id, changes });
-                        }}
-                        onCancel={() => {
-                          setEditing(undefined);
-                        }}
+                        onSave={(changes) => update.mutateAsync({ id: trunk.id, changes })}
                       />
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEditing(trunk.id);
-                        }}
-                      >
-                        Настроить
-                      </Button>
-                    ))}
+                    </FormDialog>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -363,19 +336,17 @@ function TrunkStatus({
   );
 }
 
-/** Заведение транка: адрес провайдера, способ доступа и ёмкость. */
+/** Заведение транка — поля окна «Новый транк»: адрес провайдера, способ доступа и ёмкость. */
 function NewTrunkForm({
   nodes,
   nodesReady,
   nodesError,
-  busy,
   onCreate,
 }: {
   nodes: readonly Node[];
   nodesReady: boolean;
   nodesError: ApiError | undefined;
-  busy: boolean;
-  onCreate: (body: Record<string, unknown>) => void;
+  onCreate: (body: Record<string, unknown>) => Promise<unknown>;
 }) {
   const [name, setName] = useState('');
   const [nodeId, setNodeId] = useState('');
@@ -396,10 +367,10 @@ function NewTrunkForm({
     (!registers || (username.trim() !== '' && secret !== ''));
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!ready) return;
+    <DialogForm
+      submitLabel="Завести транк"
+      canSubmit={ready}
+      onSubmit={() =>
         onCreate({
           nodeId,
           name: name.trim(),
@@ -407,77 +378,76 @@ function NewTrunkForm({
           registersOutbound: registers,
           ...(registers ? { outboundUsername: username.trim(), outboundSecret: secret } : {}),
           maxConcurrentCalls: channelCount,
-        });
-      }}
-      className="flex flex-col gap-2 rounded-md border border-border bg-card p-3"
+        })
+      }
     >
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Название</span>
-          <Input
-            className="w-[180px]"
-            placeholder="Транзит основной"
-            autoComplete="off"
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value);
-            }}
-          />
-        </label>
+      <DialogField label="Название">
+        <Input
+          placeholder="Транзит основной"
+          autoComplete="off"
+          autoFocus
+          value={name}
+          onChange={(event) => {
+            setName(event.target.value);
+          }}
+        />
+      </DialogField>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Узел</span>
-          <select
-            value={nodeId}
-            disabled={!nodesReady}
-            onChange={(event) => {
-              setNodeId(event.target.value);
-            }}
-            className="h-9 w-[180px] rounded-md border border-input bg-transparent px-2"
-          >
-            <option value="">{nodesReady ? 'выберите' : 'загружаем узлы…'}</option>
-            {nodes.map((node) => (
-              <option key={node.id} value={node.id}>
-                {node.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      <DialogField label="Узел">
+        <select
+          value={nodeId}
+          disabled={!nodesReady}
+          onChange={(event) => {
+            setNodeId(event.target.value);
+          }}
+          className="h-9 rounded-md border border-input bg-transparent px-2"
+        >
+          <option value="">{nodesReady ? 'выберите' : 'загружаем узлы…'}</option>
+          {nodes.map((node) => (
+            <option key={node.id} value={node.id}>
+              {node.name}
+            </option>
+          ))}
+        </select>
+      </DialogField>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Адрес провайдера</span>
-          <Input
-            className="num w-[220px]"
-            placeholder="sip.provider.ru:5060"
-            autoComplete="off"
-            spellCheck={false}
-            value={proxyHost}
-            onChange={(event) => {
-              setProxyHost(event.target.value);
-            }}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Каналов</span>
-          <Input
-            className="num w-[90px]"
-            inputMode="numeric"
-            autoComplete="off"
-            value={channels}
-            onChange={(event) => {
-              setChannels(event.target.value);
-            }}
-          />
-        </label>
-      </div>
-
-      {nodesError !== undefined && <ErrorNote error={nodesError} />}
-      {!channelsValid && (
-        <p className="text-warn">Каналов — целое число от 1 до {MAX_TRUNK_CONCURRENT_CALLS}.</p>
+      {nodesError !== undefined && (
+        <div className="sm:col-span-2">
+          <ErrorNote error={nodesError} />
+        </div>
       )}
 
-      <label className="flex items-center gap-2">
+      <DialogField label="Адрес провайдера">
+        <Input
+          className="num"
+          placeholder="sip.provider.ru:5060"
+          autoComplete="off"
+          spellCheck={false}
+          value={proxyHost}
+          onChange={(event) => {
+            setProxyHost(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <DialogField
+        label="Каналов"
+        hint={
+          channelsValid ? undefined : `Целое число от 1 до ${String(MAX_TRUNK_CONCURRENT_CALLS)}.`
+        }
+      >
+        <Input
+          className="num"
+          inputMode="numeric"
+          autoComplete="off"
+          value={channels}
+          onChange={(event) => {
+            setChannels(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <label className="flex items-center gap-2 sm:col-span-2">
         <input
           type="checkbox"
           checked={registers}
@@ -489,11 +459,10 @@ function NewTrunkForm({
       </label>
 
       {registers && (
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Имя у провайдера</span>
+        <>
+          <DialogField label="Имя у провайдера">
             <Input
-              className="num w-[180px]"
+              className="num"
               autoComplete="off"
               spellCheck={false}
               value={username}
@@ -501,16 +470,15 @@ function NewTrunkForm({
                 setUsername(event.target.value);
               }}
             />
-          </label>
+          </DialogField>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Пароль провайдера</span>
+          <DialogField label="Пароль провайдера">
             {/*
               `new-password`: иначе браузер предложит сохранить эту пару как вход в кабинет,
               а при следующей правке сам подставит пароль кабинета в поле провайдера.
             */}
             <Input
-              className="num w-[220px]"
+              className="num"
               type="password"
               autoComplete="new-password"
               value={secret}
@@ -518,40 +486,31 @@ function NewTrunkForm({
                 setSecret(event.target.value);
               }}
             />
-          </label>
-        </div>
+          </DialogField>
+        </>
       )}
 
-      <div className="flex items-center gap-2">
-        <Button type="submit" size="sm" disabled={!ready || busy}>
-          {busy ? 'Заводим…' : 'Завести'}
-        </Button>
-        <span className="text-muted-foreground">
-          Транк заводится выключенным: включите его, когда провайдер подтвердит доступ. Пароль после
-          сохранения не показывается — его можно заменить, но не посмотреть.
-        </span>
-      </div>
-    </form>
+      <p className="text-muted-foreground sm:col-span-2">
+        Транк заводится выключенным: включите его, когда провайдер подтвердит доступ. Пароль после
+        сохранения не показывается — его можно заменить, но не посмотреть.
+      </p>
+    </DialogForm>
   );
 }
 
 /**
- * Правка транка.
+ * Правка транка — поля окна «Настроить».
  *
  * Пустое поле пароля означает «не трогать», а не «очистить»: правка адреса не должна
  * стирать учётные данные — транк перестал бы подниматься, и увидеть это можно было бы
  * только в логе узла.
  */
-function EditTrunk({
+function EditTrunkForm({
   trunk,
-  busy,
   onSave,
-  onCancel,
 }: {
   trunk: Trunk;
-  busy: boolean;
-  onSave: (changes: Record<string, unknown>) => void;
-  onCancel: () => void;
+  onSave: (changes: Record<string, unknown>) => Promise<unknown>;
 }) {
   const [proxyHost, setProxyHost] = useState(trunk.proxy_host);
   const [channels, setChannels] = useState(String(trunk.max_concurrent_calls));
@@ -570,55 +529,52 @@ function EditTrunk({
   const dirty = Object.keys(changes).length > 0;
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (dirty && channelsValid) onSave(changes);
-      }}
-      className="flex flex-wrap items-center gap-2"
+    <DialogForm
+      submitLabel="Сохранить"
+      canSubmit={dirty && channelsValid}
+      onSubmit={() => onSave(changes)}
     >
-      <Input
-        aria-label="Адрес провайдера"
-        className="num w-[180px]"
-        autoComplete="off"
-        spellCheck={false}
-        value={proxyHost}
-        onChange={(event) => {
-          setProxyHost(event.target.value);
-        }}
-      />
-      <Input
-        aria-label="Каналов"
-        className="num w-[70px]"
-        inputMode="numeric"
-        autoComplete="off"
-        value={channels}
-        onChange={(event) => {
-          setChannels(event.target.value);
-        }}
-      />
-      <Input
-        aria-label="Новый пароль провайдера"
-        className="num w-[160px]"
-        type="password"
-        autoComplete="new-password"
-        placeholder="новый пароль…"
-        value={secret}
-        onChange={(event) => {
-          setSecret(event.target.value);
-        }}
-      />
-      <Button type="submit" size="sm" disabled={!dirty || !channelsValid || busy}>
-        {busy ? 'Сохраняем…' : 'Сохранить'}
-      </Button>
-      <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-        Отмена
-      </Button>
-      {!channelsValid && (
-        <span className="w-full text-warn">
-          Каналов — целое число от 1 до {MAX_TRUNK_CONCURRENT_CALLS}.
-        </span>
-      )}
-    </form>
+      <DialogField label="Адрес провайдера">
+        <Input
+          className="num"
+          autoComplete="off"
+          spellCheck={false}
+          autoFocus
+          value={proxyHost}
+          onChange={(event) => {
+            setProxyHost(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <DialogField
+        label="Каналов"
+        hint={
+          channelsValid ? undefined : `Целое число от 1 до ${String(MAX_TRUNK_CONCURRENT_CALLS)}.`
+        }
+      >
+        <Input
+          className="num"
+          inputMode="numeric"
+          autoComplete="off"
+          value={channels}
+          onChange={(event) => {
+            setChannels(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <DialogField label="Новый пароль провайдера" hint="Пусто — пароль остаётся прежним." wide>
+        <Input
+          className="num"
+          type="password"
+          autoComplete="new-password"
+          value={secret}
+          onChange={(event) => {
+            setSecret(event.target.value);
+          }}
+        />
+      </DialogField>
+    </DialogForm>
   );
 }

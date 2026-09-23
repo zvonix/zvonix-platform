@@ -42,15 +42,16 @@ export function OwnerSelect({
   const candidates = owners.data?.users ?? [];
 
   return (
-    <div className="flex flex-col gap-1">
+    // На обе колонки окна заведения: в строке «имя — адрес» полторы сотни знаков.
+    <div className="flex min-w-0 flex-col gap-1 sm:col-span-2">
       <label className="flex flex-col gap-1">
-        <span className="text-muted-foreground">Учётная запись владельца</span>
+        <span className="font-medium">Учётная запись владельца</span>
         <select
           value={value}
           onChange={(event) => {
             onChange(event.target.value);
           }}
-          className="h-9 w-[280px] rounded-md border border-input bg-transparent px-2"
+          className="h-9 w-full rounded-md border border-input bg-transparent px-2"
         >
           <option value="">выберите запись</option>
           {candidates.map((user) => (
@@ -62,7 +63,7 @@ export function OwnerSelect({
       </label>
 
       {owners.data !== undefined && candidates.length === 0 && (
-        <span className="max-w-[280px] text-warn">
+        <span className="text-xs text-warn">
           Нет учётных записей с этой ролью и открытым входом. Сначала человек регистрируется сам,
           затем его допускают в разделе «Учётные записи».
         </span>

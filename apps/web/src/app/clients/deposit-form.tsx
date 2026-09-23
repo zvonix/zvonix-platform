@@ -2,8 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { isNegative, money, moneyFromInput, numberFromInput } from '@/lib/money';
@@ -49,14 +49,15 @@ const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
 
 /**
- * Ручное пополнение счёта клиента.
+ * Деньги клиента: сколько доступно сейчас и ручное пополнение.
  *
- * Через подтверждение, которое повторяет сумму, клиента и основание: отменить пополнение
- * нельзя, а лишний разряд в сумме раньше уходил на счёт с первого нажатия
- * (ui-review, 2026-09-14). Открытие окна ключ идемпотентности не меняет — это то же
- * намерение.
+ * Пополнение — окно с кнопкой «Пополнить», и кнопка подтверждения повторяет сумму:
+ * отменить пополнение нельзя, а лишний разряд в сумме раньше уходил на счёт с первого
+ * нажатия (ui-review, 2026-09-14). Сумма, основание и ключ живут здесь, а не в окне:
+ * окно, закрытое после сбоя сети, при повторном открытии показывает то же намерение
+ * с тем же ключом, и повтор денег не добавит. Сбрасываются они только успехом.
  */
-export function DepositForm({ client }: { client: ClientRow }) {
+export function DepositForm({ client, canChange }: { client: ClientRow; canChange: boolean }) {
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
@@ -99,7 +100,7 @@ export function DepositForm({ client }: { client: ClientRow }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-x-6 gap-y-1">
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
         <Figure title="Остаток" value={funds.data?.balance} failed={fundsError} highlight />
         <Figure title="Придержано под вызовы" value={funds.data?.held} failed={fundsError} />
         <Figure title="Разрешённый минус" value={funds.data?.overdraft_limit} failed={fundsError} />
@@ -109,88 +110,82 @@ export function DepositForm({ client }: { client: ClientRow }) {
           failed={fundsError}
           highlight
         />
-      </div>
-      {fundsError !== undefined && <ErrorNote error={fundsError} />}
-
-      <div className="max-w-[720px] rounded-md border border-border bg-card p-3">
-        <h3 className="pb-1 font-semibold">Пополнить вручную</h3>
-        <p className="pb-2 text-muted-foreground">
-          Деньги появятся на остатке сразу и станут доступны для звонков. Отменить пополнение нельзя
-          — только провести обратную операцию. Действие попадает в журнал вместе с суммой и вашим
-          именем.
-        </p>
-
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-muted-foreground">Сумма, ₽</span>
-            <Input
-              className="num w-[140px]"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="1 500,00"
-              value={amount}
-              onChange={(event) => {
-                setAmount(event.target.value);
-                setKey(newKey());
-                setDone(undefined);
-              }}
-            />
-          </label>
-
-          <label className="flex flex-1 flex-col gap-1">
-            <span className="text-muted-foreground">Основание</span>
-            <Input
-              autoComplete="off"
-              placeholder="Платёжное поручение № 42 от 07.09.2026"
-              value={description}
-              onChange={(event) => {
-                setDescription(event.target.value);
-                setKey(newKey());
-                setDone(undefined);
-              }}
-            />
-          </label>
-
-          <ConfirmAction
+        {canChange && (
+          <FormDialog
             label="Пополнить"
-            variant="default"
-            size="default"
-            tone="neutral"
-            disabled={!ready}
             title={`Пополнить счёт «${client.name}»`}
-            consequence={
-              <>
-                <p>
-                  На остаток клиента сразу поступит <b className="num">{shown}</b>, и деньги станут
-                  доступны для звонков.
+            description="Деньги появятся на остатке сразу и станут доступны для звонков."
+            onOpenChange={(open) => {
+              // Прежний итог гасится новым открытием, а не закрытием: успех закрывает окно,
+              // и итог должен остаться на странице.
+              if (open) setDone(undefined);
+            }}
+          >
+            <DialogForm
+              submitLabel={amountValid ? `Пополнить на ${shown}` : 'Пополнить'}
+              canSubmit={ready}
+              onSubmit={() => deposit.mutateAsync()}
+            >
+              <DialogField label="Сумма, ₽">
+                <Input
+                  className="num"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  autoFocus
+                  placeholder="1 500,00"
+                  value={amount}
+                  onChange={(event) => {
+                    setAmount(event.target.value);
+                    setKey(newKey());
+                  }}
+                />
+              </DialogField>
+
+              <DialogField label="Основание" wide>
+                <Input
+                  autoComplete="off"
+                  placeholder="Платёжное поручение № 42 от 07.09.2026"
+                  value={description}
+                  onChange={(event) => {
+                    setDescription(event.target.value);
+                    setKey(newKey());
+                  }}
+                />
+              </DialogField>
+
+              {amount !== '' && !amountValid && (
+                <p className="text-warn sm:col-span-2">
+                  Сумма — число больше нуля, не больше шести знаков после запятой: например 1
+                  500,50.
                 </p>
-                <p>Основание: {description}</p>
-                <p>
+              )}
+
+              <div className="flex flex-col gap-1 sm:col-span-2" aria-live="polite">
+                {amountValid && (
+                  <p>
+                    На остаток клиента сразу поступит <b className="num">{shown}</b>, и деньги
+                    станут доступны для звонков.
+                  </p>
+                )}
+                <p className="text-muted-foreground">
                   Отменить пополнение нельзя — только провести обратную операцию. Действие попадёт в
                   журнал вместе с суммой и вашим именем.
                 </p>
-              </>
-            }
-            confirmLabel={`Пополнить на ${shown}`}
-            onConfirm={() => deposit.mutateAsync()}
-          />
-        </div>
+              </div>
+            </DialogForm>
+          </FormDialog>
+        )}
+      </div>
+      {fundsError !== undefined && <ErrorNote error={fundsError} />}
 
-        {amount !== '' && !amountValid && (
-          <p className="pt-2 text-warn">
-            Сумма — число больше нуля, не больше шести знаков после запятой: например 1 500,50.
+      <div aria-live="polite">
+        {done !== undefined && (
+          <p className={done.already_posted ? 'text-warn' : 'text-ok'}>
+            {done.already_posted
+              ? `Точно такая операция уже проводилась — повторно деньги не добавлены. Остаток: ${money(done.balance)}.`
+              : `Проведено. Остаток: ${money(done.balance)}.`}
           </p>
         )}
-
-        <div aria-live="polite">
-          {done !== undefined && (
-            <p className={done.already_posted ? 'pt-2 text-warn' : 'pt-2 text-ok'}>
-              {done.already_posted
-                ? `Точно такая операция уже проводилась — повторно деньги не добавлены. Остаток: ${money(done.balance)}.`
-                : `Проведено. Остаток: ${money(done.balance)}.`}
-            </p>
-          )}
-        </div>
       </div>
     </div>
   );

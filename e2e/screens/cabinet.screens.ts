@@ -229,7 +229,10 @@ const DIALOGS: Partial<Record<Role, { route: string; open: (page: Page) => Promi
     open: async (page) => {
       await page.getByRole('button', { name: 'Завести ключ' }).click();
       await page.getByLabel('Назначение').fill('Ключ для проверки окна');
-      await page.getByRole('button', { name: 'Завести', exact: true }).click();
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Завести и показать секрет' })
+        .click();
       await page.getByRole('button', { name: 'Отозвать' }).first().click();
     },
   },

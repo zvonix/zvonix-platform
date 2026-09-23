@@ -1,121 +1,95 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { OwnerSelect } from '@/components/owner-select';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ApiError, request } from '@/lib/api';
+import { request } from '@/lib/api';
+
+interface Created {
+  readonly partner: { readonly id: string };
+}
 
 /**
- * Заведение партнёра.
+ * Заведение партнёра — кнопка «Завести партнёра» и окно с тремя полями
+ * ([DESIGN.md](../../../../../docs/DESIGN.md), «Окно, страница или панель»).
  *
  * Псевдоним — единственное, что о партнёре узнает клиент
  * ([ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md)), поэтому
  * он спрашивается сразу и намекать на личность не должен.
+ *
+ * После заведения кабинет переходит на карточку нового партнёра: без шлюза, SIM, цен
+ * и допуска к работе партнёр не звонит, и всё это заводится именно там.
  */
 export function NewPartnerForm() {
+  return (
+    <FormDialog
+      label="Завести партнёра"
+      title="Новый партнёр"
+      description="Заводится в состоянии «ждёт проверки»: трафик по нему не пойдёт, пока его не допустят к работе."
+    >
+      <NewPartnerFields />
+    </FormDialog>
+  );
+}
+
+function NewPartnerFields() {
+  const router = useRouter();
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [ownerUserId, setOwnerUserId] = useState('');
   const [name, setName] = useState('');
   const [displayName, setDisplayName] = useState('');
 
   const create = useMutation({
     mutationFn: () =>
-      request<unknown>('/partners', {
+      request<Created>('/partners', {
         method: 'POST',
-        body: { ownerUserId, name, displayName },
+        body: { ownerUserId, name: name.trim(), displayName: displayName.trim() },
       }),
-    onSuccess: async () => {
-      setOpen(false);
-      setOwnerUserId('');
-      setName('');
-      setDisplayName('');
+    onSuccess: async (created) => {
       await queryClient.invalidateQueries({ queryKey: ['partners'] });
+      router.push(`/partners/${created.partner.id}`);
     },
   });
 
-  const error = create.error instanceof ApiError ? create.error : undefined;
   const ready = ownerUserId !== '' && name.trim().length >= 2 && displayName.trim().length >= 2;
 
-  if (!open) {
-    return (
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setOpen(true);
-          }}
-        >
-          Завести партнёра
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (ready) create.mutate();
-      }}
-      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3"
+    <DialogForm
+      submitLabel="Завести партнёра"
+      canSubmit={ready}
+      onSubmit={() => create.mutateAsync()}
     >
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="sm:col-span-2">
         <OwnerSelect value={ownerUserId} onChange={setOwnerUserId} />
-
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Настоящее имя</span>
-          <Input
-            className="w-[240px]"
-            value={name}
-            placeholder="Иванов Иван Иванович"
-            onChange={(event) => {
-              setName(event.target.value);
-            }}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground">Псевдоним у клиента</span>
-          <Input
-            className="w-[200px]"
-            value={displayName}
-            placeholder="Партнёр 17"
-            onChange={(event) => {
-              setDisplayName(event.target.value);
-            }}
-          />
-        </label>
-
-        <Button type="submit" size="sm" disabled={!ready || create.isPending}>
-          Завести
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setOpen(false);
-          }}
-        >
-          Отменить
-        </Button>
       </div>
 
-      <p className="text-muted-foreground">
-        Партнёр заводится в состоянии «ждёт проверки»: трафик по нему не пойдёт, пока его не
-        переведут в «проверен». Настоящее имя клиенту не показывается никогда — он видит только
-        псевдоним.
-      </p>
+      <DialogField label="Настоящее имя">
+        <Input
+          value={name}
+          placeholder="Иванов Иван Иванович"
+          onChange={(event) => {
+            setName(event.target.value);
+          }}
+        />
+      </DialogField>
 
-      {error !== undefined && (
-        <p role="alert" className="text-crit">
-          {error.message}
-        </p>
-      )}
-    </form>
+      <DialogField label="Псевдоним у клиента">
+        <Input
+          value={displayName}
+          autoComplete="off"
+          placeholder="Партнёр 17"
+          onChange={(event) => {
+            setDisplayName(event.target.value);
+          }}
+        />
+      </DialogField>
+
+      <p className="text-muted-foreground sm:col-span-2">
+        Настоящее имя клиенту не показывается никогда — он видит только псевдоним.
+      </p>
+    </DialogForm>
   );
 }

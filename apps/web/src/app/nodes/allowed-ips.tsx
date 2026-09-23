@@ -1,5 +1,6 @@
 'use client';
 
+import { DialogField } from '@/components/form-dialog';
 import { Input } from '@/components/ui/input';
 
 /**
@@ -13,22 +14,23 @@ import { Input } from '@/components/ui/input';
 export function AllowedIpsField({
   value,
   onChange,
+  hint,
 }: {
   value: string;
   onChange: (value: string) => void;
+  hint: string;
 }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-muted-foreground">Откуда разрешена установка</span>
+    <DialogField label="Откуда разрешена установка" hint={hint} wide>
       <Input
-        className="num w-[260px]"
+        className="num"
         placeholder="203.0.113.7, 2001:db8::1"
         value={value}
         onChange={(event) => {
           onChange(event.target.value);
         }}
       />
-    </label>
+    </DialogField>
   );
 }
 

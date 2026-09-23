@@ -2,9 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { ChannelStatus } from '@zvonix/shared';
-import { Fragment, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
-import { Button } from '@/components/ui/button';
+import { FormDialog } from '@/components/form-dialog';
 import {
   Table,
   TableBody,
@@ -35,9 +34,11 @@ export default function MyChannelsPage() {
   );
 }
 
+/**
+ * Свои линии клиента. «Настроить» открывает окно с порядком предложений и разрешёнными
+ * операторами: у каждого списка своё сохранение, поэтому окно без общей кнопки действия.
+ */
 function MyChannels() {
-  const [opened, setOpened] = useState<string | undefined>(undefined);
-
   const list = useQuery({
     queryKey: ['my', 'channels'],
     queryFn: () => request<{ channels: Channel[] }>('/client/channels'),
@@ -86,56 +87,47 @@ function MyChannels() {
             )}
 
             {list.data?.channels.map((channel) => (
-              <Fragment key={channel.id}>
-                <TableRow>
-                  <TableCell>{channel.name}</TableCell>
+              <TableRow key={channel.id}>
+                <TableCell>{channel.name}</TableCell>
 
-                  <TableCell>
-                    <span
-                      className={`rounded-md px-2 py-0.5 ${usableTone(channel.status === 'active')}`}
-                    >
-                      {CHANNEL_STATUS_NAME[channel.status]}
-                    </span>
-                  </TableCell>
+                <TableCell>
+                  <span
+                    className={`rounded-md px-2 py-0.5 ${usableTone(channel.status === 'active')}`}
+                  >
+                    {CHANNEL_STATUS_NAME[channel.status]}
+                  </span>
+                </TableCell>
 
-                  <TableCell>
-                    {channel.caller_id === null ? (
-                      <span className="text-faint">номер SIM, с которой ушёл вызов</span>
-                    ) : (
-                      <span className="num">{channel.caller_id}</span>
-                    )}
-                  </TableCell>
+                <TableCell>
+                  {channel.caller_id === null ? (
+                    <span className="text-faint">номер SIM, с которой ушёл вызов</span>
+                  ) : (
+                    <span className="num">{channel.caller_id}</span>
+                  )}
+                </TableCell>
 
-                  <TableCell>
-                    {channel.recording_required ? (
-                      'обязательна'
-                    ) : (
-                      <span className="text-faint">не требуется</span>
-                    )}
-                  </TableCell>
+                <TableCell>
+                  {channel.recording_required ? (
+                    'обязательна'
+                  ) : (
+                    <span className="text-faint">не требуется</span>
+                  )}
+                </TableCell>
 
-                  <TableCell>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-expanded={opened === channel.id}
-                      onClick={() => {
-                        setOpened(opened === channel.id ? undefined : channel.id);
-                      }}
-                    >
-                      {opened === channel.id ? 'Свернуть' : 'Настроить'}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-
-                {opened === channel.id && (
-                  <TableRow className="bg-muted/40 hover:bg-muted/40">
-                    <TableCell colSpan={COLUMNS} className="whitespace-normal">
+                <TableCell>
+                  <FormDialog
+                    label="Настроить"
+                    variant="outline"
+                    title={`Настройки линии «${channel.name}»`}
+                    description="Порядок предложений и разрешённые операторы сохраняются каждый своей кнопкой."
+                    wide
+                  >
+                    <div className="min-h-0 overflow-y-auto px-5 pb-5">
                       <ChannelSettings channelId={channel.id} />
-                    </TableCell>
-                  </TableRow>
-                )}
-              </Fragment>
+                    </div>
+                  </FormDialog>
+                </TableCell>
+              </TableRow>
             ))}
           </TableBody>
         </Table>
