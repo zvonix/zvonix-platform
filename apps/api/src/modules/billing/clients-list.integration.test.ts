@@ -204,6 +204,47 @@ describe('список клиентов', () => {
   }, 120_000);
 });
 
+describe('карточка клиента', () => {
+  it('та же строка, что в списке, — с остатком', async () => {
+    const found = await list(`name=${MARK}`);
+    const row = found.clients.find((client) => client.id === firstId);
+    const response = await api().inject({
+      method: 'GET',
+      url: `/clients/${firstId}`,
+      headers: adminAuth,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ client: ClientView }>().client).toEqual(row);
+  }, 120_000);
+
+  it('несуществующий — 404, а не пустая карточка', async () => {
+    const response = await api().inject({
+      method: 'GET',
+      url: '/clients/01a0cc00-0000-7000-8000-000000000000',
+      headers: adminAuth,
+    });
+    expect(response.statusCode).toBe(404);
+  }, 120_000);
+
+  it('негодный идентификатор — 400', async () => {
+    const response = await api().inject({
+      method: 'GET',
+      url: '/clients/не-идентификатор',
+      headers: adminAuth,
+    });
+    expect(response.statusCode).toBe(400);
+  }, 120_000);
+
+  it('клиенту закрыта: административный контур', async () => {
+    const response = await api().inject({
+      method: 'GET',
+      url: `/clients/${firstId}`,
+      headers: clientAuth,
+    });
+    expect(response.statusCode).toBe(403);
+  }, 120_000);
+});
+
 describe('движение по счёту', () => {
   it('у каждой проводки видно, что произошло', async () => {
     const response = await api().inject({

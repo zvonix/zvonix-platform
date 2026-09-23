@@ -158,6 +158,13 @@ export class BillingController {
     return { clients: found.rows.map(toClientView), total: found.total };
   }
 
+  /** Карточка клиента: та же строка, что в списке. Нет такого — `404`. */
+  @Roles('admin', 'support')
+  @Get('clients/:id')
+  async getClient(@Param('id') id: string): Promise<{ client: ClientView }> {
+    return { client: toClientView(await this.billing.clientWithBalance(parseId(id, 'client'))) };
+  }
+
   /**
    * Ручное пополнение баланса клиента.
    *
@@ -275,6 +282,15 @@ export class BillingController {
     });
 
     return { partners: found.rows.map(toPartnerView), total: found.total };
+  }
+
+  /** Карточка партнёра: та же строка, что в списке, с настоящим именем. Нет такого — `404`. */
+  @Roles('admin', 'support')
+  @Get('partners/:id')
+  async getPartner(@Param('id') id: string): Promise<{ partner: PartnerView }> {
+    return {
+      partner: toPartnerView(await this.billing.partnerWithBalance(parseId(id, 'partner'))),
+    };
   }
 
   /**

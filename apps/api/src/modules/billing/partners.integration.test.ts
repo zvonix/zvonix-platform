@@ -216,6 +216,38 @@ describe('список партнёров', () => {
   }, 120_000);
 });
 
+describe('карточка партнёра', () => {
+  it('та же строка, что в списке, — с именем, псевдонимом и остатком', async () => {
+    const found = await list(`name=${MARK}`);
+    const row = found.partners.find((partner) => partner.id === firstId);
+    const response = await api().inject({
+      method: 'GET',
+      url: `/partners/${firstId}`,
+      headers: adminAuth,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ partner: PartnerView }>().partner).toEqual(row);
+  }, 120_000);
+
+  it('несуществующий — 404, а не пустая карточка', async () => {
+    const response = await api().inject({
+      method: 'GET',
+      url: '/partners/01a0cc00-0000-7000-8000-000000000000',
+      headers: adminAuth,
+    });
+    expect(response.statusCode).toBe(404);
+  }, 120_000);
+
+  it('клиенту закрыта: настоящее имя партнёра в его контур не попадает (ADR-0014)', async () => {
+    const response = await api().inject({
+      method: 'GET',
+      url: `/partners/${firstId}`,
+      headers: clientAuth,
+    });
+    expect(response.statusCode).toBe(403);
+  }, 120_000);
+});
+
 describe('смена состояния', () => {
   it('переводит в verified — и партнёр становится виден клиенту', async () => {
     // Следствие важнее самого перехода: `verified` — единственное состояние,

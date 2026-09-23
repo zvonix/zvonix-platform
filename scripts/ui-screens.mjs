@@ -126,8 +126,9 @@ async function populate(apiUrl) {
     pricePerMinute: '1.25',
     effectiveFrom: '2020-01-01T00:00:00.000Z',
   });
+  // Правило по умолчанию, а не одному клиенту: без наценки клиент не звонит и не видит
+  // цен, и стенд показывал бы у второго клиента отказ вместо экрана.
   await call('POST', '/commission-rules', {
-    clientId,
     percentBasisPoints: 1500,
     effectiveFrom: '2020-01-01T00:00:00.000Z',
   });
