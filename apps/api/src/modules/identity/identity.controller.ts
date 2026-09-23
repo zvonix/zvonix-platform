@@ -47,6 +47,7 @@ import type {
 import {
   changePasswordSchema,
   disableTotpSchema,
+  emailResendByPasswordSchema,
   loginSchema,
   passwordResetConfirmSchema,
   passwordResetRequestSchema,
@@ -173,6 +174,21 @@ export class IdentityController {
     @Meta() meta: RequestMeta,
   ): Promise<void> {
     await this.identity.confirmEmail(body.token, meta);
+  }
+
+  /**
+   * Повторное письмо с подтверждением — тому, кого не пускает неподтверждённый адрес.
+   * Вместо сессии — адрес и пароль, сверенные так же, как на входе.
+   */
+  @Public()
+  @HttpCode(202)
+  @Post('auth/email/resend-by-password')
+  async resendEmailVerificationByPassword(
+    @Body(zodBody(emailResendByPasswordSchema))
+    body: z.infer<typeof emailResendByPasswordSchema>,
+    @Meta() meta: RequestMeta,
+  ): Promise<void> {
+    await this.identity.resendEmailVerificationByPassword(body, meta);
   }
 
   /** Повторное письмо с подтверждением — тому, кто уже вошёл. */

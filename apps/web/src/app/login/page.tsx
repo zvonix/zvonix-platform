@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError, request } from '@/lib/api';
+import { NotActivated } from './not-activated';
 
 interface CaptchaSettings {
   readonly site_key: string;
@@ -165,13 +166,27 @@ export default function LoginPage() {
             <YandexCaptcha siteKey={siteKey} onToken={setCaptchaToken} resetSignal={captchaReset} />
           )}
 
-          {error !== undefined && (
-            <p role="alert" className="text-crit">
-              {error.message}
-              {error.problems.length > 0 && (
-                <span className="block text-muted-foreground">{error.problems.join('; ')}</span>
-              )}
-            </p>
+          {error !== undefined && typeof error.details['status'] === 'string' ? (
+            <NotActivated
+              error={error}
+              email={email}
+              password={password}
+              captchaToken={captchaToken}
+              captchaRequired={siteKey !== undefined}
+              onCaptchaSpent={() => {
+                setCaptchaToken(undefined);
+                setCaptchaReset((value) => value + 1);
+              }}
+            />
+          ) : (
+            error !== undefined && (
+              <p role="alert" className="text-crit">
+                {error.message}
+                {error.problems.length > 0 && (
+                  <span className="block text-muted-foreground">{error.problems.join('; ')}</span>
+                )}
+              </p>
+            )
           )}
 
           <Button type="submit" disabled={login.isPending}>

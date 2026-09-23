@@ -455,16 +455,17 @@ export class IdentityService {
   }
 
   /**
-   * Вход по адресу и паролю.
+   * Сверка адреса и пароля — общая для входа и повторного письма без входа.
    *
-   * Неизвестный адрес и неверный пароль дают один и тот же отказ и занимают одинаковое
-   * время: иначе по ответам собирается список зарегистрированных адресов. А вот отказ
-   * из-за состояния записи виден отдельно — до него доходит только тот, кто уже знает
-   * верный пароль, так что перечислить чужие адреса это не помогает.
+   * Одним методом, чтобы оба пути несли одни рубежи: предел неудач по адресу источника,
+   * капчу, блокировку записи и одинаковый ответ на неизвестный адрес и неверный пароль.
+   * Второй путь с послабленной сверкой стал бы обходом для перебора паролей.
    */
-  async login(input: LoginInput, meta: RequestMeta): Promise<IssuedSession> {
-    const now = new Date();
-
+  private async verifyCredentials(
+    input: Pick<LoginInput, 'email' | 'password' | 'captchaToken'>,
+    meta: RequestMeta,
+    now: Date,
+  ): Promise<UserRow> {
     // Накопленные неудачи проверяются **до** сверки пароля: она стоит девятнадцати
     // мегабайт и заметного времени, и раздавать её тому, кто уже исчерпал предел,
     // значит отдать ему же средство нагрузить систему.
@@ -506,9 +507,26 @@ export class IdentityService {
       throw unauthenticated('Неверный адрес или пароль');
     }
 
+    return user;
+  }
+
+  /**
+   * Вход по адресу и паролю.
+   *
+   * Неизвестный адрес и неверный пароль дают один и тот же отказ и занимают одинаковое
+   * время: иначе по ответам собирается список зарегистрированных адресов. А вот отказ
+   * из-за состояния записи виден отдельно — до него доходит только тот, кто уже знает
+   * верный пароль, так что перечислить чужие адреса это не помогает.
+   */
+  async login(input: LoginInput, meta: RequestMeta): Promise<IssuedSession> {
+    const now = new Date();
+    const user = await this.verifyCredentials(input, meta, now);
+
     if (user.status !== 'active') {
+      // Пароль уже сверен — отвечаем владельцу записи, и ему нужно знать, чего ждать:
+      // письма со ссылкой или решения администратора. Постороннему сюда не дойти.
       throw permissionDenied('Учётная запись не активирована', {
-        details: { status: user.status },
+        details: { status: user.status, email_confirmed: user.emailConfirmedAt !== null },
       });
     }
 
@@ -749,18 +767,43 @@ export class IdentityService {
 
   /**
    * Повторное письмо с подтверждением — тому, кто уже вошёл.
-   *
-   * Единственный путь отправки, где отказ по частоте сообщается честно: сюда приходят
-   * с действующей сессией, скрывать нечего, а молчание человек прочтёт как «письмо ушло».
    */
   async resendEmailVerification(principal: Principal): Promise<void> {
     const user = await this.repository.findById(principal.userId);
     if (user === undefined) throw notFound('Пользователь не найден');
+    await this.resendTo(user, new Date());
+  }
+
+  /**
+   * Повторное письмо с подтверждением — тому, кто войти не может.
+   *
+   * Запись без подтверждённого адреса не активна, и путь «войти и попросить письмо»
+   * для неё закрыт: ссылка из письма живёт сутки, после чего человек застревал
+   * до звонка администратору. Здесь вместо сессии — та же сверка пароля, что у входа,
+   * со всеми её рубежами: письмо уходит только тому, кто знает пароль, поэтому чужой
+   * ящик этим путём не завалить.
+   */
+  async resendEmailVerificationByPassword(
+    input: Pick<LoginInput, 'email' | 'password' | 'captchaToken'>,
+    meta: RequestMeta,
+  ): Promise<void> {
+    const now = new Date();
+    const user = await this.verifyCredentials(input, meta, now);
+    await this.resendTo(user, now);
+  }
+
+  /**
+   * Общий хвост обоих путей повторного письма.
+   *
+   * Отказ по частоте сообщается честно: до него доходит только владелец записи,
+   * скрывать от него нечего, а молчание он прочтёт как «письмо ушло». Предел считается
+   * по записи — смена адреса источника его не снимает.
+   */
+  private async resendTo(user: UserRow, now: Date): Promise<void> {
     if (user.emailConfirmedAt !== null) throw conflict('Адрес уже подтверждён');
 
-    await this.assertWithinRate(EMAIL_RESEND_RULE, principal.userId);
+    await this.assertWithinRate(EMAIL_RESEND_RULE, user.id);
 
-    const now = new Date();
     if (!(await this.sendEmailVerification(user, now))) {
       const quota = await this.mail.canSendTo(user.email, now);
       throw tooManyAttempts(quota.retryAfterSeconds);
