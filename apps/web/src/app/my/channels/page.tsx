@@ -29,7 +29,7 @@ interface Channel {
 
 export default function MyChannelsPage() {
   return (
-    <ConsoleShell title="Мои линии" requireRole="client">
+    <ConsoleShell title="Мои линии" cabinet="client">
       {() => <MyChannels />}
     </ConsoleShell>
   );

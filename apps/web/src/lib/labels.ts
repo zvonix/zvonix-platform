@@ -1,4 +1,6 @@
 import type {
+  ApplicationStatus,
+  Cabinet,
   CallFailureReason,
   CallStatus,
   ChannelStatus,
@@ -34,6 +36,7 @@ export const ROLE_NAME: Record<UserRole, string> = {
   support: 'Поддержка',
   partner: 'Партнёр',
   client: 'Клиент',
+  member: 'Участник',
 };
 
 export const STATUS_NAME: Record<UserStatus, string> = {
@@ -64,6 +67,27 @@ export function statusTone(status: UserStatus): string {
   if (status === 'pending') return 'bg-warn-soft text-warn';
   return 'bg-crit-soft text-crit';
 }
+
+/** Состояние заявки на кабинет (ADR-0052). */
+export const APPLICATION_STATUS_NAME: Record<ApplicationStatus, string> = {
+  submitted: 'Ждёт решения',
+  approved: 'Одобрена',
+  rejected: 'Отказано',
+  withdrawn: 'Отозвана',
+};
+
+export function applicationTone(status: ApplicationStatus): string {
+  if (status === 'approved') return 'bg-ok-soft text-ok';
+  if (status === 'submitted') return 'bg-warn-soft text-warn';
+  if (status === 'rejected') return 'bg-crit-soft text-crit';
+  return 'bg-muted text-muted-foreground';
+}
+
+/** Вид кабинета — так, как его называет человек. */
+export const CABINET_KIND_NAME: Record<Cabinet, string> = {
+  client: 'Служба такси',
+  partner: 'Партнёр',
+};
 
 export const CLIENT_STATUS_NAME: Record<ClientStatus, string> = {
   pending: 'Ждёт допуска',

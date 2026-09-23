@@ -37,7 +37,10 @@ export const clients = pgTable(
   {
     id: primaryId<'client'>(),
 
-    /** Учётная запись владельца. Сотрудников с доступом может быть несколько — это первый. */
+    /**
+     * Учётная запись владельца — одна на карточку и одна карточка клиента на владельца.
+     * Тот же человек может владеть и карточкой партнёра: это второй кабинет (ADR-0052).
+     */
     ownerUserId: idRef<'user'>()
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -62,7 +65,9 @@ export const clients = pgTable(
   (t) => [
     check('clients_status_check', oneOf(t.status, CLIENT_STATUSES)),
     check('clients_overdraft_non_negative', sql`${t.overdraftLimit} >= 0`),
-    index('clients_owner_idx').on(t.ownerUserId),
+    // Один владелец — одна карточка клиента (ADR-0052): проверка в службе даёт понятный
+    // отказ, а гонку двух одновременных заведений закрывает этот индекс.
+    uniqueIndex('clients_owner_key').on(t.ownerUserId),
     index('clients_status_idx').on(t.status),
   ],
 );
@@ -102,7 +107,8 @@ export const partners = pgTable(
   },
   (t) => [
     check('partners_status_check', oneOf(t.status, PARTNER_STATUSES)),
-    index('partners_owner_idx').on(t.ownerUserId),
+    // Один владелец — одна карточка партнёра, по той же причине, что и у клиента.
+    uniqueIndex('partners_owner_key').on(t.ownerUserId),
     index('partners_status_idx').on(t.status),
   ],
 );

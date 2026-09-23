@@ -12,7 +12,7 @@
 
 import { Controller, Get, Query } from '@nestjs/common';
 import { Money, parseId, type TerminationKind } from '@zvonix/shared';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { BillingService } from '../billing/billing.service.js';
 import type { Principal } from '../identity/identity.service.js';
@@ -77,7 +77,7 @@ export class ClientPricesController {
    * вызов, значит звать строить его вокруг пустого места. Партнёр называется
    * **псевдонимом** и только им ([ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md)).
    */
-  @Roles('client')
+  @Cabinets('client')
   @Get('client/prices')
   async prices(
     @CurrentUser() actor: Principal,
@@ -85,7 +85,8 @@ export class ClientPricesController {
     @Query('seconds') seconds?: string,
   ): Promise<{ seconds: number; offers: OfferPriceView[] }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    const offered = await this.billing.listOfferedAliases();
+    // Свой партнёр в предложениях не показывается: звонить через себя нельзя (ADR-0052).
+    const offered = await this.billing.listOfferedAliases(actor.userId);
     const duration = exampleDuration(seconds);
 
     const priced = await this.tariffs.offerPrices(
@@ -129,14 +130,15 @@ export class ClientPricesController {
    * Список длинный по существу дела, и сводить его в диапазон значило бы выбросить ровно
    * то, ради чего его открывают.
    */
-  @Roles('client')
+  @Cabinets('client')
   @Get('client/tariffs')
   async directions(
     @CurrentUser() actor: Principal,
     @Query('operatorId') operatorId?: string,
   ): Promise<{ tariffs: TariffView[] }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    const offered = await this.billing.listOfferedAliases();
+    // Свой партнёр в предложениях не показывается: звонить через себя нельзя (ADR-0052).
+    const offered = await this.billing.listOfferedAliases(actor.userId);
 
     const rows = await this.tariffs.clientTariffs(
       client.id,

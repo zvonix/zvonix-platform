@@ -14,6 +14,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  CLIENT_APPLICATION,
   prepareEnvironment,
   resetDatabase,
   startApi,
@@ -66,7 +67,7 @@ async function register(email: string, ip: string) {
     method: 'POST',
     url: '/auth/register',
     remoteAddress: ip,
-    payload: { email, password: PASSWORD, fullName: 'Иван Петров', role: 'client' },
+    payload: { email, password: PASSWORD, fullName: 'Иван Петров', ...CLIENT_APPLICATION },
   });
 }
 

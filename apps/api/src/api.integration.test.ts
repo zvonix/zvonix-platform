@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyMigrations, createDatabase } from '@zvonix/db';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { CORRELATION_ID_HEADER } from './http/correlation-id.hook.js';
+import { CLIENT_APPLICATION, PARTNER_APPLICATION } from './testing/harness.js';
 
 const url =
   process.env['TEST_DATABASE_URL'] ?? 'postgresql://zvonix:zvonix@127.0.0.1:5432/zvonix_test';
@@ -55,11 +56,14 @@ const PASSWORD = 'достаточно длинный пароль';
  * Идентификатор читается из базы, а не из ответа: ответ его больше не содержит —
  * он одинаков и для нового адреса, и для занятого (ADR-0029).
  */
-async function register(email: string, role: 'client' | 'partner' = 'client'): Promise<string> {
+async function register(
+  email: string,
+  application: typeof CLIENT_APPLICATION | typeof PARTNER_APPLICATION = CLIENT_APPLICATION,
+): Promise<string> {
   const response = await api().inject({
     method: 'POST',
     url: '/auth/register',
-    payload: { email, password: PASSWORD, fullName: 'Иван Петров', role },
+    payload: { email, password: PASSWORD, fullName: 'Иван Петров', ...application },
   });
   expect(response.statusCode).toBe(202);
 
@@ -216,12 +220,12 @@ describe('исключения фреймворка приводятся к то
 });
 
 describe('регистрация', () => {
-  it('создаёт запись в состоянии pending', async () => {
+  it('создаёт участника в состоянии pending вместе с заявкой на кабинет', async () => {
     const email = uniqueEmail();
     const response = await api().inject({
       method: 'POST',
       url: '/auth/register',
-      payload: { email, password: PASSWORD, fullName: 'Иван Петров', role: 'partner' },
+      payload: { email, password: PASSWORD, fullName: 'Иван Петров', ...PARTNER_APPLICATION },
     });
 
     // Ответ ничего не рассказывает о записи: он одинаков и для нового адреса,
@@ -232,9 +236,14 @@ describe('регистрация', () => {
     const handle = createDatabase({ url, poolMax: 1 });
     try {
       const found = await handle.db.execute(
-        sql`select role, status from users where email = ${email}`,
+        sql`select u.role, u.status, a.kind, a.status as application_status
+            from users u join applications a on a.user_id = u.id
+            where u.email = ${email}`,
       );
-      expect(found.rows[0]).toMatchObject({ role: 'partner', status: 'pending' });
+      // Роль участника одна на оба кабинета, вид кабинета — в заявке (ADR-0052).
+      expect(found.rows).toEqual([
+        { role: 'member', status: 'pending', kind: 'partner', application_status: 'submitted' },
+      ]);
     } finally {
       await handle.close();
     }
@@ -249,7 +258,7 @@ describe('регистрация', () => {
     const response = await api().inject({
       method: 'POST',
       url: '/auth/register',
-      payload: { email, password: PASSWORD, fullName: 'Другой', role: 'client' },
+      payload: { email, password: PASSWORD, fullName: 'Другой', ...CLIENT_APPLICATION },
     });
     expect(response.statusCode).toBe(202);
     expect(response.body).toBe('');
@@ -261,7 +270,7 @@ describe('регистрация', () => {
     await api().inject({
       method: 'POST',
       url: '/auth/register',
-      payload: { email, password: PASSWORD, fullName: 'Другой', role: 'client' },
+      payload: { email, password: PASSWORD, fullName: 'Другой', ...CLIENT_APPLICATION },
     });
 
     const handle = createDatabase({ url, poolMax: 1 });
@@ -283,11 +292,17 @@ describe('регистрация', () => {
     }
   });
 
-  it('отвергает роль администратора', async () => {
+  it('не заводит сотрудника площадки: заявка бывает только на кабинет', async () => {
     const response = await api().inject({
       method: 'POST',
       url: '/auth/register',
-      payload: { email: uniqueEmail(), password: PASSWORD, fullName: 'Иван', role: 'admin' },
+      payload: {
+        email: uniqueEmail(),
+        password: PASSWORD,
+        fullName: 'Иван',
+        cabinet: 'admin',
+        answers: CLIENT_APPLICATION.answers,
+      },
     });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: { code: 'validation_failed' } });
@@ -300,7 +315,12 @@ describe('регистрация', () => {
     const response = await api().inject({
       method: 'POST',
       url: '/auth/register',
-      payload: { email: uniqueEmail(), password: rejectedPassword, fullName: 'И', role: 'client' },
+      payload: {
+        email: uniqueEmail(),
+        password: rejectedPassword,
+        fullName: 'И',
+        ...CLIENT_APPLICATION,
+      },
     });
 
     expect(response.statusCode).toBe(400);
@@ -534,7 +554,7 @@ describe('права администратора', () => {
     const adminToken = await login(adminEmail);
 
     const partnerEmail = uniqueEmail();
-    const partnerId = await register(partnerEmail, 'partner');
+    const partnerId = await register(partnerEmail, PARTNER_APPLICATION);
 
     const patched = await api().inject({
       method: 'PATCH',

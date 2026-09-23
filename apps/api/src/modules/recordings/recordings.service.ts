@@ -12,7 +12,14 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { conflict, notFound, permissionDenied, type Id, type UserRole } from '@zvonix/shared';
+import {
+  conflict,
+  isStaffRole,
+  notFound,
+  permissionDenied,
+  type Id,
+  type UserRole,
+} from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingRepository, type PartnerRow } from '../billing/billing.repository.js';
@@ -160,7 +167,7 @@ export class RecordingsService {
   /**
    * Право слушать запись.
    *
-   * Администратор и поддержка — по роли. Клиент и партнёр — только свои вызовы:
+   * Администратор и поддержка — по роли. Участник — только свои вызовы:
    * владение проверяется здесь, а не защитником (ADR-0018).
    *
    * У партнёра два независимых основания ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)):
@@ -169,34 +176,36 @@ export class RecordingsService {
    * первое выключено: это путь для разбора спора «моя SIM исправна».
    */
   private async assertMayListen(recording: RecordingRow, requester: Requester): Promise<void> {
-    if (requester.role === 'admin' || requester.role === 'support') return;
+    if (isStaffRole(requester.role)) return;
 
-    if (requester.role === 'partner') {
-      const partner = await this.partnerOfRequest(recording, requester);
-      // Ответ `not_found`, а не `permission_denied`: иначе по разнице ответов
-      // проверяется существование чужих записей.
-      if (partner === undefined) throw notFound('Запись не найдена');
-      if (partner.listensToRecordings) return;
+    // Участник может быть и клиентом, и партнёром (ADR-0052): запись его, если вызов
+    // его хотя бы по одному кабинету. Отказ один на оба — `not_found`, а не
+    // `permission_denied`: иначе по разнице ответов проверяется существование чужих записей.
+    if (await this.mayListenAsPartner(recording, requester)) return;
+    if (await this.mayListenAsClient(recording, requester)) return;
+    throw notFound('Запись не найдена');
+  }
 
-      const grant = await this.repository.findLiveGrant(recording.id, partner.id, new Date());
-      if (grant === undefined) throw notFound('Запись не найдена');
-      return;
-    }
+  private async mayListenAsPartner(
+    recording: RecordingRow,
+    requester: Requester,
+  ): Promise<boolean> {
+    const partner = await this.partnerOfRequest(recording, requester);
+    if (partner === undefined) return false;
+    if (partner.listensToRecordings) return true;
 
-    // Остался клиент: роли перечислены полностью, и отдельная проверка на него была бы
-    // заведомо истинной. Новая роль сюда не провалится молча — она не пройдёт типы.
+    const grant = await this.repository.findLiveGrant(recording.id, partner.id, new Date());
+    return grant !== undefined;
+  }
+
+  private async mayListenAsClient(recording: RecordingRow, requester: Requester): Promise<boolean> {
+    const client = await this.billing.findClientOwnedBy(requester.userId);
+    if (client === undefined) return false;
+
     const call = await this.calls.findById(recording.callId);
-    if (call === undefined) throw notFound('Вызов не найден');
-
+    if (call === undefined) return false;
     const channel = await this.telephony.findChannel(call.channelId);
-    const client =
-      channel === undefined ? undefined : await this.billing.findClientOwnedBy(requester.userId);
-
-    // Ответ `not_found`, а не `permission_denied`: иначе по разнице ответов
-    // проверяется существование чужих записей.
-    if (client === undefined || channel === undefined || channel.clientId !== client.id) {
-      throw notFound('Запись не найдена');
-    }
+    return channel !== undefined && channel.clientId === client.id;
   }
 
   /**

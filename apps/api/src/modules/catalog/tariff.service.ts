@@ -25,6 +25,7 @@ import {
   type Rounding,
   type TariffRule,
   type TerminationKind,
+  type UserRole,
 } from '@zvonix/shared';
 import { AuditService } from '../audit/audit.service.js';
 import type { Executor } from '@zvonix/db';
@@ -361,7 +362,7 @@ export class TariffService {
   async addPartnerRate(
     draft: Parameters<TariffRepository['insertPartnerRate']>[0],
     actorUserId: Id<'user'>,
-    actorRole: 'admin' | 'support' | 'client' | 'partner',
+    actorRole: UserRole,
   ): Promise<PartnerRateRow> {
     // Всё одной транзакцией: запирание направлений оператора, проверка коридора,
     // вставка и запись в журнал.
@@ -412,7 +413,7 @@ export class TariffService {
   async addCommissionRule(
     draft: Parameters<TariffRepository['insertCommissionRule']>[0],
     actorUserId: Id<'user'>,
-    actorRole: 'admin' | 'support' | 'client' | 'partner',
+    actorRole: UserRole,
   ): Promise<CommissionRuleRow> {
     return this.repository.pool.transaction(async (tx) => {
       const row = await this.repository.insertCommissionRule(draft, tx);
@@ -441,7 +442,7 @@ export class TariffService {
   async addPriceBand(
     draft: Parameters<TariffRepository['insertPriceBand']>[0],
     actorUserId: Id<'user'>,
-    actorRole: 'admin' | 'support' | 'client' | 'partner',
+    actorRole: UserRole,
   ): Promise<PriceBandRow> {
     return this.repository.pool.transaction(async (tx) => {
       // Та же очередь, что и у записи цены: иначе сужение коридора проскакивало бы
@@ -558,7 +559,7 @@ export class TariffService {
    */
   private async assertWithinBand(
     draft: Parameters<TariffRepository['insertPartnerRate']>[0],
-    actorRole: 'admin' | 'support' | 'client' | 'partner',
+    actorRole: UserRole,
     executor: Executor,
   ): Promise<void> {
     const band = await this.repository.findPriceBand(

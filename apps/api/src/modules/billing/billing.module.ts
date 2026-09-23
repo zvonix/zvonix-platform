@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
+import { IdentityModule } from '../identity/identity.module.js';
 import { MachineModule } from '../machine/machine.module.js';
 import { BillingController } from './billing.controller.js';
 import { ClientApiBillingController } from './client-api.controller.js';
 import { ClientKeysController } from './client-keys.controller.js';
 import { BillingRepository } from './billing.repository.js';
 import { BillingService } from './billing.service.js';
+import { CabinetsController } from './cabinets.controller.js';
 import { ClientSelfController } from './client-self.controller.js';
 import { PartnerSelfController } from './partner-self.controller.js';
 import { ReservationRepository } from './reservation.repository.js';
@@ -14,9 +16,12 @@ import { ReservationService } from './reservation.service.js';
 @Module({
   // Машинные ключи здесь ради собственного контура клиента (ADR-0044): «чей это клиент»
   // знает только этот модуль, и обратная стрелка замкнула бы модули в кольцо.
-  imports: [AuditModule, MachineModule],
+  // Учётные записи — ради одного правила при заведении карточки: владельцем
+  // не бывает сотрудник площадки (ADR-0052). Обратной стрелки нет.
+  imports: [AuditModule, IdentityModule, MachineModule],
   controllers: [
     BillingController,
+    CabinetsController,
     ClientSelfController,
     PartnerSelfController,
     ClientKeysController,

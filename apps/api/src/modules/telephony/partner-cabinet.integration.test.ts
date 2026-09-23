@@ -726,11 +726,15 @@ describe('границы контура', () => {
   });
 
   it('учётная запись без партнёра получает отказ, а не пустой кабинет', async () => {
+    // Кабинет открывает владение карточкой, а не роль (ADR-0052).
     const orphan = await createUser('partner');
     const response = await get('/partner/account', as(orphan.token));
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json<{ error: { code: string } }>().error.code).toBe('not_found');
+    expect(response.statusCode).toBe(403);
+    expect(response.json<{ error: { code: string; message: string } }>().error).toMatchObject({
+      code: 'permission_denied',
+      message: 'Кабинет партнёра не подключён',
+    });
   });
 });
 

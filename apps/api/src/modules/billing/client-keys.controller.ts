@@ -18,7 +18,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/common';
 import { parseId, type MachineKeyKind } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
@@ -60,7 +60,7 @@ export class ClientKeysController {
     private readonly billing: BillingService,
   ) {}
 
-  @Roles('client')
+  @Cabinets('client')
   @Get('client/api-keys')
   async list(@CurrentUser() actor: Principal): Promise<{ keys: ClientKeyView[] }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
@@ -68,7 +68,7 @@ export class ClientKeysController {
     return { keys: rows.map(toClientKeyView) };
   }
 
-  @Roles('client')
+  @Cabinets('client')
   @Post('client/api-keys')
   async issue(
     @Body(zodBody(ownClientKeySchema)) body: z.infer<typeof ownClientKeySchema>,
@@ -94,7 +94,7 @@ export class ClientKeysController {
   }
 
   /** Отзыв пометкой, а не удалением: иначе в журнале дыра там, где нужно разбираться. */
-  @Roles('client')
+  @Cabinets('client')
   @Delete('client/api-keys/:id')
   @HttpCode(204)
   async revoke(@Param('id') id: string, @CurrentUser() actor: Principal): Promise<void> {

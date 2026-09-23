@@ -52,7 +52,7 @@ const COLUMNS = 6;
 
 export default function PartnerPricesPage() {
   return (
-    <ConsoleShell title="Мои цены" requireRole="partner">
+    <ConsoleShell title="Мои цены" cabinet="partner">
       {() => <PartnerPrices />}
     </ConsoleShell>
   );

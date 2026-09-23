@@ -3,9 +3,9 @@
  */
 
 import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/common';
-import { parseId, parseMsisdn } from '@zvonix/shared';
+import { isStaffRole, parseId, parseMsisdn } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
@@ -142,13 +142,14 @@ export class CatalogController {
    * иначе было бы не завести. Справочник был закрыт партнёру, пока SIM заводил только
    * администратор, — и стал дефектом, когда партнёр начал заводить их сам.
    */
-  @Roles('admin', 'support', 'client', 'partner')
+  @Roles('admin', 'support')
+  @Cabinets('client', 'partner')
   @Get('operators')
   async list(
     @CurrentUser() actor: Principal,
   ): Promise<{ operators: OperatorResponse[] | OperatorChoice[] }> {
     const operators = await this.catalog.listOperators();
-    if (actor.role === 'client' || actor.role === 'partner') {
+    if (!isStaffRole(actor.role)) {
       return { operators: operators.map((operator) => ({ id: operator.id, name: operator.name })) };
     }
     return { operators: operators.map(toOperatorResponse) };

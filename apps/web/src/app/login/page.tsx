@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ThemeSwitch } from '@/components/theme-switch';
@@ -177,6 +178,12 @@ export default function LoginPage() {
             {login.isPending ? 'Проверяем…' : 'Войти'}
           </Button>
         </form>
+        <p className="pt-3 text-center text-muted-foreground">
+          Нет входа?{' '}
+          <Link href="/register" className="font-semibold text-primary">
+            Подать заявку на подключение
+          </Link>
+        </p>
       </div>
     </div>
   );

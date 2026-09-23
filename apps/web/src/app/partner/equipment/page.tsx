@@ -24,7 +24,7 @@ import { AddGateway, AddSim, GatewayActions, PortSim, SimActions } from './manag
 
 export default function PartnerEquipmentPage() {
   return (
-    <ConsoleShell title="Моё оборудование" requireRole="partner">
+    <ConsoleShell title="Моё оборудование" cabinet="partner">
       {() => <PartnerEquipment />}
     </ConsoleShell>
   );

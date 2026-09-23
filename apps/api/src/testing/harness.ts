@@ -271,6 +271,20 @@ export function uniqueEmail(): string {
 export const TEST_PASSWORD = 'достаточно длинный пароль';
 
 /**
+ * Годные заявки для регистрации (ADR-0052): учётная запись участника заводится
+ * вместе с заявкой на кабинет, и форма без анкеты отвергается.
+ */
+export const CLIENT_APPLICATION = {
+  cabinet: 'client',
+  answers: { companyName: 'Такси Проверка', city: 'Екатеринбург', phone: '+7 900 000-00-00' },
+} as const;
+
+export const PARTNER_APPLICATION = {
+  cabinet: 'partner',
+  answers: { region: 'Свердловская область', phone: '+7 900 000-00-00', operators: ['МТС'] },
+} as const;
+
+/**
  * Отмечает шлюз зарегистрированным на узле — тем же путём, каким это делает FreeSWITCH.
  *
  * Маршрутизация выбирает только те шлюзы, что зарегистрированы **на принявшем вызов

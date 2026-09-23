@@ -139,16 +139,30 @@ describe('доступ к справочнику', () => {
 });
 
 /** Ответ справочника пользователю с этой ролью. */
-async function roleSees(role: 'client' | 'partner') {
+/**
+ * Что видит в справочнике владелец кабинета. Кабинет открывает карточка, а не роль
+ * (ADR-0052), поэтому участнику она заводится администратором.
+ */
+async function roleSees(cabinet: 'client' | 'partner') {
   const email = uniqueEmail();
   const { IdentityService } = await import('../identity/identity.service.js');
-  await api().get(IdentityService).createByAdmin({
+  const user = await api().get(IdentityService).createByAdmin({
     email,
     password: TEST_PASSWORD,
     fullName: 'Проверка доступа',
-    role,
+    role: 'member',
     status: 'active',
   });
+  const card = await api().inject({
+    method: 'POST',
+    url: cabinet === 'client' ? '/clients' : '/partners',
+    headers: { authorization: `Bearer ${adminToken}` },
+    payload:
+      cabinet === 'client'
+        ? { ownerUserId: user.id, name: 'Проверка доступа' }
+        : { ownerUserId: user.id, name: 'Проверка доступа', displayName: `Справочник ${email}` },
+  });
+  expect(card.statusCode).toBe(201);
   const login = await api().inject({
     method: 'POST',
     url: '/auth/login',

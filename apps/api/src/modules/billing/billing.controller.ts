@@ -6,13 +6,20 @@
  */
 
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Put, Query } from '@nestjs/common';
-import { Money, notFound, parseId, type MoneyAmount, type PartnerStatus } from '@zvonix/shared';
+import {
+  isStaffRole,
+  Money,
+  notFound,
+  parseId,
+  type MoneyAmount,
+  type PartnerStatus,
+} from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 import { zodBody, zodQuery } from '../../http/zod.pipe.js';
-import type { Principal } from '../identity/identity.service.js';
+import { IdentityService, type Principal } from '../identity/identity.service.js';
 import {
   BillingRepository,
   type ClientWithBalance,
@@ -68,6 +75,7 @@ interface PartnerView {
 export class BillingController {
   constructor(
     private readonly billing: BillingService,
+    private readonly identity: IdentityService,
     private readonly repository: BillingRepository,
     private readonly reservations: ReservationService,
   ) {}
@@ -76,12 +84,13 @@ export class BillingController {
   @Post('clients')
   async createClient(
     @Body(zodBody(createClientSchema)) body: z.infer<typeof createClientSchema>,
+    @CurrentUser() actor: Principal,
   ): Promise<{ client: ClientView }> {
-    const client = await this.billing.createClient({
-      ownerUserId: parseId(body.ownerUserId, 'user'),
-      name: body.name,
-      overdraftLimit: body.overdraftLimit ?? Money.ZERO,
-    });
+    const owner = await this.identity.requireParticipant(parseId(body.ownerUserId, 'user'));
+    const client = await this.billing.createClient(
+      { ownerUserId: owner.id, name: body.name, overdraftLimit: body.overdraftLimit ?? Money.ZERO },
+      actor,
+    );
 
     return { client: toClientView({ ...client, balance: Money.ZERO }) };
   }
@@ -229,12 +238,13 @@ export class BillingController {
   @Post('partners')
   async createPartner(
     @Body(zodBody(createPartnerSchema)) body: z.infer<typeof createPartnerSchema>,
+    @CurrentUser() actor: Principal,
   ): Promise<{ partner: { id: string; display_name: string; status: string } }> {
-    const partner = await this.billing.createPartner({
-      ownerUserId: parseId(body.ownerUserId, 'user'),
-      name: body.name,
-      displayName: body.displayName,
-    });
+    const owner = await this.identity.requireParticipant(parseId(body.ownerUserId, 'user'));
+    const partner = await this.billing.createPartner(
+      { ownerUserId: owner.id, name: body.name, displayName: body.displayName },
+      actor,
+    );
 
     // Настоящее имя не возвращается даже администратору через этот ответ:
     // так его нельзя случайно показать в общем интерфейсе (ADR-0014).
@@ -354,12 +364,15 @@ export class BillingController {
    * ни настоящего имени: клиент знает о партнёре ровно псевдоним, и возврат чего-то ещё
    * в клиентский контур ADR-0014 считает дефектом уровня инварианта.
    */
-  @Roles('admin', 'support', 'client')
+  @Roles('admin', 'support')
+  @Cabinets('client')
   @Get('partner-aliases')
-  async listPartnerAliases(): Promise<{
+  async listPartnerAliases(@CurrentUser() actor: Principal): Promise<{
     partners: { alias_id: string; display_name: string; listens_to_recordings: boolean }[];
   }> {
-    const rows = await this.repository.listOfferedAliases();
+    const rows = await this.repository.listOfferedAliases(
+      isStaffRole(actor.role) ? undefined : actor.userId,
+    );
     return {
       partners: rows.map((row) => ({
         alias_id: row.id,
@@ -378,7 +391,8 @@ export class BillingController {
    * Меняет сам партнёр либо администратор; владение проверяет служба. Признак сразу
    * виден клиентам в списке псевдонимов — они по нему и выбирают.
    */
-  @Roles('partner', 'admin')
+  @Roles('admin')
+  @Cabinets('partner')
   @Put('partners/:id/recordings-access')
   async setRecordingsAccess(
     @Param('id') id: string,

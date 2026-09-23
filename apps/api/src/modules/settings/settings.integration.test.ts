@@ -10,6 +10,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
+  CLIENT_APPLICATION,
   prepareEnvironment,
   resetDatabase,
   startApi,
@@ -265,7 +266,7 @@ describe('капча', () => {
         email: uniqueEmail(),
         password: TEST_PASSWORD,
         fullName: 'Иван Петров',
-        role: 'client',
+        ...CLIENT_APPLICATION,
       },
     });
     expect(response.statusCode).toBe(400);
@@ -285,7 +286,7 @@ describe('капча', () => {
         email: uniqueEmail(),
         password: TEST_PASSWORD,
         fullName: 'Иван Петров',
-        role: 'client',
+        ...CLIENT_APPLICATION,
       },
     });
     expect(response.statusCode).toBe(202);

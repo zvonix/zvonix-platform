@@ -21,7 +21,7 @@ import {
   type TerminationKind,
 } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
@@ -105,7 +105,7 @@ export class PartnerPricesController {
    * ни у кого ([ADR-0032](../../../../../docs/adr/0032-zagruzka-plana-numeracii.md)),
    * и цена там ничего не изменила бы.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Get('partner/rates')
   async rates(@CurrentUser() actor: Principal): Promise<{
     reference_call_seconds: number;
@@ -170,7 +170,7 @@ export class PartnerPricesController {
    * тарифицированный вчера, не переоценивается сегодняшней ценой. Действует **с этого
    * момента** — время начала действия у партнёра не принимается, см. `partnerOwnRateSchema`.
    */
-  @Roles('partner')
+  @Cabinets('partner')
   @Post('partner/rates')
   async setRate(
     @CurrentUser() actor: Principal,

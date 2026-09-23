@@ -13,6 +13,7 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
+  CLIENT_APPLICATION,
   prepareEnvironment,
   resetDatabase,
   startApi,
@@ -41,7 +42,7 @@ async function registered(): Promise<string> {
     email,
     password: TEST_PASSWORD,
     fullName: 'Иван Петров',
-    role: 'client',
+    ...CLIENT_APPLICATION,
   });
   expect(response.statusCode).toBe(202);
   return email;

@@ -1,7 +1,6 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { UserRole } from '@zvonix/shared';
 import { request } from '@/lib/api';
 
 interface OwnerCandidate {
@@ -13,7 +12,9 @@ interface OwnerCandidate {
 /**
  * Выбор учётной записи владельца — общий для клиента и партнёра.
  *
- * Берутся только записи с нужной ролью **и открытым входом**: пароль человек задаёт
+ * Берутся только участники рынка (роль `member`) **с открытым входом**: сотрудник
+ * площадки владельцем карточки не бывает, и API такой выбор отвергнет
+ * ([ADR-0052](../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)). Открытый вход — потому что пароль человек задаёт
  * себе сам при регистрации, и заводить учётную запись за него значило бы придумывать
  * чужой пароль. Записи в состоянии «ждёт допуска» здесь нет намеренно — сначала её
  * допускают в разделе «Учётные записи».
@@ -23,20 +24,18 @@ interface OwnerCandidate {
  * и появится, а до тех пор лишний механизм.
  */
 export function OwnerSelect({
-  role,
   value,
   onChange,
   enabled = true,
 }: {
-  role: UserRole;
   value: string;
   onChange: (id: string) => void;
   enabled?: boolean;
 }) {
   const owners = useQuery({
-    queryKey: ['users', 'owners', role],
+    queryKey: ['users', 'owners'],
     queryFn: () =>
-      request<{ users: OwnerCandidate[] }>(`/users?role=${role}&status=active&limit=200`),
+      request<{ users: OwnerCandidate[] }>('/users?role=member&status=active&limit=200'),
     enabled,
   });
 

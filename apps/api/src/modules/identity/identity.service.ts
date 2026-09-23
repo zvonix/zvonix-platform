@@ -5,6 +5,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
+  isStaffRole,
   newId,
   notFound,
   DomainError,
@@ -13,6 +14,7 @@ import {
   rateLimited,
   unauthenticated,
   validationFailed,
+  type ApplicationStatus,
   type UserRole,
   type UserStatus,
 } from '@zvonix/shared';
@@ -23,6 +25,10 @@ import { MailService } from '../mail/mail.service.js';
 import { CaptchaService } from './captcha.service.js';
 import {
   IdentityRepository,
+  type ApplicationId,
+  type ApplicationRow,
+  type ApplicationWithApplicant,
+  type Executor,
   type SessionId,
   type SessionRow,
   type UserFilter,
@@ -37,7 +43,7 @@ import {
 } from './letters.js';
 import { decryptSecret, encryptSecret, TOTP_SECRET_PURPOSE } from '../../infra/secret-box.js';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js';
-import type { FirstRunInput, LoginInput, RegisterInput } from './schemas.js';
+import type { ApplicationInput, FirstRunInput, LoginInput, RegisterInput } from './schemas.js';
 import { acceptsFirstRunCode } from './first-run.js';
 import { hashToken, issueToken, LAST_SEEN_REFRESH_MS, tokenHashEquals } from './session-token.js';
 
@@ -331,16 +337,30 @@ export class IdentityService {
       return;
     }
 
+    // Учётная запись участника и первая заявка — одна транзакция (ADR-0052): учётная
+    // запись без заявки ждала бы допуска, о котором администратор не узнает.
+    const passwordHash = await hashPassword(input.password);
     let created: UserRow;
+    let application: ApplicationRow;
     try {
-      created = await this.repository.createUser({
-        id: newId<'user'>(),
-        email: input.email,
-        passwordHash: await hashPassword(input.password),
-        fullName: input.fullName,
-        role: input.role,
-        status: 'pending',
-      });
+      ({ created, application } = await this.repository.db.transaction(async (tx) => {
+        const user = await this.repository.createUser(
+          {
+            id: newId<'user'>(),
+            email: input.email,
+            passwordHash,
+            fullName: input.fullName,
+            role: 'member',
+            status: 'pending',
+          },
+          tx,
+        );
+        const submitted = await this.repository.createApplication(
+          { userId: user.id, kind: input.cabinet, answers: input.answers },
+          tx,
+        );
+        return { created: user, application: submitted };
+      }));
     } catch (cause) {
       // Гонку двух одновременных регистраций закрывает уникальный индекс. Наружу
       // она тоже не должна быть видна: ответ обязан не зависеть от занятости адреса.
@@ -359,10 +379,77 @@ export class IdentityService {
       entityId: created.id,
       actorUserId: created.id,
       actorRole: created.role,
-      after: { email: created.email, role: created.role, status: created.status },
+      after: {
+        email: created.email,
+        role: created.role,
+        status: created.status,
+        application_id: application.id,
+        cabinet: application.kind,
+      },
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
+  }
+
+  // --- Заявки на кабинет (ADR-0052) -----------------------------------------
+  //
+  // Таблица заявок принадлежит этому модулю: заявка — часть заведения учётной записи.
+  // Решение по ней принимает модуль заявок, которому нужны и учётные записи, и карточки
+  // биллинга; он вызывает эти методы, передавая свою транзакцию.
+
+  /** Новая заявка уже вошедшего участника — на второй кабинет. */
+  async createApplication(
+    userId: UserId,
+    input: ApplicationInput,
+    executor?: Executor,
+  ): Promise<ApplicationRow> {
+    return this.repository.createApplication(
+      { userId, kind: input.cabinet, answers: input.answers },
+      executor,
+    );
+  }
+
+  async listApplications(filter: {
+    status?: ApplicationStatus;
+    limit: number;
+    offset: number;
+  }): Promise<{ rows: ApplicationWithApplicant[]; total: number }> {
+    return this.repository.listApplications(filter);
+  }
+
+  async applicationsOf(userId: UserId): Promise<ApplicationRow[]> {
+    return this.repository.listApplicationsOf(userId);
+  }
+
+  /** Заявка и заявитель под блокировкой заявки — для решения по ней. */
+  async lockApplication(
+    id: ApplicationId,
+    executor: Executor,
+  ): Promise<{ application: ApplicationRow; applicant: UserRow }> {
+    const application = await this.repository.lockApplication(id, executor);
+    if (application === undefined) throw notFound('Заявка не найдена');
+    const applicant = await this.repository.findById(application.userId, executor);
+    if (applicant === undefined) throw notFound('Заявитель не найден');
+    return { application, applicant };
+  }
+
+  async decideApplication(
+    id: ApplicationId,
+    decision: Parameters<IdentityRepository['decideApplication']>[1],
+    executor: Executor,
+  ): Promise<ApplicationRow> {
+    return this.repository.decideApplication(id, decision, executor);
+  }
+
+  /**
+   * Открывает вход заявителю, если он ещё ждёт допуска.
+   *
+   * Только `pending` → `active`: приостановленную или закрытую учётную запись
+   * одобрение заявки не возвращает — это отдельное решение с другой причиной.
+   */
+  async admitApplicant(user: UserRow, executor: Executor): Promise<UserRow> {
+    if (user.status !== 'pending') return user;
+    return this.repository.setStatus(user.id, 'active', executor);
   }
 
   /**
@@ -991,6 +1078,23 @@ export class IdentityService {
     const row = await this.repository.findById(id);
     if (row === undefined) throw notFound('Учётная запись не найдена');
     return toPublicUser(row);
+  }
+
+  /**
+   * Учётная запись, которой можно отдать карточку клиента или партнёра.
+   *
+   * Сотрудник площадки владельцем не бывает (ADR-0052): администратор-партнёр сам
+   * назначал бы коридоры и цены, по которым получает деньги. Нужен кабинет — отдельный
+   * вход на другую почту. Отказ `409`: запрос верный по форме, мешает состояние.
+   */
+  async requireParticipant(id: UserId): Promise<PublicUser> {
+    const user = await this.findPublicUser(id);
+    if (isStaffRole(user.role)) {
+      throw conflict(
+        'Сотрудник площадки не может быть клиентом или партнёром — заведите отдельную учётную запись',
+      );
+    }
+    return user;
   }
 
   /**

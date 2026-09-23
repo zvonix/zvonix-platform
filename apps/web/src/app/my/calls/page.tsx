@@ -50,7 +50,7 @@ interface Call {
 
 export default function MyCallsPage() {
   return (
-    <ConsoleShell title="Вызовы" requireRole="client">
+    <ConsoleShell title="Вызовы" cabinet="client">
       {() => (
         <Suspense fallback={<p className="text-muted-foreground">Загружаем…</p>}>
           <MyCalls />

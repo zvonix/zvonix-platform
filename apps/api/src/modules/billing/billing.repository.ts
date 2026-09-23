@@ -8,7 +8,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, ne, or, sql, type SQL } from 'drizzle-orm';
 import {
   containsIgnoringCase,
   orderByText,
@@ -156,14 +156,17 @@ export class BillingRepository {
 
   // --- Участники -------------------------------------------------------------
 
-  async createClient(draft: {
-    ownerUserId: UserId;
-    name: string;
-    status: ClientStatus;
-    overdraftLimit: MoneyAmount;
-  }): Promise<ClientRow> {
+  async createClient(
+    draft: {
+      ownerUserId: UserId;
+      name: string;
+      status: ClientStatus;
+      overdraftLimit: MoneyAmount;
+    },
+    executor: Executor = this.db,
+  ): Promise<ClientRow> {
     try {
-      const [row] = await this.db
+      const [row] = await executor
         .insert(clients)
         .values({ id: newId<'client'>(), ...draft })
         .returning();
@@ -226,13 +229,16 @@ export class BillingRepository {
     };
   }
 
-  async createPartner(draft: {
-    ownerUserId: UserId;
-    name: string;
-    status: PartnerStatus;
-  }): Promise<PartnerRow> {
+  async createPartner(
+    draft: {
+      ownerUserId: UserId;
+      name: string;
+      status: PartnerStatus;
+    },
+    executor: Executor = this.db,
+  ): Promise<PartnerRow> {
     try {
-      const [row] = await this.db
+      const [row] = await executor
         .insert(partners)
         .values({ id: newId<'partner'>(), ...draft })
         .returning();
@@ -332,9 +338,13 @@ export class BillingRepository {
   }
 
   /** Псевдоним, под которым партнёра видит клиент (ADR-0014). Настоящее имя не отдаётся. */
-  async setPartnerAlias(partnerId: PartnerId, displayName: string): Promise<string> {
+  async setPartnerAlias(
+    partnerId: PartnerId,
+    displayName: string,
+    executor: Executor = this.db,
+  ): Promise<string> {
     try {
-      await this.db
+      await executor
         .insert(partnerAliases)
         .values({ id: newId<'partnerAlias'>(), partnerId, displayName });
       return displayName;
@@ -387,7 +397,13 @@ export class BillingRepository {
    * Ни идентификатора партнёра, ни настоящего имени в результате нет и быть не может
    * (ADR-0014): это единственное, что клиент о партнёре узнаёт.
    */
-  async listOfferedAliases(): Promise<(PartnerAliasRow & { listensToRecordings: boolean })[]> {
+  /**
+   * `exceptOwner` убирает партнёра, которым владеет спрашивающий клиент: звонить
+   * через себя ему нельзя (ADR-0052), и свой псевдоним в списке был бы пустым выбором.
+   */
+  async listOfferedAliases(
+    exceptOwner?: Id<'user'>,
+  ): Promise<(PartnerAliasRow & { listensToRecordings: boolean })[]> {
     return this.db
       .select({
         id: partnerAliases.id,
@@ -401,7 +417,12 @@ export class BillingRepository {
       })
       .from(partnerAliases)
       .innerJoin(partners, eq(partners.id, partnerAliases.partnerId))
-      .where(eq(partners.status, 'verified'))
+      .where(
+        and(
+          eq(partners.status, 'verified'),
+          exceptOwner === undefined ? undefined : ne(partners.ownerUserId, exceptOwner),
+        ),
+      )
       .orderBy(orderByText(partnerAliases.displayName));
   }
 
@@ -431,8 +452,11 @@ export class BillingRepository {
    * и читать её напрямую из чужого модуля значит завести вторую версию правила
    * «чей это клиент» (ARCHITECTURE.md, границы модулей).
    */
-  async findClientOwnedBy(userId: Id<'user'>): Promise<{ id: ClientId } | undefined> {
-    const [row] = await this.db
+  async findClientOwnedBy(
+    userId: Id<'user'>,
+    executor: Executor = this.db,
+  ): Promise<{ id: ClientId } | undefined> {
+    const [row] = await executor
       .select({ id: clients.id })
       .from(clients)
       .where(eq(clients.ownerUserId, userId));
@@ -445,8 +469,11 @@ export class BillingRepository {
    * Роль — первый рубеж, владение проверяет служба ([ADR-0018](../../../../../docs/adr/0018-autentifikaciya.md)):
    * роль `partner` говорит лишь о том, что человек партнёр, а не о том, **какой**.
    */
-  async findPartnerOwnedBy(userId: Id<'user'>): Promise<{ id: PartnerId } | undefined> {
-    const [row] = await this.db
+  async findPartnerOwnedBy(
+    userId: Id<'user'>,
+    executor: Executor = this.db,
+  ): Promise<{ id: PartnerId } | undefined> {
+    const [row] = await executor
       .select({ id: partners.id })
       .from(partners)
       .where(eq(partners.ownerUserId, userId));
@@ -545,12 +572,13 @@ export class BillingRepository {
     kind: AccountKind,
     ownerId: string | null,
     currency: string,
+    executor: Executor = this.db,
   ): Promise<AccountRow> {
-    const existing = await this.findAccount(kind, ownerId, currency);
+    const existing = await this.findAccount(kind, ownerId, currency, executor);
     if (existing !== undefined) return existing;
 
     try {
-      const [created] = await this.db
+      const [created] = await executor
         .insert(accounts)
         .values({ id: newId<'account'>(), kind, ownerId, currency })
         .onConflictDoNothing()
@@ -560,7 +588,7 @@ export class BillingRepository {
       throw toDatabaseError(cause);
     }
 
-    const after = await this.findAccount(kind, ownerId, currency);
+    const after = await this.findAccount(kind, ownerId, currency, executor);
     if (after === undefined) throw new Error('Счёт не создан и не найден');
     return after;
   }

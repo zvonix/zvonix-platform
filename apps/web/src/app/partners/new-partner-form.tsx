@@ -64,7 +64,7 @@ export function NewPartnerForm() {
       className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3"
     >
       <div className="flex flex-wrap items-end gap-2">
-        <OwnerSelect role="partner" value={ownerUserId} onChange={setOwnerUserId} />
+        <OwnerSelect value={ownerUserId} onChange={setOwnerUserId} />
 
         <label className="flex flex-col gap-1">
           <span className="text-muted-foreground">Настоящее имя</span>

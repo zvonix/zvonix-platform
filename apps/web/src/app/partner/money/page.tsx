@@ -22,7 +22,7 @@ interface Account {
 
 export default function PartnerMoneyPage() {
   return (
-    <ConsoleShell title="Деньги" requireRole="partner">
+    <ConsoleShell title="Деньги" cabinet="partner">
       {() => <PartnerMoney />}
     </ConsoleShell>
   );

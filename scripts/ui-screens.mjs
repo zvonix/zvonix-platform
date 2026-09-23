@@ -200,7 +200,7 @@ async function main() {
     if (SERVE) {
       process.stdout.write(
         `\nСтенд поднят: ${stack.baseUrl}\n` +
-          'Входы: admin@e2e.zvonix.test, support@e2e.zvonix.test, client@e2e.zvonix.test, ' +
+          'Входы: admin@e2e.zvonix.test, support@e2e.zvonix.test, client@e2e.zvonix.test, both@e2e.zvonix.test (два кабинета), ' +
           `partner@e2e.zvonix.test — пароль «${E2E_PASSWORD}».\n` +
           'Заходить именно по этому адресу: сессия живёт в cookie на источник.\n' +
           'Остановить — Ctrl+C.\n',
