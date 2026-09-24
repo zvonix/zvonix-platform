@@ -7,10 +7,19 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { conflict, notFound, parseId, validationFailed } from '@zvonix/shared';
+import { maskPhone } from '@zvonix/logger';
+import {
+  conflict,
+  notFound,
+  parseId,
+  validationFailed,
+  type Msisdn,
+  type UserRole,
+} from '@zvonix/shared';
 import { AuditService } from '../audit/audit.service.js';
 import { CatalogRepository, type OperatorId, type OperatorRow } from './catalog.repository.js';
 import { normalizeOperatorName } from './operator-name.js';
+import { OperatorResolverService, type OperatorResolution } from './operator-resolver.service.js';
 import type { CreateOperatorInput, VerifyOperatorInput } from './schemas.js';
 
 export interface OperatorView {
@@ -34,7 +43,42 @@ export class CatalogService {
   constructor(
     private readonly repository: CatalogRepository,
     private readonly audit: AuditService,
+    private readonly resolver: OperatorResolverService,
   ) {}
+
+  /**
+   * Администратор подтверждает, какой оператор обслуживает номер
+   * ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)).
+   *
+   * Правило «вызов с неподтверждённым оператором не совершается» требует подтверждения,
+   * а не именно внешнего источника: человек, проверивший номер, — подтверждение. Ошибка
+   * в нём стоит денег партнёра, поэтому путь только у администратора и только с журналом.
+   */
+  async confirmNumberOperator(
+    msisdn: Msisdn,
+    operatorId: OperatorId,
+    actor: { userId: string; role: UserRole },
+  ): Promise<OperatorResolution> {
+    const operator = await this.repository.findOperator(operatorId);
+    if (operator === undefined) throw notFound('Оператор не найден');
+
+    const { previousOperatorId, resolution } = await this.resolver.confirmManually(
+      msisdn,
+      operatorId,
+    );
+
+    await this.audit.record({
+      action: 'number.operator_confirmed',
+      entityType: 'number',
+      actorUserId: parseId(actor.userId, 'user'),
+      actorRole: actor.role,
+      // Номер маскируется: журнал читают люди, которым полный номер не нужен (ADR-0004).
+      before: { msisdn: maskPhone(msisdn), operator_id: previousOperatorId },
+      after: { msisdn: maskPhone(msisdn), operator_id: operatorId, source: 'manual' },
+    });
+
+    return resolution;
+  }
 
   async createOperator(
     input: CreateOperatorInput,

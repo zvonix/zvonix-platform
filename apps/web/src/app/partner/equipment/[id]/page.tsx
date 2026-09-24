@@ -12,6 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { goipLinePrefix } from '@zvonix/shared';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { GATEWAY_TYPE_NAME, PORT_STATE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
@@ -137,35 +138,71 @@ function NextStep({ gateway }: { gateway: Gateway }) {
   return <p className="text-warn">{step}</p>;
 }
 
-/** Куда и под каким именем регистрировать устройство. Пароль — только при выдаче. */
+/**
+ * Куда и под каким именем регистрировать устройство. Пароль — только при выдаче.
+ *
+ * Названия полей — как в веб-интерфейсе GOIP (раздел Configurations → Basic VoIP):
+ * партнёр переносит значения построчно, и переводить английские подписи в уме ему незачем.
+ */
 function ConnectionSection({ gateway, connection }: { gateway: Gateway; connection: Connection }) {
+  const goip = gateway.type === 'goip';
   return (
-    <section aria-labelledby="connection" className="flex max-w-[640px] flex-col gap-2">
+    <section aria-labelledby="connection" className="flex max-w-[720px] flex-col gap-2">
       <h3 id="connection" className="font-semibold">
         Подключение
       </h3>
       <p className="text-muted-foreground">
-        Эти данные вводятся в настройках SIP самого устройства — в разделе регистрации на сервере.
+        {goip
+          ? 'В веб-интерфейсе GOIP: Configurations → Basic VoIP. Поля названы так же, как там.'
+          : 'Эти данные вводятся в настройках SIP самого устройства.'}
       </p>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-card p-3">
-        <dt className="text-muted-foreground">Сервер</dt>
+        {goip && (
+          <>
+            <dt className="text-muted-foreground">Config Mode</dt>
+            <dd>Single Server Mode</dd>
+          </>
+        )}
+        <dt className="text-muted-foreground">
+          {goip ? 'SIP Proxy, SIP Registrar Server' : 'Сервер'}
+        </dt>
         <dd className="num select-all">{connection.server}</dd>
         <dt className="text-muted-foreground">Порт</dt>
         <dd className="num select-all">{connection.port}</dd>
-        <dt className="text-muted-foreground">Логин</dt>
+        <dt className="text-muted-foreground">
+          {goip ? 'Authentication ID, Phone Number' : 'Логин'}
+        </dt>
         <dd className="num select-all">{gateway.sip_username}</dd>
-        <dt className="text-muted-foreground">Пароль</dt>
+        <dt className="text-muted-foreground">{goip ? 'Password' : 'Пароль'}</dt>
         <dd>
           показан один раз, при добавлении шлюза. Потеряли — выдайте новый: старые логин и пароль
           перестанут работать.
         </dd>
+        {goip && (
+          <>
+            <dt className="text-muted-foreground">Prefix Match Mode</dt>
+            <dd>Match Callee</dd>
+            <dt className="text-muted-foreground">Delete Callee Prefix while Dialing</dt>
+            <dd>Enable</dd>
+            <dt className="text-muted-foreground">Line N Routing Prefix</dt>
+            <dd>префикс из таблицы портов ниже — у каждой линии свой</dd>
+          </>
+        )}
       </dl>
+      {goip && (
+        <p className="text-muted-foreground">
+          По префиксу GOIP понимает, с какой SIM звонить: площадка выбирает карту нужного оператора
+          и набирает номер с префиксом её линии. Звонит площадка только через карты, вставленные в
+          порты здесь, — чтобы проверить одну SIM, вставьте в кабинете только её.
+        </p>
+      )}
       <NewPassword gateway={gateway} />
     </section>
   );
 }
 
 function PortsSection({ gateway, spare }: { gateway: Gateway; spare: readonly Sim[] }) {
+  const goip = gateway.type === 'goip';
   return (
     <section aria-labelledby="ports" className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
@@ -185,6 +222,7 @@ function PortsSection({ gateway, spare }: { gateway: Gateway; spare: readonly Si
             <TableHeader>
               <TableRow className="text-muted-foreground hover:bg-transparent">
                 <TableHead className="h-8 w-[64px]">Порт</TableHead>
+                {goip && <TableHead className="h-8">Префикс линии</TableHead>}
                 <TableHead className="h-8">SIM-карта</TableHead>
                 <TableHead className="h-8">Оператор</TableHead>
                 <TableHead className="h-8">Состояние</TableHead>
@@ -195,6 +233,11 @@ function PortsSection({ gateway, spare }: { gateway: Gateway; spare: readonly Si
               {gateway.ports.map((port) => (
                 <TableRow key={port.id}>
                   <TableCell className="num">{port.port_number}</TableCell>
+                  {goip && (
+                    <TableCell className="num select-all">
+                      {goipLinePrefix(port.port_number)}
+                    </TableCell>
+                  )}
                   <TableCell className="num">
                     {port.sim?.msisdn ?? <span className="text-faint">пусто</span>}
                   </TableCell>

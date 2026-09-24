@@ -43,6 +43,13 @@ interface RouteCandidate {
 
   /** Имя учётной записи SIP шлюза: `gw-a1b2c3d4e5f6`. У транка — имя sofia-gateway. */
   readonly gatewaySipUsername: string;
+
+  /**
+   * Префикс линии GOIP, по которому шлюз выбирает, с какой SIM звонить
+   * ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)). Пусто —
+   * выбирать нечего: у телефона Android слот один, у транка SIM нет вовсе.
+   */
+  readonly linePrefix: string | null;
 }
 
 export interface RoutePlan {
@@ -96,6 +103,9 @@ export function sipResponseFor(reason: CallFailureReason): string {
  * Обращение идёт к `user/<имя>@<realm>` — зарегистрированной учётной записи каталога.
  * Не `sofia/gateway/…`: в терминах FreeSWITCH «gateway» это транк, на который
  * регистрируемся мы, а GOIP партнёра регистрируется **на узле**.
+ *
+ * Кандидаты могут стоять на одном шлюзе: префикс линии делает их разными попытками,
+ * а не одним и тем же набором, повторённым несколько раз.
  */
 export function routeDocument(plan: RoutePlan): string {
   const bridge = plan.candidates.map((candidate) => endpointOf(candidate, plan)).join('|');
@@ -127,12 +137,20 @@ export function routeDocument(plan: RoutePlan): string {
  * в каталоге, и набор идёт через него как через пользователя. К провайдеру
  * регистрируемся **мы** — он значится в конфигурации узла исходящим sofia-gateway,
  * и набор идёт через шлюз с номером назначения.
+ *
+ * У зарегистрированного шлюза `user/…` отвечает, **куда** слать INVITE, но в строке
+ * запроса оставляет имя учётной записи — номера там нет. Номер с префиксом линии кладётся
+ * туда переменной плеча `sip_invite_req_uri` ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)):
+ * в квадратных скобках, потому что у каждого кандидата он свой.
  */
 function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
   const name = escapeXmlAttribute(candidate.gatewaySipUsername);
-  return candidate.kind === 'sim'
-    ? `user/${name}@${escapeXmlAttribute(plan.realm)}`
-    : `sofia/gateway/${name}/${escapeXmlAttribute(plan.destination)}`;
+  const realm = escapeXmlAttribute(plan.realm);
+  const destination = escapeXmlAttribute(plan.destination);
+  if (candidate.kind === 'sip') return `sofia/gateway/${name}/${destination}`;
+
+  const dialled = `${escapeXmlAttribute(candidate.linePrefix ?? '')}${destination}`;
+  return `[sip_invite_req_uri=sip:${dialled}@${realm}]user/${name}@${realm}`;
 }
 
 /** Отказ: тот же 200 и тот же XML, просто диалплан кладёт трубку. */

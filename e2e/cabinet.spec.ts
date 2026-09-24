@@ -453,6 +453,63 @@ test.describe('партнёр добавляет своё оборудовани
   });
 });
 
+test.describe('операторы связи (ADR-0053)', () => {
+  test('администратор подтверждает оператора номера вручную, и номер становится рабочим', async ({
+    page,
+  }) => {
+    // Служба проверки перенесённых номеров с сервера недоступна, а без подтверждения
+    // по номеру не звонят вовсе. Человек, проверивший номер, — подтверждение.
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/operators');
+
+    await page.getByLabel('Номер', { exact: true }).fill('+7 913 555-44-33');
+    await page.getByRole('button', { name: 'Проверить' }).click();
+    await expect(
+      page.getByText('Оператор не подтверждён — по этому номеру не звонят.'),
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: 'Подтвердить оператора вручную' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('журнал');
+    await dialog.getByLabel('Оператор').selectOption({ label: 'МегаФон' });
+    await dialog.getByRole('button', { name: 'Подтвердить оператора' }).click();
+
+    await expect(page.getByText('Оператор подтверждён — по номеру звонят.')).toBeVisible();
+    await expect(page.getByText('подтверждён администратором')).toBeVisible();
+  });
+
+  test('поддержка видит справочник и проверку номера, но не подтверждает', async ({ page }) => {
+    await signIn(page, PEOPLE.support);
+    await page.goto('/operators');
+
+    await expect(page.getByText('Только чтение:')).toBeVisible();
+    await page.getByLabel('Номер', { exact: true }).fill('+7 913 555-44-34');
+    await page.getByRole('button', { name: 'Проверить' }).click();
+    await expect(page.getByText(/Оператор не подтверждён/u)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Подтвердить оператора вручную' })).toHaveCount(
+      0,
+    );
+  });
+
+  test('партнёр видит префикс каждой линии и что ввести в GOIP', async ({ page }) => {
+    // Без префикса GOIP сам выбирал линию, и вызов на МТС мог уйти с SIM T2.
+    await signIn(page, PEOPLE.partner);
+    await page.goto('/partner/equipment');
+    await page.getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByLabel('Название').fill('GOIP с префиксами');
+    await page.getByLabel('Слотов под SIM').fill('2');
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByRole('link', { name: 'GOIP с префиксами' }).click();
+
+    const connection = page.getByRole('region', { name: 'Подключение' });
+    await expect(connection).toContainText('Single Server Mode');
+    await expect(connection).toContainText('Match Callee');
+    const ports = page.getByRole('region', { name: 'Порты' });
+    await expect(ports.getByRole('row', { name: /^1 99001/u })).toBeVisible();
+    await expect(ports.getByRole('row', { name: /^2 99002/u })).toBeVisible();
+  });
+});
+
 test.describe('список, который заменяется целиком', () => {
   test('регион покрытия не добавить, пока список не пришёл: форма стёрла бы прежние', async ({
     page,

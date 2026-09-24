@@ -155,7 +155,7 @@ interface Preview {
   reason: string | null;
   sip_response: string | null;
   call_id: string | null;
-  candidates: { sim_card_id: string }[];
+  candidates: { sim_card_id: string; line_prefix: string | null }[];
 }
 
 async function route(channel: string, destination: string, callId = unique('call')) {
@@ -212,6 +212,8 @@ describe('успешный маршрут', () => {
     expect(decision.outcome).toBe('routed');
     expect(decision.candidates).toHaveLength(1);
     expect(decision.candidates[0]?.sim_card_id).toBe(env.sim);
+    // SIM стоит в порту 1 GOIP: узел выберет её линию префиксом (ADR-0053).
+    expect(decision.candidates[0]?.line_prefix).toBe('99001');
 
     const held = await withDatabase(async (execute) => {
       const result = await execute(

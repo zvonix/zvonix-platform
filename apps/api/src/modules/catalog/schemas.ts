@@ -64,6 +64,11 @@ export const verifyOperatorSchema = z
 
 export const addAliasSchema = z.object({ alias: name });
 
+/** Оператор номера, подтверждённый человеком (ADR-0053). */
+export const confirmNumberOperatorSchema = z.object({
+  operatorId: z.uuid('должен быть идентификатором'),
+});
+
 export type CreateOperatorInput = z.infer<typeof createOperatorSchema>;
 export type VerifyOperatorInput = z.infer<typeof verifyOperatorSchema>;
 
