@@ -37,7 +37,7 @@ const plan = {
   realm: 'sip.zvonix.test',
   callerId: null,
   recordingPath: null,
-  candidates: [{ kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa' }],
+  candidates: [{ kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa', linePrefix: null }],
 };
 
 describe('диалплан с маршрутом', () => {
@@ -45,16 +45,43 @@ describe('диалплан с маршрутом', () => {
     const xml = routeDocument({
       ...plan,
       candidates: [
-        { kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa' },
-        { kind: 'sim' as const, gatewaySipUsername: 'gw-bbbbbbbbbbbb' },
+        { kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa', linePrefix: null },
+        { kind: 'sim' as const, gatewaySipUsername: 'gw-bbbbbbbbbbbb', linePrefix: null },
       ],
     });
     expect(() => parse(xml)).not.toThrow();
 
     // Разделитель `|` означает «пробовать по очереди»: перебор выполняет узел.
+    // Номер — в строке запроса каждого плеча: у `user/…` там иначе имя учётной записи.
     expect(xml).toContain(
-      'data="user/gw-aaaaaaaaaaaa@sip.zvonix.test|user/gw-bbbbbbbbbbbb@sip.zvonix.test"',
+      'data="[sip_invite_req_uri=sip:79001234567@sip.zvonix.test]user/gw-aaaaaaaaaaaa@sip.zvonix.test' +
+        '|[sip_invite_req_uri=sip:79001234567@sip.zvonix.test]user/gw-bbbbbbbbbbbb@sip.zvonix.test"',
     );
+  });
+
+  it('линия GOIP выбирается префиксом: две SIM одного шлюза — две разные попытки', () => {
+    // Раньше обе набирались одинаково, `user/gw-…`, и какой линией звонить, решал GOIP —
+    // вызов на МТС мог уйти с SIM T2 за счёт партнёра (ADR-0053).
+    const xml = routeDocument({
+      ...plan,
+      candidates: [
+        { kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa', linePrefix: '99003' },
+        { kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa', linePrefix: '99001' },
+      ],
+    });
+    expect(() => parse(xml)).not.toThrow();
+    expect(xml).toContain(
+      'data="[sip_invite_req_uri=sip:9900379001234567@sip.zvonix.test]user/gw-aaaaaaaaaaaa@sip.zvonix.test' +
+        '|[sip_invite_req_uri=sip:9900179001234567@sip.zvonix.test]user/gw-aaaaaaaaaaaa@sip.zvonix.test"',
+    );
+  });
+
+  it('транк набирается через свой sofia-gateway, без префикса', () => {
+    const xml = routeDocument({
+      ...plan,
+      candidates: [{ kind: 'sip' as const, gatewaySipUsername: 'trunk-1', linePrefix: null }],
+    });
+    expect(xml).toContain('data="sofia/gateway/trunk-1/79001234567"');
   });
 
   it('идентификатор вызова экспортируется: без него не связать разговор, деньги и запись', () => {
@@ -79,7 +106,7 @@ describe('диалплан с маршрутом', () => {
     // выбросил бы его молча.
     const xml = routeDocument({
       ...plan,
-      candidates: [{ kind: 'sim' as const, gatewaySipUsername: 'gw-"><evil' }],
+      candidates: [{ kind: 'sim' as const, gatewaySipUsername: 'gw-"><evil', linePrefix: null }],
     });
     expect(() => parse(xml)).not.toThrow();
     expect(xml).not.toContain('<evil');

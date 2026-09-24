@@ -358,6 +358,53 @@ describe('определение оператора номера', () => {
     expect(body.region).toBe('Красноярский край');
   });
 
+  it('администратор подтверждает оператора номера вручную — с записью в журнал', async () => {
+    // Внешний источник недоступен, а правило требует подтверждения: человек, проверивший
+    // номер, — подтверждение (ADR-0053). Без этого не проходит ни один звонок.
+    const suffix = String(Date.now()).slice(-6);
+    const serving = await createOperator({ name: `Обслуживающий-${suffix}`, mnc: '02' });
+    const msisdn = '79130555123';
+
+    const response = await api().inject({
+      method: 'PUT',
+      url: `/numbers/${msisdn}/operator`,
+      headers: auth(),
+      payload: { operatorId: serving.id },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(
+      response.json<{ serving: { id: string }; confirmed: boolean; source: string }>(),
+    ).toMatchObject({ serving: { id: serving.id }, confirmed: true, source: 'manual' });
+
+    // И то же при следующем обращении — маршрутизация спросит именно так.
+    const again = await api().inject({
+      method: 'GET',
+      url: `/numbers/${msisdn}/operator`,
+      headers: auth(),
+    });
+    expect(again.json<{ confirmed: boolean }>().confirmed).toBe(true);
+
+    const logged = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select after from audit_log where action = 'number.operator_confirmed' order by occurred_at desc limit 1`,
+      );
+      return result.rows[0] as { after: { msisdn: string; operator_id: string } } | undefined;
+    });
+    expect(logged?.after.operator_id).toBe(serving.id);
+    // Номер в журнале маскирован: полный он там никому не нужен.
+    expect(logged?.after.msisdn).not.toBe(msisdn);
+  });
+
+  it('несуществующий оператор при ручном подтверждении — 404, запись не появляется', async () => {
+    const response = await api().inject({
+      method: 'PUT',
+      url: '/numbers/79130555124/operator',
+      headers: auth(),
+      payload: { operatorId: '01a0d211-629d-7049-bdf9-e48f2dac8e11' },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
   it('подтверждённая запись из своей базы даёт обслуживающего оператора и сеть', async () => {
     const suffix = String(Date.now()).slice(-6);
     const network = await createOperator({ name: `Сеть-${suffix}`, mnc: '20' });

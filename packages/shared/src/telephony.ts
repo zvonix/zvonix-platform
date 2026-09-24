@@ -249,3 +249,20 @@ export const SCOPE_SUSPENDED_STATUS: Readonly<Record<FailureScope, string>> = {
   sim: 'throttled',
   gateway: 'suspended',
 };
+
+/**
+ * Префикс линии GOIP — `99` и номер порта тремя цифрами: порт 1 — `99001`
+ * ([ADR-0053](../../docs/adr/0053-liniya-goip-po-prefiksu.md)).
+ *
+ * GOIP в режиме «один вход на шлюз» выбирает линию по началу набранного номера
+ * (`Routing Prefix` линии) и отбрасывает префикс перед набором в сеть. Длина одна
+ * на все порты намеренно: `9901` было бы началом `99010`, и порт 10 уходил бы в линию 1.
+ * Функция номера порта, а не хранимое поле: кабинету, диалплану и документации
+ * расходиться не с чем.
+ */
+export function goipLinePrefix(portNumber: number): string {
+  if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 999) {
+    throw new RangeError(`Номер порта вне 1…999: ${String(portNumber)}`);
+  }
+  return `99${String(portNumber).padStart(3, '0')}`;
+}

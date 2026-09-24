@@ -2,7 +2,7 @@
  * HTTP-контракт справочника операторов и определения оператора номера.
  */
 
-import { Body, Controller, Delete, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
 import { isStaffRole, parseId, parseMsisdn } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Cabinets, Roles } from '../../http/auth.guard.js';
@@ -12,11 +12,12 @@ import type { Principal } from '../identity/identity.service.js';
 import { BlockedNumberService } from './blocked-numbers.service.js';
 import type { BlockedNumberRow } from './blocked-numbers.repository.js';
 import { CatalogService, type OperatorView } from './catalog.service.js';
-import { OperatorResolverService } from './operator-resolver.service.js';
+import { OperatorResolverService, type OperatorResolution } from './operator-resolver.service.js';
 import {
   addAliasSchema,
   blockNumberSchema,
   createOperatorSchema,
+  confirmNumberOperatorSchema,
   verifyOperatorSchema,
 } from './schemas.js';
 
@@ -176,17 +177,29 @@ export class CatalogController {
   @Roles('admin', 'support')
   @Get('numbers/:msisdn/operator')
   async resolve(@Param('msisdn') msisdn: string): Promise<ResolutionResponse> {
-    const resolution = await this.resolver.resolve(parseMsisdn(msisdn));
-    return {
-      range_owner: brief(resolution.rangeOwner),
-      serving: brief(resolution.serving),
-      network: brief(resolution.network),
-      previous_operator: brief(resolution.previousOperator),
-      region: resolution.region ?? null,
-      source: resolution.source ?? null,
-      confirmed: resolution.confirmed,
-      reason: resolution.reason ?? null,
-    };
+    return toResolutionResponse(await this.resolver.resolve(parseMsisdn(msisdn)));
+  }
+
+  /**
+   * Администратор подтверждает оператора номера вручную
+   * ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)): когда внешний
+   * источник недоступен, а номер проверен иначе — например, звонком с него.
+   * Ответ — то же определение, что у `GET`, уже подтверждённое.
+   */
+  @Roles('admin')
+  @Put('numbers/:msisdn/operator')
+  async confirmOperator(
+    @Param('msisdn') msisdn: string,
+    @Body(zodBody(confirmNumberOperatorSchema)) body: z.infer<typeof confirmNumberOperatorSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<ResolutionResponse> {
+    return toResolutionResponse(
+      await this.catalog.confirmNumberOperator(
+        parseMsisdn(msisdn),
+        parseId(body.operatorId, 'operator'),
+        actor,
+      ),
+    );
   }
 
   /**
@@ -259,5 +272,18 @@ function toBlockedView(row: BlockedNumberRow): BlockedNumberView {
     prefix: row.prefix,
     note: row.note,
     created_at: row.createdAt.toISOString(),
+  };
+}
+
+function toResolutionResponse(resolution: OperatorResolution): ResolutionResponse {
+  return {
+    range_owner: brief(resolution.rangeOwner),
+    serving: brief(resolution.serving),
+    network: brief(resolution.network),
+    previous_operator: brief(resolution.previousOperator),
+    region: resolution.region ?? null,
+    source: resolution.source ?? null,
+    confirmed: resolution.confirmed,
+    reason: resolution.reason ?? null,
   };
 }

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   GATEWAY_STATUSES,
   GATEWAY_TYPES,
+  goipLinePrefix,
   REGISTRABLE_GATEWAY_STATUSES,
   type GatewayPortState,
   type GatewayStatus,
@@ -433,7 +434,7 @@ function GatewayRow({
             wide
           >
             <div className="min-h-0 overflow-y-auto px-5 pb-5">
-              <GatewayPorts gatewayId={gateway.id} sims={sims} />
+              <GatewayPorts gatewayId={gateway.id} goip={gateway.type === 'goip'} sims={sims} />
             </div>
           </FormDialog>
         </div>
@@ -449,7 +450,16 @@ function GatewayRow({
  * на шлюз превратил бы открытие карточки партнёра в десяток обращений. Окно показывает
  * и свои отказы — добавления порта и установки SIM.
  */
-function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[] }) {
+function GatewayPorts({
+  gatewayId,
+  goip,
+  sims,
+}: {
+  gatewayId: string;
+  /** Префикс линии есть только у GOIP (ADR-0053): у телефона слот один. */
+  goip: boolean;
+  sims: SimOption[];
+}) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
   const [portNumber, setPortNumber] = useState('');
@@ -528,6 +538,7 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8 text-right">Порт</TableHead>
+              {goip && <TableHead className="h-8">Префикс линии</TableHead>}
               <TableHead className="h-8">Состояние</TableHead>
               <TableHead className="h-8">SIM</TableHead>
             </TableRow>
@@ -535,7 +546,7 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
           <TableBody>
             {list.isPending && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={3} className="text-muted-foreground">
+                <TableCell colSpan={goip ? 4 : 3} className="text-muted-foreground">
                   Загружаем…
                 </TableCell>
               </TableRow>
@@ -543,7 +554,7 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
 
             {list.data !== undefined && ports.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={3} className="text-muted-foreground">
+                <TableCell colSpan={goip ? 4 : 3} className="text-muted-foreground">
                   Портов не объявлено — SIM некуда поставить, и шлюз в отбор не попадёт.
                 </TableCell>
               </TableRow>
@@ -552,6 +563,7 @@ function GatewayPorts({ gatewayId, sims }: { gatewayId: string; sims: SimOption[
             {ports.map((row) => (
               <TableRow key={row.id}>
                 <TableCell className="num text-right">{row.port_number}</TableCell>
+                {goip && <TableCell className="num">{goipLinePrefix(row.port_number)}</TableCell>}
                 <TableCell className="text-muted-foreground">
                   {PORT_STATE_NAME[row.state]}
                 </TableCell>

@@ -8,13 +8,14 @@
  */
 
 import { Body, Controller, Header, HttpCode, Inject, Post } from '@nestjs/common';
-import { parseId, terminationKindOf } from '@zvonix/shared';
+import { goipLinePrefix, parseId, terminationKindOf } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Machine, Roles } from '../../http/auth.guard.js';
 import { CurrentMachine } from '../../http/request-context.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
+import type { TerminationCandidate } from '../telephony/telephony.repository.js';
 import { rejectDocument, routeDocument, sipResponseFor } from './dialplan-xml.js';
 import { dialplanRequestSchema, previewSchema } from './schemas.js';
 import { RoutingService } from './routing.service.js';
@@ -91,6 +92,7 @@ export class RoutingController {
       candidates: decision.candidates.map((candidate) => ({
         kind: terminationKindOf(candidate.gateway.type),
         gatewaySipUsername: candidate.gateway.sipUsername,
+        linePrefix: linePrefixOf(candidate),
       })),
     });
   }
@@ -115,6 +117,7 @@ export class RoutingController {
       sip_username: string;
       termination_kind: string;
       sim_card_id: string | null;
+      line_prefix: string | null;
     }[];
   }> {
     const startedAt = performance.now();
@@ -151,6 +154,8 @@ export class RoutingController {
         termination_kind: terminationKindOf(candidate.gateway.type),
         // У транка SIM нет: ёмкость у него своя, и подставлять сюда нечего.
         sim_card_id: candidate.kind === 'sim' ? candidate.sim.id : null,
+        // Каким префиксом узел выберет линию GOIP — то, что проверяют при настройке шлюза.
+        line_prefix: linePrefixOf(candidate),
       })),
     };
   }
@@ -173,4 +178,14 @@ export class RoutingController {
     }
     return durationMs;
   }
+}
+
+/**
+ * Префикс линии кандидата: только у GOIP, где линий несколько и выбирать её должен
+ * не шлюз, а площадка (ADR-0053).
+ */
+function linePrefixOf(candidate: TerminationCandidate): string | null {
+  return candidate.kind === 'sim' && candidate.gateway.type === 'goip'
+    ? goipLinePrefix(candidate.port.portNumber)
+    : null;
 }

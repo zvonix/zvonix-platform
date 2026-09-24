@@ -16,6 +16,7 @@ import {
   Server,
   Settings2,
   ShieldBan,
+  SignalHigh,
   Users,
   Wallet,
 } from 'lucide-react';
@@ -95,6 +96,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/partners', label: 'Партнёры и оборудование', Icon: Radio },
         { href: '/nodes', label: 'Узлы АТС', Icon: Server },
+        { href: '/operators', label: 'Операторы связи', Icon: SignalHigh },
         { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
         { href: '/limits', label: 'Запреты и лимиты', Icon: ShieldBan },
       ],
@@ -140,6 +142,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/partners', label: 'Партнёры и оборудование', Icon: Radio },
         { href: '/nodes', label: 'Узлы АТС', Icon: Server },
+        { href: '/operators', label: 'Операторы связи', Icon: SignalHigh },
         { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
         { href: '/limits', label: 'Запреты и лимиты', Icon: ShieldBan },
       ],

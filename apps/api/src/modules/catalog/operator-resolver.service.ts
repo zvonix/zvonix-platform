@@ -268,6 +268,37 @@ export class OperatorResolverService {
     return refreshed;
   }
 
+  /**
+   * Оператора номера подтвердил человек
+   * ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)).
+   *
+   * Запись того же вида, что от внешнего источника, и с тем же сроком: когда источник
+   * снова доступен, фоновое обновление перепишет её его ответом, как любую другую.
+   * Возвращает прежнюю живую запись — для журнала, — и новую.
+   */
+  async confirmManually(
+    msisdn: Msisdn,
+    operatorId: OperatorRow['id'],
+    now: Date = new Date(),
+  ): Promise<{ previousOperatorId: OperatorRow['id'] | null; resolution: OperatorResolution }> {
+    const previous = await this.repository.findLiveResolution(msisdn, now);
+    const owner = await this.repository.findRangeOwner(msisdn);
+    await this.repository.saveResolution({
+      msisdn,
+      operatorId,
+      previousOperatorId: previous?.operatorId ?? null,
+      region: previous?.region ?? owner?.region ?? null,
+      source: 'manual',
+      resolvedAt: now,
+      expiresAt: new Date(now.getTime() + this.ttlMs),
+    });
+    this.logger.warn('Оператор номера подтверждён вручную', { msisdn: maskPhone(msisdn) });
+    return {
+      previousOperatorId: previous?.operatorId ?? null,
+      resolution: await this.build(msisdn, operatorId, null, owner?.region ?? null, 'manual'),
+    };
+  }
+
   /** Последний рубеж: кому выделен диапазон. Оператора не подтверждает. */
   private async fromNumberingPlan(msisdn: Msisdn, reason?: string): Promise<OperatorResolution> {
     const owner = await this.repository.findRangeOwner(msisdn);
