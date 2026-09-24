@@ -19,7 +19,13 @@ import { request } from '@/lib/api';
 import { duration, moment } from '@/lib/format';
 import { CALL_STATUS_NAME, callTone } from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
-import { simsOf, type Equipment, type Gateway, type Sim } from '../equipment/equipment';
+import {
+  EQUIPMENT_KEY,
+  simsOf,
+  type Equipment,
+  type Gateway,
+  type Sim,
+} from '../equipment/equipment';
 
 const PAGE_SIZE = 50;
 const COLUMNS = 6;
@@ -78,7 +84,7 @@ function PartnerCalls() {
   // Названия железа берутся из того же ответа, что и раздел «оборудование»: второй
   // список имён разъехался бы с первым, а идентификатор в таблице не говорит ничего.
   const equipment = useQuery({
-    queryKey: ['partner', 'equipment'],
+    queryKey: EQUIPMENT_KEY,
     queryFn: () => request<Equipment>('/partner/equipment'),
     staleTime: 60_000,
   });

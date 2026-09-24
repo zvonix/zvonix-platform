@@ -21,6 +21,9 @@ import {
 import { z } from 'zod';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 
+/** Портов у шлюза. Самые большие GOIP — на 32 слота; 256 с запасом отсекает опечатку. */
+export const MAX_GATEWAY_PORTS = 256;
+
 const name = z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное');
 
 export const createGatewaySchema = z.object({
@@ -33,7 +36,7 @@ export const createGatewaySchema = z.object({
     .number()
     .int('должно быть целым числом')
     .min(0, 'не может быть отрицательным')
-    .max(256, 'неправдоподобно много')
+    .max(MAX_GATEWAY_PORTS, 'неправдоподобно много')
     .default(0),
 });
 
@@ -118,9 +121,11 @@ export const createSimSchema = z.object({
 
   /**
    * Оператор, которого объявляет партнёр. Сверяется с ответом резолвера по собственному
-   * номеру SIM: подтверждённое расхождение — отказ, а не предупреждение.
+   * номеру SIM: подтверждённое расхождение — отказ, а не предупреждение. Не указан —
+   * берётся тот, кого назвал резолвер; не назвал — отказ: карта без оператора
+   * не маршрутизируется вовсе.
    */
-  operatorId: z.uuid('должен быть идентификатором'),
+  operatorId: z.uuid('должен быть идентификатором').optional(),
 
   /** Собственный номер SIM. Нормализуется: `8916…`, `+7 916 …` и `7916…` — одно и то же. */
   msisdn: z
@@ -166,14 +171,29 @@ export const simConcurrencySchema = z.object({
     .max(MAX_CONCURRENT_CALLS_LIMIT, 'выше разумного предела'),
 });
 
-export const addPortSchema = z.object({
-  /** Номер порта на устройстве, как он подписан на корпусе. */
-  portNumber: z.coerce
-    .number()
-    .int('должен быть целым числом')
-    .min(1, 'нумерация портов начинается с единицы')
-    .max(256, 'неправдоподобно много'),
-});
+/**
+ * Новый порт: либо с номером, как он подписан на корпусе, либо несколько следующих
+ * по порядку — `count` штук после наибольшего заведённого.
+ */
+export const addPortSchema = z.union(
+  [
+    z.object({
+      portNumber: z.coerce
+        .number()
+        .int('должен быть целым числом')
+        .min(1, 'нумерация портов начинается с единицы')
+        .max(MAX_GATEWAY_PORTS, 'неправдоподобно много'),
+    }),
+    z.object({
+      count: z.coerce
+        .number()
+        .int('должно быть целым числом')
+        .min(1, 'хотя бы один')
+        .max(MAX_GATEWAY_PORTS, 'неправдоподобно много'),
+    }),
+  ],
+  { error: 'нужен номер порта (portNumber) или количество (count)' },
+);
 
 export const assignSimSchema = z.object({
   /** `null` означает «вынуть SIM из порта». */

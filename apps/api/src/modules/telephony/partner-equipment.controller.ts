@@ -44,6 +44,7 @@ import {
   partnerSimSchema,
   partnerSimStatusSchema,
 } from './schemas.js';
+import { firstAndAll } from './telephony.controller.js';
 import { TelephonyService } from './telephony.service.js';
 import type {
   GatewayPortRow,
@@ -96,10 +97,28 @@ interface GatewayView {
    */
   readonly suspended_by: PartnerFacingSuspension | null;
   readonly model: string | null;
+  /**
+   * Имя SIP, под которым шлюз регистрируется. Не секрет — секрет пароль, и он
+   * не отдаётся никогда; имя же нужно партнёру каждый раз, когда он перенастраивает
+   * устройство, а раньше было видно только в минуту заведения.
+   */
+  readonly sip_username: string;
   readonly on_node: boolean;
   readonly registered_at: string | null;
   readonly ports: readonly PortView[];
 }
+
+/**
+ * Куда шлюзу регистрироваться. Одно на всех: профиль узла один, и порт его задан
+ * в `node/conf/autoload_configs/sofia.conf.xml`.
+ */
+interface ConnectionView {
+  readonly server: string;
+  readonly port: number;
+}
+
+/** Порт профиля `zvonix` узла — `sip-port` в sofia.conf.xml. Меняется только вместе с ним. */
+const NODE_SIP_PORT = 5060;
 
 /**
  * SIP-транк партнёра.
@@ -140,6 +159,7 @@ export class PartnerEquipmentController {
   @Cabinets('partner')
   @Get('partner/equipment')
   async equipment(@CurrentUser() actor: Principal): Promise<{
+    connection: ConnectionView;
     gateways: GatewayView[];
     trunks: TrunkView[];
     spare_sims: SimView[];
@@ -189,6 +209,7 @@ export class PartnerEquipmentController {
       );
 
     return {
+      connection: { server: this.telephony.realm, port: NODE_SIP_PORT },
       gateways: gatewayViews,
       trunks: trunks
         .filter(({ gateway }) => gateway.status !== 'retired')
@@ -291,13 +312,13 @@ export class PartnerEquipmentController {
     @Param('id') id: string,
     @Body(zodBody(addPortSchema)) body: z.infer<typeof addPortSchema>,
     @CurrentUser() actor: Principal,
-  ): Promise<{ port: PortSummary }> {
+  ): Promise<{ port: PortSummary; ports: PortSummary[] }> {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
     const gatewayId = parseId(id, 'gateway');
     await this.telephony.requireOwnGateway(gatewayId, partner.id);
 
-    const port = await this.telephony.addPort(gatewayId, body.portNumber, actor.userId, actor.role);
-    return { port: toPortSummary(port) };
+    const ports = await this.telephony.addPorts(gatewayId, body, actor.userId, actor.role);
+    return firstAndAll(ports.map(toPortSummary));
   }
 
   /**
@@ -317,7 +338,7 @@ export class PartnerEquipmentController {
     const sim = await this.telephony.createOwnSim(
       {
         partnerId: partner.id,
-        operatorId: parseId(body.operatorId, 'operator'),
+        operatorId: body.operatorId === undefined ? null : parseId(body.operatorId, 'operator'),
         msisdn: body.msisdn,
         iccid: body.iccid ?? null,
         activatedAt: body.activatedAt === undefined ? null : new Date(body.activatedAt),
@@ -414,6 +435,7 @@ function toGatewayView(gateway: GatewayRow, ports: readonly PortView[]): Gateway
     suspended_by:
       gateway.suspendedBy === null ? null : partnerFacingSuspension(gateway.suspendedBy),
     model: gateway.model,
+    sip_username: gateway.sipUsername,
     on_node: gateway.nodeId !== null,
     registered_at: gateway.registeredAt?.toISOString() ?? null,
     ports,

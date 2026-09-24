@@ -80,7 +80,7 @@ function MyChannels() {
             {list.data?.channels.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
-                  Линий пока нет — значит, звонить неоткуда. Их заводит площадка вместе с доступом
+                  Линий пока нет — значит, звонить неоткуда. Их добавляет площадка вместе с доступом
                   SIP: напишите в поддержку.
                 </TableCell>
               </TableRow>

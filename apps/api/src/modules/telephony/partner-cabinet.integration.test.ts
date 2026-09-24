@@ -892,6 +892,103 @@ describe('партнёр заводит своё оборудование (ADR-0
     expect(filled?.ports[0]?.sim?.id).toBe(sim);
   });
 
+  it('шлюз на восемь портов заводится сразу с портами 1–8', async () => {
+    // Раньше число записывалось, а портов не появлялось: партнёр видел «портов не заведено»
+    // и нажимал «добавить порт» восемь раз (владелец, 2026-09-24).
+    const gateway = (
+      await post(
+        '/partner/gateways',
+        { name: unique('Шлюз'), type: 'goip', portCount: 8 },
+        as(mine.token),
+      )
+    ).json<{ gateway: { id: string } }>().gateway.id;
+
+    const equipment = (await get('/partner/equipment', as(mine.token))).json<EquipmentResponse>();
+    const created = equipment.gateways.find((row) => row.id === gateway);
+    expect(created?.ports.map((port) => port.port_number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('несколько портов добавляются разом — следующими номерами после последнего', async () => {
+    const gateway = (
+      await post(
+        '/partner/gateways',
+        { name: unique('Шлюз'), type: 'goip', portCount: 2 },
+        as(mine.token),
+      )
+    ).json<{ gateway: { id: string } }>().gateway.id;
+
+    const response = await post(`/partner/gateways/${gateway}/ports`, { count: 3 }, as(mine.token));
+    expect(response.statusCode).toBe(201);
+    expect(
+      response.json<{ ports: { port_number: number }[] }>().ports.map((port) => port.port_number),
+    ).toEqual([3, 4, 5]);
+
+    const tooMany = await post(
+      `/partner/gateways/${gateway}/ports`,
+      { count: 252 },
+      as(mine.token),
+    );
+    expect(tooMany.statusCode).toBe(409);
+  });
+
+  it('отдаёт, куда и под каким именем регистрировать шлюз — пароля нет', async () => {
+    // Имя и сервер нужны партнёру при каждой перенастройке устройства, а были видны
+    // только в минуту заведения. Пароль по-прежнему не отдаётся никогда.
+    const response = await get('/partner/equipment', as(mine.token));
+    const body = response.json<{
+      connection: { server: string; port: number };
+      gateways: { sip_username: string }[];
+    }>();
+    expect(body.connection.port).toBe(5060);
+    expect(body.connection.server).not.toBe('');
+    expect(body.gateways[0]?.sip_username).toMatch(/^gw-/u);
+    expect(response.body).not.toContain('password');
+    expect(response.body).not.toContain('a1_hash');
+  });
+
+  it('оператора карты площадка определяет по номеру сама', async () => {
+    const msisdn = nextMsisdn();
+    await declare(msisdn, operatorId);
+
+    const response = await post('/partner/sim-cards', { msisdn }, as(mine.token));
+    expect(response.statusCode).toBe(201);
+    const sim = response.json<{ sim: { operator_id: string; operator_confirmed_at: string } }>()
+      .sim;
+    expect(sim.operator_id).toBe(operatorId);
+    expect(sim.operator_confirmed_at).not.toBeNull();
+  });
+
+  it('без подтверждения оператором карты становится владелец диапазона — неподтверждённым', async () => {
+    // Источник перенесённых номеров на площадке может быть не настроен, и тогда план
+    // нумерации — всё, что известно. Карта заводится, но включить её без подтверждения
+    // нельзя: номер мог уйти к другому оператору.
+    const msisdn = '79430001234';
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        insert into numbering_plan_ranges
+          (id, def_code, range_start, range_end, capacity, operator_id, region, source, imported_at)
+        values (gen_random_uuid(), '943', 79430000000, 79430009999, 10000,
+                ${operatorId}::uuid, 'Красноярский край', 'mincifry', now())
+      `);
+    });
+
+    const response = await post('/partner/sim-cards', { msisdn }, as(mine.token));
+    expect(response.statusCode).toBe(201);
+    const sim = response.json<{
+      sim: { operator_id: string; operator_confirmed_at: string | null };
+    }>().sim;
+    expect(sim.operator_id).toBe(operatorId);
+    expect(sim.operator_confirmed_at).toBeNull();
+  });
+
+  it('номер, по которому оператор не определился, без оператора не заводится', async () => {
+    // Угадывать нельзя: карта без подтверждённого оператора — платный вызов за счёт
+    // партнёра. Лучше внятный отказ, чем тихая запись.
+    const response = await post('/partner/sim-cards', { msisdn: nextMsisdn() }, as(mine.token));
+    expect(response.statusCode).toBe(503);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe('dependency_unavailable');
+  });
+
   it('транк партнёр не заводит: он привязан к узлу площадки', async () => {
     // Узлы — не его дело, и выбирать их ему нечем. Транк остаётся за администратором.
     const response = await post(

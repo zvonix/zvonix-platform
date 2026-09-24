@@ -101,7 +101,7 @@ export function BlockedNumbers() {
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Префикс</TableHead>
               <TableHead className="h-8">Почему</TableHead>
-              <TableHead className="h-8">Заведён</TableHead>
+              <TableHead className="h-8">Добавлен</TableHead>
               <TableHead className="h-8"> </TableHead>
             </TableRow>
           </TableHeader>

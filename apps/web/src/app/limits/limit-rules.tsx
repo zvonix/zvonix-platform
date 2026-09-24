@@ -153,7 +153,7 @@ export function LimitRules() {
       <div className="flex flex-wrap items-baseline gap-3">
         <h2 className="text-[15px] font-semibold tracking-tight">Лимиты по окнам</h2>
         {canChange && (
-          <FormDialog label="Завести лимит" title="Новый лимит" className="ml-auto">
+          <FormDialog label="Добавить лимит" title="Новый лимит" className="ml-auto">
             <NewLimitForm onCreate={(body) => add.mutateAsync(body)} />
           </FormDialog>
         )}
@@ -286,7 +286,7 @@ function NewLimitForm({
 
   return (
     <DialogForm
-      submitLabel="Завести лимит"
+      submitLabel="Добавить лимит"
       canSubmit={ready}
       onSubmit={async () => {
         if (!isSubjectKind(kind)) return;

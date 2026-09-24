@@ -227,11 +227,11 @@ const DIALOGS: Partial<Record<Role, { route: string; open: (page: Page) => Promi
   client: {
     route: '/my/integration',
     open: async (page) => {
-      await page.getByRole('button', { name: 'Завести ключ' }).click();
+      await page.getByRole('button', { name: 'Создать ключ' }).click();
       await page.getByLabel('Назначение').fill('Ключ для проверки окна');
       await page
         .getByRole('dialog')
-        .getByRole('button', { name: 'Завести и показать секрет' })
+        .getByRole('button', { name: 'Создать и показать секрет' })
         .click();
       await page.getByRole('button', { name: 'Отозвать' }).first().click();
     },
@@ -239,11 +239,8 @@ const DIALOGS: Partial<Record<Role, { route: string; open: (page: Page) => Promi
   partner: {
     route: '/partner/equipment',
     open: async (page) => {
-      await page
-        .getByRole('region', { name: /GOIP в гараже/u })
-        .getByRole('button', { name: 'Списать' })
-        .first()
-        .click();
+      await page.getByRole('link', { name: /GOIP в гараже/u }).click();
+      await page.getByRole('button', { name: 'Выдать новый пароль' }).click();
     },
   },
 };

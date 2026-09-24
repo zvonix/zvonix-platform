@@ -165,7 +165,7 @@ export function PartnerGateways({
       <div className="flex items-baseline gap-3">
         <h3 className="font-semibold">Шлюзы</h3>
         {canChange && (
-          <FormDialog label="Завести шлюз" title="Новый шлюз" variant="outline">
+          <FormDialog label="Добавить шлюз" title="Новый шлюз" variant="outline">
             <NewGatewayForm onCreate={(draft) => create.mutateAsync(draft)} />
           </FormDialog>
         )}
@@ -240,7 +240,7 @@ function NewGatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promi
 
   return (
     <DialogForm
-      submitLabel="Завести шлюз"
+      submitLabel="Добавить шлюз"
       canSubmit={nameValid && portsValid}
       onSubmit={() =>
         onCreate({

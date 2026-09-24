@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { OneTimeSecret } from '@/components/one-time-secret';
 
 export interface SipAccount {
@@ -32,10 +33,13 @@ export function SipCredentials({
   account,
   title,
   onClose,
+  children,
 }: {
   account: SipAccount;
   title: string;
   onClose: () => void;
+  /** Что делать дальше — например, ссылка на страницу шлюза. */
+  children?: ReactNode;
 }) {
   return (
     <OneTimeSecret title={title} onClose={onClose}>
@@ -53,6 +57,7 @@ export function SipCredentials({
         <dt className="text-muted-foreground">Сервер</dt>
         <dd className="num select-all">{account.realm}</dd>
       </dl>
+      {children}
     </OneTimeSecret>
   );
 }

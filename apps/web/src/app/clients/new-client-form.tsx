@@ -19,9 +19,9 @@ import { numberFromInput } from '@/lib/money';
 export function NewClientForm() {
   return (
     <FormDialog
-      label="Завести клиента"
+      label="Добавить клиента"
       title="Новый клиент"
-      description="Клиент заводится в состоянии «ждёт допуска»: звонки по его каналам не пойдут, пока его не переведут в «звонит»."
+      description="Клиент создаётся в состоянии «ждёт допуска»: звонки по его каналам не пойдут, пока его не переведут в «звонит»."
     >
       <NewClientFields />
     </FormDialog>
@@ -48,7 +48,7 @@ function NewClientFields() {
 
   return (
     <DialogForm
-      submitLabel="Завести клиента"
+      submitLabel="Добавить клиента"
       canSubmit={ownerUserId !== '' && name.trim().length >= 2}
       onSubmit={() => create.mutateAsync()}
     >

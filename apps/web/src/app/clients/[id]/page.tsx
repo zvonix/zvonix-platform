@@ -170,7 +170,7 @@ function ClientCard() {
               {money(client.balance)}
             </b>
           </span>
-          <span className="num text-muted-foreground">заведён {moment(client.created_at)}</span>
+          <span className="num text-muted-foreground">добавлен {moment(client.created_at)}</span>
         </div>
         {!canChange && <ReadOnly what="клиента, его каналы и деньги" />}
       </div>

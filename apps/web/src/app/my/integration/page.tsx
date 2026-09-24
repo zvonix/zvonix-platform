@@ -113,9 +113,9 @@ function Integration() {
 
       <div>
         <FormDialog
-          label="Завести ключ"
+          label="Создать ключ"
           title="Новый ключ"
-          description="Секрет покажется один раз — сразу после заведения."
+          description="Секрет покажется один раз — сразу после создания."
         >
           <AddKey
             onIssued={async (key, label) => {
@@ -217,7 +217,7 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
 
   return (
     <DialogForm
-      submitLabel="Завести и показать секрет"
+      submitLabel="Создать и показать секрет"
       canSubmit={label.trim() !== ''}
       onSubmit={() => add.mutateAsync()}
     >

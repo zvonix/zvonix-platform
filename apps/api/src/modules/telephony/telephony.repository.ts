@@ -11,6 +11,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  max,
   ne,
   sql,
   type AnyColumn,
@@ -152,18 +153,21 @@ export class TelephonyRepository {
 
   // --- Шлюзы -----------------------------------------------------------------
 
-  async createGateway(draft: {
-    partnerId: Id<'partner'>;
-    name: string;
-    type: GatewayType;
-    status: GatewayStatus;
-    sipUsername: string;
-    a1Hash: string;
-    model: string | null;
-    portCount: number;
-  }): Promise<GatewayRow> {
+  async createGateway(
+    draft: {
+      partnerId: Id<'partner'>;
+      name: string;
+      type: GatewayType;
+      status: GatewayStatus;
+      sipUsername: string;
+      a1Hash: string;
+      model: string | null;
+      portCount: number;
+    },
+    executor: Executor = this.db,
+  ): Promise<GatewayRow> {
     try {
-      const [row] = await this.db
+      const [row] = await executor
         .insert(gateways)
         .values({ id: newId<'gateway'>(), ...draft })
         .returning();
@@ -813,6 +817,39 @@ export class TelephonyRepository {
     } catch (cause) {
       throw toDatabaseError(cause);
     }
+  }
+
+  /**
+   * Несколько портов одного шлюза одной вставкой.
+   *
+   * Шлюз на восемь или тридцать два порта заводится разом: по порту за обращение партнёр
+   * нажимал бы одну и ту же кнопку столько раз, сколько слотов на корпусе.
+   */
+  async createPorts(
+    gatewayId: GatewayId,
+    portNumbers: readonly number[],
+    executor: Executor = this.db,
+  ): Promise<GatewayPortRow[]> {
+    if (portNumbers.length === 0) return [];
+    try {
+      return await executor
+        .insert(gatewayPorts)
+        .values(
+          portNumbers.map((portNumber) => ({ id: newId<'gatewayPort'>(), gatewayId, portNumber })),
+        )
+        .returning();
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /** Наибольший номер порта шлюза, `0` — портов нет. Следующие нумеруются после него. */
+  async lastPortNumber(gatewayId: GatewayId, executor: Executor = this.db): Promise<number> {
+    const [row] = await executor
+      .select({ last: max(gatewayPorts.portNumber) })
+      .from(gatewayPorts)
+      .where(eq(gatewayPorts.gatewayId, gatewayId));
+    return row?.last ?? 0;
   }
 
   /**

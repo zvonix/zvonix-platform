@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
 import { ConsoleShell } from '@/components/console-shell';
 import {
   Table,
@@ -12,15 +13,9 @@ import {
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
-import {
-  GATEWAY_STATUS_NAME,
-  GATEWAY_TYPE_NAME,
-  PARTNER_SUSPENSION_NAME,
-  PORT_STATE_NAME,
-  SIM_STATUS_NAME,
-} from '@/lib/labels';
-import type { Equipment, Gateway, Sim } from './equipment';
-import { AddGateway, AddSim, GatewayActions, PortSim, SimActions } from './manage';
+import { GATEWAY_STATUS_NAME, GATEWAY_TYPE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
+import { EQUIPMENT_KEY, gatewayStateName, type Equipment } from './equipment';
+import { AddGateway, SimActions } from './manage';
 
 export default function PartnerEquipmentPage() {
   return (
@@ -30,17 +25,22 @@ export default function PartnerEquipmentPage() {
   );
 }
 
+/**
+ * Оборудование списком: шлюз — строка таблицы, по нажатию — его страница с портами
+ * и настройками подключения. Раньше каждый шлюз был строкой текста с рядом кнопок
+ * над таблицей портов, и шлюз читался как «где-то сверху», а не как объект списка
+ * (владелец, 2026-09-24).
+ */
 function PartnerEquipment() {
   const equipment = useQuery({
-    queryKey: ['partner', 'equipment'],
+    queryKey: EQUIPMENT_KEY,
     queryFn: () => request<Equipment>('/partner/equipment'),
   });
 
   if (equipment.isPending) return <p className="text-muted-foreground">Загружаем…</p>;
 
-  // Ранний выход — только когда показывать нечего. Неудачное фоновое обновление (партнёр
-  // вернулся из вкладки с настройками GOIP) не должно размонтировать формы: вместе с ними
-  // пропадал только что выданный пароль SIP, который показывается один раз.
+  // Ранний выход — только когда показывать нечего: неудачное фоновое обновление
+  // не должно размонтировать панель с только что выданным паролем SIP.
   if (equipment.data === undefined) {
     return (
       <p role="alert" className="text-crit">
@@ -54,8 +54,6 @@ function PartnerEquipment() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Обновление не удалось, но загруженное остаётся на экране — вместе с формами
-          и выданным паролем. */}
       {equipment.error !== null && (
         <p role="alert" className="text-crit">
           Не удалось обновить оборудование: {equipment.error.message}. Показано последнее
@@ -63,42 +61,85 @@ function PartnerEquipment() {
         </p>
       )}
 
-      <div className="flex flex-col gap-1">
-        {/*
-          Самое дорогое из невидимого: включённый шлюз без регистрации выглядит рабочим
-          в любом списке, но вызов на него не уйдёт вовсе — набрать его с узла нечем.
-        */}
-        {offline.length > 0 && (
-          <p className="text-warn">
-            {offline.length === 1
-              ? 'Шлюз не на связи'
-              : `Шлюзов не на связи: ${String(offline.length)}`}{' '}
-            — вызовы на {offline.length === 1 ? 'него' : 'них'} не идут вовсе. Проверьте питание,
-            сеть и настройки регистрации SIP на самом оборудовании.
-          </p>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-start gap-2">
-        <AddGateway />
-        <AddSim />
-      </div>
-
-      {gateways.length === 0 && trunks.length === 0 && (
-        <p className="max-w-prose text-muted-foreground">
-          Оборудования пока нет. Заведите шлюз — пароль SIP выдаётся сразу, им вы и настроите
-          устройство. SIP-транк заводит площадка: он привязывается к её узлу.
+      {/*
+        Самое дорогое из невидимого: включённый шлюз без регистрации выглядит рабочим
+        в любом списке, но вызов на него не уйдёт вовсе — набрать его с узла нечем.
+      */}
+      {offline.length > 0 && (
+        <p className="text-warn">
+          {offline.length === 1
+            ? 'Шлюз не на связи'
+            : `Шлюзов не на связи: ${String(offline.length)}`}{' '}
+          — вызовы на {offline.length === 1 ? 'него' : 'них'} не идут. Проверьте питание, сеть и
+          настройки подключения на странице шлюза.
         </p>
       )}
 
-      {gateways.map((gateway) => (
-        <GatewayCard key={gateway.id} gateway={gateway} spare={spare} />
-      ))}
+      <AddGateway />
+
+      {gateways.length === 0 && trunks.length === 0 ? (
+        <div className="flex max-w-prose flex-col gap-1 text-muted-foreground">
+          <p>Оборудования пока нет. Порядок такой:</p>
+          <ol className="list-decimal pl-5">
+            <li>Добавьте шлюз — порты под SIM появятся сразу.</li>
+            <li>Введите в настройках устройства сервер, логин и пароль со страницы шлюза.</li>
+            <li>Вставьте SIM-карты в порты и включите шлюз.</li>
+          </ol>
+        </div>
+      ) : (
+        gateways.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-border bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow className="text-muted-foreground hover:bg-transparent">
+                  <TableHead className="h-8">Шлюз</TableHead>
+                  <TableHead className="h-8">Вид</TableHead>
+                  <TableHead className="h-8">Состояние</TableHead>
+                  <TableHead className="h-8">Связь с площадкой</TableHead>
+                  <TableHead className="h-8 text-right">Карт в портах</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {gateways.map((gateway) => {
+                  const filled = gateway.ports.filter((port) => port.sim !== null).length;
+                  return (
+                    <TableRow key={gateway.id}>
+                      <TableCell>
+                        <Link
+                          href={`/partner/equipment/${gateway.id}`}
+                          className="font-semibold text-primary underline-offset-4 hover:underline"
+                        >
+                          {gateway.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {GATEWAY_TYPE_NAME[gateway.type]}
+                        {gateway.model !== null && ` · ${gateway.model}`}
+                      </TableCell>
+                      <TableCell>{gatewayStateName(gateway)}</TableCell>
+                      <TableCell className={gateway.on_node ? '' : 'text-warn'}>
+                        {gateway.on_node
+                          ? `на связи · ${moment(gateway.registered_at)}`
+                          : 'не на связи'}
+                      </TableCell>
+                      <TableCell className="num text-right">
+                        {`${String(filled)} из ${String(gateway.ports.length)}`}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )
+      )}
 
       {trunks.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <h3 className="font-semibold">SIP-транки</h3>
-          <div className="rounded-lg border border-border bg-card">
+        <section aria-labelledby="trunks" className="flex flex-col gap-2">
+          <h3 id="trunks" className="font-semibold">
+            SIP-транки
+          </h3>
+          <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <Table>
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -137,19 +178,22 @@ function PartnerEquipment() {
             </Table>
           </div>
           <p className="max-w-prose text-muted-foreground">
-            Пароль провайдера площадка не показывает никому: он уходит только на узел, в его
-            конфигурацию. Если пароль сменился у провайдера — сообщите площадке, его заведут заново.
+            Транк добавляет и настраивает площадка. Пароль провайдера она не показывает никому: он
+            уходит только на узел. Сменился пароль у провайдера — сообщите площадке.
           </p>
-        </div>
+        </section>
       )}
 
       {spare.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <h3 className="font-semibold">Карты вне шлюзов</h3>
+        <section aria-labelledby="spare" className="flex flex-col gap-2">
+          <h3 id="spare" className="font-semibold">
+            Карты вне шлюзов
+          </h3>
           <p className="max-w-prose text-muted-foreground">
-            Эти карты заведены, но не стоят ни в одном порту — значит, вызовов не получают.
+            Вынутые из портов карты вызовов не получают. Вставить такую карту можно из порта на
+            странице шлюза.
           </p>
-          <div className="rounded-lg border border-border bg-card">
+          <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <Table>
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">
@@ -166,12 +210,7 @@ function PartnerEquipment() {
                     <TableCell>
                       {sim.operator_name ?? <span className="text-faint">—</span>}
                     </TableCell>
-                    <TableCell>
-                      {SIM_STATUS_NAME[sim.status]}
-                      {sim.operator_confirmed_at === null && (
-                        <span className="block text-warn">оператор не подтверждён</span>
-                      )}
-                    </TableCell>
+                    <TableCell>{SIM_STATUS_NAME[sim.status]}</TableCell>
                     <TableCell>
                       <SimActions sim={sim} inPort={false} />
                     </TableCell>
@@ -180,97 +219,8 @@ function PartnerEquipment() {
               </TableBody>
             </Table>
           </div>
-        </div>
+        </section>
       )}
     </div>
-  );
-}
-
-/** Шлюз с портами: одна карточка — одна железка, как она стоит у партнёра. */
-function GatewayCard({ gateway, spare }: { gateway: Gateway; spare: readonly Sim[] }) {
-  return (
-    // Область с именем: у партнёра шлюзов бывает десяток, и без имени и человек
-    // с экранным диктором, и проверка одинаково не понимают, к какому из них
-    // относится кнопка.
-    <section aria-label={gateway.name} className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-baseline gap-3">
-        <h3 className="font-semibold">{gateway.name}</h3>
-        <span className="text-muted-foreground">{GATEWAY_TYPE_NAME[gateway.type]}</span>
-        {gateway.model !== null && <span className="text-faint">{gateway.model}</span>}
-        <span className="text-muted-foreground">
-          {/* У выключенного важнее не «приостановлен», а кто выключил: от этого зависит,
-              может ли партнёр включить его сам (ADR-0047). */}
-          {gateway.suspended_by === null
-            ? GATEWAY_STATUS_NAME[gateway.status]
-            : PARTNER_SUSPENSION_NAME[gateway.suspended_by]}
-        </span>
-        <span className={gateway.on_node ? 'text-muted-foreground' : 'text-warn'}>
-          {gateway.on_node ? `на связи · ${moment(gateway.registered_at)}` : 'не на связи с узлом'}
-        </span>
-      </div>
-
-      <GatewayActions gateway={gateway} />
-
-      <div className="rounded-lg border border-border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8 w-[70px]">Порт</TableHead>
-              <TableHead className="h-8">Номер SIM</TableHead>
-              <TableHead className="h-8">Оператор</TableHead>
-              <TableHead className="h-8">Карта</TableHead>
-              <TableHead className="h-8 text-right">Одновременных</TableHead>
-              <TableHead className="h-8">Порт</TableHead>
-              <TableHead className="h-8" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {gateway.ports.length === 0 && (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7} className="whitespace-normal text-muted-foreground">
-                  Портов не заведено. Пока их нет, шлюз не может принять ни одного вызова.
-                </TableCell>
-              </TableRow>
-            )}
-
-            {gateway.ports.map((port) => (
-              <TableRow key={port.id}>
-                <TableCell className="num">{port.port_number}</TableCell>
-                <TableCell className="num">
-                  {port.sim?.msisdn ?? <span className="text-faint">пусто</span>}
-                </TableCell>
-                <TableCell>
-                  {port.sim?.operator_name ?? <span className="text-faint">—</span>}
-                </TableCell>
-                <TableCell>
-                  {port.sim === null ? (
-                    <span className="text-faint">—</span>
-                  ) : (
-                    <>
-                      {SIM_STATUS_NAME[port.sim.status]}
-                      {port.sim.operator_confirmed_at === null && (
-                        <span className="block text-warn">оператор не подтверждён</span>
-                      )}
-                    </>
-                  )}
-                </TableCell>
-                <TableCell className="num text-right">
-                  {port.sim?.max_concurrent_calls ?? <span className="text-faint">—</span>}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {PORT_STATE_NAME[port.state]}
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap items-start gap-2">
-                    <PortSim portId={port.id} spare={spare} filled={port.sim !== null} />
-                    {port.sim !== null && <SimActions sim={port.sim} inPort />}
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
   );
 }

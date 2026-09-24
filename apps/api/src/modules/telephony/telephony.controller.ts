@@ -430,7 +430,7 @@ export class TelephonyController {
     const sim = await this.telephony.createSim(
       {
         partnerId: parseId(body.partnerId, 'partner'),
-        operatorId: parseId(body.operatorId, 'operator'),
+        operatorId: body.operatorId === undefined ? null : parseId(body.operatorId, 'operator'),
         msisdn: body.msisdn,
         iccid: body.iccid ?? null,
         activatedAt: body.activatedAt === undefined ? null : new Date(body.activatedAt),
@@ -496,14 +496,14 @@ export class TelephonyController {
     @Param('id') id: string,
     @Body(zodBody(addPortSchema)) body: z.infer<typeof addPortSchema>,
     @CurrentUser() actor: Principal,
-  ): Promise<{ port: PortView }> {
-    const port = await this.telephony.addPort(
+  ): Promise<{ port: PortView; ports: PortView[] }> {
+    const ports = await this.telephony.addPorts(
       parseId(id, 'gateway'),
-      body.portNumber,
+      body,
       actor.userId,
       actor.role,
     );
-    return { port: toPortView(port) };
+    return firstAndAll(ports.map(toPortView));
   }
 
   @Roles('admin', 'support')
@@ -648,4 +648,14 @@ function toPriorityView(row: PartnerPriorityView): PartnerPriorityResponse {
     priority: row.priority,
     last_routed_at: row.lastRoutedAt?.toISOString() ?? null,
   };
+}
+
+/**
+ * Ответ на заведение портов: `port` — первый, как отвечал обработчик одного порта,
+ * `ports` — все заведённые, когда их просили несколько.
+ */
+export function firstAndAll<T>(ports: readonly T[]): { port: T; ports: T[] } {
+  const [port] = ports;
+  if (port === undefined) throw new Error('Заведение портов не вернуло ни одной строки');
+  return { port, ports: [...ports] };
 }
