@@ -142,7 +142,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
         <h3 className="font-semibold">SIP-транки</h3>
         {canChange && (
           <FormDialog
-            label="Завести транк"
+            label="Добавить транк"
             title="Новый транк"
             variant="outline"
             className="ml-auto"
@@ -368,7 +368,7 @@ function NewTrunkForm({
 
   return (
     <DialogForm
-      submitLabel="Завести транк"
+      submitLabel="Добавить транк"
       canSubmit={ready}
       onSubmit={() =>
         onCreate({
@@ -491,7 +491,7 @@ function NewTrunkForm({
       )}
 
       <p className="text-muted-foreground sm:col-span-2">
-        Транк заводится выключенным: включите его, когда провайдер подтвердит доступ. Пароль после
+        Транк добавляется выключенным: включите его, когда провайдер подтвердит доступ. Пароль после
         сохранения не показывается — его можно заменить, но не посмотреть.
       </p>
     </DialogForm>

@@ -13,6 +13,7 @@ import type {
   PartnerFacingSuspension,
   SimStatus,
 } from '@zvonix/shared';
+import { GATEWAY_STATUS_NAME, PARTNER_SUSPENSION_NAME } from '@/lib/labels';
 
 export interface Sim {
   readonly id: string;
@@ -43,6 +44,8 @@ export interface Gateway {
    */
   readonly suspended_by: PartnerFacingSuspension | null;
   readonly model: string | null;
+  /** Имя SIP, под которым шлюз регистрируется. Пароль не отдаётся никогда. */
+  readonly sip_username: string;
   /**
    * Есть ли регистрация на узле. Без неё вызов не уйдёт вовсе: диалплан набирает шлюз
    * как зарегистрированного пользователя, и отбор кандидатов сужается узлом.
@@ -63,11 +66,21 @@ interface Trunk {
   readonly on_node: boolean;
 }
 
+/** Куда регистрировать шлюз — одно на всех. */
+export interface Connection {
+  readonly server: string;
+  readonly port: number;
+}
+
 export interface Equipment {
+  readonly connection: Connection;
   readonly gateways: readonly Gateway[];
   readonly trunks: readonly Trunk[];
   readonly spare_sims: readonly Sim[];
 }
+
+/** Ключ оборудования в кэше: список, страница шлюза и вызовы читают один ответ. */
+export const EQUIPMENT_KEY = ['partner', 'equipment'] as const;
 
 /** Все карты партнёра: и стоящие в портах, и лежащие отдельно. */
 export function simsOf(equipment: Equipment | undefined): Sim[] {
@@ -76,4 +89,11 @@ export function simsOf(equipment: Equipment | undefined): Sim[] {
     gateway.ports.flatMap((port) => (port.sim === null ? [] : [port.sim])),
   );
   return [...inPorts, ...equipment.spare_sims];
+}
+
+/** Состояние шлюза словами партнёра: у выключенного важнее, кто выключил (ADR-0047). */
+export function gatewayStateName(gateway: Gateway): string {
+  return gateway.suspended_by === null
+    ? GATEWAY_STATUS_NAME[gateway.status]
+    : PARTNER_SUSPENSION_NAME[gateway.suspended_by];
 }

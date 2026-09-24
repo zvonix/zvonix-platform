@@ -158,7 +158,7 @@ function UsersTable() {
               <TableHead className="h-8">Адрес подтверждён</TableHead>
               <TableHead className="h-8">Второй фактор</TableHead>
               <TableHead className="h-8">Последний вход</TableHead>
-              <TableHead className="h-8">Заведена</TableHead>
+              <TableHead className="h-8">Создана</TableHead>
               <TableHead className="h-8"> </TableHead>
             </TableRow>
           </TableHeader>

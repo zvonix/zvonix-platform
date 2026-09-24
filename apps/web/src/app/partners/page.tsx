@@ -121,7 +121,7 @@ function PartnersTable() {
               <TableHead className="h-8">Состояние</TableHead>
               <TableHead className="h-8 text-right">Причитается</TableHead>
               <TableHead className="h-8">Слушает записи</TableHead>
-              <TableHead className="h-8">Заведён</TableHead>
+              <TableHead className="h-8">Добавлен</TableHead>
               <TableHead className="h-8"> </TableHead>
             </TableRow>
           </TableHeader>

@@ -62,7 +62,7 @@ export default function SetupPage() {
   if (complete.isSuccess) {
     body = (
       <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
-        <p>Администратор заведён. Войдите с этим адресом и паролем.</p>
+        <p>Администратор создан. Войдите с этим адресом и паролем.</p>
         <Button asChild>
           <Link href="/login">Войти</Link>
         </Button>
@@ -195,7 +195,7 @@ export default function SetupPage() {
         )}
 
         <Button type="submit" disabled={complete.isPending || state.isPending}>
-          {complete.isPending ? 'Заводим…' : 'Завести администратора'}
+          {complete.isPending ? 'Создаём…' : 'Создать администратора'}
         </Button>
       </form>
     );

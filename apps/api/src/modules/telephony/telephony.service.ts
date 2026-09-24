@@ -9,6 +9,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
+  dependencyUnavailable,
   internal as internalError,
   regionKeyOf,
   notFound,
@@ -33,6 +34,7 @@ import { BillingRepository } from '../billing/billing.repository.js';
 import { CatalogRepository } from '../catalog/catalog.repository.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
+import { MAX_GATEWAY_PORTS } from './schemas.js';
 import { issueSipCredentials, issueSipUsername, type SipCredentials } from './sip-credentials.js';
 import {
   gatewayStateOf,
@@ -129,17 +131,34 @@ export class TelephonyService {
     actorRole: UserRole,
   ): Promise<{ gateway: GatewayRow; account: IssuedSipAccount }> {
     const credentials = issueSipCredentials('gateway', this.realm);
-    const gateway = await this.repository.createGateway({
-      partnerId: input.partnerId,
-      name: input.name,
-      type: input.type,
-      // Шлюз заводится неподтверждённым: учётная запись выдана, но каталог её не отдаёт,
-      // пока модерация не пройдена.
-      status: 'pending',
-      sipUsername: credentials.username,
-      a1Hash: credentials.a1Hash,
-      model: input.model,
-      portCount: input.portCount,
+    // Порты 1…N заводятся вместе со шлюзом, одной транзакцией. Раньше число записывалось,
+    // а портов не появлялось: партнёр указывал восемь и видел «портов не заведено»
+    // (владелец, 2026-09-24).
+    const gateway = await this.repository.transaction(async (tx) => {
+      const created = await this.repository.createGateway(
+        {
+          partnerId: input.partnerId,
+          name: input.name,
+          type: input.type,
+          // Шлюз заводится неподтверждённым: учётная запись выдана, но каталог её не отдаёт,
+          // пока модерация не пройдена.
+          status: 'pending',
+          sipUsername: credentials.username,
+          a1Hash: credentials.a1Hash,
+          model: input.model,
+          portCount: input.portCount,
+        },
+        tx,
+      );
+      // У транка портов не бывает: SIM в нём нет.
+      if (input.type !== 'sip_trunk') {
+        await this.repository.createPorts(
+          created.id,
+          Array.from({ length: input.portCount }, (_, index) => index + 1),
+          tx,
+        );
+      }
+      return created;
     });
 
     await this.audit.record({
@@ -149,7 +168,12 @@ export class TelephonyService {
       actorUserId,
       actorRole,
       // Ни пароля, ни хеша: журнал читают люди, которым они не нужны.
-      after: { name: gateway.name, type: gateway.type, sip_username: gateway.sipUsername },
+      after: {
+        name: gateway.name,
+        type: gateway.type,
+        sip_username: gateway.sipUsername,
+        port_count: input.type === 'sip_trunk' ? 0 : input.portCount,
+      },
     });
 
     return { gateway, account: this.toAccount(credentials) };
@@ -496,7 +520,8 @@ export class TelephonyService {
   async createSim(
     input: {
       partnerId: Id<'partner'>;
-      operatorId: Id<'operator'>;
+      /** `null` — оператора называет резолвер по номеру; не назвал — отказ. */
+      operatorId: Id<'operator'> | null;
       msisdn: Msisdn;
       iccid: string | null;
       activatedAt: Date | null;
@@ -506,12 +531,31 @@ export class TelephonyService {
   ): Promise<SimCardRow> {
     const resolution = await this.resolver.resolve(input.msisdn);
     let confirmedAt: Date | null = null;
+    let operatorId = input.operatorId;
+
+    if (operatorId === null) {
+      // Спрашивать у партнёра то, что площадка узнаёт по номеру сама, значило бы только
+      // дать ему ошибиться. Подтверждённый источник называет того, кто обслуживает номер;
+      // без него — владелец диапазона по плану нумерации, и карта заводится
+      // с неподтверждённым оператором, как и с оператором, названным партнёром: включить
+      // её без подтверждения нельзя (ADR-0013). Нет и владельца — отказ, а не догадка.
+      const known = resolution.serving ?? resolution.rangeOwner;
+      if (known === undefined) {
+        throw dependencyUnavailable('Не удалось определить оператора номера', {
+          details: {
+            remedy:
+              'Номера нет в плане нумерации площадки. Проверьте его; если он верный — напишите площадке.',
+          },
+        });
+      }
+      operatorId = known.id;
+    }
 
     if (resolution.confirmed && resolution.serving !== undefined) {
-      if (resolution.serving.id !== input.operatorId) {
+      if (resolution.serving.id !== operatorId) {
         throw validationFailed('Объявленный оператор не совпадает с фактическим', {
           details: {
-            declared_operator_id: input.operatorId,
+            declared_operator_id: operatorId,
             actual_operator_id: resolution.serving.id,
             actual_operator: resolution.serving.name,
           },
@@ -522,7 +566,7 @@ export class TelephonyService {
 
     const sim = await this.repository.createSim({
       partnerId: input.partnerId,
-      operatorId: input.operatorId,
+      operatorId,
       msisdn: input.msisdn,
       iccid: input.iccid,
       activatedAt: input.activatedAt,
@@ -621,9 +665,27 @@ export class TelephonyService {
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<GatewayPortRow> {
+    const [port] = await this.addPorts(gatewayId, { portNumber }, actorUserId, actorRole);
+    if (port === undefined) throw new Error('Вставка порта не вернула строку');
+    return port;
+  }
+
+  /**
+   * Порт с заданным номером или несколько следующих по порядку.
+   *
+   * «Следующие» — после наибольшего заведённого, под той же блокировкой шлюза, что
+   * и проверка: два одновременных «добавить четыре» иначе посчитали бы от одного
+   * и того же номера, и второе упало бы на уникальности.
+   */
+  async addPorts(
+    gatewayId: GatewayId,
+    spec: { portNumber: number } | { count: number },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<GatewayPortRow[]> {
     // Под блокировкой шлюза: порт, заведённый в миг списания, остался бы у списанного
     // шлюза (ADR-0048).
-    const port = await this.repository.transaction(async (tx) => {
+    const ports = await this.repository.transaction(async (tx) => {
       const gateway = await this.repository.lockGatewayForPorts(gatewayId, tx);
       if (gateway === undefined) throw notFound('Шлюз не найден');
       // У транка портов не бывает: к провайдеру регистрируемся мы, а SIM в нём нет.
@@ -632,18 +694,33 @@ export class TelephonyService {
       // Списанный шлюз портов не держит (ADR-0043, «Ревизия»): новый порт стал бы местом
       // для карты, которой не достать.
       if (gateway.status === 'retired') throw conflict('Шлюз списан: заводить порт некуда');
-      return this.repository.createPort({ gatewayId, portNumber }, tx);
+
+      if ('portNumber' in spec)
+        return this.repository.createPorts(gatewayId, [spec.portNumber], tx);
+      const last = await this.repository.lastPortNumber(gatewayId, tx);
+      if (last + spec.count > MAX_GATEWAY_PORTS) {
+        throw conflict(`У шлюза не бывает больше ${String(MAX_GATEWAY_PORTS)} портов`, {
+          details: { last_port_number: last },
+        });
+      }
+      return this.repository.createPorts(
+        gatewayId,
+        Array.from({ length: spec.count }, (_, index) => last + index + 1),
+        tx,
+      );
     });
 
-    await this.audit.record({
-      action: 'gateway_port.created',
-      entityType: 'gateway_port',
-      entityId: port.id,
-      actorUserId,
-      actorRole,
-      after: { gateway_id: gatewayId, port_number: portNumber },
-    });
-    return port;
+    for (const port of ports) {
+      await this.audit.record({
+        action: 'gateway_port.created',
+        entityType: 'gateway_port',
+        entityId: port.id,
+        actorUserId,
+        actorRole,
+        after: { gateway_id: gatewayId, port_number: port.portNumber },
+      });
+    }
+    return ports;
   }
 
   /**
@@ -1285,7 +1362,7 @@ export class TelephonyService {
   async createOwnSim(
     input: {
       partnerId: PartnerId;
-      operatorId: Id<'operator'>;
+      operatorId: Id<'operator'> | null;
       msisdn: Msisdn;
       iccid: string | null;
       activatedAt: Date | null;

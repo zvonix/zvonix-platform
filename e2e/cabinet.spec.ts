@@ -223,7 +223,7 @@ test.describe('поддержка видит, но не меняет', () => {
     await page.goto('/partners');
 
     await expect(page.getByText('Только чтение:')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Завести партнёра' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Добавить партнёра' })).toHaveCount(0);
     // Данные при этом на месте: раздел открыт целиком, а не наполовину.
     await expect(page.getByText('Иванов Иван Иванович')).toBeVisible();
   });
@@ -234,7 +234,7 @@ test.describe('поддержка видит, но не меняет', () => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/partners');
 
-    await expect(page.getByRole('button', { name: 'Завести партнёра' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Добавить партнёра' })).toBeVisible();
     await expect(page.getByText('Только чтение:')).toHaveCount(0);
   });
 });
@@ -253,7 +253,8 @@ test.describe('чужой раздел', () => {
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/money');
 
-    await expect(page.getByText('Иванов Иван Иванович')).toBeVisible();
+    // Заголовок, а не любой текст: то же имя стоит в углу меню, как только загрузится сессия.
+    await expect(page.getByRole('heading', { name: 'Иванов Иван Иванович' })).toBeVisible();
     await expect(page.getByText('Партнёр 17')).toBeVisible();
     // Заработка ещё нет, и это нормальное состояние нового партнёра.
     await expect(page.getByText('Заработано, к выплате')).toBeVisible();
@@ -300,11 +301,11 @@ test.describe('клиент заводит доступ своей систем�
 
     // До ADR-0044 ключ выпускал администратор, и секрет обязан был дойти до клиента
     // перепиской. Теперь он появляется там же, где его и вставляют.
-    await page.getByRole('button', { name: 'Завести ключ' }).click();
+    await page.getByRole('button', { name: 'Создать ключ' }).click();
     await page.getByLabel('Назначение').fill('Диспетчерская на проверке');
     await page
       .getByRole('dialog')
-      .getByRole('button', { name: 'Завести и показать секрет' })
+      .getByRole('button', { name: 'Создать и показать секрет' })
       .click();
 
     await expect(page.getByText('Ключ «Диспетчерская на проверке»')).toBeVisible();
@@ -315,11 +316,11 @@ test.describe('клиент заводит доступ своей систем�
     await signIn(page, PEOPLE.client);
     await page.goto('/my/integration');
 
-    await page.getByRole('button', { name: 'Завести ключ' }).click();
+    await page.getByRole('button', { name: 'Создать ключ' }).click();
     await page.getByLabel('Назначение').fill('Ключ на отзыв');
     await page
       .getByRole('dialog')
-      .getByRole('button', { name: 'Завести и показать секрет' })
+      .getByRole('button', { name: 'Создать и показать секрет' })
       .click();
     await expect(page.getByText('Ключ «Ключ на отзыв»')).toBeVisible();
 
@@ -346,25 +347,45 @@ test.describe('клиент заводит доступ своей систем�
   });
 });
 
-test.describe('партнёр заводит своё оборудование', () => {
-  test('заводит шлюз и получает пароль SIP там же, где его вводит', async ({ page }) => {
+/** Выбрать переход в окне «Состояние»: вариант, затем кнопку, которая его называет. */
+async function changeState(page: Page, action: string): Promise<void> {
+  await page.getByRole('button', { name: 'Состояние' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: action, exact: true }).first().click();
+  await dialog.getByRole('button', { name: action, exact: true }).last().click();
+  await expect(dialog).toHaveCount(0);
+}
+
+test.describe('партнёр добавляет своё оборудование', () => {
+  test('шлюз добавляется с портами, настройки подключения видны на его странице', async ({
+    page,
+  }) => {
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/equipment');
 
-    // До ADR-0043 здесь стояло «состав оборудования меняет администратор», и завести
-    // шлюз партнёр не мог ничем: ни кнопки, ни обработчика.
-    await page.getByRole('button', { name: 'Завести шлюз' }).click();
+    await page.getByRole('button', { name: 'Добавить шлюз' }).click();
     await page.getByLabel('Название').fill('GOIP на проверке');
-    await page.getByRole('dialog').getByRole('button', { name: 'Завести шлюз' }).click();
+    await page.getByLabel('Слотов под SIM').fill('4');
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
 
-    // Пароль показывается один раз и приходит туда же, где партнёр настраивает железо.
-    await expect(page.getByText('Доступ для этого шлюза')).toBeVisible();
-    await expect(page.getByText('GOIP на проверке')).toBeVisible();
+    // Пароль показывается один раз, а шлюз встаёт строкой в список — не «где-то сверху».
+    await expect(page.getByText('Доступ для нового шлюза')).toBeVisible();
+    await expect(page.getByRole('row', { name: /GOIP на проверке/u })).toContainText('0 из 4');
+
+    await page.getByRole('link', { name: /Открыть шлюз/u }).click();
+    await expect(page.getByRole('heading', { name: 'GOIP на проверке' })).toBeVisible();
+
+    // Сервер, порт и логин видны всегда: раньше — только в минуту добавления.
+    const connection = page.getByRole('region', { name: 'Подключение' });
+    await expect(connection).toContainText('5060');
+    await expect(connection).toContainText(/gw-/u);
+
+    // Указали четыре слота — четыре порта, а не «портов не заведено».
+    const ports = page.getByRole('region', { name: 'Порты' });
+    await expect(ports.getByRole('button', { name: 'Вставить SIM' })).toHaveCount(4);
   });
 
-  test('заводит SIM: справочник операторов ему открыт', async ({ page }) => {
-    // Форма брала операторов из `GET /operators`, закрытого партнёру: `403` на каждом
-    // открытии раздела и пустой выбор, с которым SIM не завести (ui-review, 2026-09-14).
+  test('SIM вставляется в порт по номеру, оператора не спрашивают', async ({ page }) => {
     const denied: string[] = [];
     page.on('response', (response) => {
       if (response.status() === 403) denied.push(response.url());
@@ -372,16 +393,20 @@ test.describe('партнёр заводит своё оборудование',
 
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/equipment');
+    await page.getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByLabel('Название').fill('Шлюз под карту');
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByRole('link', { name: 'Шлюз под карту' }).click();
 
-    await page.getByRole('button', { name: 'Завести SIM' }).click();
-    await page.getByLabel('Номер карты').fill('+7 913 555-00-17');
-    await page.getByLabel('Оператор').selectOption({ label: 'МегаФон' });
-    await page.getByRole('dialog').getByRole('button', { name: 'Завести SIM' }).click();
+    await page.getByRole('button', { name: 'Вставить SIM' }).first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByLabel('Оператор')).toHaveCount(0);
+    await dialog.getByLabel('Номер карты').fill('+7 913 555-00-17');
+    await dialog.getByRole('button', { name: 'Вставить' }).click();
 
-    // Источник оператора на стенде выключен: карта заводится и ждёт подтверждения.
-    await expect(
-      page.getByRole('row').filter({ hasText: '9135550017' }).filter({ hasText: 'МегаФон' }),
-    ).toBeVisible();
+    // Источника оператора на стенде нет: площадка честно говорит, что определить
+    // не смогла, а не заводит карту с выдуманным оператором.
+    await expect(dialog.getByText('Не удалось определить оператора номера')).toBeVisible();
     expect(denied).toEqual([]);
   });
 
@@ -389,47 +414,42 @@ test.describe('партнёр заводит своё оборудование',
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/equipment');
 
-    await page.getByRole('button', { name: 'Завести шлюз' }).click();
+    await page.getByRole('button', { name: 'Добавить шлюз' }).click();
     await page.getByLabel('Название').fill('Шлюз на выключение');
-    await page.getByRole('dialog').getByRole('button', { name: 'Завести шлюз' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByRole('link', { name: 'Шлюз на выключение' }).click();
 
-    const card = page.getByRole('region', { name: 'Шлюз на выключение' });
-    await card.getByRole('button', { name: 'Включить' }).click();
-    await expect(card.getByText('Работает', { exact: true })).toBeVisible();
+    await changeState(page, 'Включить');
+    await expect(page.getByText('Работает', { exact: true })).toBeVisible();
 
     // До ADR-0047 выключение партнёра не отличалось от отключения площадкой,
     // и за одной кнопкой «Включить» приходилось идти к администратору.
-    const dialog = page.getByRole('alertdialog', { name: 'Выключить шлюз «Шлюз на выключение»' });
-    await card.getByRole('button', { name: 'Выключить' }).click();
-    await expect(dialog).toContainText('обратно');
-    await dialog.getByRole('button', { name: 'Выключить шлюз' }).click();
-
-    await expect(card.getByText('Выключен вами')).toBeVisible();
-    await card.getByRole('button', { name: 'Включить' }).click();
-    await expect(card.getByText('Работает', { exact: true })).toBeVisible();
+    await changeState(page, 'Выключить');
+    await expect(page.getByText('Выключен вами')).toBeVisible();
+    await changeState(page, 'Включить');
+    await expect(page.getByText('Работает', { exact: true })).toBeVisible();
   });
 
-  test('списание спрашивает с последствием: отменить его будет нечем', async ({ page }) => {
+  test('удаление называет последствие до нажатия и уводит шлюз из списка', async ({ page }) => {
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/equipment');
 
-    await page.getByRole('button', { name: 'Завести шлюз' }).click();
-    await page.getByLabel('Название').fill('Шлюз на списание');
-    await page.getByRole('dialog').getByRole('button', { name: 'Завести шлюз' }).click();
-    await expect(page.getByText('Шлюз на списание')).toBeVisible();
+    await page.getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByLabel('Название').fill('Шлюз на удаление');
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByRole('link', { name: 'Шлюз на удаление' }).click();
 
-    // Окно называет последствие, а не «вы уверены?»: списание стоит рядом с «выключить»,
+    await page.getByRole('button', { name: 'Состояние' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Удалить навсегда' }).first().click();
+    // Окно называет последствие, а не «вы уверены?»: удаление стоит рядом с «выключить»,
     // которое отменяется одним нажатием, и разница должна быть видна до нажатия.
-    const card = page.getByRole('region', { name: 'Шлюз на списание' });
-    const dialog = page.getByRole('alertdialog', { name: 'Списать шлюз «Шлюз на списание»' });
-    await card.getByRole('button', { name: 'Списать' }).click();
-    await expect(dialog).toContainText('навсегда');
-    await dialog.getByRole('button', { name: 'Списать шлюз' }).click();
+    await expect(dialog.getByRole('status')).toContainText('навсегда');
+    await dialog.getByRole('button', { name: 'Удалить навсегда' }).last().click();
 
-    await expect(page.getByRole('region', { name: 'Шлюз на списание' })).toHaveCount(0);
-    // Кнопка «Списать» ушла вместе со шлюзом, но фокус не падает на страницу: он встаёт
-    // на ближайший доступный элемент там, где кнопка стояла (ConfirmAction).
-    await expect(page.getByRole('button', { name: 'Завести шлюз' })).toBeFocused();
+    await expect(page.getByText(/Такого шлюза нет/u)).toBeVisible();
+    await page.getByRole('link', { name: '← Всё оборудование' }).click();
+    await expect(page.getByRole('row', { name: /Шлюз на удаление/u })).toHaveCount(0);
   });
 });
 
@@ -650,19 +670,19 @@ test.describe('первый запуск', () => {
     await page.getByLabel('Имя').fill('Владелец Площадки');
     await page.getByLabel('Пароль — не короче 12 знаков').fill('достаточно длинный пароль');
     await page.getByLabel('Пароль ещё раз').fill('другой длинный пароль');
-    await page.getByRole('button', { name: 'Завести администратора' }).click();
+    await page.getByRole('button', { name: 'Создать администратора' }).click();
     // Несовпадение ловится до отправки: опечатка в пароле единственного администратора
     // запирает площадку.
     await expect(page.getByText('Пароли не совпадают')).toBeVisible();
     expect(posted).toBe(0);
 
     await page.getByLabel('Пароль ещё раз').fill('достаточно длинный пароль');
-    await page.getByRole('button', { name: 'Завести администратора' }).click();
+    await page.getByRole('button', { name: 'Создать администратора' }).click();
     await expect(page.getByText('Код первого запуска не подходит')).toBeVisible();
 
     await page.getByLabel('Код первого запуска').fill('B4PR-3N3H-CCP5');
-    await page.getByRole('button', { name: 'Завести администратора' }).click();
-    await expect(page.getByText('Администратор заведён')).toBeVisible();
+    await page.getByRole('button', { name: 'Создать администратора' }).click();
+    await expect(page.getByText('Администратор создан')).toBeVisible();
     await page.getByRole('link', { name: 'Войти' }).click();
     await expect(page).toHaveURL(/\/login$/u);
   });

@@ -28,7 +28,7 @@ export function NewNodeForm({ onCreate }: { onCreate: (draft: NodeDraft) => Prom
 
   return (
     <DialogForm
-      submitLabel="Завести и выдать команду"
+      submitLabel="Добавить и выдать команду"
       canSubmit={trimmedName.length >= 2}
       onSubmit={() =>
         onCreate({

@@ -117,6 +117,31 @@ corepack enable
 policy="$(redis-cli config get maxmemory-policy | tail -1)"
 [ "$policy" = "noeviction" ] || die "в Redis maxmemory-policy=${policy}, нужна noeviction (ADR-0020)"
 
+step "Корневой сертификат Минцифры"
+# План нумерации лежит на opendata.digital.gov.ru, а его цепочка ведёт к «Russian Trusted
+# Root CA», которого нет в ca-certificates Ubuntu (ADR-0032). Без него загрузка плана падает
+# каждый час, операторов в справочнике нет — ни одна SIM не заводится и ни один вызов
+# не маршрутизируется. Так и случилось на первом сервере: NODE_OPTIONS=--use-system-ca
+# в окружении был, а самого сертификата в хранилище — нет (2026-09-24).
+#
+# Сертификат получает доверие для любых адресов, поэтому ставится только при совпадении
+# отпечатка, записанного в ADR-0032. Не совпал — отказ: подменённый корень хуже
+# незагруженного плана.
+MINCIFRY_CA=/usr/local/share/ca-certificates/russian_trusted_root_ca.crt
+MINCIFRY_CA_SHA256="D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31"
+if [ ! -s "$MINCIFRY_CA" ]; then
+  ca_download="$(mktemp)"
+  curl -fsSL https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt -o "$ca_download" \
+    || die "не скачался корневой сертификат Минцифры с gu-st.ru — без него не загрузится план нумерации"
+  ca_fingerprint="$(openssl x509 -in "$ca_download" -noout -fingerprint -sha256 | cut -d= -f2)"
+  [ "$ca_fingerprint" = "$MINCIFRY_CA_SHA256" ] \
+    || die "отпечаток сертификата Минцифры ${ca_fingerprint} не совпал с записанным в ADR-0032 — не ставлю"
+  install -m 0644 "$ca_download" "$MINCIFRY_CA"
+  rm -f "$ca_download"
+  update-ca-certificates >/dev/null
+  echo "сертификат Минцифры установлен"
+fi
+
 step "Подкачка"
 # Сервер без подкачки при нехватке памяти убивает процессы — а с ними и звонки. Замер
 # 2026-09-22 на чистой машине: 1 ГБ памяти, подкачки нет, свободно ~400 МБ ещё до узла АТС,

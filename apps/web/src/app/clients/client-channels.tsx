@@ -137,10 +137,10 @@ export function ClientChannels({
         <h2 className="font-semibold">Каналы</h2>
         {canChange && (
           <FormDialog
-            label="Завести канал"
+            label="Добавить канал"
             variant="outline"
             title="Новый канал"
-            description="После заведения кабинет один раз покажет имя и пароль SIP."
+            description="После добавления кабинет один раз покажет имя и пароль SIP."
           >
             <NewChannelForm onCreate={(draft) => create.mutateAsync(draft)} />
           </FormDialog>
@@ -291,7 +291,7 @@ function NewChannelForm({ onCreate }: { onCreate: (draft: ChannelDraft) => Promi
 
   return (
     <DialogForm
-      submitLabel="Завести канал"
+      submitLabel="Добавить канал"
       canSubmit={nameValid}
       onSubmit={() => onCreate({ name: trimmedName, callerId: callerId.trim(), recordingRequired })}
     >

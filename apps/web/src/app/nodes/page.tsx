@@ -131,9 +131,9 @@ function NodesView() {
         </p>
         {canChange ? (
           <FormDialog
-            label="Завести узел"
+            label="Добавить узел"
             title="Новый узел"
-            description="После заведения кабинет один раз покажет команду установки для сервера."
+            description="После добавления кабинет один раз покажет команду установки для сервера."
             className="ml-auto"
           >
             <NewNodeForm onCreate={(draft) => provision.mutateAsync(draft)} />
@@ -176,7 +176,7 @@ function NodesView() {
           </pre>
           <p className="text-muted-foreground">
             Выполнять на будущем узле от имени пользователя с правами администратора. Пока команда
-            не выполнена, узел остаётся в состоянии «заведён» и вызовов не принимает.
+            не выполнена, узел остаётся в состоянии «добавлен» и вызовов не принимает.
           </p>
         </OneTimeSecret>
       )}
@@ -207,7 +207,7 @@ function NodesView() {
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
                   Узлов нет — значит, вызовы не идут вовсе: маршрут запрашивает узел.
-                  {canChange && ' Заведите первый и выполните выданную команду на сервере.'}
+                  {canChange && ' Добавьте первый и выполните выданную команду на сервере.'}
                 </TableCell>
               </TableRow>
             )}

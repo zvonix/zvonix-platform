@@ -96,7 +96,8 @@ async function createActiveGateway(
     method: 'POST',
     url: '/gateways',
     headers: auth(),
-    payload: { partnerId, name: unique('Шлюз'), type, portCount: 4 },
+    // Без портов: тесты заводят их сами, с теми номерами, которые проверяют.
+    payload: { partnerId, name: unique('Шлюз'), type },
   });
   expect(created.statusCode).toBe(201);
   const id = created.json<{ gateway: { id: string } }>().gateway.id;

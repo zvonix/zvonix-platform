@@ -148,7 +148,7 @@ function PartnerCard({ id }: { id: string }) {
             <dd>{partner.listens_to_recordings ? 'да' : 'нет'}</dd>
           </div>
           <div className="flex gap-1">
-            <dt className="text-muted-foreground">Заведён:</dt>
+            <dt className="text-muted-foreground">Добавлен:</dt>
             <dd className="num">{moment(partner.created_at)}</dd>
           </div>
         </dl>
