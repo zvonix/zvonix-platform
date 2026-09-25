@@ -223,6 +223,8 @@ export class TestCallService {
       status: testStatusOf(status === 'completed' ? 'answered' : status),
       hangupCause: cdr.hangupCause,
       sipStatus: cdr.sipStatus ?? null,
+      sipPhrase: cdr.sipPhrase ?? null,
+      rangAt: cdr.progressAt ?? null,
       talkSeconds: cdr.billableSeconds,
     });
   }

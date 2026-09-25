@@ -344,7 +344,7 @@ describe('тестовый звонок с SIM', () => {
     const command = commands.at(-1) ?? '';
     expect(command).toContain(`zvonix_test_call=${call.id}`);
     expect(command).toContain(
-      `[sip_invite_req_uri=sip:79130001122@${REALM}]user/${port(1).username}@${REALM}`,
+      `[sip_invite_to_uri=<sip:79130001122@${REALM}>]user/${port(1).username}@${REALM}`,
     );
     expect(command).toMatch(/^originate \{.*originate_timeout=40.*\}\[/u);
     expect(command).toContain('&playback(tone_stream://');
@@ -487,6 +487,52 @@ describe('тестовый звонок с SIM', () => {
       return (result.rows[0] as { after: { destination: string } } | undefined)?.after;
     });
     expect(audit?.destination).toBe('7913*****28');
+  });
+
+  it('отказ сети после набора: CDR дописывает ответ шлюза дословно и отметку «набирал»', async () => {
+    // Так выглядела проба на живом GOIP (2026-09-25): «183 Ringing», затем отказ через
+    // полминуты. Кабинет должен назвать участок — сеть оператора, — а не гадать о карте.
+    const extra = await createGateway(partner.token, 1);
+    const [line] = extra.ports;
+    if (line === undefined) throw new Error('Нет порта');
+    const simId = await simInPort(partner.token, line);
+    nextReply = '-ERR NORMAL_TEMPORARY_FAILURE';
+    const call = (
+      await post(
+        `/partner/sim-cards/${simId}/test-call`,
+        { destination: '79130001129' },
+        partner.token,
+      )
+    ).json<{ test_call: { id: string } }>().test_call;
+    await settled(call.id, partner.token, '/partner/test-calls');
+
+    const cdr = await api().inject({
+      method: 'POST',
+      url: '/node/cdr',
+      headers: as(nodeKey),
+      payload: {
+        variables: {
+          uuid: call.id,
+          zvonix_test_call: call.id,
+          billsec: '0',
+          hangup_cause: 'NORMAL_TEMPORARY_FAILURE',
+          sip_invite_failure_status: '503',
+          sip_invite_failure_phrase: 'Service Unavailable',
+          progress_stamp: '2026-09-25 12:49:40.000000',
+        },
+      },
+    });
+    expect(cdr.statusCode).toBe(200);
+
+    const view = (await get(`/partner/test-calls/${call.id}`, partner.token)).json<{
+      test_call: { status: string; sip_status: string; sip_phrase: string; rang: boolean };
+    }>().test_call;
+    expect(view).toMatchObject({
+      status: 'failed',
+      sip_status: '503',
+      sip_phrase: 'Service Unavailable',
+      rang: true,
+    });
   });
 
   it('номер не российский — 400', async () => {

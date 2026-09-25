@@ -521,25 +521,36 @@ export const TEST_CALL_STATUS_TEXT: Record<Exclude<TestCallStatus, 'failed'>, st
     'Итог не пришёл: площадка перезапускалась во время звонка. Позвоните ещё раз через минуту.',
 };
 
-/** Причины отбоя FreeSWITCH, которые партнёр может исправить сам. */
-const TEST_CALL_CAUSE_TEXT: Readonly<Record<string, string>> = {
-  USER_NOT_REGISTERED:
-    'Линия не на связи с площадкой — проверьте в GOIP логин и пароль линии и адрес площадки.',
-  CALL_REJECTED: 'Шлюз отклонил звонок — проверьте, что линия включена и карта видит сеть.',
-  NORMAL_TEMPORARY_FAILURE:
-    'Сбой при наборе — карта, скорее всего, не зарегистрирована в сети оператора: проверьте сигнал и баланс.',
-  NETWORK_OUT_OF_ORDER: 'Сеть оператора не приняла звонок — проверьте сигнал и баланс карты.',
-  UNALLOCATED_NUMBER: 'Такого номера нет — проверьте номер.',
-  INVALID_NUMBER_FORMAT: 'Номер набран неверно — проверьте номер.',
-  NO_ROUTE_DESTINATION: 'Номер недоступен из сети оператора карты.',
-  SUBSCRIBER_ABSENT: 'Абонент недоступен — телефон выключен или вне сети.',
-  RECOVERY_ON_TIMER_EXPIRE: 'Шлюз не ответил вовремя — проверьте, что он включён и в сети.',
-  ESL_CONNECT: 'Площадка не смогла передать команду на звонок — напишите администратору площадки.',
-  ESL_AUTH: 'Площадка не смогла передать команду на звонок — напишите администратору площадки.',
-  ESL_PROTOCOL: 'Площадка не смогла передать команду на звонок — напишите администратору площадки.',
-};
-
-export function testCallFailureText(cause: string | null): string {
-  if (cause === null) return 'Звонок не прошёл.';
-  return TEST_CALL_CAUSE_TEXT[cause] ?? `Звонок не прошёл: ${cause}.`;
+/**
+ * Почему тестовый звонок не прошёл — **по участку обрыва, без догадок**.
+ *
+ * Раньше код отбоя FreeSWITCH переводился в причину «на глаз»: `NORMAL_TEMPORARY_FAILURE`
+ * становился «карта не зарегистрирована в сети», хотя на деле запрос не дошёл до GOIP
+ * вовсе (владелец, 2026-09-25: «может указывать верную ошибку?»). Теперь текст строится
+ * из фактов записи о звонке: дошёл ли звонок до шлюза, начал ли шлюз набор, что он ответил.
+ */
+export function testCallFailureText(call: {
+  readonly hangup_cause: string | null;
+  readonly sip_status: string | null;
+  readonly sip_phrase: string | null;
+  readonly rang: boolean;
+}): string {
+  const cause = call.hangup_cause ?? '';
+  if (cause.startsWith('ESL_')) {
+    return 'Площадка не смогла передать команду на звонок своему узлу — напишите администратору площадки.';
+  }
+  if (cause === 'USER_NOT_REGISTERED' || cause === 'SUBSCRIBER_ABSENT') {
+    return 'Линия не на связи с площадкой — звонок до шлюза не отправлялся.';
+  }
+  const answer =
+    call.sip_status === null
+      ? `код ${cause === '' ? 'неизвестен' : cause}`
+      : `${call.sip_status}${call.sip_phrase === null ? '' : ` ${call.sip_phrase}`}`;
+  if (call.rang) {
+    return `Шлюз принял звонок и набирал номер, но сеть оператора отказала. Ответ шлюза: ${answer}.`;
+  }
+  if (call.sip_status !== null) {
+    return `Шлюз получил звонок и отказал, не начав набор. Ответ шлюза: ${answer}.`;
+  }
+  return `Звонок не прошёл: ${answer}.`;
 }

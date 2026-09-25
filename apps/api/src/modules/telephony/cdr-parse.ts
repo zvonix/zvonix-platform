@@ -33,8 +33,15 @@ export interface ParsedCdr {
    * ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)): вызов вне биллинга.
    */
   readonly testCallId: string | undefined;
-  /** Код SIP, которым закончилось плечо к шлюзу (`sip_term_status`). */
+  /**
+   * Код SIP ответа шлюза: отказ на INVITE (`sip_invite_failure_status`), иначе код,
+   * которым закончилось плечо (`sip_term_status`).
+   */
   readonly sipStatus: string | undefined;
+  /** Текст этого ответа, как его прислал шлюз: «Service Unavailable», «Not Found». */
+  readonly sipPhrase: string | undefined;
+  /** Когда шлюз сообщил, что набирает (`180`/`183`). Пусто — до набора не дошло. */
+  readonly progressAt: Date | undefined;
 }
 
 export class CdrParseError extends Error {
@@ -74,7 +81,9 @@ export function parseCdr(body: unknown): ParsedCdr {
     endedAt: stamp(source['end_stamp']),
     rejectReason: text(source['zvonix_reject_reason']),
     testCallId: text(source['zvonix_test_call']),
-    sipStatus: text(source['sip_term_status']),
+    sipStatus: text(source['sip_invite_failure_status']) ?? text(source['sip_term_status']),
+    sipPhrase: text(source['sip_invite_failure_phrase']) ?? text(source['sip_term_phrase']),
+    progressAt: stamp(source['progress_stamp']) ?? stamp(source['progress_media_stamp']),
   };
 }
 

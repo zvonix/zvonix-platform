@@ -46,15 +46,20 @@ export function simDialTarget(
 }
 
 /**
- * Строка набора для FreeSWITCH: `[sip_invite_req_uri=sip:<набор>@realm]user/<имя>@realm`.
+ * Строка набора для FreeSWITCH: `[sip_invite_to_uri=<sip:<набор>@realm>]user/<имя>@realm`.
  *
- * `user/…` находит регистрацию — куда слать INVITE, но в строке запроса оставляет имя
- * учётной записи. Номер с префиксом линии кладётся туда переменной плеча.
+ * **Номер — в заголовке `To`, адрес запроса — вход линии.** Раньше номер клали в адрес
+ * запроса (`sip_invite_req_uri=sip:<номер>@realm`), и на живом узле (2026-09-25) это
+ * сломалось дважды: FreeSWITCH отправлял такой запрос по адресу realm — то есть самому
+ * себе, и до GOIP звонок не доходил; а направленный на GOIP, он получал `404`: GOIP
+ * со входом по линиям ждёт в адресе запроса свой вход. С номером в `To` запрос уходит
+ * по адресу регистрации линии (`user/…` → `sofia_contact`), и GOIP начинает набор —
+ * проверено ручной пробой с узла.
  *
  * Не экранирована: диалплан экранирует её под XML сам, команде ESL экранирование
  * не нужно — имя, префикс и номер здесь только из букв, цифр и дефиса.
  */
 export function simEndpoint(target: SimDialTarget, destination: string, realm: string): string {
   const dialled = `${target.linePrefix ?? ''}${destination}`;
-  return `[sip_invite_req_uri=sip:${dialled}@${realm}]user/${target.sipUsername}@${realm}`;
+  return `[sip_invite_to_uri=<sip:${dialled}@${realm}>]user/${target.sipUsername}@${realm}`;
 }
