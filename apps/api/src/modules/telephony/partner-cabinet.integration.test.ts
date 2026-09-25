@@ -816,13 +816,17 @@ describe('партнёр заводит своё оборудование (ADR-0
     }>().sim;
     expect(sim.status).toBe('new');
 
-    // Источник о номере ничего не сказал — включать нечего проверять, и отказ говорит это.
-    const refused = await post(
+    // Источник о номере ничего не сказал — карта всё равно включается: подтверждение
+    // оператора площадкой не требуется (владелец, 2026-09-25).
+    const enabled = await post(
       `/partner/sim-cards/${sim.id}/status`,
       { status: 'active' },
       as(mine.token),
     );
-    expect(refused.json<{ error: { code: string } }>().error.code).toBe('validation_failed');
+    expect(enabled.statusCode).toBe(201);
+    expect(
+      enabled.json<{ sim: { status: string; operator_confirmed_at: string | null } }>().sim,
+    ).toMatchObject({ status: 'active', operator_confirmed_at: null });
   });
 
   it('SIM с подтверждённым оператором партнёр включает сам', async () => {

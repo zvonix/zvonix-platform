@@ -58,10 +58,11 @@ export function PortRow({
           <span className="text-faint">—</span>
         ) : (
           <>
+            {/*
+              Подтверждение оператора площадкой партнёру ничего не даёт и ничего от него
+              не требует (владелец, 2026-09-25) — здесь только состояние карты.
+            */}
             {SIM_STATUS_NAME[port.sim.status]}
-            {port.sim.operator_confirmed_at === null && (
-              <span className="text-warn"> · оператор не подтверждён</span>
-            )}
           </>
         )}
         {/*
