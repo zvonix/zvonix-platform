@@ -335,9 +335,13 @@ if command -v fail2ban-client >/dev/null 2>&1; then
       fail2ban-client ping >/dev/null 2>&1 && break
       sleep 1
     done
-    fail2ban-client status zvonix-freeswitch >/dev/null 2>&1 \
-      && echo "Подбор паролей SIP закрывается: 20 неудач за 10 минут — час блокировки" \
-      || echo "ВНИМАНИЕ: тюрьма zvonix-freeswitch не поднялась — journalctl -u fail2ban" >&2
+    # Две тюрьмы (ревизия 2026-09-25): чужие логины — сканеры, логины площадки — шлюз
+    # партнёра со старым паролем, его блокирует только поток уровня атаки.
+    for jail in zvonix-freeswitch zvonix-freeswitch-known; do
+      fail2ban-client status "$jail" >/dev/null 2>&1 \
+        || echo "ВНИМАНИЕ: тюрьма $jail не поднялась — journalctl -u fail2ban" >&2
+    done
+    echo "Подбор паролей SIP закрывается на порту 5060: чужие логины — 5 неудач за час, блок на сутки; свои — 1200 за 10 минут, блок на час"
   else
     echo "ВНИМАНИЕ: журнал FreeSWITCH не найден (${FREESWITCH_LOG}) — защита от подбора паролей SIP не включена" >&2
   fi

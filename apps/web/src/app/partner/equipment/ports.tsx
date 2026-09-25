@@ -41,7 +41,9 @@ export function PortRow({
   spare: readonly Sim[];
 }) {
   return (
-    <TableRow>
+    // В одну строчку: у партнёра десятки портов, и строка в две высоты вдвое сокращала то,
+    // что видно на экране без прокрутки (владелец, 2026-09-25).
+    <TableRow className="whitespace-nowrap">
       <TableCell className="num">{port.port_number}</TableCell>
       <TableCell>
         <LineCell gateway={gateway} port={port} />
@@ -57,7 +59,7 @@ export function PortRow({
           <>
             {SIM_STATUS_NAME[port.sim.status]}
             {port.sim.operator_confirmed_at === null && (
-              <span className="block text-warn">оператор не подтверждён</span>
+              <span className="text-warn"> · оператор не подтверждён</span>
             )}
           </>
         )}
@@ -66,11 +68,11 @@ export function PortRow({
           не говорят, а неисправный или выключенный слот — причина, почему карта молчит.
         */}
         {(port.state === 'fault' || port.state === 'disabled') && (
-          <span className="block text-warn">слот {PORT_STATE_NAME[port.state]}</span>
+          <span className="text-warn"> · слот {PORT_STATE_NAME[port.state]}</span>
         )}
       </TableCell>
       <TableCell>
-        <div className="flex flex-wrap items-start justify-end gap-2">
+        <div className="flex items-start justify-end gap-2">
           {port.sim === null ? (
             <InsertSim portId={port.id} portNumber={port.port_number} spare={spare} />
           ) : (
@@ -98,8 +100,8 @@ function LineCell({ gateway, port }: { gateway: Gateway; port: Port }) {
   if (gateway.registration_mode === 'gateway') {
     return (
       <>
+        <span className="text-faint">префикс </span>
         <span className="num select-all">{goipLinePrefix(port.port_number)}</span>
-        <span className="block text-faint">префикс</span>
       </>
     );
   }
@@ -108,10 +110,14 @@ function LineCell({ gateway, port }: { gateway: Gateway; port: Port }) {
     <>
       <span className="num">Line {port.port_number}</span>
       {port.sip_username === null ? (
-        <span className="block text-warn">вход не выдан</span>
+        <span className="text-warn"> · вход не выдан</span>
       ) : (
-        <span className={`block ${port.on_node ? 'text-muted-foreground' : 'text-warn'}`}>
-          {port.on_node ? `на связи · ${moment(port.registered_at)}` : 'не на связи'}
+        // Когда отмечена связь — подсказкой: в строке важно «да или нет», время — по запросу.
+        <span
+          className={port.on_node ? 'text-muted-foreground' : 'text-warn'}
+          title={port.on_node ? `отметка ${moment(port.registered_at)}` : undefined}
+        >
+          {port.on_node ? ' · на связи' : ' · не на связи'}
         </span>
       )}
     </>

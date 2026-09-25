@@ -37,7 +37,12 @@ import { CatalogRepository } from '../catalog/catalog.repository.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
 import { MAX_GATEWAY_PORTS } from './schemas.js';
-import { issueSipCredentials, issueSipUsername, type SipCredentials } from './sip-credentials.js';
+import {
+  issueSipCredentials,
+  issueSipUsername,
+  renewSipPassword,
+  type SipCredentials,
+} from './sip-credentials.js';
 import {
   gatewayStateOf,
   TelephonyRepository,
@@ -293,10 +298,10 @@ export class TelephonyService {
   }
 
   /**
-   * Новый вход одной линии: меняются имя и пароль, регистрация линии стирается.
+   * Новый пароль одной линии: имя прежнее, регистрация линии стирается.
    *
-   * Как у шлюза: имя засветилось в регистрации и логах узла, а перенастраивать линию
-   * всё равно придётся.
+   * Только пароль, как и обещает кнопка: имя уже введено в GOIP, и менять его значило
+   * бы заставить перенастраивать два поля вместо одного (владелец, 2026-09-25).
    */
   async resetPortAccount(
     portId: GatewayPortId,
@@ -317,7 +322,20 @@ export class TelephonyService {
       return { before: port, account: issued };
     });
 
-    await this.recordPortAccounts([account], actorUserId, actorRole, before.sipUsername);
+    // Выдан впервые — запись о выдаче; был — о новом пароле: одинаковое имя до и после
+    // в записи о выдаче читалось бы как «ничего не произошло».
+    if (before.sipUsername === null) {
+      await this.recordPortAccounts([account], actorUserId, actorRole);
+    } else {
+      await this.audit.record({
+        action: 'gateway_port.password_reset',
+        entityType: 'gateway_port',
+        entityId: account.portId,
+        actorUserId,
+        actorRole,
+        after: { sip_username: account.username },
+      });
+    }
     return account;
   }
 
@@ -338,7 +356,11 @@ export class TelephonyService {
   ): Promise<IssuedPortAccount[]> {
     const accounts: IssuedPortAccount[] = [];
     for (const port of ports) {
-      const credentials = issueSipCredentials('port', this.realm);
+      // У порта со входом — новый пароль к прежнему имени; без входа — вход целиком.
+      const credentials =
+        port.sipUsername === null
+          ? issueSipCredentials('port', this.realm)
+          : renewSipPassword(port.sipUsername, this.realm);
       const updated = await this.repository.setPortCredentials(
         port.id,
         credentials.username,
@@ -363,7 +385,6 @@ export class TelephonyService {
     accounts: readonly IssuedPortAccount[],
     actorUserId: Id<'user'>,
     actorRole: UserRole,
-    previousUsername: string | null = null,
   ): Promise<void> {
     for (const account of accounts) {
       await this.audit.record({
@@ -372,18 +393,19 @@ export class TelephonyService {
         entityId: account.portId,
         actorUserId,
         actorRole,
-        before: { sip_username: previousUsername },
+        before: { sip_username: null },
         after: { sip_username: account.username },
       });
     }
   }
 
   /**
-   * Перевыпуск учётных данных шлюза.
+   * Новый пароль шлюза — **имя прежнее** (ADR-0054, ревизия 2026-09-25).
    *
-   * Меняется и имя, и пароль. Только пароль недостаточно: имя уже засветилось в записи
-   * регистрации на узле и в логах, а перенастраивать оборудование партнёру всё равно
-   * придётся — так пусть меняется всё разом.
+   * Раньше менялось и имя: «оно засветилось в логах». Но имя не секрет, а кнопка
+   * называлась «новый пароль» — партнёр вводил пароль и не понимал, почему шлюз молчит:
+   * имя в устройстве осталось старым (владелец, 2026-09-25). Прежний пароль перестаёт
+   * действовать сразу, регистрация стирается.
    */
   async resetGatewayCredentials(
     id: GatewayId,
@@ -393,7 +415,7 @@ export class TelephonyService {
     const existing = await this.repository.findGateway(id);
     if (existing === undefined) throw notFound('Шлюз не найден');
 
-    const credentials = issueSipCredentials('gateway', this.realm);
+    const credentials = renewSipPassword(existing.sipUsername, this.realm);
     const updated = await this.repository.replaceGatewayCredentials(
       id,
       credentials.username,
@@ -407,8 +429,8 @@ export class TelephonyService {
       entityId: id,
       actorUserId,
       actorRole,
-      before: { sip_username: existing.sipUsername },
-      after: { sip_username: updated.sipUsername },
+      // Имя прежнее — меняется пароль; самого пароля в журнале нет.
+      after: { sip_username: updated.sipUsername, password_changed: true },
     });
 
     return this.toAccount(credentials);
@@ -1769,14 +1791,18 @@ export class TelephonyService {
     if (sim.operatorConfirmedAt === null) {
       const resolution = await this.resolver.resolve(msisdn);
       if (!resolution.confirmed || resolution.serving === undefined) {
-        throw validationFailed('Оператор SIM не подтверждён — повторите позже', {
-          details: {
-            reason: resolution.reason ?? 'источник не ответил',
-            remedy:
-              'Оператора определяет внешний источник. Пока он молчит, включить карту ' +
-              'может администратор.',
+        // Не «повторите позже»: служба проверки номеров с площадки сейчас недоступна
+        // (TASKS 4.21), и сама собой карта не заработает — её подтверждает человек
+        // (владелец, 2026-09-25).
+        throw validationFailed(
+          'Оператор номера карты ещё не подтверждён площадкой — карта включится после подтверждения',
+          {
+            details: {
+              reason: resolution.reason ?? 'источник не ответил',
+              remedy: 'Напишите площадке номер карты: администратор подтвердит оператора вручную.',
+            },
           },
-        });
+        );
       }
       if (resolution.serving.id !== sim.operatorId) {
         const declared = await this.catalog.findOperator(sim.operatorId);
