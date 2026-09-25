@@ -347,12 +347,11 @@ test.describe('клиент заводит доступ своей систем�
   });
 });
 
-/** Выбрать переход в окне «Состояние»: вариант, затем кнопку, которая его называет. */
-async function changeState(page: Page, action: string): Promise<void> {
-  await page.getByRole('button', { name: 'Состояние' }).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByRole('button', { name: action, exact: true }).first().click();
-  await dialog.getByRole('button', { name: action, exact: true }).last().click();
+/** Подтвердить действие в окне, которое называет последствие, — кнопкой с тем же именем. */
+async function confirmAction(page: Page, action: string): Promise<void> {
+  await page.getByRole('button', { name: action, exact: true }).click();
+  const dialog = page.getByRole('alertdialog');
+  await dialog.getByRole('button', { name: action, exact: true }).click();
   await expect(dialog).toHaveCount(0);
 }
 
@@ -410,7 +409,9 @@ test.describe('партнёр добавляет своё оборудовани
     expect(denied).toEqual([]);
   });
 
-  test('выключенный собой шлюз партнёр включает обратно здесь же', async ({ page }) => {
+  test('шлюз включается одной прямой кнопкой и так же возвращается после выключения', async ({
+    page,
+  }) => {
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/equipment');
 
@@ -419,14 +420,18 @@ test.describe('партнёр добавляет своё оборудовани
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
     await page.getByRole('link', { name: 'Шлюз на выключение' }).click();
 
-    await changeState(page, 'Включить');
+    // Невключённый шлюз не пускают даже с верными настройками — и страница говорит это прямо.
+    // Раньше включение пряталось в окне за кнопкой «Состояние» (владелец, 2026-09-25).
+    await expect(page.getByText('Не включён', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/Шлюз не включён — линии не могут подключиться/u)).toBeVisible();
+    await page.getByRole('button', { name: 'Включить шлюз' }).click();
     await expect(page.getByText('Работает', { exact: true })).toBeVisible();
 
     // До ADR-0047 выключение партнёра не отличалось от отключения площадкой,
     // и за одной кнопкой «Включить» приходилось идти к администратору.
-    await changeState(page, 'Выключить');
+    await confirmAction(page, 'Выключить шлюз');
     await expect(page.getByText('Выключен вами')).toBeVisible();
-    await changeState(page, 'Включить');
+    await page.getByRole('button', { name: 'Включить шлюз' }).click();
     await expect(page.getByText('Работает', { exact: true })).toBeVisible();
   });
 
@@ -439,13 +444,12 @@ test.describe('партнёр добавляет своё оборудовани
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
     await page.getByRole('link', { name: 'Шлюз на удаление' }).click();
 
-    await page.getByRole('button', { name: 'Состояние' }).click();
-    const dialog = page.getByRole('dialog');
-    await dialog.getByRole('button', { name: 'Удалить навсегда' }).first().click();
+    await page.getByRole('button', { name: 'Удалить шлюз' }).click();
+    const dialog = page.getByRole('alertdialog');
     // Окно называет последствие, а не «вы уверены?»: удаление стоит рядом с «выключить»,
     // которое отменяется одним нажатием, и разница должна быть видна до нажатия.
-    await expect(dialog.getByRole('status')).toContainText('навсегда');
-    await dialog.getByRole('button', { name: 'Удалить навсегда' }).last().click();
+    await expect(dialog).toContainText('навсегда');
+    await dialog.getByRole('button', { name: 'Удалить навсегда' }).click();
 
     await expect(page.getByText(/Такого шлюза нет/u)).toBeVisible();
     await page.getByRole('link', { name: '← Всё оборудование' }).click();
@@ -552,8 +556,11 @@ test.describe('оборудование одной таблицей, вход п
     await expect(secrets.getByRole('row', { name: /^Line 2 pt-/u })).toBeVisible();
 
     await page.getByRole('link', { name: 'Открыть шлюз — порты и настройки →' }).click();
+    // Настройки — построчно для каждой линии, теми же полями, что у линии в GOIP.
+    const lines = page.getByRole('table', { name: 'Настройки линий' });
+    await expect(lines.getByRole('row', { name: /^Line 1 pt-/u })).toContainText('sip.');
+    await expect(lines.getByRole('row', { name: /^Line 2 pt-/u })).toContainText('не на связи');
     const ports = page.getByRole('region', { name: 'Порты' });
-    await expect(ports.getByRole('row', { name: /^1 pt-/u })).toContainText('не на связи');
 
     await page.getByRole('button', { name: 'Перейти на один вход для шлюза' }).click();
     await page

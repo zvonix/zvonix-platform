@@ -13,7 +13,6 @@ import {
   type PortAccount,
   type SipAccount,
 } from '@/components/sip-credentials';
-import { StatusDialog, type StatusOption } from '@/components/status-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
@@ -252,26 +251,14 @@ function GatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promise<
   );
 }
 
-/** Кнопка называет действие, а не состояние, в которое переводит. */
-const GATEWAY_ACTION = {
-  active: 'Включить',
-  suspended: 'Выключить',
-  retired: 'Удалить навсегда',
-} as const;
-
-const GATEWAY_ACTION_MEANING = {
-  active:
-    'Шлюз начнёт регистрироваться на узле и принимать вызовы. Включайте, когда устройство уже настроено.',
-  suspended:
-    'Шлюз перестанет получать вызовы. Идущие разговоры не рвутся. Включить обратно можно здесь же, в любой момент.',
-  retired:
-    'Шлюз удаляется навсегда: вернуть его нельзя, только добавить заново. Карты из его портов вынимаются — их можно вставить в другой шлюз.',
-} as const;
-
-type GatewayTarget = keyof typeof GATEWAY_ACTION;
-
 /**
- * Состояние шлюза — одна кнопка и окно с вариантами, как у администратора.
+ * Состояние шлюза — меткой, и рядом прямая кнопка того, что нужно сейчас.
+ *
+ * Раньше была одна кнопка «Состояние» и окно с вариантами: по ней не видно, что
+ * произойдёт, и главное действие — «Включить» — пряталось внутри. Партнёр настроил GOIP,
+ * а шлюз так и остался невключённым, и линии не могли подключиться (владелец,
+ * 2026-09-25). Включение — одним нажатием: оно ничего не ломает. Выключение останавливает
+ * вызовы, удаление необратимо — оба с подтверждением, названным последствием.
  *
  * Показываются только переходы, которые API примет: кто выключил, решает, кто вправе
  * вернуть (ADR-0047). Отключённым площадкой или порогом партнёр не распоряжается вовсе.
@@ -279,46 +266,83 @@ type GatewayTarget = keyof typeof GATEWAY_ACTION;
 export function GatewayStatus({ gateway }: { gateway: Gateway }) {
   const refresh = useRefresh();
   const change = useMutation({
-    mutationFn: (status: GatewayTarget) =>
+    mutationFn: (status: 'active' | 'suspended' | 'retired') =>
       request<unknown>(`/partner/gateways/${gateway.id}/status`, {
         method: 'POST',
         body: { status },
       }),
     onSuccess: () => atMost(refresh()),
   });
+  const error = asApiError(change.error);
 
-  const current = gatewayStateName(gateway);
+  const badge = (
+    <span
+      className={`rounded-sm px-1.5 py-0.5 ${gateway.status === 'active' ? 'bg-ok-soft text-ok' : 'bg-warn-soft text-warn'}`}
+    >
+      {gatewayStateName(gateway)}
+    </span>
+  );
 
   if (gateway.status === 'suspended' && gateway.suspended_by !== 'partner') {
     return (
-      <p className="text-muted-foreground">
-        {gateway.suspended_by === 'failure_threshold'
-          ? 'Много неудачных вызовов — проверьте оборудование и напишите площадке: включит администратор.'
-          : 'Включить или удалить этот шлюз может только администратор площадки.'}
-      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {badge}
+        <span className="text-muted-foreground">
+          {gateway.suspended_by === 'failure_threshold'
+            ? 'Много неудачных вызовов — проверьте оборудование и напишите площадке: включит администратор.'
+            : 'Включить или удалить этот шлюз может только администратор площадки.'}
+        </span>
+      </div>
     );
   }
 
   const occupied = gateway.ports.filter((port) => port.sim !== null).length;
-  const targets: GatewayTarget[] =
-    gateway.status === 'active' ? ['suspended', 'retired'] : ['active', 'retired'];
-  const options: StatusOption<GatewayTarget>[] = targets.map((status) => ({
-    value: status,
-    action: GATEWAY_ACTION[status],
-    meaning:
-      status === 'retired' && occupied > 0
-        ? `${GATEWAY_ACTION_MEANING.retired} Карт в портах сейчас: ${String(occupied)}.`
-        : GATEWAY_ACTION_MEANING[status],
-    danger: status !== 'active',
-  }));
 
   return (
-    <StatusDialog
-      subject={`шлюз «${gateway.name}»`}
-      current={current}
-      options={options}
-      onChange={(status) => change.mutateAsync(status)}
-    />
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        {badge}
+        {gateway.status === 'active' ? (
+          <ConfirmAction
+            label="Выключить шлюз"
+            title={`Выключить шлюз «${gateway.name}»`}
+            consequence={
+              <p>
+                Шлюз перестанет получать вызовы, линии отключатся от площадки. Идущие разговоры не
+                рвутся. Включить обратно можно здесь же, в любой момент.
+              </p>
+            }
+            confirmLabel="Выключить шлюз"
+            onConfirm={() => change.mutateAsync('suspended')}
+          />
+        ) : (
+          <Button
+            size="sm"
+            disabled={change.isPending}
+            onClick={() => {
+              change.mutate('active');
+            }}
+          >
+            Включить шлюз
+          </Button>
+        )}
+        <ConfirmAction
+          label="Удалить шлюз"
+          title={`Удалить шлюз «${gateway.name}»`}
+          consequence={
+            <p>
+              Шлюз удаляется навсегда: вернуть его нельзя, только добавить заново. Карты из его
+              портов вынимаются — их можно вставить в другой шлюз.
+              {occupied > 0 && ` Карт в портах сейчас: ${String(occupied)}.`}
+            </p>
+          }
+          confirmLabel="Удалить навсегда"
+          variant="ghost"
+          onConfirm={() => change.mutateAsync('retired')}
+        />
+      </div>
+      {error !== undefined && <ErrorNote error={error} />}
+    </div>
   );
 }
 

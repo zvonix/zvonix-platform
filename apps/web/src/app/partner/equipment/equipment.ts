@@ -100,8 +100,13 @@ export function simsOf(equipment: Equipment | undefined): Sim[] {
   return [...inPorts, ...equipment.spare_sims];
 }
 
-/** Состояние шлюза словами партнёра: у выключенного важнее, кто выключил (ADR-0047). */
+/**
+ * Состояние шлюза словами партнёра: у выключенного важнее, кто выключил (ADR-0047).
+ * `pending` — «Не включён»: «Ждёт» читалось как «ждёт площадку», хотя включает сам
+ * партнёр (владелец, 2026-09-25).
+ */
 export function gatewayStateName(gateway: Gateway): string {
+  if (gateway.status === 'pending') return 'Не включён';
   return gateway.suspended_by === null
     ? GATEWAY_STATUS_NAME[gateway.status]
     : PARTNER_SUSPENSION_NAME[gateway.suspended_by];

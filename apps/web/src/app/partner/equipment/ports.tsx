@@ -1,12 +1,11 @@
 'use client';
 
 import { goipLinePrefix } from '@zvonix/shared';
-import type { IssuedLines } from '@/components/sip-credentials';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { moment } from '@/lib/format';
 import { PORT_STATE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
 import type { Gateway, Port, Sim } from './equipment';
-import { InsertSim, NewLineAccount, RemoveSim, SimActions } from './manage';
+import { InsertSim, RemoveSim, SimActions } from './manage';
 
 /**
  * Строки портов — одни на общую таблицу оборудования и на страницу шлюза
@@ -36,22 +35,16 @@ export function PortRow({
   gateway,
   port,
   spare,
-  onIssued,
 }: {
   gateway: Gateway;
   port: Port;
   spare: readonly Sim[];
-  /**
-   * Куда отдать новый вход линии. Задан — у линии есть «Новый пароль»: на странице
-   * шлюза, где устройство и настраивают. В общей таблице его нет — там карты.
-   */
-  onIssued?: (issued: IssuedLines) => void;
 }) {
   return (
     <TableRow>
       <TableCell className="num">{port.port_number}</TableCell>
       <TableCell>
-        <LineCell gateway={gateway} port={port} onIssued={onIssued} />
+        <LineCell gateway={gateway} port={port} />
       </TableCell>
       <TableCell className="num">
         {port.sim?.msisdn ?? <span className="text-faint">пусто</span>}
@@ -95,17 +88,10 @@ export function PortRow({
 /**
  * Как площадка выбирает эту линию. При входе на шлюз — префиксом, который вводится
  * в GOIP как `Routing Prefix` линии; при входе по линиям — её собственным входом,
- * и тогда важно, на связи ли именно она.
+ * и здесь важно одно: на связи ли она. Логин и пароль линии — в настройках линий
+ * на странице шлюза, где устройство и настраивают.
  */
-function LineCell({
-  gateway,
-  port,
-  onIssued,
-}: {
-  gateway: Gateway;
-  port: Port;
-  onIssued: ((issued: IssuedLines) => void) | undefined;
-}) {
+function LineCell({ gateway, port }: { gateway: Gateway; port: Port }) {
   // У телефона слот один — выбирать нечего.
   if (gateway.type !== 'goip') return <span className="text-faint">—</span>;
 
@@ -118,18 +104,16 @@ function LineCell({
     );
   }
 
-  if (port.sip_username === null) return <span className="text-warn">вход не выдан</span>;
   return (
     <>
-      <span className="num select-all">{port.sip_username}</span>
-      <span className="flex flex-wrap items-center gap-x-2">
-        <span className={port.on_node ? 'text-muted-foreground' : 'text-warn'}>
+      <span className="num">Line {port.port_number}</span>
+      {port.sip_username === null ? (
+        <span className="block text-warn">вход не выдан</span>
+      ) : (
+        <span className={`block ${port.on_node ? 'text-muted-foreground' : 'text-warn'}`}>
           {port.on_node ? `на связи · ${moment(port.registered_at)}` : 'не на связи'}
         </span>
-        {onIssued !== undefined && (
-          <NewLineAccount gateway={gateway} port={port} onIssued={onIssued} />
-        )}
-      </span>
+      )}
     </>
   );
 }
