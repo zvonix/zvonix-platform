@@ -7,6 +7,7 @@ import {
   CALL_STATUSES,
   CHANNEL_STATUSES,
   DEFAULT_TRUNK_CONCURRENT_CALLS,
+  GATEWAY_REGISTRATION_MODES,
   GATEWAY_STATUSES,
   GATEWAY_TYPES,
   MAX_CONCURRENT_CALLS_LIMIT,
@@ -38,6 +39,16 @@ export const createGatewaySchema = z.object({
     .min(0, 'не может быть отрицательным')
     .max(MAX_GATEWAY_PORTS, 'неправдоподобно много')
     .default(0),
+  /**
+   * Способ подключения ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
+   * Пропущен — `gateway`, как до появления поля: смысл прежних обращений не меняется.
+   */
+  registrationMode: z.enum(GATEWAY_REGISTRATION_MODES).optional(),
+});
+
+/** Смена способа подключения шлюза (ADR-0054). Допустимость проверяет служба. */
+export const registrationModeSchema = z.object({
+  mode: z.enum(GATEWAY_REGISTRATION_MODES),
 });
 
 /**

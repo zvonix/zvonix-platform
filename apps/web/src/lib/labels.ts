@@ -7,6 +7,7 @@ import type {
   ClientFailureReason,
   ClientStatus,
   GatewayPortState,
+  GatewayRegistrationMode,
   GatewayStatus,
   GatewaySuspendedBy,
   GatewayType,
@@ -163,6 +164,12 @@ export const GATEWAY_TYPE_NAME: Record<GatewayType, string> = {
   goip: 'GOIP',
   android: 'Android',
   sip_trunk: 'SIP-транк',
+};
+
+/** Способ подключения шлюза (ADR-0054) — словами того, кто настраивает GOIP. */
+export const REGISTRATION_MODE_NAME: Record<GatewayRegistrationMode, string> = {
+  port: 'каждая линия отдельно',
+  gateway: 'весь шлюз одним входом',
 };
 
 export const GATEWAY_STATUS_NAME: Record<GatewayStatus, string> = {

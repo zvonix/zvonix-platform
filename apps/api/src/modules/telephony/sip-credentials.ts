@@ -23,11 +23,14 @@ const USERNAME_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 /** 24 байта в base64url — 32 символа. Пароль вводит человек в веб-интерфейс шлюза. */
 const PASSWORD_BYTES = 24;
 
-export type SipPrincipalKind = 'gateway' | 'channel';
+/** `port` — вход линии GOIP в режиме «каждая линия отдельно» (ADR-0054). */
+export type SipPrincipalKind = 'gateway' | 'channel' | 'port';
 
+/** Приставки разные у всех видов: имена разных видов не пересекаются по построению. */
 const PREFIX: Readonly<Record<SipPrincipalKind, string>> = {
   gateway: 'gw',
   channel: 'ch',
+  port: 'pt',
 };
 
 export interface SipCredentials {

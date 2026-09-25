@@ -37,7 +37,7 @@ const plan = {
   realm: 'sip.zvonix.test',
   callerId: null,
   recordingPath: null,
-  candidates: [{ kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa', linePrefix: null }],
+  candidates: [{ kind: 'sim' as const, sipUsername: 'gw-aaaaaaaaaaaa', linePrefix: null }],
 };
 
 describe('диалплан с маршрутом', () => {
@@ -45,8 +45,8 @@ describe('диалплан с маршрутом', () => {
     const xml = routeDocument({
       ...plan,
       candidates: [
-        { kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa', linePrefix: null },
-        { kind: 'sim' as const, gatewaySipUsername: 'gw-bbbbbbbbbbbb', linePrefix: null },
+        { kind: 'sim' as const, sipUsername: 'gw-aaaaaaaaaaaa', linePrefix: null },
+        { kind: 'sim' as const, sipUsername: 'gw-bbbbbbbbbbbb', linePrefix: null },
       ],
     });
     expect(() => parse(xml)).not.toThrow();
@@ -65,8 +65,8 @@ describe('диалплан с маршрутом', () => {
     const xml = routeDocument({
       ...plan,
       candidates: [
-        { kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa', linePrefix: '99003' },
-        { kind: 'sim' as const, gatewaySipUsername: 'gw-aaaaaaaaaaaa', linePrefix: '99001' },
+        { kind: 'sim' as const, sipUsername: 'gw-aaaaaaaaaaaa', linePrefix: '99003' },
+        { kind: 'sim' as const, sipUsername: 'gw-aaaaaaaaaaaa', linePrefix: '99001' },
       ],
     });
     expect(() => parse(xml)).not.toThrow();
@@ -76,10 +76,23 @@ describe('диалплан с маршрутом', () => {
     );
   });
 
+  it('вход по линиям: набирается вход самой линии, номер без префикса', () => {
+    // Линию выбрала учётная запись, а не начало номера (ADR-0054): префикс здесь
+    // был бы лишней цифрой, которую GOIP набрал бы в сеть.
+    const xml = routeDocument({
+      ...plan,
+      candidates: [{ kind: 'sim' as const, sipUsername: 'pt-cccccccccccc', linePrefix: null }],
+    });
+    expect(() => parse(xml)).not.toThrow();
+    expect(xml).toContain(
+      'data="[sip_invite_req_uri=sip:79001234567@sip.zvonix.test]user/pt-cccccccccccc@sip.zvonix.test"',
+    );
+  });
+
   it('транк набирается через свой sofia-gateway, без префикса', () => {
     const xml = routeDocument({
       ...plan,
-      candidates: [{ kind: 'sip' as const, gatewaySipUsername: 'trunk-1', linePrefix: null }],
+      candidates: [{ kind: 'sip' as const, sipUsername: 'trunk-1', linePrefix: null }],
     });
     expect(xml).toContain('data="sofia/gateway/trunk-1/79001234567"');
   });
@@ -106,7 +119,7 @@ describe('диалплан с маршрутом', () => {
     // выбросил бы его молча.
     const xml = routeDocument({
       ...plan,
-      candidates: [{ kind: 'sim' as const, gatewaySipUsername: 'gw-"><evil', linePrefix: null }],
+      candidates: [{ kind: 'sim' as const, sipUsername: 'gw-"><evil', linePrefix: null }],
     });
     expect(() => parse(xml)).not.toThrow();
     expect(xml).not.toContain('<evil');

@@ -23,6 +23,7 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { parseId, partnerFacingSuspension } from '@zvonix/shared';
 import type {
   GatewayPortState,
+  GatewayRegistrationMode,
   GatewayStatus,
   GatewayType,
   PartnerFacingSuspension,
@@ -43,8 +44,9 @@ import {
   partnerGatewayStatusSchema,
   partnerSimSchema,
   partnerSimStatusSchema,
+  registrationModeSchema,
 } from './schemas.js';
-import { firstAndAll } from './telephony.controller.js';
+import { firstAndAll, toPortAccountView, type PortAccountView } from './telephony.controller.js';
 import { TelephonyService } from './telephony.service.js';
 import type {
   GatewayPortRow,
@@ -71,11 +73,19 @@ interface SimView {
   readonly operator_confirmed_at: string | null;
 }
 
+/**
+ * Порт с картой. Вход линии — у шлюза со входом по линиям
+ * ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)): имя (пароль
+ * не отдаётся никогда) и есть ли у линии регистрация.
+ */
 interface PortView {
   readonly id: string;
   readonly port_number: number;
   readonly state: GatewayPortState;
   readonly sim: SimView | null;
+  readonly sip_username: string | null;
+  readonly on_node: boolean;
+  readonly registered_at: string | null;
 }
 
 /**
@@ -97,12 +107,18 @@ interface GatewayView {
    */
   readonly suspended_by: PartnerFacingSuspension | null;
   readonly model: string | null;
+  /** `gateway` — один вход на шлюз, `port` — вход у каждой линии (ADR-0054). */
+  readonly registration_mode: GatewayRegistrationMode;
   /**
    * Имя SIP, под которым шлюз регистрируется. Не секрет — секрет пароль, и он
    * не отдаётся никогда; имя же нужно партнёру каждый раз, когда он перенастраивает
    * устройство, а раньше было видно только в минуту заведения.
    */
   readonly sip_username: string;
+  /**
+   * На связи ли шлюз: при входе на шлюз — его регистрация, при входе по линиям —
+   * хоть одна линия (какая именно — у портов). Отметка — самая свежая из них.
+   */
   readonly on_node: boolean;
   readonly registered_at: string | null;
   readonly ports: readonly PortView[];
@@ -198,12 +214,7 @@ export class PartnerEquipmentController {
           (portsByGateway.get(gateway.id) ?? []).map((port) => {
             const sim = port.simCardId === null ? undefined : simById.get(port.simCardId);
             if (sim !== undefined) occupied.add(sim.id);
-            return {
-              id: port.id,
-              port_number: port.portNumber,
-              state: port.state,
-              sim: sim === undefined ? null : toSimView(sim, operators),
-            };
+            return toPortView(port, sim === undefined ? null : toSimView(sim, operators));
           }),
         ),
       );
@@ -232,7 +243,7 @@ export class PartnerEquipmentController {
   async createGateway(
     @Body(zodBody(partnerGatewaySchema)) body: z.infer<typeof partnerGatewaySchema>,
     @CurrentUser() actor: Principal,
-  ): Promise<{ gateway: GatewayView; account: SipAccountView }> {
+  ): Promise<{ gateway: GatewayView; account: SipAccountView; port_accounts: PortAccountView[] }> {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
     const created = await this.telephony.createOwnGateway(
       {
@@ -241,6 +252,7 @@ export class PartnerEquipmentController {
         type: body.type,
         model: body.model ?? null,
         portCount: body.portCount,
+        ...(body.registrationMode === undefined ? {} : { registrationMode: body.registrationMode }),
       },
       actor.userId,
       actor.role,
@@ -252,7 +264,70 @@ export class PartnerEquipmentController {
         password: created.account.password,
         realm: created.account.realm,
       },
+      port_accounts: created.portAccounts.map(toPortAccountView),
     };
+  }
+
+  /**
+   * Способ подключения своего шлюза ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)):
+   * один вход на шлюз или вход у каждой линии. Режим задаёт само устройство на всё
+   * целиком, поэтому и здесь он один на шлюз.
+   */
+  @Cabinets('partner')
+  @Post('partner/gateways/:id/registration-mode')
+  async setRegistrationMode(
+    @Param('id') id: string,
+    @Body(zodBody(registrationModeSchema)) body: z.infer<typeof registrationModeSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ gateway: GatewayView; port_accounts: PortAccountView[] }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const gatewayId = parseId(id, 'gateway');
+    await this.telephony.requireOwnGateway(gatewayId, partner.id);
+
+    const result = await this.telephony.setRegistrationMode(
+      gatewayId,
+      body.mode,
+      actor.userId,
+      actor.role,
+    );
+    return {
+      gateway: toGatewayView(result.gateway, []),
+      port_accounts: result.portAccounts.map(toPortAccountView),
+    };
+  }
+
+  /** Входы линиям своего шлюза, у которых их ещё нет — например, после «Добавить порты». */
+  @Cabinets('partner')
+  @Post('partner/gateways/:id/port-credentials')
+  async issuePortCredentials(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ port_accounts: PortAccountView[] }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const gatewayId = parseId(id, 'gateway');
+    await this.telephony.requireOwnGateway(gatewayId, partner.id);
+
+    const accounts = await this.telephony.issueMissingPortAccounts(
+      gatewayId,
+      actor.userId,
+      actor.role,
+    );
+    return { port_accounts: accounts.map(toPortAccountView) };
+  }
+
+  /** Новый вход одной линии своего шлюза: прежние имя и пароль перестают работать. */
+  @Cabinets('partner')
+  @Post('partner/gateway-ports/:id/credentials')
+  async resetPortCredentials(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ port_account: PortAccountView }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const portId = parseId(id, 'gatewayPort');
+    await this.telephony.requireOwnPort(portId, partner.id);
+
+    const account = await this.telephony.resetPortAccount(portId, actor.userId, actor.role);
+    return { port_account: toPortAccountView(account) };
   }
 
   /**
@@ -426,6 +501,18 @@ function toSimView(sim: SimCardRow, operators: Map<string, string>): SimView {
   };
 }
 
+function toPortView(port: GatewayPortRow, sim: SimView | null): PortView {
+  return {
+    id: port.id,
+    port_number: port.portNumber,
+    state: port.state,
+    sim,
+    sip_username: port.sipUsername,
+    on_node: port.nodeId !== null,
+    registered_at: port.registeredAt?.toISOString() ?? null,
+  };
+}
+
 function toGatewayView(gateway: GatewayRow, ports: readonly PortView[]): GatewayView {
   return {
     id: gateway.id,
@@ -435,10 +522,36 @@ function toGatewayView(gateway: GatewayRow, ports: readonly PortView[]): Gateway
     suspended_by:
       gateway.suspendedBy === null ? null : partnerFacingSuspension(gateway.suspendedBy),
     model: gateway.model,
+    registration_mode: gateway.registrationMode,
     sip_username: gateway.sipUsername,
-    on_node: gateway.nodeId !== null,
-    registered_at: gateway.registeredAt?.toISOString() ?? null,
+    ...presenceOf(gateway, ports),
     ports,
+  };
+}
+
+/**
+ * Связь шлюза с площадкой — по той стороне, что регистрируется (ADR-0054).
+ *
+ * При входе по линиям у самого шлюза регистрации нет и быть не должно: каталог
+ * его вход не отдаёт. «На связи» тогда значит «хоть одна линия на связи».
+ */
+function presenceOf(
+  gateway: GatewayRow,
+  ports: readonly PortView[],
+): { on_node: boolean; registered_at: string | null } {
+  if (gateway.registrationMode === 'gateway') {
+    return {
+      on_node: gateway.nodeId !== null,
+      registered_at: gateway.registeredAt?.toISOString() ?? null,
+    };
+  }
+  const moments = ports.flatMap((port) =>
+    port.registered_at === null ? [] : [port.registered_at],
+  );
+  return {
+    on_node: ports.some((port) => port.on_node),
+    // ISO-строки в UTC сравниваются как строки.
+    registered_at: moments.length === 0 ? null : moments.reduce((a, b) => (a > b ? a : b)),
   };
 }
 

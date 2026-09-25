@@ -12,6 +12,7 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   prepareEnvironment,
   registerGateway,
+  registerPort,
   resetDatabase,
   startApi,
   TEST_PASSWORD,
@@ -66,7 +67,15 @@ async function post(url: string, payload: Record<string, unknown>) {
  * и активной SIM; активный клиент с деньгами, каналом и тарифом.
  */
 async function scenario(
-  options: { recordingRequired?: boolean; gatewayType?: 'goip' | 'android'; deposit?: string } = {},
+  options: {
+    recordingRequired?: boolean;
+    gatewayType?: 'goip' | 'android';
+    deposit?: string;
+    /** Вход по линиям (ADR-0054): регистрируется порт, а не шлюз. */
+    registrationMode?: 'gateway' | 'port';
+    /** Не регистрировать ни шлюз, ни линию — для проверки отбора по регистрации. */
+    unregistered?: boolean;
+  } = {},
 ) {
   const operator = (await post('/operators', { name: unique('Оператор') })).json<{
     operator: { id: string };
@@ -94,15 +103,25 @@ async function scenario(
       partnerId: partner,
       name: unique('Шлюз'),
       type: options.gatewayType ?? 'goip',
+      ...(options.registrationMode === undefined
+        ? {}
+        : { registrationMode: options.registrationMode }),
     })
   ).json<{ gateway: { id: string }; account: { username: string } }>();
   await post(`/gateways/${gateway.gateway.id}/status`, { status: 'active' });
-  // Маршрутизация выбирает только шлюзы, зарегистрированные на принявшем вызов узле.
-  await registerGateway(api(), nodeKey, gateway.gateway.id);
 
   const port = (await post(`/gateways/${gateway.gateway.id}/ports`, { portNumber: 1 })).json<{
     port: { id: string };
   }>().port.id;
+
+  // Маршрутизация выбирает только шлюзы, зарегистрированные на принявшем вызов узле;
+  // при входе по линиям — только линии, зарегистрированные на нём (ADR-0054).
+  if (options.registrationMode === 'port') {
+    await post(`/gateways/${gateway.gateway.id}/port-credentials`, {});
+    if (options.unregistered !== true) await registerPort(api(), nodeKey, port);
+  } else if (options.unregistered !== true) {
+    await registerGateway(api(), nodeKey, gateway.gateway.id);
+  }
 
   const sim = (
     await post('/sim-cards', { partnerId: partner, operatorId: operator, msisdn: nextMsisdn() })
@@ -155,7 +174,7 @@ interface Preview {
   reason: string | null;
   sip_response: string | null;
   call_id: string | null;
-  candidates: { sim_card_id: string; line_prefix: string | null }[];
+  candidates: { sim_card_id: string; sip_username: string; line_prefix: string | null }[];
 }
 
 async function route(channel: string, destination: string, callId = unique('call')) {
@@ -200,6 +219,52 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
+});
+
+describe('вход по линиям GOIP (ADR-0054)', () => {
+  it('набирается вход линии, где стоит SIM, без префикса', async () => {
+    const env = await scenario({ registrationMode: 'port' });
+    const decision = (await route(env.channel, env.destination)).json<Preview>();
+
+    expect(decision.outcome).toBe('routed');
+    expect(decision.candidates[0]?.sim_card_id).toBe(env.sim);
+    expect(decision.candidates[0]?.sip_username).toMatch(/^pt-[a-z0-9]{12}$/);
+    expect(decision.candidates[0]?.line_prefix).toBeNull();
+  });
+
+  it('линия без регистрации — не кандидат, и отказ говорит о железе', async () => {
+    // Шлюз включён и SIM в порту, но линия ни разу не регистрировалась: набрать её
+    // нечем. Регистрация самого шлюза здесь ничего не значит — он её и не получит.
+    const env = await scenario({ registrationMode: 'port', unregistered: true });
+    const decision = (await route(env.channel, env.destination)).json<Preview>();
+
+    expect(decision.outcome).toBe('rejected');
+    expect(decision.reason).toBe('gateway_unregistered');
+  });
+
+  it('узел набирает `user/pt-…` через диалплан', async () => {
+    const env = await scenario({ registrationMode: 'port' });
+    const response = await api().inject({
+      method: 'POST',
+      url: '/node/dialplan',
+      headers: {
+        authorization: `Bearer ${nodeKey}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      payload: new URLSearchParams({
+        section: 'dialplan',
+        'Unique-ID': unique('call'),
+        variable_zvonix_channel: env.channel,
+        'Caller-Destination-Number': env.destination,
+      }).toString(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatch(
+      new RegExp(`\\[sip_invite_req_uri=sip:${env.destination}@[^\\]]+\\]user/pt-[a-z0-9]{12}@`),
+    );
+    expect(response.body).not.toContain('user/gw-');
+  });
 });
 
 describe('успешный маршрут', () => {

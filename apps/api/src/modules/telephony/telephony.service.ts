@@ -13,10 +13,12 @@ import {
   internal as internalError,
   regionKeyOf,
   notFound,
+  supportsPortRegistration,
   parseId,
   parseMsisdn,
   validationFailed,
   type ChannelStatus,
+  type GatewayRegistrationMode,
   type GatewayState,
   type GatewayStatus,
   type GatewaySuspendedBy,
@@ -41,6 +43,7 @@ import {
   TelephonyRepository,
   type AllowedOperatorRow,
   type ChannelId,
+  type Executor,
   type ChannelRow,
   type GatewayId,
   type GatewayPortId,
@@ -97,6 +100,12 @@ export interface IssuedSipAccount {
   readonly realm: string;
 }
 
+/** Вход линии GOIP (ADR-0054) — с портом, к которому он выдан. */
+export interface IssuedPortAccount extends IssuedSipAccount {
+  readonly portId: GatewayPortId;
+  readonly portNumber: number;
+}
+
 @Injectable()
 export class TelephonyService {
   private readonly logger: Logger;
@@ -126,15 +135,27 @@ export class TelephonyService {
       type: GatewayType;
       model: string | null;
       portCount: number;
+      /** Пусто — `gateway`, как до появления поля (ADR-0054). */
+      registrationMode?: GatewayRegistrationMode;
     },
     actorUserId: Id<'user'>,
     actorRole: UserRole,
-  ): Promise<{ gateway: GatewayRow; account: IssuedSipAccount }> {
+  ): Promise<{
+    gateway: GatewayRow;
+    account: IssuedSipAccount;
+    portAccounts: IssuedPortAccount[];
+  }> {
+    const registrationMode = input.registrationMode ?? 'gateway';
+    if (registrationMode === 'port' && !supportsPortRegistration(input.type)) {
+      throw validationFailed('Вход по линиям бывает только у GOIP');
+    }
+
     const credentials = issueSipCredentials('gateway', this.realm);
     // Порты 1…N заводятся вместе со шлюзом, одной транзакцией. Раньше число записывалось,
     // а портов не появлялось: партнёр указывал восемь и видел «портов не заведено»
-    // (владелец, 2026-09-24).
-    const gateway = await this.repository.transaction(async (tx) => {
+    // (владелец, 2026-09-24). При входе по линиям тем же движением им выдаются входы:
+    // пароли показываются один раз, и показать их надо там же, где шлюз добавлен.
+    const { gateway, portAccounts } = await this.repository.transaction(async (tx) => {
       const created = await this.repository.createGateway(
         {
           partnerId: input.partnerId,
@@ -147,18 +168,21 @@ export class TelephonyService {
           a1Hash: credentials.a1Hash,
           model: input.model,
           portCount: input.portCount,
+          registrationMode,
         },
         tx,
       );
       // У транка портов не бывает: SIM в нём нет.
-      if (input.type !== 'sip_trunk') {
-        await this.repository.createPorts(
-          created.id,
-          Array.from({ length: input.portCount }, (_, index) => index + 1),
-          tx,
-        );
-      }
-      return created;
+      if (input.type === 'sip_trunk') return { gateway: created, portAccounts: [] };
+      const ports = await this.repository.createPorts(
+        created.id,
+        Array.from({ length: input.portCount }, (_, index) => index + 1),
+        tx,
+      );
+      return {
+        gateway: created,
+        portAccounts: registrationMode === 'port' ? await this.issuePortAccounts(ports, tx) : [],
+      };
     });
 
     await this.audit.record({
@@ -173,10 +197,185 @@ export class TelephonyService {
         type: gateway.type,
         sip_username: gateway.sipUsername,
         port_count: input.type === 'sip_trunk' ? 0 : input.portCount,
+        registration_mode: gateway.registrationMode,
       },
     });
+    await this.recordPortAccounts(portAccounts, actorUserId, actorRole);
 
-    return { gateway, account: this.toAccount(credentials) };
+    return { gateway, account: this.toAccount(credentials), portAccounts };
+  }
+
+  /**
+   * Смена способа подключения ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
+   *
+   * При переходе на вход по линиям портам без входа он выдаётся тут же, и пароли
+   * возвращаются один раз: иначе после переключения партнёру пришлось бы искать
+   * ещё одну кнопку, прежде чем линии смогут зарегистрироваться.
+   *
+   * Под блокировкой шлюза, как запись в порты (ADR-0048): выдача входов не должна
+   * разойтись с одновременной сменой режима или списанием.
+   */
+  async setRegistrationMode(
+    id: GatewayId,
+    mode: GatewayRegistrationMode,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; portAccounts: IssuedPortAccount[] }> {
+    const result = await this.repository.transaction(async (tx) => {
+      const gateway = await this.repository.lockGatewayForPorts(id, tx);
+      if (gateway === undefined) throw notFound('Шлюз не найден');
+      if (gateway.registrationMode === mode) {
+        return { before: gateway, gateway, portAccounts: [] };
+      }
+      if (gateway.status === 'retired') throw conflict('Шлюз списан: настраивать нечего');
+      if (mode === 'port' && !supportsPortRegistration(gateway.type)) {
+        throw conflict('Вход по линиям бывает только у GOIP');
+      }
+
+      const updated = await this.repository.changeRegistrationMode(
+        id,
+        gateway.registrationMode,
+        mode,
+        tx,
+      );
+      if (updated === undefined) {
+        throw conflict('Способ подключения успел измениться — обновите страницу');
+      }
+      const portAccounts =
+        mode === 'port'
+          ? await this.issuePortAccounts(
+              await this.repository.lockPortsWithoutCredentials(id, tx),
+              tx,
+            )
+          : [];
+      return { before: gateway, gateway: updated, portAccounts };
+    });
+
+    if (result.before.registrationMode !== result.gateway.registrationMode) {
+      await this.audit.record({
+        action: 'gateway.registration_mode_changed',
+        entityType: 'gateway',
+        entityId: id,
+        actorUserId,
+        actorRole,
+        before: { registration_mode: result.before.registrationMode },
+        after: { registration_mode: result.gateway.registrationMode },
+      });
+    }
+    await this.recordPortAccounts(result.portAccounts, actorUserId, actorRole);
+
+    return { gateway: result.gateway, portAccounts: result.portAccounts };
+  }
+
+  /**
+   * Входы всем портам шлюза, у которых их нет, — после «Добавить порты»
+   * или для линий, пропущенных при переключении.
+   *
+   * Уже выданные не трогаются: перевыпуск входа — отдельное действие над одним портом,
+   * он заставляет перенастраивать линию.
+   */
+  async issueMissingPortAccounts(
+    gatewayId: GatewayId,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<IssuedPortAccount[]> {
+    const accounts = await this.repository.transaction(async (tx) => {
+      const gateway = await this.repository.lockGatewayForPorts(gatewayId, tx);
+      if (gateway === undefined) throw notFound('Шлюз не найден');
+      this.requirePortRegistration(gateway);
+      return this.issuePortAccounts(
+        await this.repository.lockPortsWithoutCredentials(gatewayId, tx),
+        tx,
+      );
+    });
+    await this.recordPortAccounts(accounts, actorUserId, actorRole);
+    return accounts;
+  }
+
+  /**
+   * Новый вход одной линии: меняются имя и пароль, регистрация линии стирается.
+   *
+   * Как у шлюза: имя засветилось в регистрации и логах узла, а перенастраивать линию
+   * всё равно придётся.
+   */
+  async resetPortAccount(
+    portId: GatewayPortId,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<IssuedPortAccount> {
+    const found = await this.repository.findPort(portId);
+    if (found === undefined) throw notFound('Порт не найден');
+
+    const { before, account } = await this.repository.transaction(async (tx) => {
+      const gateway = await this.repository.lockGatewayForPorts(found.gatewayId, tx);
+      if (gateway === undefined) throw notFound('Шлюз не найден');
+      this.requirePortRegistration(gateway);
+      const port = await this.repository.lockPort(portId, tx);
+      if (port === undefined) throw notFound('Порт не найден');
+      const [issued] = await this.issuePortAccounts([port], tx);
+      if (issued === undefined) throw new Error('Выдача входа не вернула учётную запись');
+      return { before: port, account: issued };
+    });
+
+    await this.recordPortAccounts([account], actorUserId, actorRole, before.sipUsername);
+    return account;
+  }
+
+  /** Вход линии выдаётся только шлюзу со входом по линиям и не списанному. */
+  private requirePortRegistration(gateway: GatewayRow): void {
+    if (gateway.status === 'retired') throw conflict('Шлюз списан: настраивать нечего');
+    if (gateway.registrationMode !== 'port') {
+      // Вход, который каталог не отдаст, партнёр ввёл бы в устройство и не понял бы,
+      // почему линия молчит (ADR-0054).
+      throw conflict('Шлюз подключён одним входом — сначала переключите его на вход по линиям');
+    }
+  }
+
+  /** Выпуск входов портам внутри транзакции вызывающего. Пароли — только в ответе. */
+  private async issuePortAccounts(
+    ports: readonly GatewayPortRow[],
+    tx: Executor,
+  ): Promise<IssuedPortAccount[]> {
+    const accounts: IssuedPortAccount[] = [];
+    for (const port of ports) {
+      const credentials = issueSipCredentials('port', this.realm);
+      const updated = await this.repository.setPortCredentials(
+        port.id,
+        credentials.username,
+        credentials.a1Hash,
+        tx,
+      );
+      if (updated === undefined) throw notFound('Порт не найден');
+      accounts.push({
+        ...this.toAccount(credentials),
+        portId: port.id,
+        portNumber: port.portNumber,
+      });
+    }
+    return accounts;
+  }
+
+  /**
+   * Каждый вход — своей записью по порту: историю линии ищут по её порту.
+   * Ни пароля, ни хеша, только имя.
+   */
+  private async recordPortAccounts(
+    accounts: readonly IssuedPortAccount[],
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+    previousUsername: string | null = null,
+  ): Promise<void> {
+    for (const account of accounts) {
+      await this.audit.record({
+        action: 'gateway_port.credentials_issued',
+        entityType: 'gateway_port',
+        entityId: account.portId,
+        actorUserId,
+        actorRole,
+        before: { sip_username: previousUsername },
+        after: { sip_username: account.username },
+      });
+    }
   }
 
   /**
@@ -1031,6 +1230,20 @@ export class TelephonyService {
       });
     }
 
+    const line = await this.repository.findRegistrablePort(username);
+    if (line !== undefined && line.port.sipUsername !== null && line.port.a1Hash !== null) {
+      await this.repository.recordPortRegistration(line.port.id, nodeId, new Date());
+      return directoryDocument(this.realm, {
+        username: line.port.sipUsername,
+        a1Hash: line.port.a1Hash,
+        variables: {
+          zvonix_gateway: line.gateway.id,
+          zvonix_gateway_type: line.gateway.type,
+          zvonix_gateway_port: line.port.id,
+        },
+      });
+    }
+
     const channel = await this.repository.findActiveChannel(username);
     if (channel !== undefined) {
       return directoryDocument(this.realm, {
@@ -1345,10 +1558,11 @@ export class TelephonyService {
       type: GatewayType;
       model: string | null;
       portCount: number;
+      registrationMode?: GatewayRegistrationMode;
     },
     actorUserId: Id<'user'>,
     actorRole: UserRole,
-  ): Promise<{ gateway: GatewayRow; account: IssuedSipAccount }> {
+  ): ReturnType<TelephonyService['createGateway']> {
     const limit = this.config.PARTNER_GATEWAY_LIMIT;
     if (limit > 0 && (await this.repository.countGateways(input.partnerId)) >= limit) {
       throw conflict('Больше шлюзов завести нельзя', {

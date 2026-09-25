@@ -232,6 +232,13 @@
       "when": 1790127398467,
       "tag": "0032_odin_vkhod_dva_kabineta",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790303444114,
+      "tag": "0033_vkhod_po_liniyam",
+      "breakpoints": true
     }
   ]
 }

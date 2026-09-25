@@ -91,8 +91,7 @@ export class RoutingController {
         : null,
       candidates: decision.candidates.map((candidate) => ({
         kind: terminationKindOf(candidate.gateway.type),
-        gatewaySipUsername: candidate.gateway.sipUsername,
-        linePrefix: linePrefixOf(candidate),
+        ...dialTargetOf(candidate),
       })),
     });
   }
@@ -148,15 +147,19 @@ export class RoutingController {
       sip_response: null,
       call_id: decision.call.id,
       decision_ms: decisionMs,
-      candidates: decision.candidates.map((candidate) => ({
-        gateway_id: candidate.gateway.id,
-        sip_username: candidate.gateway.sipUsername,
-        termination_kind: terminationKindOf(candidate.gateway.type),
-        // У транка SIM нет: ёмкость у него своя, и подставлять сюда нечего.
-        sim_card_id: candidate.kind === 'sim' ? candidate.sim.id : null,
-        // Каким префиксом узел выберет линию GOIP — то, что проверяют при настройке шлюза.
-        line_prefix: linePrefixOf(candidate),
-      })),
+      candidates: decision.candidates.map((candidate) => {
+        const target = dialTargetOf(candidate);
+        return {
+          gateway_id: candidate.gateway.id,
+          // Учётная запись, которую набирает узел: у входа по линиям — вход порта (ADR-0054).
+          sip_username: target.sipUsername,
+          termination_kind: terminationKindOf(candidate.gateway.type),
+          // У транка SIM нет: ёмкость у него своя, и подставлять сюда нечего.
+          sim_card_id: candidate.kind === 'sim' ? candidate.sim.id : null,
+          // Каким префиксом узел выберет линию GOIP — то, что проверяют при настройке шлюза.
+          line_prefix: target.linePrefix,
+        };
+      }),
     };
   }
 
@@ -181,11 +184,32 @@ export class RoutingController {
 }
 
 /**
- * Префикс линии кандидата: только у GOIP, где линий несколько и выбирать её должен
- * не шлюз, а площадка (ADR-0053).
+ * Кого набирать и с каким префиксом.
+ *
+ * Линию GOIP выбирает площадка, а не шлюз, и двумя способами
+ * ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)): при входе по линиям —
+ * учётной записью самой линии, без префикса; при входе на шлюз — префиксом линии
+ * ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)). У телефона слот
+ * один, у транка SIM нет — набирается шлюз как есть.
  */
-function linePrefixOf(candidate: TerminationCandidate): string | null {
-  return candidate.kind === 'sim' && candidate.gateway.type === 'goip'
-    ? goipLinePrefix(candidate.port.portNumber)
-    : null;
+function dialTargetOf(candidate: TerminationCandidate): {
+  sipUsername: string;
+  linePrefix: string | null;
+} {
+  if (candidate.kind !== 'sim' || candidate.gateway.type !== 'goip') {
+    return { sipUsername: candidate.gateway.sipUsername, linePrefix: null };
+  }
+  if (candidate.gateway.registrationMode === 'port') {
+    // Отбор берёт у такого шлюза только порт с выданным и зарегистрированным входом.
+    // Пустое имя здесь — рассогласование данных, и набирать вместо линии шлюз целиком
+    // значило бы позвонить с неизвестной SIM.
+    if (candidate.port.sipUsername === null) {
+      throw new Error(`У порта ${candidate.port.id} нет входа линии, а отбор его пропустил`);
+    }
+    return { sipUsername: candidate.port.sipUsername, linePrefix: null };
+  }
+  return {
+    sipUsername: candidate.gateway.sipUsername,
+    linePrefix: goipLinePrefix(candidate.port.portNumber),
+  };
 }

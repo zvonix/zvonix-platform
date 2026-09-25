@@ -6,14 +6,21 @@ import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
-import { SipCredentials, type SipAccount } from '@/components/sip-credentials';
+import {
+  LineCredentials,
+  SipCredentials,
+  type IssuedLines,
+  type PortAccount,
+  type SipAccount,
+} from '@/components/sip-credentials';
 import { StatusDialog, type StatusOption } from '@/components/status-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
 import { integerFromInput } from '@/lib/money';
-import { EQUIPMENT_KEY, gatewayStateName, type Gateway, type Sim } from './equipment';
+import { REGISTRATION_MODE_NAME } from '@/lib/labels';
+import { EQUIPMENT_KEY, gatewayStateName, type Gateway, type Port, type Sim } from './equipment';
 
 /**
  * Действия партнёра над своим оборудованием
@@ -45,22 +52,31 @@ const asApiError = (error: unknown): ApiError | undefined =>
 /**
  * Добавление шлюза. Пароль SIP показывается здесь и один раз, рядом — ссылка
  * на страницу шлюза, где остальные настройки видны всегда.
+ *
+ * При входе по линиям паролей столько, сколько линий, и показывается таблица входов:
+ * вход самого шлюза в этом режиме не действует, и показывать его значило бы
+ * предложить ввести то, что работать не будет (ADR-0054).
  */
 export function AddGateway() {
   const refresh = useRefresh();
-  const [created, setCreated] = useState<{ id: string; account: SipAccount } | undefined>(
-    undefined,
-  );
+  const [created, setCreated] = useState<
+    { id: string; name: string; account: SipAccount; lines: readonly PortAccount[] } | undefined
+  >(undefined);
 
   const add = useMutation({
     mutationFn: (draft: GatewayDraft) =>
-      request<{ gateway: { id: string }; account: SipAccount }>('/partner/gateways', {
-        method: 'POST',
-        body: { ...draft },
-      }),
-    onSuccess: async (response) => {
+      request<{ gateway: { id: string }; account: SipAccount; port_accounts: PortAccount[] }>(
+        '/partner/gateways',
+        { method: 'POST', body: { ...draft } },
+      ),
+    onSuccess: async (response, draft) => {
       // Панель с паролем закрывает человек: закрыть её — то же, что потерять пароль.
-      setCreated({ id: response.gateway.id, account: response.account });
+      setCreated({
+        id: response.gateway.id,
+        name: draft.name,
+        account: response.account,
+        lines: response.port_accounts,
+      });
       await refresh();
     },
   });
@@ -77,7 +93,19 @@ export function AddGateway() {
         </FormDialog>
       </div>
 
-      {created !== undefined && (
+      {created !== undefined && created.lines.length > 0 && (
+        <>
+          <LineCredentials
+            lines={created.lines}
+            title={`Входы линий шлюза «${created.name}»`}
+            onClose={() => {
+              setCreated(undefined);
+            }}
+          />
+          <GatewayLink id={created.id} />
+        </>
+      )}
+      {created !== undefined && created.lines.length === 0 && (
         <SipCredentials
           account={created.account}
           title="Доступ для нового шлюза"
@@ -85,15 +113,21 @@ export function AddGateway() {
             setCreated(undefined);
           }}
         >
-          <Link
-            href={`/partner/equipment/${created.id}`}
-            className="font-semibold text-primary underline-offset-4 hover:underline"
-          >
-            Открыть шлюз — порты и настройки →
-          </Link>
+          <GatewayLink id={created.id} />
         </SipCredentials>
       )}
     </div>
+  );
+}
+
+function GatewayLink({ id }: { id: string }) {
+  return (
+    <Link
+      href={`/partner/equipment/${id}`}
+      className="self-start font-semibold text-primary underline-offset-4 hover:underline"
+    >
+      Открыть шлюз — порты и настройки →
+    </Link>
   );
 }
 
@@ -102,6 +136,7 @@ interface GatewayDraft {
   readonly type: 'goip' | 'android';
   readonly model?: string;
   readonly portCount: number;
+  readonly registrationMode: 'gateway' | 'port';
 }
 
 /** Поля окна «Новый шлюз». Порты 1…N появляются вместе со шлюзом. */
@@ -110,6 +145,9 @@ function GatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promise<
   const [model, setModel] = useState('');
   const [type, setType] = useState<'goip' | 'android'>('goip');
   const [portCount, setPortCount] = useState('8');
+  // Предлагается вход по линиям: линию выбирает учётная запись, а не толкование
+  // префикса устройством, и видно, какая линия на связи (ADR-0054, решение владельца).
+  const [mode, setMode] = useState<'gateway' | 'port'>('port');
 
   // У телефона Android слот один — спрашивать нечего.
   const ports = type === 'android' ? 1 : integerFromInput(portCount);
@@ -127,6 +165,7 @@ function GatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promise<
           type,
           ...(model.trim() === '' ? {} : { model: model.trim() }),
           portCount: ports,
+          registrationMode: type === 'goip' ? mode : 'gateway',
         });
       }}
     >
@@ -165,6 +204,28 @@ function GatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promise<
           }}
         />
       </DialogField>
+
+      {type === 'goip' && (
+        <DialogField
+          label="Подключение"
+          hint={
+            mode === 'port'
+              ? 'В GOIP: Config Mode — Config by Line. Можно настроить только одну линию'
+              : 'В GOIP: Config Mode — Single Server. Линию выбирает префикс номера'
+          }
+        >
+          <select
+            value={mode}
+            onChange={(event) => {
+              setMode(event.target.value === 'gateway' ? 'gateway' : 'port');
+            }}
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2"
+          >
+            <option value="port">Каждая линия отдельно</option>
+            <option value="gateway">Весь шлюз одним входом</option>
+          </select>
+        </DialogField>
+      )}
 
       {type === 'goip' && (
         <DialogField label="Слотов под SIM" hint="Сколько на корпусе — столько и портов">
@@ -302,6 +363,153 @@ export function NewPassword({ gateway }: { gateway: Gateway }) {
         />
       )}
     </div>
+  );
+}
+
+/** Что показать партнёру о переходе на каждый из способов подключения. */
+const MODE_SWITCH = {
+  port: {
+    action: 'Перейти на вход по линиям',
+    consequence:
+      'У каждой линии появится свой логин и пароль — их покажут один раз, сразу после перехода. В GOIP выберите Config Mode — Config by Line и введите их в Line 1, Line 2 и так далее. Пока линии не введены, вызовы через шлюз не идут; общий вход шлюза перестаёт действовать сразу.',
+  },
+  gateway: {
+    action: 'Перейти на один вход для шлюза',
+    consequence:
+      'Линии перестанут регистрироваться своими входами — действовать будет общий вход шлюза. В GOIP выберите Config Mode — Single Server и введите префиксы линий из таблицы портов. Пароль общего входа, если он потерян, выдайте заново.',
+  },
+} as const;
+
+/**
+ * Способ подключения шлюза (ADR-0054). Режим у GOIP один на всё устройство, поэтому
+ * и здесь он один на шлюз. Переключение — с подтверждением: оно останавливает вызовы,
+ * пока устройство не перенастроено.
+ */
+export function RegistrationMode({
+  gateway,
+  onIssued,
+}: {
+  gateway: Gateway;
+  onIssued: (issued: IssuedLines) => void;
+}) {
+  const refresh = useRefresh();
+  const target = gateway.registration_mode === 'port' ? 'gateway' : 'port';
+  const change = useMutation({
+    mutationFn: () =>
+      request<{ port_accounts: PortAccount[] }>(
+        `/partner/gateways/${gateway.id}/registration-mode`,
+        { method: 'POST', body: { mode: target } },
+      ),
+    onSuccess: async (response) => {
+      if (response.port_accounts.length > 0) {
+        onIssued({ title: `Входы линий шлюза «${gateway.name}»`, lines: response.port_accounts });
+      }
+      await refresh();
+    },
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span>
+        <span className="text-muted-foreground">Способ подключения: </span>
+        {REGISTRATION_MODE_NAME[gateway.registration_mode]}
+      </span>
+      <ConfirmAction
+        label={MODE_SWITCH[target].action}
+        title={`${MODE_SWITCH[target].action}: «${gateway.name}»`}
+        consequence={<p>{MODE_SWITCH[target].consequence}</p>}
+        confirmLabel={MODE_SWITCH[target].action}
+        onConfirm={() => change.mutateAsync()}
+      />
+    </div>
+  );
+}
+
+/** Входы линиям, у которых их нет, — после «Добавить порты». */
+export function IssueMissingLines({
+  gateway,
+  onIssued,
+}: {
+  gateway: Gateway;
+  onIssued: (issued: IssuedLines) => void;
+}) {
+  const refresh = useRefresh();
+  const missing = gateway.ports.filter((port) => port.sip_username === null).length;
+  const issue = useMutation({
+    mutationFn: () =>
+      request<{ port_accounts: PortAccount[] }>(
+        `/partner/gateways/${gateway.id}/port-credentials`,
+        { method: 'POST' },
+      ),
+    onSuccess: async (response) => {
+      if (response.port_accounts.length > 0) {
+        onIssued({ title: `Входы линий шлюза «${gateway.name}»`, lines: response.port_accounts });
+      }
+      await refresh();
+    },
+  });
+  const error = asApiError(issue.error);
+
+  if (missing === 0) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <div>
+        <Button
+          size="sm"
+          disabled={issue.isPending}
+          onClick={() => {
+            issue.mutate();
+          }}
+        >
+          Выдать входы линиям без входа: {missing}
+        </Button>
+      </div>
+      {error !== undefined && <ErrorNote error={error} />}
+    </div>
+  );
+}
+
+/** Новый пароль одной линии: меняются логин и пароль, прежние перестают работать. */
+export function NewLineAccount({
+  gateway,
+  port,
+  onIssued,
+}: {
+  gateway: Gateway;
+  port: Port;
+  onIssued: (issued: IssuedLines) => void;
+}) {
+  const refresh = useRefresh();
+  const reset = useMutation({
+    mutationFn: () =>
+      request<{ port_account: PortAccount }>(`/partner/gateway-ports/${port.id}/credentials`, {
+        method: 'POST',
+      }),
+    onSuccess: async (response) => {
+      onIssued({
+        title: `Новый вход линии ${String(port.port_number)} шлюза «${gateway.name}»`,
+        lines: [response.port_account],
+      });
+      await refresh();
+    },
+  });
+
+  return (
+    <ConfirmAction
+      label="Новый пароль"
+      title={`Новый вход линии ${String(port.port_number)}`}
+      consequence={
+        <p>
+          Меняются логин и пароль линии. Она замолчит, пока вы не введёте новые данные в Line{' '}
+          {port.port_number} в GOIP. Остальные линии и идущие разговоры это не затрагивает.
+        </p>
+      }
+      confirmLabel="Выдать новый пароль"
+      size="xs"
+      variant="ghost"
+      className="h-5 px-1 text-primary"
+      onConfirm={() => reset.mutateAsync()}
+    />
   );
 }
 

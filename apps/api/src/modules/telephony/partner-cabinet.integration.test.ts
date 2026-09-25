@@ -1555,3 +1555,294 @@ describe('карты и порты при поздних и одновремен
     },
   );
 });
+
+describe('вход по линиям GOIP (ADR-0054)', () => {
+  // Свой партнёр: у проверяемого шлюзов уже на предел, заведённый площадкой.
+  let owner: Awaited<ReturnType<typeof createPartner>>;
+  beforeAll(async () => {
+    owner = await createPartner('Сидоров Сидор');
+  });
+
+  interface PortAccount {
+    port_id: string;
+    port_number: number;
+    username: string;
+    password: string;
+    realm: string;
+  }
+
+  /** Спросить каталог от имени узла: принят ли вход. */
+  async function accepted(username: string): Promise<boolean> {
+    const response = await api().inject({
+      method: 'POST',
+      url: '/node/directory',
+      headers: { ...as(nodeKey), 'content-type': 'application/x-www-form-urlencoded' },
+      payload: `section=directory&user=${username}&action=sip_auth`,
+    });
+    expect(response.statusCode).toBe(200);
+    return response.body.includes('a1-hash');
+  }
+
+  async function createPortGateway(portCount: number) {
+    const response = await post(
+      '/partner/gateways',
+      { name: unique('Шлюз по линиям'), type: 'goip', portCount, registrationMode: 'port' },
+      as(owner.token),
+    );
+    expect(response.statusCode).toBe(201);
+    const body = response.json<{
+      gateway: { id: string };
+      account: { username: string };
+      port_accounts: PortAccount[];
+    }>();
+    await post(
+      `/partner/gateways/${body.gateway.id}/status`,
+      { status: 'active' },
+      as(owner.token),
+    );
+    return body;
+  }
+
+  async function equipmentOf(gatewayId: string) {
+    const body = (await get('/partner/equipment', as(owner.token))).json<{
+      gateways: {
+        id: string;
+        registration_mode: string;
+        on_node: boolean;
+        ports: { id: string; sip_username: string | null; on_node: boolean }[];
+      }[];
+    }>();
+    const gateway = body.gateways.find((row) => row.id === gatewayId);
+    if (gateway === undefined) throw new Error('Шлюза нет в оборудовании');
+    return gateway;
+  }
+
+  it('GOIP со входом по линиям получает входы всех портов сразу, один раз', async () => {
+    const created = await createPortGateway(2);
+
+    expect(created.port_accounts.map((account) => account.port_number)).toEqual([1, 2]);
+    for (const account of created.port_accounts) {
+      expect(account.username).toMatch(/^pt-[a-z0-9]{12}$/u);
+      expect(account.password.length).toBeGreaterThan(10);
+    }
+
+    // В оборудовании — имена линий, но не пароли.
+    const response = await get('/partner/equipment', as(owner.token));
+    expect(response.body).not.toContain(created.port_accounts[0]?.password ?? '—');
+    const shown = await equipmentOf(created.gateway.id);
+    expect(shown.registration_mode).toBe('port');
+    expect(shown.ports.map((port) => port.sip_username)).toEqual(
+      created.port_accounts.map((account) => account.username),
+    );
+    expect(shown.on_node).toBe(false);
+  });
+
+  it('каталог отдаёт вход линии и не отдаёт вход шлюза; связь видна по линии', async () => {
+    const created = await createPortGateway(2);
+    const [line] = created.port_accounts;
+    if (line === undefined) throw new Error('Входов нет');
+
+    // Два пути регистрации дали бы два набора — вход шлюза в этом режиме не действует.
+    expect(await accepted(created.account.username)).toBe(false);
+    expect(await accepted(line.username)).toBe(true);
+
+    const shown = await equipmentOf(created.gateway.id);
+    expect(shown.on_node).toBe(true);
+    expect(shown.ports.map((port) => port.on_node)).toEqual([true, false]);
+  });
+
+  it('у выключенного шлюза вход линии не действует', async () => {
+    const created = await createPortGateway(1);
+    await post(
+      `/partner/gateways/${created.gateway.id}/status`,
+      { status: 'suspended' },
+      as(owner.token),
+    );
+    expect(await accepted(created.port_accounts[0]?.username ?? '')).toBe(false);
+  });
+
+  it('вход по линиям только у GOIP', async () => {
+    const android = await post(
+      '/partner/gateways',
+      { name: unique('Телефон'), type: 'android', portCount: 1, registrationMode: 'port' },
+      as(owner.token),
+    );
+    expect(android.statusCode).toBe(400);
+
+    const phone = (
+      await post(
+        '/partner/gateways',
+        { name: unique('Телефон'), type: 'android', portCount: 1 },
+        as(owner.token),
+      )
+    ).json<{ gateway: { id: string } }>().gateway.id;
+    const response = await post(
+      `/partner/gateways/${phone}/registration-mode`,
+      { mode: 'port' },
+      as(owner.token),
+    );
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('переключение на линии выдаёт входы и пишется в журнал; обратно — вход шлюза снова действует', async () => {
+    const created = (
+      await post(
+        '/partner/gateways',
+        { name: unique('Шлюз'), type: 'goip', portCount: 3 },
+        as(owner.token),
+      )
+    ).json<{ gateway: { id: string }; account: { username: string }; port_accounts: [] }>();
+    expect(created.port_accounts).toEqual([]);
+    await post(
+      `/partner/gateways/${created.gateway.id}/status`,
+      { status: 'active' },
+      as(owner.token),
+    );
+    expect(await accepted(created.account.username)).toBe(true);
+
+    const switched = await post(
+      `/partner/gateways/${created.gateway.id}/registration-mode`,
+      { mode: 'port' },
+      as(owner.token),
+    );
+    expect(switched.statusCode).toBe(201);
+    const accounts = switched.json<{ port_accounts: PortAccount[] }>().port_accounts;
+    expect(accounts.map((account) => account.port_number)).toEqual([1, 2, 3]);
+    expect(await accepted(created.account.username)).toBe(false);
+    // Давняя регистрация шлюза не делает его «на связи» по линиям.
+    expect((await equipmentOf(created.gateway.id)).on_node).toBe(false);
+
+    // Повтор — не событие: входы не перевыпускаются, журнал не пишется.
+    const again = await post(
+      `/partner/gateways/${created.gateway.id}/registration-mode`,
+      { mode: 'port' },
+      as(owner.token),
+    );
+    expect(again.json<{ port_accounts: PortAccount[] }>().port_accounts).toEqual([]);
+
+    const back = await post(
+      `/partner/gateways/${created.gateway.id}/registration-mode`,
+      { mode: 'gateway' },
+      as(owner.token),
+    );
+    expect(back.statusCode).toBe(201);
+    expect(await accepted(accounts[0]?.username ?? '')).toBe(false);
+    expect(await accepted(created.account.username)).toBe(true);
+
+    const journal = await withDatabase(async (execute) => {
+      const result = await execute(sql`
+        select before, after from audit_log
+         where action = 'gateway.registration_mode_changed' and entity_id = ${created.gateway.id}
+         order by occurred_at, id
+      `);
+      return result.rows as { before: unknown; after: unknown }[];
+    });
+    expect(journal).toEqual([
+      { before: { registration_mode: 'gateway' }, after: { registration_mode: 'port' } },
+      { before: { registration_mode: 'port' }, after: { registration_mode: 'gateway' } },
+    ]);
+  });
+
+  it('новым портам входы выдаются отдельно — уже выданные не трогаются', async () => {
+    const created = await createPortGateway(1);
+    await post(`/partner/gateways/${created.gateway.id}/ports`, { count: 2 }, as(owner.token));
+
+    const issued = await post(
+      `/partner/gateways/${created.gateway.id}/port-credentials`,
+      {},
+      as(owner.token),
+    );
+    expect(issued.statusCode).toBe(201);
+    expect(
+      issued.json<{ port_accounts: PortAccount[] }>().port_accounts.map((a) => a.port_number),
+    ).toEqual([2, 3]);
+    expect(await accepted(created.port_accounts[0]?.username ?? '')).toBe(true);
+
+    // Второй раз выдавать некому.
+    const again = await post(
+      `/partner/gateways/${created.gateway.id}/port-credentials`,
+      {},
+      as(owner.token),
+    );
+    expect(again.json<{ port_accounts: PortAccount[] }>().port_accounts).toEqual([]);
+  });
+
+  it('новый вход линии: прежний перестаёт действовать сразу', async () => {
+    const created = await createPortGateway(1);
+    const [line] = created.port_accounts;
+    if (line === undefined) throw new Error('Входов нет');
+    expect(await accepted(line.username)).toBe(true);
+
+    const reset = await post(
+      `/partner/gateway-ports/${line.port_id}/credentials`,
+      {},
+      as(owner.token),
+    );
+    expect(reset.statusCode).toBe(201);
+    const fresh = reset.json<{ port_account: PortAccount }>().port_account;
+    expect(fresh.username).not.toBe(line.username);
+    expect(await accepted(line.username)).toBe(false);
+    expect(await accepted(fresh.username)).toBe(true);
+
+    const journal = await withDatabase(async (execute) => {
+      const result = await execute(sql`
+        select before, after from audit_log
+         where action = 'gateway_port.credentials_issued' and entity_id = ${line.port_id}
+         order by occurred_at, id
+      `);
+      return result.rows as { before: unknown; after: unknown }[];
+    });
+    // Ни пароля, ни хеша — только имена.
+    expect(journal).toEqual([
+      { before: { sip_username: null }, after: { sip_username: line.username } },
+      { before: { sip_username: line.username }, after: { sip_username: fresh.username } },
+    ]);
+  });
+
+  it('при входе на шлюз вход линии не выдаётся: каталог его не отдал бы', async () => {
+    const gateway = (
+      await post(
+        '/partner/gateways',
+        { name: unique('Шлюз'), type: 'goip', portCount: 1 },
+        as(owner.token),
+      )
+    ).json<{ gateway: { id: string } }>().gateway.id;
+    const [port] = (await equipmentOf(gateway)).ports;
+
+    expect(
+      (await post(`/partner/gateways/${gateway}/port-credentials`, {}, as(owner.token))).statusCode,
+    ).toBe(409);
+    expect(
+      (await post(`/partner/gateway-ports/${port?.id ?? ''}/credentials`, {}, as(owner.token)))
+        .statusCode,
+    ).toBe(409);
+  });
+
+  it('чужому шлюзу ни режима, ни входов — 404', async () => {
+    const created = await createPortGateway(1);
+    const portId = created.port_accounts[0]?.port_id ?? '';
+
+    expect(
+      (
+        await post(
+          `/partner/gateways/${created.gateway.id}/registration-mode`,
+          { mode: 'gateway' },
+          as(neighbour.token),
+        )
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await post(
+          `/partner/gateways/${created.gateway.id}/port-credentials`,
+          {},
+          as(neighbour.token),
+        )
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (await post(`/partner/gateway-ports/${portId}/credentials`, {}, as(neighbour.token)))
+        .statusCode,
+    ).toBe(404);
+  });
+});

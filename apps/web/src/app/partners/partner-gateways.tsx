@@ -7,6 +7,7 @@ import {
   goipLinePrefix,
   REGISTRABLE_GATEWAY_STATUSES,
   type GatewayPortState,
+  type GatewayRegistrationMode,
   type GatewayStatus,
   type GatewaySuspendedBy,
   type GatewayType,
@@ -17,7 +18,13 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { StatusDialog } from '@/components/status-dialog';
-import type { IssuedCredentials, SipAccount } from '@/components/sip-credentials';
+import {
+  LineCredentials,
+  type IssuedLines,
+  type IssuedSecret,
+  type PortAccount,
+  type SipAccount,
+} from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -39,6 +46,7 @@ import {
   GATEWAY_SUSPENDED_BY_NAME,
   GATEWAY_TYPE_NAME,
   PORT_STATE_NAME,
+  REGISTRATION_MODE_NAME,
   usableTone,
 } from '@/lib/labels';
 import { integerFromInput } from '@/lib/money';
@@ -50,6 +58,8 @@ interface Gateway {
   readonly status: GatewayStatus;
   /** Кто выключил: задан ровно у `suspended` (ADR-0047). */
   readonly suspended_by: GatewaySuspendedBy | null;
+  /** `port` — у каждой линии свой вход, вход шлюза не действует (ADR-0054). */
+  readonly registration_mode: GatewayRegistrationMode;
   readonly sip_username: string;
   readonly registered_at: string | null;
   readonly model: string | null;
@@ -61,6 +71,9 @@ interface Port {
   readonly port_number: number;
   readonly sim_card_id: string | null;
   readonly state: GatewayPortState;
+  /** Вход линии; пусто — не выдан. */
+  readonly sip_username: string | null;
+  readonly registered_at: string | null;
 }
 
 export interface SimOption {
@@ -111,7 +124,7 @@ export function PartnerGateways({
 }: {
   partnerId: string;
   sims: SimOption[];
-  onIssued: (issued: IssuedCredentials) => void;
+  onIssued: (issued: IssuedSecret) => void;
 }) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
@@ -127,13 +140,32 @@ export function PartnerGateways({
 
   const create = useMutation({
     mutationFn: (draft: GatewayDraft) =>
-      request<{ account: SipAccount }>('/gateways', {
+      request<{ account: SipAccount; port_accounts: PortAccount[] }>('/gateways', {
         method: 'POST',
         body: { partnerId, ...draft },
       }),
     onSuccess: async (data, draft) => {
-      onIssued({ title: `Доступ SIP для шлюза «${draft.name}»`, account: data.account });
+      // При входе по линиям вход шлюза не действует — показываются входы линий (ADR-0054).
+      onIssued(
+        data.port_accounts.length > 0
+          ? { title: `Входы линий шлюза «${draft.name}»`, lines: data.port_accounts }
+          : { title: `Доступ SIP для шлюза «${draft.name}»`, account: data.account },
+      );
       await invalidate();
+    },
+  });
+
+  const switchMode = useMutation({
+    mutationFn: (input: { gateway: Gateway; mode: GatewayRegistrationMode }) =>
+      request<{ port_accounts: PortAccount[] }>(`/gateways/${input.gateway.id}/registration-mode`, {
+        method: 'POST',
+        body: { mode: input.mode },
+      }),
+    onSuccess: (data, input) => {
+      if (data.port_accounts.length > 0) {
+        onIssued({ title: `Входы линий шлюза «${input.gateway.name}»`, lines: data.port_accounts });
+      }
+      void invalidate();
     },
   });
 
@@ -159,7 +191,7 @@ export function PartnerGateways({
 
   // Отказы заведения, состояния и доступа показывают их окна, здесь — только отказ списка.
   const failed = asApiError(list.error);
-  const busy = changeStatus.isPending || reissue.isPending;
+  const busy = changeStatus.isPending || reissue.isPending || switchMode.isPending;
 
   return (
     <div className="flex flex-col gap-2">
@@ -181,7 +213,7 @@ export function PartnerGateways({
               <TableHead className="h-8">Шлюз</TableHead>
               <TableHead className="h-8">Вид</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Имя SIP</TableHead>
+              <TableHead className="h-8">Вход SIP</TableHead>
               <TableHead className="h-8 text-right">Портов</TableHead>
               <TableHead className="h-8">Регистрация</TableHead>
               <TableHead className="h-8"> </TableHead>
@@ -212,6 +244,8 @@ export function PartnerGateways({
                 busy={busy}
                 onChangeStatus={(status) => changeStatus.mutateAsync({ gateway, status })}
                 onReissue={() => reissue.mutateAsync(gateway)}
+                onSwitchMode={(mode) => switchMode.mutateAsync({ gateway, mode })}
+                onIssued={onIssued}
               />
             ))}
           </TableBody>
@@ -226,6 +260,7 @@ interface GatewayDraft {
   readonly type: GatewayType;
   readonly model?: string;
   readonly portCount: number;
+  readonly registrationMode: GatewayRegistrationMode;
 }
 
 /** Заведение шлюза — поля окна «Новый шлюз». */
@@ -234,6 +269,7 @@ function NewGatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promi
   const [type, setType] = useState<GatewayType>('goip');
   const [model, setModel] = useState('');
   const [portCount, setPortCount] = useState('8');
+  const [mode, setMode] = useState<GatewayRegistrationMode>('port');
 
   const ports = integerFromInput(portCount);
   const portsValid = ports !== undefined && ports <= MAX_PORTS;
@@ -249,6 +285,8 @@ function NewGatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promi
           type,
           ...(model.trim() === '' ? {} : { model: model.trim() }),
           portCount: ports ?? 0,
+          // Вход по линиям бывает только у GOIP (ADR-0054).
+          registrationMode: type === 'goip' ? mode : 'gateway',
         })
       }
     >
@@ -282,6 +320,21 @@ function NewGatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promi
           ))}
         </select>
       </DialogField>
+
+      {type === 'goip' && (
+        <DialogField label="Подключение">
+          <select
+            value={mode}
+            onChange={(event) => {
+              setMode(event.target.value === 'gateway' ? 'gateway' : 'port');
+            }}
+            className="h-9 rounded-md border border-input bg-transparent px-2"
+          >
+            <option value="port">Каждая линия отдельно</option>
+            <option value="gateway">Весь шлюз одним входом</option>
+          </select>
+        </DialogField>
+      )}
 
       <DialogField label="Модель">
         <Input
@@ -329,18 +382,24 @@ function GatewayRow({
   busy,
   onChangeStatus,
   onReissue,
+  onSwitchMode,
+  onIssued,
 }: {
   gateway: Gateway;
   sims: SimOption[];
   busy: boolean;
   onChangeStatus: (status: GatewayStatus) => Promise<unknown>;
   onReissue: () => Promise<unknown>;
+  onSwitchMode: (mode: GatewayRegistrationMode) => Promise<unknown>;
+  onIssued: (issued: IssuedSecret) => void;
 }) {
   const canChange = useCanChange();
   // Выключенный самим партнёром шлюз администратор может запереть: состояние то же,
   // источник — площадка, и партнёр больше не включит и не спишет его (ADR-0047).
   const lockable = gateway.status === 'suspended' && gateway.suspended_by === 'partner';
   const retired = gateway.status === 'retired';
+  const byLine = gateway.registration_mode === 'port';
+  const otherMode: GatewayRegistrationMode = byLine ? 'gateway' : 'port';
 
   return (
     <TableRow>
@@ -364,13 +423,25 @@ function GatewayRow({
         )}
       </TableCell>
       <TableCell>
-        <span className="num" translate="no">
-          {gateway.sip_username}
-        </span>
+        {byLine ? (
+          <span>по линиям</span>
+        ) : (
+          <span className="num" translate="no">
+            {gateway.sip_username}
+          </span>
+        )}
+        {gateway.type === 'goip' && (
+          <span className="block text-faint">
+            {REGISTRATION_MODE_NAME[gateway.registration_mode]}
+          </span>
+        )}
       </TableCell>
       <TableCell className="num text-right">{gateway.port_count}</TableCell>
       <TableCell>
-        {gateway.registered_at === null ? (
+        {byLine ? (
+          // Регистрация у каждой линии своя — в окне портов.
+          <span className="text-muted-foreground">у линий — в окне портов</span>
+        ) : gateway.registered_at === null ? (
           <span className="text-warn">не регистрировался</span>
         ) : (
           <span className="num text-muted-foreground">{moment(gateway.registered_at)}</span>
@@ -405,7 +476,25 @@ function GatewayRow({
             />
           )}
 
-          {canChange && !retired && (
+          {canChange && !retired && gateway.type === 'goip' && (
+            <ConfirmAction
+              label={byLine ? 'Один вход на шлюз' : 'Вход по линиям'}
+              title={`Способ подключения шлюза «${gateway.name}»`}
+              consequence={
+                <p>
+                  {byLine
+                    ? 'Линии перестанут регистрироваться своими входами, действовать будет вход шлюза. Партнёру нужно переключить GOIP на Single Server и ввести префиксы линий.'
+                    : 'У каждой линии появится свой вход — пароли покажутся один раз. Вход шлюза перестанет действовать сразу. Партнёру нужно переключить GOIP на Config by Line и ввести входы линий.'}{' '}
+                  Пока устройство не перенастроено, вызовы через шлюз не идут.
+                </p>
+              }
+              confirmLabel="Переключить"
+              disabled={busy}
+              onConfirm={() => onSwitchMode(otherMode)}
+            />
+          )}
+
+          {canChange && !retired && !byLine && (
             <ConfirmAction
               label="Новый доступ"
               title={`Перевыпустить доступ шлюза «${gateway.name}»`}
@@ -434,7 +523,7 @@ function GatewayRow({
             wide
           >
             <div className="min-h-0 overflow-y-auto px-5 pb-5">
-              <GatewayPorts gatewayId={gateway.id} goip={gateway.type === 'goip'} sims={sims} />
+              <GatewayPorts gateway={gateway} sims={sims} onIssued={onIssued} />
             </div>
           </FormDialog>
         </div>
@@ -451,18 +540,30 @@ function GatewayRow({
  * и свои отказы — добавления порта и установки SIM.
  */
 function GatewayPorts({
-  gatewayId,
-  goip,
+  gateway,
   sims,
+  onIssued,
 }: {
-  gatewayId: string;
-  /** Префикс линии есть только у GOIP (ADR-0053): у телефона слот один. */
-  goip: boolean;
+  gateway: Gateway;
   sims: SimOption[];
+  onIssued: (issued: IssuedSecret) => void;
 }) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
   const [portNumber, setPortNumber] = useState('');
+  const gatewayId = gateway.id;
+  // Префикс линии есть только у GOIP (ADR-0053): у телефона слот один. При входе
+  // по линиям вместо префикса — вход линии и её регистрация (ADR-0054).
+  const goip = gateway.type === 'goip';
+  const byLine = gateway.registration_mode === 'port';
+  const columns = goip ? (byLine ? 5 : 4) : 3;
+  // Выданное показывается и здесь: панель на карточке остаётся за этим окном,
+  // и пароль, показанный один раз, легко не заметить (копия там — на случай закрытия окна).
+  const [shown, setShown] = useState<IssuedLines | undefined>(undefined);
+  const issued = (lines: IssuedLines): void => {
+    setShown(lines);
+    onIssued(lines);
+  };
 
   const list = useQuery({
     queryKey: ['ports', gatewayId],
@@ -494,7 +595,37 @@ function GatewayPorts({
     onSuccess: invalidate,
   });
 
-  const failed = asApiError(list.error ?? addPort.error ?? assign.error);
+  const issueMissing = useMutation({
+    mutationFn: () =>
+      request<{ port_accounts: PortAccount[] }>(`/gateways/${gatewayId}/port-credentials`, {
+        method: 'POST',
+      }),
+    onSuccess: async (data) => {
+      if (data.port_accounts.length > 0) {
+        issued({ title: `Входы линий шлюза «${gateway.name}»`, lines: data.port_accounts });
+      }
+      await invalidate();
+    },
+  });
+
+  const resetLine = useMutation({
+    mutationFn: (port: Port) =>
+      request<{ port_account: PortAccount }>(`/gateway-ports/${port.id}/credentials`, {
+        method: 'POST',
+      }),
+    onSuccess: async (data, port) => {
+      issued({
+        title: `Новый вход линии ${String(port.port_number)} шлюза «${gateway.name}»`,
+        lines: [data.port_account],
+      });
+      await invalidate();
+    },
+  });
+
+  const failed = asApiError(
+    list.error ?? addPort.error ?? assign.error ?? issueMissing.error ?? resetLine.error,
+  );
+  const missing = (list.data?.ports ?? []).filter((row) => row.sip_username === null).length;
   const ports = list.data?.ports ?? [];
   const port = integerFromInput(portNumber);
   const portValid = port !== undefined && port >= 1 && port <= MAX_PORTS;
@@ -531,6 +662,31 @@ function GatewayPorts({
         </form>
       )}
 
+      {canChange && byLine && missing > 0 && gateway.status !== 'retired' && (
+        <div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={issueMissing.isPending}
+            onClick={() => {
+              issueMissing.mutate();
+            }}
+          >
+            Выдать входы линиям без входа: {missing}
+          </Button>
+        </div>
+      )}
+
+      {shown !== undefined && (
+        <LineCredentials
+          lines={shown.lines}
+          title={shown.title}
+          onClose={() => {
+            setShown(undefined);
+          }}
+        />
+      )}
+
       {failed !== undefined && <ErrorNote error={failed} />}
 
       <div className="overflow-x-auto rounded-md border border-border bg-card">
@@ -538,7 +694,9 @@ function GatewayPorts({
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8 text-right">Порт</TableHead>
-              {goip && <TableHead className="h-8">Префикс линии</TableHead>}
+              {goip && !byLine && <TableHead className="h-8">Префикс линии</TableHead>}
+              {byLine && <TableHead className="h-8">Вход линии</TableHead>}
+              {byLine && <TableHead className="h-8">Регистрация</TableHead>}
               <TableHead className="h-8">Состояние</TableHead>
               <TableHead className="h-8">SIM</TableHead>
             </TableRow>
@@ -546,7 +704,7 @@ function GatewayPorts({
           <TableBody>
             {list.isPending && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={goip ? 4 : 3} className="text-muted-foreground">
+                <TableCell colSpan={columns} className="text-muted-foreground">
                   Загружаем…
                 </TableCell>
               </TableRow>
@@ -554,7 +712,7 @@ function GatewayPorts({
 
             {list.data !== undefined && ports.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={goip ? 4 : 3} className="text-muted-foreground">
+                <TableCell colSpan={columns} className="text-muted-foreground">
                   Портов не объявлено — SIM некуда поставить, и шлюз в отбор не попадёт.
                 </TableCell>
               </TableRow>
@@ -563,7 +721,47 @@ function GatewayPorts({
             {ports.map((row) => (
               <TableRow key={row.id}>
                 <TableCell className="num text-right">{row.port_number}</TableCell>
-                {goip && <TableCell className="num">{goipLinePrefix(row.port_number)}</TableCell>}
+                {goip && !byLine && (
+                  <TableCell className="num">{goipLinePrefix(row.port_number)}</TableCell>
+                )}
+                {byLine && (
+                  <TableCell>
+                    {row.sip_username === null ? (
+                      <span className="text-warn">не выдан</span>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="num" translate="no">
+                          {row.sip_username}
+                        </span>
+                        {canChange && gateway.status !== 'retired' && (
+                          <ConfirmAction
+                            label="Новый вход"
+                            title={`Новый вход линии ${String(row.port_number)}`}
+                            consequence={
+                              <p>
+                                Логин и пароль линии меняются сразу. Линия замолчит, пока партнёр не
+                                введёт новые данные в GOIP. Другие линии это не затрагивает.
+                              </p>
+                            }
+                            confirmLabel="Перевыпустить"
+                            size="xs"
+                            variant="ghost"
+                            onConfirm={() => resetLine.mutateAsync(row)}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+                )}
+                {byLine && (
+                  <TableCell>
+                    {row.registered_at === null ? (
+                      <span className="text-warn">не регистрировалась</span>
+                    ) : (
+                      <span className="num text-muted-foreground">{moment(row.registered_at)}</span>
+                    )}
+                  </TableCell>
+                )}
                 <TableCell className="text-muted-foreground">
                   {PORT_STATE_NAME[row.state]}
                 </TableCell>

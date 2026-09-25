@@ -18,6 +18,7 @@ describe('выпуск учётных данных', () => {
   it.each([
     ['gateway', 'gw'],
     ['channel', 'ch'],
+    ['port', 'pt'],
   ] as const)('%s: имя узнаётся по приставке', (kind, prefix) => {
     const issued = issueSipCredentials(kind, REALM);
     expect(issued.username).toMatch(new RegExp(`^${prefix}-[a-z0-9]{12}$`));
