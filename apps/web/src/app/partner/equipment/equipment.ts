@@ -8,6 +8,7 @@
 
 import type {
   GatewayPortState,
+  GatewayRegistrationMode,
   GatewayStatus,
   GatewayType,
   PartnerFacingSuspension,
@@ -26,11 +27,16 @@ export interface Sim {
   readonly operator_confirmed_at: string | null;
 }
 
-interface Port {
+export interface Port {
   readonly id: string;
   readonly port_number: number;
   readonly state: GatewayPortState;
   readonly sim: Sim | null;
+  /** Вход линии при входе по линиям (ADR-0054); пусто — не выдан. Пароль не отдаётся. */
+  readonly sip_username: string | null;
+  /** Есть ли у линии регистрация. Значимо только при входе по линиям. */
+  readonly on_node: boolean;
+  readonly registered_at: string | null;
 }
 
 export interface Gateway {
@@ -44,11 +50,14 @@ export interface Gateway {
    */
   readonly suspended_by: PartnerFacingSuspension | null;
   readonly model: string | null;
+  /** `port` — у каждой линии свой вход, `gateway` — один вход на шлюз (ADR-0054). */
+  readonly registration_mode: GatewayRegistrationMode;
   /** Имя SIP, под которым шлюз регистрируется. Пароль не отдаётся никогда. */
   readonly sip_username: string;
   /**
    * Есть ли регистрация на узле. Без неё вызов не уйдёт вовсе: диалплан набирает шлюз
    * как зарегистрированного пользователя, и отбор кандидатов сужается узлом.
+   * При входе по линиям — есть ли она хоть у одной линии.
    */
   readonly on_node: boolean;
   readonly registered_at: string | null;

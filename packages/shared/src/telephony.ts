@@ -70,6 +70,24 @@ export function terminationKindOf(type: GatewayType): TerminationKind {
 }
 
 /**
+ * Способ подключения шлюза ([ADR-0054](../../docs/adr/0054-vhod-po-liniyam-goip.md)).
+ *
+ * `gateway` — один вход на весь шлюз, линию GOIP выбирает префикс номера
+ *             ([ADR-0053](../../docs/adr/0053-liniya-goip-po-prefiksu.md));
+ * `port`    — свой вход у каждого порта (GOIP `Config by Line`): площадка набирает
+ *             вход линии, и вызов приходит ровно в неё. **Только у GOIP.**
+ *
+ * GOIP задаёт режим на всё устройство, поэтому это свойство шлюза, а не порта.
+ */
+export const GATEWAY_REGISTRATION_MODES = ['gateway', 'port'] as const;
+export type GatewayRegistrationMode = (typeof GATEWAY_REGISTRATION_MODES)[number];
+
+/** Вход по линиям бывает только там, где линий несколько и у каждой свой SIP-клиент. */
+export function supportsPortRegistration(type: GatewayType): boolean {
+  return type === 'goip';
+}
+
+/**
  * Состояние шлюза.
  *
  * `pending`   — заведён партнёром, модерация не пройдена: учётная запись SIP не выдаётся;
@@ -141,13 +159,14 @@ export type ChannelStatus = (typeof CHANNEL_STATUSES)[number];
 export const ACTIVE_CHANNEL_STATUSES: readonly ChannelStatus[] = ['active'];
 
 /**
- * Имя учётной записи SIP: `gw-<12 символов>` у шлюза, `ch-<12 символов>` у канала.
+ * Имя учётной записи SIP: `gw-<12 символов>` у шлюза, `ch-<12 символов>` у канала,
+ * `pt-<12 символов>` у линии GOIP ([ADR-0054](../../docs/adr/0054-vhod-po-liniyam-goip.md)).
  *
  * Не идентификатор сущности: он попадает в заголовки SIP, в логи узла и в запись
  * регистрации, а UUID там нечитаем. И не имя, заданное человеком: оно меняется,
  * а смена имени учётной записи означает перенастройку оборудования у партнёра.
  */
-const SIP_USERNAME = /^(gw|ch)-[0-9a-z]{12}$/;
+const SIP_USERNAME = /^(gw|ch|pt)-[0-9a-z]{12}$/;
 
 export function isSipUsername(value: string): boolean {
   return SIP_USERNAME.test(value);

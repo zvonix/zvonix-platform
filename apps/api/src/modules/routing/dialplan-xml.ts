@@ -41,13 +41,18 @@ interface RouteCandidate {
    */
   readonly kind: TerminationKind;
 
-  /** Имя учётной записи SIP шлюза: `gw-a1b2c3d4e5f6`. У транка — имя sofia-gateway. */
-  readonly gatewaySipUsername: string;
+  /**
+   * Учётная запись, которую набирать: шлюза (`gw-…`) или, при входе по линиям, порта
+   * (`pt-…`, [ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
+   * У транка — имя sofia-gateway.
+   */
+  readonly sipUsername: string;
 
   /**
    * Префикс линии GOIP, по которому шлюз выбирает, с какой SIM звонить
    * ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)). Пусто —
-   * выбирать нечего: у телефона Android слот один, у транка SIM нет вовсе.
+   * выбирать нечего: линию уже выбрал вход линии (ADR-0054), у телефона Android слот
+   * один, у транка SIM нет вовсе.
    */
   readonly linePrefix: string | null;
 }
@@ -144,7 +149,7 @@ export function routeDocument(plan: RoutePlan): string {
  * в квадратных скобках, потому что у каждого кандидата он свой.
  */
 function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
-  const name = escapeXmlAttribute(candidate.gatewaySipUsername);
+  const name = escapeXmlAttribute(candidate.sipUsername);
   const realm = escapeXmlAttribute(plan.realm);
   const destination = escapeXmlAttribute(plan.destination);
   if (candidate.kind === 'sip') return `sofia/gateway/${name}/${destination}`;

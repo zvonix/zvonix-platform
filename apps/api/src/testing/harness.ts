@@ -309,7 +309,34 @@ export async function registerGateway(
     .get(TelephonyRepository)
     .findGateway(gatewayId as Parameters<TelephonyRepository['findGateway']>[0]);
   if (gateway === undefined) throw new Error(`Шлюз ${gatewayId} не найден`);
+  await registerSipUser(app, nodeKey, gateway.sipUsername);
+}
 
+/**
+ * То же для линии шлюза со входом по линиям
+ * ([ADR-0054](../../../../docs/adr/0054-vhod-po-liniyam-goip.md)): регистрируется
+ * вход порта, а не шлюза.
+ */
+export async function registerPort(
+  app: NestFastifyApplication,
+  nodeKey: string,
+  portId: string,
+): Promise<void> {
+  const { TelephonyRepository } = await import('../modules/telephony/telephony.repository.js');
+  const port = await app
+    .get(TelephonyRepository)
+    .findPort(portId as Parameters<TelephonyRepository['findPort']>[0]);
+  if (port === undefined || port.sipUsername === null)
+    throw new Error(`У порта ${portId} нет входа линии`);
+  await registerSipUser(app, nodeKey, port.sipUsername);
+}
+
+/** Запрос каталога от имени узла; отказ каталога — исключение. */
+async function registerSipUser(
+  app: NestFastifyApplication,
+  nodeKey: string,
+  username: string,
+): Promise<void> {
   const response = await app.inject({
     method: 'POST',
     url: '/node/directory',
@@ -317,12 +344,12 @@ export async function registerGateway(
       authorization: `Bearer ${nodeKey}`,
       'content-type': 'application/x-www-form-urlencoded',
     },
-    payload: `section=directory&user=${gateway.sipUsername}&action=sip_auth`,
+    payload: `section=directory&user=${username}&action=sip_auth`,
   });
 
   // Каталог отвечает всегда `200` и всегда XML: «записи нет» — тоже документ.
   // Отличить регистрацию от отказа можно только по содержимому.
   if (!response.body.includes('a1-hash')) {
-    throw new Error(`Шлюз ${gateway.sipUsername} не принят каталогом`);
+    throw new Error(`Учётная запись ${username} не принята каталогом`);
   }
 }

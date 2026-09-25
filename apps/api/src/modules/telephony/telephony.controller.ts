@@ -20,6 +20,7 @@ import {
   gatewayStatusSchema,
   partnerCoverageSchema,
   partnerPrioritiesSchema,
+  registrationModeSchema,
   simConcurrencySchema,
   simStatusSchema,
   updateChannelSchema,
@@ -33,6 +34,7 @@ import type {
 } from './telephony.repository.js';
 import {
   TelephonyService,
+  type IssuedPortAccount,
   type IssuedSipAccount,
   type PartnerCoverageView,
   type PartnerPriorityView,
@@ -48,6 +50,12 @@ interface SipAccountView {
   readonly username: string;
   readonly password: string;
   readonly realm: string;
+}
+
+/** Вход линии GOIP (ADR-0054): тот же один показ пароля, с портом, к которому он выдан. */
+export interface PortAccountView extends SipAccountView {
+  readonly port_id: string;
+  readonly port_number: number;
 }
 
 /**
@@ -69,6 +77,9 @@ interface GatewayView {
   readonly status: string;
   /** Кто выключил: задан ровно у `suspended` (ADR-0047) — от этого зависит, кто вправе вернуть. */
   readonly suspended_by: string | null;
+  /** `gateway` — вход на шлюз, `port` — вход у каждой линии (ADR-0054). */
+  readonly registration_mode: string;
+  /** Вход шлюза. При `registration_mode = port` каталог его не отдаёт. */
   readonly sip_username: string;
   readonly node_id: string | null;
   readonly registered_at: string | null;
@@ -113,6 +124,10 @@ interface PortView {
   readonly port_number: number;
   readonly sim_card_id: string | null;
   readonly state: string;
+  /** Вход линии; пусто — не выдан. Пароль не отдаётся никогда (ADR-0054). */
+  readonly sip_username: string | null;
+  readonly node_id: string | null;
+  readonly registered_at: string | null;
 }
 
 /** Кандидат на терминацию: что увидит поддержка, разбирая «почему не звонит». */
@@ -137,7 +152,7 @@ export class TelephonyController {
   async createGateway(
     @Body(zodBody(createGatewaySchema)) body: z.infer<typeof createGatewaySchema>,
     @CurrentUser() actor: Principal,
-  ): Promise<{ gateway: GatewayView; account: SipAccountView }> {
+  ): Promise<{ gateway: GatewayView; account: SipAccountView; port_accounts: PortAccountView[] }> {
     const created = await this.telephony.createGateway(
       {
         partnerId: parseId(body.partnerId, 'partner'),
@@ -145,11 +160,16 @@ export class TelephonyController {
         type: body.type,
         model: body.model ?? null,
         portCount: body.portCount,
+        ...(body.registrationMode === undefined ? {} : { registrationMode: body.registrationMode }),
       },
       actor.userId,
       actor.role,
     );
-    return { gateway: toGatewayView(created.gateway), account: toAccountView(created.account) };
+    return {
+      gateway: toGatewayView(created.gateway),
+      account: toAccountView(created.account),
+      port_accounts: created.portAccounts.map(toPortAccountView),
+    };
   }
 
   @Roles('admin', 'support')
@@ -202,6 +222,59 @@ export class TelephonyController {
       actor.role,
     );
     return { account: toAccountView(account) };
+  }
+
+  /**
+   * Способ подключения шлюза ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
+   * При переходе на вход по линиям портам без входа он выдаётся — пароли здесь, один раз.
+   */
+  @Roles('admin')
+  @Post('gateways/:id/registration-mode')
+  async setRegistrationMode(
+    @Param('id') id: string,
+    @Body(zodBody(registrationModeSchema)) body: z.infer<typeof registrationModeSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ gateway: GatewayView; port_accounts: PortAccountView[] }> {
+    const result = await this.telephony.setRegistrationMode(
+      parseId(id, 'gateway'),
+      body.mode,
+      actor.userId,
+      actor.role,
+    );
+    return {
+      gateway: toGatewayView(result.gateway),
+      port_accounts: result.portAccounts.map(toPortAccountView),
+    };
+  }
+
+  /** Входы всем линиям шлюза, у которых их нет (ADR-0054). */
+  @Roles('admin')
+  @Post('gateways/:id/port-credentials')
+  async issuePortCredentials(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ port_accounts: PortAccountView[] }> {
+    const accounts = await this.telephony.issueMissingPortAccounts(
+      parseId(id, 'gateway'),
+      actor.userId,
+      actor.role,
+    );
+    return { port_accounts: accounts.map(toPortAccountView) };
+  }
+
+  /** Новый вход одной линии: имя и пароль меняются, прежние перестают работать. */
+  @Roles('admin')
+  @Post('gateway-ports/:id/credentials')
+  async resetPortCredentials(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ port_account: PortAccountView }> {
+    const account = await this.telephony.resetPortAccount(
+      parseId(id, 'gatewayPort'),
+      actor.userId,
+      actor.role,
+    );
+    return { port_account: toPortAccountView(account) };
   }
 
   // --- Каналы ----------------------------------------------------------------
@@ -594,11 +667,23 @@ function toPortView(row: GatewayPortRow): PortView {
     port_number: row.portNumber,
     sim_card_id: row.simCardId,
     state: row.state,
+    sip_username: row.sipUsername,
+    node_id: row.nodeId,
+    registered_at: row.registeredAt?.toISOString() ?? null,
   };
 }
 
 function toAccountView(account: IssuedSipAccount): SipAccountView {
   return { username: account.username, password: account.password, realm: account.realm };
+}
+
+/** Общий вид входа линии для обоих контуров: администратора и самого партнёра. */
+export function toPortAccountView(account: IssuedPortAccount): PortAccountView {
+  return {
+    port_id: account.portId,
+    port_number: account.portNumber,
+    ...toAccountView(account),
+  };
 }
 
 function toGatewayView(row: GatewayRow): GatewayView {
@@ -610,6 +695,7 @@ function toGatewayView(row: GatewayRow): GatewayView {
     type: row.type,
     status: row.status,
     suspended_by: row.suspendedBy,
+    registration_mode: row.registrationMode,
     sip_username: row.sipUsername,
     node_id: row.nodeId,
     registered_at: row.registeredAt?.toISOString() ?? null,

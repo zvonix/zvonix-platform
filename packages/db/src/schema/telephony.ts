@@ -17,6 +17,7 @@ import {
   CHANNEL_STATUSES,
   DEFAULT_MAX_CONCURRENT_CALLS,
   GATEWAY_PORT_STATES,
+  GATEWAY_REGISTRATION_MODES,
   GATEWAY_STATUSES,
   GATEWAY_SUSPENDED_BY,
   GATEWAY_TYPES,
@@ -28,6 +29,7 @@ import {
   TERMINATION_KINDS,
   type ChannelStatus,
   type GatewayPortState,
+  type GatewayRegistrationMode,
   type GatewayStatus,
   type GatewaySuspendedBy,
   type GatewayType,
@@ -90,6 +92,15 @@ export const gateways = pgTable(
     /** Момент последней успешной регистрации. По нему видно, живой ли шлюз. */
     registeredAt: timestamptz(),
 
+    /**
+     * Способ подключения ([ADR-0054](../../../../docs/adr/0054-vhod-po-liniyam-goip.md)):
+     * `gateway` — регистрируется учётная запись шлюза, линия GOIP выбирается префиксом;
+     * `port` — у каждого порта свой вход, и учётная запись шлюза каталогом не отдаётся.
+     *
+     * Умолчание `gateway` — то, как настроены все шлюзы до появления поля.
+     */
+    registrationMode: text().$type<GatewayRegistrationMode>().notNull().default('gateway'),
+
     /** Модель оборудования и число портов — для разбора и подсказок партнёру. */
     model: text(),
     portCount: integer().notNull().default(0),
@@ -114,6 +125,15 @@ export const gateways = pgTable(
     // и шлюз без него молча перестал бы проходить проверку digest.
     check('gateways_a1_hash_required', sql`${t.a1Hash} is not null or ${t.type} = 'sip_trunk'`),
     check('gateways_port_count_non_negative', sql`${t.portCount} >= 0`),
+    check(
+      'gateways_registration_mode_check',
+      oneOf(t.registrationMode, GATEWAY_REGISTRATION_MODES),
+    ),
+    // Вход по линиям — только у GOIP: у телефона слот один, у транка регистрируемся мы.
+    check(
+      'gateways_port_registration_goip_only',
+      sql`${t.registrationMode} = 'gateway' or ${t.type} = 'goip'`,
+    ),
     uniqueIndex('gateways_sip_username_key').on(t.sipUsername),
     index('gateways_partner_idx').on(t.partnerId),
     index('gateways_node_idx').on(t.nodeId),
@@ -277,11 +297,32 @@ export const gatewayPorts = pgTable(
 
     state: text().$type<GatewayPortState>().notNull().default('unknown'),
 
+    /**
+     * Вход линии — у шлюза в режиме `port`
+     * ([ADR-0054](../../../../docs/adr/0054-vhod-po-liniyam-goip.md)): `pt-a1b2c3d4e5f6`
+     * и `MD5(имя:realm:пароль)`, как у шлюза. Пусто — вход линии не выдан.
+     */
+    sipUsername: text(),
+    a1Hash: text(),
+
+    /** Где и когда линия регистрировалась последний раз — как у шлюза, но по линии. */
+    nodeId: idRef<'node'>().references(() => nodes.id, { onDelete: 'set null' }),
+    registeredAt: timestamptz(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     check('gateway_ports_state_check', oneOf(t.state, GATEWAY_PORT_STATES)),
+    // Имя без хеша — вход, который каталог отдал бы без проверки пароля; хеш без имени —
+    // вход, под которым не войти.
+    check(
+      'gateway_ports_credentials_together',
+      sql`(${t.sipUsername} is null) = (${t.a1Hash} is null)`,
+    ),
+    uniqueIndex('gateway_ports_sip_username_key')
+      .on(t.sipUsername)
+      .where(sql`${t.sipUsername} is not null`),
     check('gateway_ports_number_positive', sql`${t.portNumber} >= 1`),
     uniqueIndex('gateway_ports_slot_key').on(t.gatewayId, t.portNumber),
     // Одна SIM стоит ровно в одном порту. Без этого она оказалась бы «свободна»

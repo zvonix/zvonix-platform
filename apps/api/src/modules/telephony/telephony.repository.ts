@@ -37,6 +37,7 @@ import {
   USABLE_SIM_STATUSES,
   type ChannelStatus,
   type GatewayPortState,
+  type GatewayRegistrationMode,
   type GatewayState,
   type GatewayStatus,
   type GatewayType,
@@ -163,6 +164,7 @@ export class TelephonyRepository {
       a1Hash: string;
       model: string | null;
       portCount: number;
+      registrationMode: GatewayRegistrationMode;
     },
     executor: Executor = this.db,
   ): Promise<GatewayRow> {
@@ -332,6 +334,38 @@ export class TelephonyRepository {
     await this.db.update(gateways).set({ nodeId, registeredAt: at }).where(eq(gateways.id, id));
   }
 
+  /**
+   * Смена способа подключения ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md))
+   * — условием на прежний режим, вместе со стиранием регистрации той стороны,
+   * на которую переключаются.
+   *
+   * Стирается именно она: давняя регистрация, оставшаяся с прошлого раза, сделала бы
+   * шлюз «на связи» раньше, чем устройство перенастроено, и отбор набирал бы его впустую.
+   */
+  async changeRegistrationMode(
+    id: GatewayId,
+    from: GatewayRegistrationMode,
+    to: GatewayRegistrationMode,
+    executor: Executor,
+  ): Promise<GatewayRow | undefined> {
+    const [row] = await executor
+      .update(gateways)
+      .set({
+        registrationMode: to,
+        ...(to === 'gateway' ? { nodeId: null, registeredAt: null } : {}),
+      })
+      .where(and(eq(gateways.id, id), eq(gateways.registrationMode, from)))
+      .returning();
+    if (row === undefined) return undefined;
+    if (to === 'port') {
+      await executor
+        .update(gatewayPorts)
+        .set({ nodeId: null, registeredAt: null })
+        .where(eq(gatewayPorts.gatewayId, id));
+    }
+    return row;
+  }
+
   // --- Каналы ----------------------------------------------------------------
 
   async createChannel(draft: {
@@ -440,9 +474,65 @@ export class TelephonyRepository {
           // и проверять digest нечего. Его имя узел получает отдельно — списком
           // исходящих sofia-gateway (ADR-0039).
           ne(gateways.type, 'sip_trunk'),
+          // У шлюза со входом по линиям регистрируются линии, а не он сам (ADR-0054):
+          // два пути регистрации дали бы два набора, между которыми не из чего выбирать.
+          eq(gateways.registrationMode, 'gateway'),
         ),
       );
     return row?.gateway;
+  }
+
+  /**
+   * Действующий вход линии по имени — с теми же условиями на шлюз и партнёра, что у входа
+   * шлюза, тем же запросом ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
+   */
+  async findRegistrablePort(
+    sipUsername: string,
+  ): Promise<{ port: GatewayPortRow; gateway: GatewayRow } | undefined> {
+    const [row] = await this.db
+      .select({ port: gatewayPorts, gateway: gateways })
+      .from(gatewayPorts)
+      .innerJoin(gateways, eq(gateways.id, gatewayPorts.gatewayId))
+      .innerJoin(partners, eq(partners.id, gateways.partnerId))
+      .where(
+        and(
+          eq(gatewayPorts.sipUsername, sipUsername),
+          eq(gateways.status, 'active'),
+          eq(partners.status, 'verified'),
+          eq(gateways.registrationMode, 'port'),
+        ),
+      );
+    return row;
+  }
+
+  /** Отметка о регистрации линии — как у шлюза, но по порту. */
+  async recordPortRegistration(id: GatewayPortId, nodeId: Id<'node'>, at: Date): Promise<void> {
+    await this.db
+      .update(gatewayPorts)
+      .set({ nodeId, registeredAt: at })
+      .where(eq(gatewayPorts.id, id));
+  }
+
+  /**
+   * Новый вход линии: имя и хеш разом, регистрация стирается — старый вход перестаёт
+   * действовать сразу, и прежняя отметка о нём ничего не значит.
+   */
+  async setPortCredentials(
+    id: GatewayPortId,
+    sipUsername: string,
+    a1Hash: string,
+    executor: Executor = this.db,
+  ): Promise<GatewayPortRow | undefined> {
+    try {
+      const [row] = await executor
+        .update(gatewayPorts)
+        .set({ sipUsername, a1Hash, nodeId: null, registeredAt: null })
+        .where(eq(gatewayPorts.id, id))
+        .returning();
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
   }
 
   // --- SIP-транки (ADR-0039) ---------------------------------------------------
@@ -891,6 +981,27 @@ export class TelephonyRepository {
     return row;
   }
 
+  /**
+   * Порты шлюза без входа линии — запертыми, по порядку `id`
+   * ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
+   *
+   * Запираются, потому что выдача «всем без входа» из двух вкладок иначе выдала бы
+   * линии два пароля, и первый, уже показанный, молча перестал бы работать. Дождавшись
+   * чужой выдачи, `FOR UPDATE` перепроверяет условие на новой версии строки и порт,
+   * получивший вход, пропускает.
+   */
+  async lockPortsWithoutCredentials(
+    gatewayId: GatewayId,
+    executor: Executor,
+  ): Promise<GatewayPortRow[]> {
+    return executor
+      .select()
+      .from(gatewayPorts)
+      .where(and(eq(gatewayPorts.gatewayId, gatewayId), isNull(gatewayPorts.sipUsername)))
+      .orderBy(asc(gatewayPorts.id))
+      .for('no key update');
+  }
+
   async listPorts(gatewayId: GatewayId): Promise<GatewayPortRow[]> {
     return this.db
       .select()
@@ -1018,7 +1129,12 @@ export class TelephonyRepository {
       // (`user/gw-…@realm`), а регистрации живут на том узле, куда шлюз пришёл.
       // Кандидат с другого узла — маршрут, по которому нельзя набрать; кандидат
       // без регистрации вовсе — тем более.
-      conditions.push(eq(gateways.nodeId, options.nodeId));
+      //
+      // Регистрация — той стороны, что набирается (ADR-0054): у входа по линиям это порт
+      // со своим входом, у входа на шлюз — сам шлюз. Одним выражением в том же запросе.
+      conditions.push(
+        sql`case when ${gateways.registrationMode} = 'port' then ${gatewayPorts.sipUsername} is not null and ${gatewayPorts.nodeId} = ${options.nodeId} else ${gateways.nodeId} = ${options.nodeId} end`,
+      );
     }
     if (options.excludeRecordingIncapable === true) {
       conditions.push(ne(gateways.type, 'android'));

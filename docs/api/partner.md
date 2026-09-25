@@ -82,9 +82,11 @@
   "gateways": [
     {
       "id": "…", "name": "GOIP в гараже", "type": "goip", "status": "active", "suspended_by": null,
-      "model": null, "sip_username": "gw-a1b2c3d4e5f6", "on_node": true, "registered_at": "…",
+      "model": null, "registration_mode": "port", "sip_username": "gw-a1b2c3d4e5f6",
+      "on_node": true, "registered_at": "…",
       "ports": [
         { "id": "…", "port_number": 1, "state": "idle",
+          "sip_username": "pt-k2m9x0a1b2c3", "on_node": true, "registered_at": "…",
           "sim": { "id": "…", "msisdn": "79001234567", "status": "active",
                    "operator_id": "…", "operator_name": "ПАО «МегаФон»",
                    "network_scope": "own_network", "max_concurrent_calls": 2,
@@ -119,6 +121,13 @@
 Сервер — `SIP_REALM`, порт — `sip-port` профиля узла (`node/conf/autoload_configs/sofia.conf.xml`).
 Имя не секрет и отдаётся всегда: оно нужно при каждой перенастройке устройства, а раньше
 было видно только в минуту заведения. Пароль не отдаётся никогда — только при выдаче.
+
+**`registration_mode` — способ подключения** ([ADR-0054](../adr/0054-vhod-po-liniyam-goip.md)):
+`gateway` — один вход на шлюз, линию выбирает префикс ([ADR-0053](../adr/0053-liniya-goip-po-prefiksu.md));
+`port` — у каждой линии свой вход (GOIP `Config by Line`). При `port` у порта есть
+`sip_username` (пусто — вход не выдан), `on_node` и `registered_at` линии, а `on_node`
+шлюза означает «хоть одна линия на связи» и `registered_at` — самая свежая из них.
+Вход самого шлюза в этом режиме каталог не отдаёт.
 
 `spare_sims` — карты, не стоящие ни в одном порту. Заведённая, но не вставленная ёмкость
 не видна больше нигде: в списке шлюзов её нет по определению.
@@ -284,11 +293,22 @@
 
 ### `POST /partner/gateways`
 
-`{ "name": "GOIP в офисе", "type": "goip", "model": "GoIP-8", "portCount": 8 }`
+`{ "name": "GOIP в офисе", "type": "goip", "model": "GoIP-8", "portCount": 8, "registrationMode": "port" }`
 
 `type` — только `goip` или `android`. `sip_trunk` отвергается: см. выше.
+`registrationMode` — `gateway` (по умолчанию, как до появления поля) или `port`;
+`port` только у `goip`, иначе `400` ([ADR-0054](../adr/0054-vhod-po-liniyam-goip.md)).
+Кабинет для GOIP предлагает `port`.
 
-`201` → `{ "gateway": …, "account": { "username": "gw-…", "password": "…", "realm": "…" } }`
+`201` →
+```json
+{ "gateway": …, "account": { "username": "gw-…", "password": "…", "realm": "…" },
+  "port_accounts": [ { "port_id": "…", "port_number": 1, "username": "pt-…",
+                       "password": "…", "realm": "…" } ] }
+```
+
+`port_accounts` — входы всех портов при `port`, пусто при `gateway`. Вход шлюза
+выдаётся всегда: он понадобится, если шлюз переключат на `gateway`.
 
 **Пароль отдаётся один раз и больше ниоткуда не читается** — в базе лежит хеш. Он приходит
 туда же, где партнёр его и вводит, настраивая оборудование; пока шлюз заводил
@@ -336,6 +356,30 @@
 
 Перевыпуск учётных данных. Меняются **и имя, и пароль**: имя уже засветилось в записи
 регистрации и в логах узла, а перенастраивать оборудование всё равно придётся.
+
+### `POST /partner/gateways/:id/registration-mode`
+
+`{ "mode": "port" }` или `{ "mode": "gateway" }` → `201`
+`{ "gateway": …, "port_accounts": [ … ] }` ([ADR-0054](../adr/0054-vhod-po-liniyam-goip.md)).
+
+При переходе на `port` портам без входа он выдаётся тут же — пароли в `port_accounts`,
+один раз. Регистрация той стороны, на которую переключились, стирается: шлюз не станет
+«на связи» раньше, чем устройство перенастроено. Тот же режим — `201` без изменений
+и без записи в журнал. `port` не у GOIP и любая смена у списанного шлюза — `409`.
+В журнал — `gateway.registration_mode_changed` (прежний и новый режим).
+
+### `POST /partner/gateways/:id/port-credentials`
+
+Входы всем портам шлюза, у которых их нет, — например, после «Добавить порты».
+`201` → `{ "port_accounts": [ … ] }`; выдавать некому — пустой список. Уже выданные
+не трогаются. При `gateway` и у списанного шлюза — `409`.
+
+### `POST /partner/gateway-ports/:id/credentials`
+
+Новый вход одной линии: меняются имя и пароль, регистрация линии стирается, прежний
+вход перестаёт действовать сразу. `201` → `{ "port_account": { … } }`. При `gateway` — `409`.
+Каждая выдача — запись `gateway_port.credentials_issued` с прежним и новым именем,
+без пароля и хеша.
 
 ### `POST /partner/gateways/:id/ports`
 

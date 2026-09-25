@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { IssuedCredentials } from '@/components/sip-credentials';
+import type { IssuedSecret } from '@/components/sip-credentials';
 import { request } from '@/lib/api';
 import { PartnerCoverage } from './partner-coverage';
 import { PartnerGateways } from './partner-gateways';
@@ -28,7 +28,7 @@ export function PartnerEquipment({
   onIssued,
 }: {
   partnerId: string;
-  onIssued: (issued: IssuedCredentials) => void;
+  onIssued: (issued: IssuedSecret) => void;
 }) {
   const sims = useQuery({
     queryKey: ['sim-cards', partnerId],

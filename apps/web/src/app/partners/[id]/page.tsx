@@ -11,7 +11,7 @@ import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
-import { SipCredentials, type IssuedCredentials } from '@/components/sip-credentials';
+import { IssuedSecretPanel, type IssuedSecret } from '@/components/sip-credentials';
 import { Input } from '@/components/ui/input';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
@@ -58,7 +58,7 @@ function BackLink() {
 function PartnerCard({ id }: { id: string }) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
-  const [issued, setIssued] = useState<readonly IssuedCredentials[]>([]);
+  const [issued, setIssued] = useState<readonly IssuedSecret[]>([]);
 
   // Ключ под общим `['partners']`: действия здесь и заведение в списке обновляют оба экрана.
   const card = useQuery({
@@ -163,10 +163,13 @@ function PartnerCard({ id }: { id: string }) {
         несколько: пароль второго шлюза не затирает незакрытый пароль первого.
       */}
       {issued.map((secret) => (
-        <SipCredentials
-          key={secret.account.username}
-          account={secret.account}
-          title={secret.title}
+        <IssuedSecretPanel
+          key={
+            'lines' in secret
+              ? (secret.lines[0]?.username ?? secret.title)
+              : secret.account.username
+          }
+          secret={secret}
           onClose={() => {
             setIssued((list) => list.filter((item) => item !== secret));
           }}
