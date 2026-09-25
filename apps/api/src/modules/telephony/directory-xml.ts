@@ -38,6 +38,23 @@ export interface DirectoryUser {
 }
 
 /**
+ * Куда звонить учётной записи — то, что `user/<имя>@<домен>` превращает в вызов.
+ *
+ * Без этого параметра `user/…` отвечает `MANDATORY_IE_MISSING` сразу, до набора: запись
+ * найдена, а строки набора у неё нет. Так упал первый тестовый звонок на живом узле
+ * (2026-09-25) — и так же падал бы каждый вызов клиента на GOIP: диалплан набирает шлюз
+ * тем же `user/…`. Штатный каталог FreeSWITCH задаёт эту строку на домене; у нас домен
+ * приходит из control plane вместе с записью, поэтому она здесь.
+ *
+ * Значение — штатное FreeSWITCH: `sofia_contact` находит адрес, с которого устройство
+ * зарегистрировалось. `^^:` меняет разделитель переменных на двоеточие, чтобы запятая
+ * внутри значений не резала список.
+ */
+const DIAL_STRING =
+  '{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}' +
+  '${sofia_contact(*/${dialed_user}@${dialed_domain})}';
+
+/**
  * Документ `directory` с одной учётной записью.
  *
  * `a1-hash` вместо `password`: FreeSWITCH принимает готовый хеш и не считает его сам,
@@ -59,6 +76,7 @@ export function directoryDocument(domain: string, user: DirectoryUser): string {
     `      <user id="${escapeXmlAttribute(user.username)}">`,
     '        <params>',
     `          <param name="a1-hash" value="${escapeXmlAttribute(user.a1Hash)}"/>`,
+    `          <param name="dial-string" value="${escapeXmlAttribute(DIAL_STRING)}"/>`,
     '        </params>',
     '        <variables>',
     variables,

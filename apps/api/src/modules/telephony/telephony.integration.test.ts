@@ -317,6 +317,11 @@ describe('каталог для узла', () => {
     expect(response.body).not.toContain(account.password);
     expect(response.body).toContain(`<user id="${account.username}">`);
     expect(response.body).toContain(`zvonix_gateway`);
+    // Без строки набора `user/…` отвечает MANDATORY_IE_MISSING до всякого набора — так упал
+    // первый тестовый звонок на живом узле (2026-09-25), и так падал бы любой вызов на шлюз.
+    expect(response.body).toContain(
+      '<param name="dial-string" value="{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}"/>',
+    );
   });
 
   it('неподтверждённый шлюз не выдаётся', async () => {
