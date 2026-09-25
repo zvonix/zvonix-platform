@@ -518,3 +518,11 @@ export const updateSipTrunkSchema = z
   .refine((value) => Object.keys(value).length > 0, {
     message: 'Нечего менять: не передано ни одного поля',
   });
+
+/**
+ * Тестовый звонок с SIM ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
+ * Номер приводится к российскому виду в службе — здесь только разумная длина строки.
+ */
+export const testCallSchema = z.object({
+  destination: z.string().trim().min(1, 'укажите номер').max(32, 'слишком длинный'),
+});

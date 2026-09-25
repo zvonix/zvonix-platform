@@ -22,6 +22,7 @@ import type {
   TransactionKind,
   UserRole,
   UserStatus,
+  TestCallStatus,
 } from '@zvonix/shared';
 
 /**
@@ -506,3 +507,39 @@ export const TERMINATION_KIND_MEANING: Record<TerminationKind, string> = {
   sim: 'по воздуху через сотовую сеть, SIM в шлюзе партнёра',
   sip: 'по интернету через транзитного оператора',
 };
+
+/**
+ * Итог тестового звонка с SIM ([ADR-0055](../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
+ * Главное для партнёра — работает ли карта: «занято» и «не ответили» тоже значат «да».
+ */
+export const TEST_CALL_STATUS_TEXT: Record<Exclude<TestCallStatus, 'failed'>, string> = {
+  dialing: 'Звоним. Снимите трубку — услышите пять коротких сигналов.',
+  answered: 'Ответили — карта, линия и шлюз работают.',
+  busy: 'Занято — карта прошла в сеть, линия работает.',
+  no_answer: 'Не ответили за 40 секунд — карта прошла в сеть, линия работает.',
+  unknown:
+    'Итог не пришёл: площадка перезапускалась во время звонка. Позвоните ещё раз через минуту.',
+};
+
+/** Причины отбоя FreeSWITCH, которые партнёр может исправить сам. */
+const TEST_CALL_CAUSE_TEXT: Readonly<Record<string, string>> = {
+  USER_NOT_REGISTERED:
+    'Линия не на связи с площадкой — проверьте в GOIP логин и пароль линии и адрес площадки.',
+  CALL_REJECTED: 'Шлюз отклонил звонок — проверьте, что линия включена и карта видит сеть.',
+  NORMAL_TEMPORARY_FAILURE:
+    'Сбой при наборе — карта, скорее всего, не зарегистрирована в сети оператора: проверьте сигнал и баланс.',
+  NETWORK_OUT_OF_ORDER: 'Сеть оператора не приняла звонок — проверьте сигнал и баланс карты.',
+  UNALLOCATED_NUMBER: 'Такого номера нет — проверьте номер.',
+  INVALID_NUMBER_FORMAT: 'Номер набран неверно — проверьте номер.',
+  NO_ROUTE_DESTINATION: 'Номер недоступен из сети оператора карты.',
+  SUBSCRIBER_ABSENT: 'Абонент недоступен — телефон выключен или вне сети.',
+  RECOVERY_ON_TIMER_EXPIRE: 'Шлюз не ответил вовремя — проверьте, что он включён и в сети.',
+  ESL_CONNECT: 'Площадка не смогла передать команду на звонок — напишите администратору площадки.',
+  ESL_AUTH: 'Площадка не смогла передать команду на звонок — напишите администратору площадки.',
+  ESL_PROTOCOL: 'Площадка не смогла передать команду на звонок — напишите администратору площадки.',
+};
+
+export function testCallFailureText(cause: string | null): string {
+  if (cause === null) return 'Звонок не прошёл.';
+  return TEST_CALL_CAUSE_TEXT[cause] ?? `Звонок не прошёл: ${cause}.`;
+}

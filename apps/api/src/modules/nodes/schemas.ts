@@ -36,6 +36,19 @@ export const enrollNodeSchema = z.object({
   agentVersion: z.string().trim().max(50, 'слишком длинная').optional(),
 });
 
+/**
+ * Пароль ESL узла ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
+ *
+ * Установщик порождает его как 48 шестнадцатеричных знаков; шире — не наш установщик.
+ * Адреса и порта здесь нет намеренно: площадка соединяется только с 127.0.0.1:8021,
+ * иначе украденный ключ узла направлял бы её куда угодно.
+ */
+export const eslSchema = z.object({
+  password: z
+    .string()
+    .regex(/^[0-9a-f]{32,128}$/, 'должен быть шестнадцатеричной строкой от 32 до 128 знаков'),
+});
+
 export const heartbeatSchema = z.object({
   /** Активных вызовов на момент отправки. */
   activeCalls: z.coerce

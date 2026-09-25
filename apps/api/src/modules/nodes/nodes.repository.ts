@@ -75,6 +75,16 @@ export class NodesRepository {
     }
   }
 
+  /** Записывает зашифрованный пароль ESL узла (ADR-0055). */
+  async setEslSecret(id: NodeId, eslSecret: string): Promise<NodeRow | undefined> {
+    const [row] = await this.db
+      .update(nodes)
+      .set({ eslSecret })
+      .where(eq(nodes.id, id))
+      .returning();
+    return row;
+  }
+
   async recordHeartbeat(
     id: NodeId,
     beat: { status: NodeStatus; activeCalls: number; agentVersion: string | null; at: Date },

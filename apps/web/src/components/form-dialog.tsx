@@ -136,6 +136,7 @@ export function DialogForm({
   canSubmit = true,
   onSubmit,
   tone = 'default',
+  keepOpen = false,
   children,
 }: {
   /** Называет действие: «Добавить узел», а не «Сохранить». */
@@ -145,6 +146,11 @@ export function DialogForm({
   /** Запрос. Отказ показывается в окне, успех закрывает его. */
   onSubmit: () => Promise<unknown>;
   tone?: 'default' | 'danger';
+  /**
+   * Успех не закрывает окно: итог действия показывается в нём же — так у тестового
+   * звонка, где после отправки ещё идёт дозвон.
+   */
+  keepOpen?: boolean;
   /** Поля. Сетка в две колонки; широкое поле — `sm:col-span-2`. */
   children: ReactNode;
 }) {
@@ -161,7 +167,7 @@ export function DialogForm({
     try {
       await onSubmit();
       dialog.setPending(false);
-      dialog.close();
+      if (!keepOpen) dialog.close();
     } catch (error) {
       if (error instanceof ApiError) {
         setFailure(error);

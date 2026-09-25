@@ -6,7 +6,7 @@
  * тоже доступен.
  */
 
-import { Body, Controller, HttpCode, Ip, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, Ip, Post, Put } from '@nestjs/common';
 import { NODE_HEARTBEAT_INTERVAL_MS } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Machine } from '../../http/auth.guard.js';
@@ -14,7 +14,7 @@ import { CurrentMachine } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
 import { NodesService } from './nodes.service.js';
-import { enrollNodeSchema, heartbeatSchema } from './schemas.js';
+import { enrollNodeSchema, eslSchema, heartbeatSchema } from './schemas.js';
 
 @Controller('node')
 export class NodeAgentController {
@@ -55,6 +55,24 @@ export class NodeAgentController {
       key: { key_id: enrolled.keyId, secret: enrolled.secret },
       endpoints: enrolled.endpoints,
     };
+  }
+
+  /**
+   * Пароль ESL узла ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
+   *
+   * Вызывает установщик после записи конфигурации; повторный вызов заменяет пароль.
+   * Принимается только с петлевого адреса — площадка звонит лишь через узел своей машины.
+   */
+  @Machine('node')
+  @Put('esl')
+  @HttpCode(200)
+  async esl(
+    @Body(zodBody(eslSchema)) body: z.infer<typeof eslSchema>,
+    @CurrentMachine() machine: MachinePrincipal,
+    @Ip() ip: string,
+  ): Promise<{ esl: 'registered' }> {
+    await this.nodes.registerEsl(machine, body.password, ip);
+    return { esl: 'registered' };
   }
 
   /**

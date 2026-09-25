@@ -571,6 +571,47 @@ test.describe('оборудование одной таблицей, вход п
     await expect(connection).toContainText('Single Server Mode');
     await expect(ports.getByRole('row', { name: /^1 префикс 99001/u })).toBeVisible();
   });
+
+  test('тестовый звонок с карты: окно с номером и понятный отказ, пока линия не на связи', async ({
+    page,
+  }) => {
+    // ADR-0055. Живого FreeSWITCH на стенде нет — проверяется путь до узла: кнопка у карты,
+    // окно, отказ словами партнёра, а не кодом.
+    await signIn(page, PEOPLE.partner);
+    await page.goto('/partner/equipment');
+    await page.getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByLabel('Название').fill('GOIP для пробы');
+    await page.getByLabel('Слотов под SIM').fill('1');
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await page.getByRole('button', { name: 'Записал, закрыть' }).click();
+
+    // Источника оператора на стенде нет, и по номеру карта не заводится (см. «SIM вставляется
+    // в порт по номеру…»). Карта заводится с явным оператором стенда и вставляется из вынутых.
+    const operators = await page.request.get('/api/operators', {
+      headers: { 'X-Zvonix-Web': '1' },
+    });
+    const operator = (await operators.json()) as { operators: { id: string; name: string }[] };
+    const megafon = operator.operators.find((row) => row.name === 'МегаФон');
+    expect(megafon).toBeDefined();
+    const created = await page.request.post('/api/partner/sim-cards', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { msisdn: '+7 913 555-00-01', operatorId: megafon?.id },
+    });
+    expect(created.status()).toBe(201);
+    await page.reload();
+
+    const group = page.getByRole('rowgroup').filter({ hasText: 'GOIP для пробы' });
+    await group.getByRole('button', { name: 'Вставить SIM' }).click();
+    const insert = page.getByRole('dialog');
+    await insert.getByRole('combobox').selectOption({ label: '79135550001 · МегаФон' });
+    await insert.getByRole('button', { name: 'Вставить' }).click();
+
+    await group.getByRole('button', { name: 'Тестовый звонок' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Тестовый звонок' });
+    await dialog.getByLabel('Куда звонить').fill('+7 913 000-11-22');
+    await dialog.getByRole('button', { name: 'Позвонить' }).click();
+    await expect(dialog).toContainText('Линия ещё не подключилась к площадке');
+  });
 });
 
 test.describe('список, который заменяется целиком', () => {

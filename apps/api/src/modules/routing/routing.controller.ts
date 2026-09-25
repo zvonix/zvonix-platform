@@ -8,13 +8,14 @@
  */
 
 import { Body, Controller, Header, HttpCode, Inject, Post } from '@nestjs/common';
-import { goipLinePrefix, parseId, terminationKindOf } from '@zvonix/shared';
+import { parseId, terminationKindOf } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Machine, Roles } from '../../http/auth.guard.js';
 import { CurrentMachine } from '../../http/request-context.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
+import { simDialTarget, type SimDialTarget } from '../telephony/sim-dial.js';
 import type { TerminationCandidate } from '../telephony/telephony.repository.js';
 import { rejectDocument, routeDocument, sipResponseFor } from './dialplan-xml.js';
 import { dialplanRequestSchema, previewSchema } from './schemas.js';
@@ -184,32 +185,12 @@ export class RoutingController {
 }
 
 /**
- * Кого набирать и с каким префиксом.
- *
- * Линию GOIP выбирает площадка, а не шлюз, и двумя способами
- * ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)): при входе по линиям —
- * учётной записью самой линии, без префикса; при входе на шлюз — префиксом линии
- * ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)). У телефона слот
- * один, у транка SIM нет — набирается шлюз как есть.
+ * Кого набирать и с каким префиксом. Правило одно с тестовым звонком — `simDialTarget`.
+ * У транка SIM нет — набирается шлюз как есть.
  */
-function dialTargetOf(candidate: TerminationCandidate): {
-  sipUsername: string;
-  linePrefix: string | null;
-} {
-  if (candidate.kind !== 'sim' || candidate.gateway.type !== 'goip') {
+function dialTargetOf(candidate: TerminationCandidate): SimDialTarget {
+  if (candidate.kind !== 'sim') {
     return { sipUsername: candidate.gateway.sipUsername, linePrefix: null };
   }
-  if (candidate.gateway.registrationMode === 'port') {
-    // Отбор берёт у такого шлюза только порт с выданным и зарегистрированным входом.
-    // Пустое имя здесь — рассогласование данных, и набирать вместо линии шлюз целиком
-    // значило бы позвонить с неизвестной SIM.
-    if (candidate.port.sipUsername === null) {
-      throw new Error(`У порта ${candidate.port.id} нет входа линии, а отбор его пропустил`);
-    }
-    return { sipUsername: candidate.port.sipUsername, linePrefix: null };
-  }
-  return {
-    sipUsername: candidate.gateway.sipUsername,
-    linePrefix: goipLinePrefix(candidate.port.portNumber),
-  };
+  return simDialTarget(candidate.gateway, candidate.port);
 }

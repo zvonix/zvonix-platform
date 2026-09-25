@@ -3,6 +3,7 @@ import { AuditModule } from '../audit/audit.module.js';
 import { CatalogModule } from '../catalog/catalog.module.js';
 import { BillingModule } from '../billing/billing.module.js';
 import { LimitsModule } from '../limits/limits.module.js';
+import { NodesModule } from '../nodes/nodes.module.js';
 import { CallRepository } from './call.repository.js';
 import { CallsController } from './calls.controller.js';
 import { CallsService } from './calls.service.js';
@@ -21,9 +22,12 @@ import { QualityService } from './quality.service.js';
 import { TelephonyController } from './telephony.controller.js';
 import { TelephonyRepository } from './telephony.repository.js';
 import { TelephonyService } from './telephony.service.js';
+import { TestCallController } from './test-call.controller.js';
+import { TestCallRepository } from './test-call.repository.js';
+import { TestCallService } from './test-call.service.js';
 
 @Module({
-  imports: [AuditModule, CatalogModule, BillingModule, LimitsModule],
+  imports: [AuditModule, CatalogModule, BillingModule, LimitsModule, NodesModule],
   controllers: [
     TelephonyController,
     NodeDirectoryController,
@@ -35,6 +39,7 @@ import { TelephonyService } from './telephony.service.js';
     SipTrunkController,
     PartnerReportController,
     PartnerEquipmentController,
+    TestCallController,
   ],
   providers: [
     TelephonyService,
@@ -45,6 +50,8 @@ import { TelephonyService } from './telephony.service.js';
     QualityService,
     QualityRepository,
     PartnerReportService,
+    TestCallService,
+    TestCallRepository,
   ],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.
   // `CdrService` — ради уборки вызовов без CDR: она нужна и маршрутизации на пути
