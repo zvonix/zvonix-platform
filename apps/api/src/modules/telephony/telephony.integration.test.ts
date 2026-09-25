@@ -223,7 +223,7 @@ describe('выдача учётных данных', () => {
     expect(stored).not.toContain(account.password);
   });
 
-  it('перевыпуск меняет и имя, и пароль, а старое имя перестаёт находиться', async () => {
+  it('новый пароль шлюза: имя прежнее, в каталоге — хеш нового пароля', async () => {
     const partner = await createPartner();
     await verifyPartner(partner);
     const { id, account } = await createGateway(partner);
@@ -238,10 +238,20 @@ describe('выдача учётных данных', () => {
     expect(reset.statusCode).toBe(201);
     const fresh = reset.json<{ account: SipAccount }>().account;
 
-    expect(fresh.username).not.toBe(account.username);
+    // Меняется только пароль: имя уже введено в устройство (владелец, 2026-09-25).
+    expect(fresh.username).toBe(account.username);
     expect(fresh.password).not.toBe(account.password);
-    expect((await askDirectory(account.username)).body).toContain('not found');
-    expect((await askDirectory(fresh.username)).body).toContain('<user id=');
+    const served = (await askDirectory(account.username)).body;
+    expect(served).toContain(
+      createHash('md5')
+        .update(`${fresh.username}:${REALM}:${fresh.password}`, 'utf8')
+        .digest('hex'),
+    );
+    expect(served).not.toContain(
+      createHash('md5')
+        .update(`${account.username}:${REALM}:${account.password}`, 'utf8')
+        .digest('hex'),
+    );
   });
 
   it('перевыпуск доступа канала отзывает старый пароль', async () => {

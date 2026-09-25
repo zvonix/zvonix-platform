@@ -318,9 +318,11 @@ export class TelephonyRepository {
     a1Hash: string,
   ): Promise<GatewayRow | undefined> {
     try {
+      // Регистрация стирается: она сделана прежним паролем, и до перенастройки устройства
+      // шлюз не на связи — отбор не должен набирать его по старой отметке.
       const [row] = await this.db
         .update(gateways)
-        .set({ sipUsername, a1Hash })
+        .set({ sipUsername, a1Hash, nodeId: null, registeredAt: null })
         .where(eq(gateways.id, id))
         .returning();
       return row;
@@ -514,7 +516,7 @@ export class TelephonyRepository {
   }
 
   /**
-   * Новый вход линии: имя и хеш разом, регистрация стирается — старый вход перестаёт
+   * Вход линии — имя и хеш разом; при новом пароле имя прежнее. Регистрация стирается — старый пароль перестаёт
    * действовать сразу, и прежняя отметка о нём ничего не значит.
    */
   async setPortCredentials(

@@ -9,6 +9,7 @@
  * там смотрят, что клиент не видит партнёра, здесь — что партнёр не видит соседа.
  */
 
+import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -1571,8 +1572,8 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
     realm: string;
   }
 
-  /** Спросить каталог от имени узла: принят ли вход. */
-  async function accepted(username: string): Promise<boolean> {
+  /** Ответ каталога узлу по имени входа. */
+  async function served(username: string): Promise<string> {
     const response = await api().inject({
       method: 'POST',
       url: '/node/directory',
@@ -1580,8 +1581,20 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
       payload: `section=directory&user=${username}&action=sip_auth`,
     });
     expect(response.statusCode).toBe(200);
-    return response.body.includes('a1-hash');
+    return response.body;
   }
+
+  /** Спросить каталог от имени узла: принят ли вход. */
+  async function accepted(username: string): Promise<boolean> {
+    return (await served(username)).includes('a1-hash');
+  }
+
+  /** Realm стенда — `SIP_REALM` из harness.ts. */
+  const REALM = 'sip.zvonix.test';
+
+  /** `MD5(имя:realm:пароль)` — то, что каталог отдаёт вместо пароля. */
+  const a1 = (username: string, password: string): string =>
+    createHash('md5').update(`${username}:${REALM}:${password}`, 'utf8').digest('hex');
 
   async function createPortGateway(portCount: number) {
     const response = await post(
@@ -1767,7 +1780,7 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
     expect(again.json<{ port_accounts: PortAccount[] }>().port_accounts).toEqual([]);
   });
 
-  it('новый вход линии: прежний перестаёт действовать сразу', async () => {
+  it('новый пароль линии: имя прежнее, пароль новый, в журнале — без пароля', async () => {
     const created = await createPortGateway(1);
     const [line] = created.port_accounts;
     if (line === undefined) throw new Error('Входов нет');
@@ -1780,22 +1793,25 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
     );
     expect(reset.statusCode).toBe(201);
     const fresh = reset.json<{ port_account: PortAccount }>().port_account;
-    expect(fresh.username).not.toBe(line.username);
-    expect(await accepted(line.username)).toBe(false);
-    expect(await accepted(fresh.username)).toBe(true);
+    // Меняется только пароль — как и обещает кнопка (владелец, 2026-09-25).
+    expect(fresh.username).toBe(line.username);
+    expect(fresh.password).not.toBe(line.password);
+    expect(await served(line.username)).toContain(a1(fresh.username, fresh.password));
+    expect(await served(line.username)).not.toContain(a1(line.username, line.password));
 
     const journal = await withDatabase(async (execute) => {
       const result = await execute(sql`
-        select before, after from audit_log
-         where action = 'gateway_port.credentials_issued' and entity_id = ${line.port_id}
+        select action, after from audit_log
+         where action like 'gateway_port.%' and entity_id = ${line.port_id}
+           and action in ('gateway_port.credentials_issued', 'gateway_port.password_reset')
          order by occurred_at, id
       `);
-      return result.rows as { before: unknown; after: unknown }[];
+      return result.rows as { action: string; after: unknown }[];
     });
-    // Ни пароля, ни хеша — только имена.
+    // Ни пароля, ни хеша — только имя.
     expect(journal).toEqual([
-      { before: { sip_username: null }, after: { sip_username: line.username } },
-      { before: { sip_username: line.username }, after: { sip_username: fresh.username } },
+      { action: 'gateway_port.credentials_issued', after: { sip_username: line.username } },
+      { action: 'gateway_port.password_reset', after: { sip_username: line.username } },
     ]);
   });
 

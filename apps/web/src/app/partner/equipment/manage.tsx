@@ -369,8 +369,8 @@ export function NewPassword({ gateway }: { gateway: Gateway }) {
           title={`Новый пароль для «${gateway.name}»`}
           consequence={
             <p>
-              Меняются и имя, и пароль. Шлюз потеряет регистрацию и замолчит, пока вы не введёте
-              новые данные в его настройках. Идущие разговоры не рвутся.
+              Меняется только пароль, логин прежний. Шлюз замолчит, пока вы не введёте новый пароль
+              в его настройках. Идущие разговоры не рвутся.
             </p>
           }
           confirmLabel="Выдать новый пароль"
@@ -511,7 +511,7 @@ export function NewLineAccount({
       }),
     onSuccess: async (response) => {
       onIssued({
-        title: `Новый вход линии ${String(port.port_number)} шлюза «${gateway.name}»`,
+        title: `Новый пароль линии ${String(port.port_number)} шлюза «${gateway.name}»`,
         lines: [response.port_account],
       });
       await refresh();
@@ -521,11 +521,11 @@ export function NewLineAccount({
   return (
     <ConfirmAction
       label="Новый пароль"
-      title={`Новый вход линии ${String(port.port_number)}`}
+      title={`Новый пароль линии ${String(port.port_number)}`}
       consequence={
         <p>
-          Меняются логин и пароль линии. Она замолчит, пока вы не введёте новые данные в Line{' '}
-          {port.port_number} в GOIP. Остальные линии и идущие разговоры это не затрагивает.
+          Меняется только пароль, логин прежний. Линия замолчит, пока вы не введёте новый пароль в
+          Line {port.port_number} в GOIP. Остальные линии и идущие разговоры это не затрагивает.
         </p>
       }
       confirmLabel="Выдать новый пароль"

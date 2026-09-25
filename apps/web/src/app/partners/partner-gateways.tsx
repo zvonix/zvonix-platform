@@ -496,13 +496,12 @@ function GatewayRow({
 
           {canChange && !retired && !byLine && (
             <ConfirmAction
-              label="Новый доступ"
-              title={`Перевыпустить доступ шлюза «${gateway.name}»`}
+              label="Новый пароль"
+              title={`Новый пароль шлюза «${gateway.name}»`}
               consequence={
                 <p>
-                  Имя и пароль SIP меняются сразу. Шлюз потеряет регистрацию и замолчит, пока
-                  партнёр не введёт новые данные в настройках оборудования. Идущие разговоры не
-                  рвутся.
+                  Меняется только пароль, логин прежний. Шлюз замолчит, пока партнёр не введёт новый
+                  пароль в настройках оборудования. Идущие разговоры не рвутся.
                 </p>
               }
               confirmLabel="Перевыпустить"
@@ -615,7 +614,7 @@ function GatewayPorts({
       }),
     onSuccess: async (data, port) => {
       issued({
-        title: `Новый вход линии ${String(port.port_number)} шлюза «${gateway.name}»`,
+        title: `Новый пароль линии ${String(port.port_number)} шлюза «${gateway.name}»`,
         lines: [data.port_account],
       });
       await invalidate();
@@ -735,12 +734,12 @@ function GatewayPorts({
                         </span>
                         {canChange && gateway.status !== 'retired' && (
                           <ConfirmAction
-                            label="Новый вход"
-                            title={`Новый вход линии ${String(row.port_number)}`}
+                            label="Новый пароль"
+                            title={`Новый пароль линии ${String(row.port_number)}`}
                             consequence={
                               <p>
-                                Логин и пароль линии меняются сразу. Линия замолчит, пока партнёр не
-                                введёт новые данные в GOIP. Другие линии это не затрагивает.
+                                Меняется только пароль, логин прежний. Линия замолчит, пока партнёр
+                                не введёт новый пароль в GOIP. Другие линии это не затрагивает.
                               </p>
                             }
                             confirmLabel="Перевыпустить"

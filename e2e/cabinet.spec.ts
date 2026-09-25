@@ -510,8 +510,8 @@ test.describe('операторы связи (ADR-0053)', () => {
     await expect(connection).toContainText('Single Server Mode');
     await expect(connection).toContainText('Match Callee');
     const ports = page.getByRole('region', { name: 'Порты' });
-    await expect(ports.getByRole('row', { name: /^1 99001/u })).toBeVisible();
-    await expect(ports.getByRole('row', { name: /^2 99002/u })).toBeVisible();
+    await expect(ports.getByRole('row', { name: /^1 префикс 99001/u })).toBeVisible();
+    await expect(ports.getByRole('row', { name: /^2 префикс 99002/u })).toBeVisible();
   });
 });
 
@@ -569,7 +569,7 @@ test.describe('оборудование одной таблицей, вход п
       .click();
     const connection = page.getByRole('region', { name: 'Подключение' });
     await expect(connection).toContainText('Single Server Mode');
-    await expect(ports.getByRole('row', { name: /^1 99001/u })).toBeVisible();
+    await expect(ports.getByRole('row', { name: /^1 префикс 99001/u })).toBeVisible();
   });
 });
 

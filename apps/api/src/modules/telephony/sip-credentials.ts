@@ -50,7 +50,17 @@ export interface SipCredentials {
  * а перерегистрация на соседний это штатный способ пережить отказ узла.
  */
 export function issueSipCredentials(kind: SipPrincipalKind, realm: string): SipCredentials {
-  const username = issueSipUsername(kind);
+  return renewSipPassword(issueSipUsername(kind), realm);
+}
+
+/**
+ * Новый пароль к прежнему имени.
+ *
+ * «Новый пароль» меняет только пароль: имя уже введено в устройство, и менять его
+ * значило бы заставить перенастраивать два поля вместо одного, а кнопка обещала одно
+ * (владелец, 2026-09-25). Имя не секрет — секрет пароль, и утечку закрывает он.
+ */
+export function renewSipPassword(username: string, realm: string): SipCredentials {
   const password = randomBytes(PASSWORD_BYTES).toString('base64url');
   return { username, password, a1Hash: a1Hash(username, realm, password) };
 }
