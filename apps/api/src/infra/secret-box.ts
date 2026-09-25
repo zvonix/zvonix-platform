@@ -30,6 +30,8 @@ const NONCE_BYTES = 12;
 export const TOTP_SECRET_PURPOSE = 'zvonix:totp-secret:v1';
 export const PLATFORM_SETTING_PURPOSE = 'zvonix:platform-setting:v1';
 export const SIP_TRUNK_SECRET_PURPOSE = 'zvonix:sip-trunk-secret:v1';
+/** Пароль ESL узла: с ним площадка может звонить (ADR-0055). */
+export const NODE_ESL_SECRET_PURPOSE = 'zvonix:node-esl-secret:v1';
 /** Не ключ шифрования, а ключ HMAC кода первого запуска (ADR-0050): назначение то же — разделить ключи. */
 export const FIRST_RUN_CODE_PURPOSE = 'zvonix:first-run-code:v1';
 

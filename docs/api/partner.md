@@ -140,6 +140,42 @@
 цены (`GET /partner/rates`). Считать его на сервере значило бы завести второе описание
 условий отбора рядом с запросом `findSimCandidates` — и разойтись с ним на первой правке.
 
+## `POST /partner/sim-cards/:id/test-call` — тестовый звонок
+
+Площадка сама звонит со своей карты партнёра на указанный номер
+([ADR-0055](../adr/0055-testovyy-zvonok-s-sim.md)). Ответивший слышит пять коротких
+сигналов. Проверяется одно: работают ли шлюз, линия и SIM. Клиента, цены и проверки
+оператора номера здесь нет, денег проба не двигает.
+
+Тело: `{ "destination": "+7 913 000-11-22" }` — российский номер в любой записи.
+
+`202` → `{ "test_call": { "id", "sim_card_id", "gateway_id", "port_number", "destination",
+"status": "dialing", "hangup_cause", "sip_status", "talk_seconds", "created_at", "finished_at" } }`.
+
+Итог — повторным чтением `GET /partner/test-calls/:id`: `answered` (ответили), `busy`,
+`no_answer` (сеть дозвонилась — карта работает), `failed` с причиной FreeSWITCH
+в `hangup_cause` (`USER_NOT_REGISTERED` — линия не на связи, `ESL_*` — площадка
+не передала команду узлу), `unknown` — итог потерян (запись старше трёх минут без итога).
+`talk_seconds` и `sip_status` приходят с CDR, чуть позже итога.
+
+| Отказ | Когда |
+|---|---|
+| `400` | номер не российский |
+| `404` | карта не своя или не существует |
+| `409` `sim_not_testable` | карта списана или заблокирована (`new`, `active`, `throttled` — можно) |
+| `409` `destination_blocked` | номер в чёрном списке площадки |
+| `409` `sim_not_in_port`, `gateway_retired`, `line_without_account` | карте не с чего звонить |
+| `409` `not_registered` | линия (или шлюз) ещё не подключилась к площадке |
+| `409` `node_not_ready` | узел не сообщил площадке пароль ESL |
+| `409` `test_call_in_progress` | с карты уже идёт проба |
+| `429` + `Retry-After` | с карты звонили меньше минуты назад |
+
+Запись в журнале — `sim_card.test_call`, номер маской (`7913*****22`).
+
+## `GET /partner/test-calls/:id`
+
+`200` → `{ "test_call": { … } }`, как выше. Чужая проба — `404`.
+
 ## `GET /partner/rates`
 
 `200` →

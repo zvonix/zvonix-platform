@@ -17,6 +17,8 @@ import {
   type NodeStatus,
   type UserRole,
 } from '@zvonix/shared';
+import type { EslTarget } from '../../infra/esl.js';
+import { decryptSecret, encryptSecret, NODE_ESL_SECRET_PURPOSE } from '../../infra/secret-box.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { MachineService, type MachinePrincipal } from '../machine/machine.service.js';
@@ -35,6 +37,20 @@ export interface NodeEnrollment {
   readonly keyId: string;
   readonly secret: string;
   readonly endpoints: Readonly<Record<string, string>>;
+}
+
+/**
+ * Где слушает ESL узла на той же машине (ADR-0051: только петлевой адрес, порт штатный).
+ * Адрес от узла не принимается — см. `registerEsl`.
+ */
+const LOCAL_ESL_HOST = '127.0.0.1';
+const LOCAL_ESL_PORT = 8021;
+
+/** Адрес, с которого запрос пришёл изнутри машины. */
+function isLoopback(ip: string | undefined): boolean {
+  if (ip === undefined) return false;
+  const bare = ip.startsWith('::ffff:') ? ip.slice('::ffff:'.length) : ip;
+  return bare === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare);
 }
 
 export interface HeartbeatInput {
@@ -211,6 +227,66 @@ export class NodesService {
     });
     if (updated === undefined) throw notFound('Узел не найден');
     return updated;
+  }
+
+  /**
+   * Принимает пароль ESL от узла ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
+   *
+   * **Только с петлевого адреса.** ESL узла слушает 127.0.0.1 (ADR-0051), и достучаться
+   * до него площадка может, лишь стоя на той же машине. Запрос с петлевого адреса
+   * и доказывает это: чужая машина его не пришлёт — за nginx адрес берётся из
+   * `X-Forwarded-For` доверенного прокси, а не из заголовка клиента.
+   *
+   * Пароль хранится зашифрованным: с ним площадка может звонить, и утечка одной базы
+   * этого давать не должна.
+   */
+  async registerEsl(
+    principal: MachinePrincipal,
+    password: string,
+    ip: string | undefined,
+  ): Promise<NodeRow> {
+    const nodeId = parseId(principal.ownerId, 'node');
+    if (!isLoopback(ip)) {
+      throw conflict(
+        'Площадка звонит только через узел на своей же машине: ESL узла закрыт для внешних адресов',
+        { details: { reason: 'esl_not_local' } },
+      );
+    }
+
+    const updated = await this.repository.setEslSecret(
+      nodeId,
+      encryptSecret(password, this.config.SECRET_KEY, NODE_ESL_SECRET_PURPOSE),
+    );
+    if (updated === undefined) throw notFound('Узел не найден');
+
+    // Пароль в журнал не пишется ни в каком виде — только сам факт.
+    await this.audit.record({
+      action: 'node.esl_registered',
+      entityType: 'node',
+      entityId: nodeId,
+      ip: ip ?? null,
+      after: { esl_host: LOCAL_ESL_HOST, esl_port: LOCAL_ESL_PORT },
+    });
+    this.logger.info('Узел сообщил пароль ESL', { node_id: nodeId });
+    return updated;
+  }
+
+  /**
+   * Куда отдавать команды узлу. `undefined` — узел пароль не сообщал или выведен:
+   * звонить с него площадка не может.
+   */
+  async eslTargetOf(id: NodeId): Promise<EslTarget | undefined> {
+    const node = await this.repository.findById(id);
+    if (node === undefined || node.eslSecret === null || node.status === 'decommissioned') {
+      return undefined;
+    }
+    return {
+      host: LOCAL_ESL_HOST,
+      port: LOCAL_ESL_PORT,
+      // Не расшифровался — ключ площадки сменили или запись испорчена. Ошибка
+      // не проглатывается: молча ответить «пароля нет» значило бы спрятать поломку.
+      password: decryptSecret(node.eslSecret, this.config.SECRET_KEY, NODE_ESL_SECRET_PURPOSE),
+    };
   }
 
   /**

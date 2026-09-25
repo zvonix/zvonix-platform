@@ -1,10 +1,11 @@
 'use client';
 
-import { goipLinePrefix } from '@zvonix/shared';
+import { goipLinePrefix, TESTABLE_SIM_STATUSES } from '@zvonix/shared';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { moment } from '@/lib/format';
 import { PORT_STATE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
 import type { Gateway, Port, Sim } from './equipment';
+import { TestCallButton } from '@/components/test-call';
 import { InsertSim, RemoveSim, SimActions } from './manage';
 
 /**
@@ -78,6 +79,9 @@ export function PortRow({
           ) : (
             <>
               <SimActions sim={port.sim} inPort />
+              {TESTABLE_SIM_STATUSES.includes(port.sim.status) && (
+                <TestCallButton scope="partner" simId={port.sim.id} msisdn={port.sim.msisdn} />
+              )}
               <RemoveSim portId={port.id} />
             </>
           )}

@@ -11,7 +11,7 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { Money, notFound, terminationKindOf, validationFailed } from '@zvonix/shared';
+import { Money, notFound, parseId, terminationKindOf, validationFailed } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { BillingService } from '../billing/billing.service.js';
 import { ReservationService } from '../billing/reservation.service.js';
@@ -20,6 +20,7 @@ import { LimitService } from '../limits/limit.service.js';
 import { CallRepository, type CallRow } from './call.repository.js';
 import { parseCdr, statusFromHangupCause, type ParsedCdr } from './cdr-parse.js';
 import { TelephonyRepository } from './telephony.repository.js';
+import { TestCallService } from './test-call.service.js';
 
 /**
  * Запас поверх предельной длительности, после которого открытый вызов считается брошенным.
@@ -35,7 +36,8 @@ const ABANDONED_CALL_MARGIN_MS = 5 * 60 * 1000;
 export type CdrOutcome =
   | { readonly kind: 'charged'; readonly call: CallRow; readonly clientAmount: string }
   | { readonly kind: 'closed'; readonly call: CallRow }
-  | { readonly kind: 'ignored_b_leg' };
+  | { readonly kind: 'ignored_b_leg' }
+  | { readonly kind: 'test_call' };
 
 @Injectable()
 export class CdrService {
@@ -48,6 +50,7 @@ export class CdrService {
     private readonly billing: BillingService,
     private readonly limits: LimitService,
     private readonly reservations: ReservationService,
+    private readonly testCalls: TestCallService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -56,6 +59,13 @@ export class CdrService {
 
   async accept(body: unknown): Promise<CdrOutcome> {
     const cdr = parseCdr(body);
+
+    // Тестовый звонок — вне биллинга (ADR-0055): только итог пробы, и `200`, иначе узел
+    // складывал бы такие CDR на диск как невыставленные счета.
+    if (cdr.testCallId !== undefined) {
+      await this.testCalls.acceptCdr(parseId(cdr.testCallId, 'testCall'), cdr);
+      return { kind: 'test_call' };
+    }
 
     const call = await this.calls.findByExternalId(cdr.uuid);
     if (call === undefined) {

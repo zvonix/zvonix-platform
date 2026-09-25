@@ -28,6 +28,13 @@ export interface ParsedCdr {
   readonly endedAt: Date | undefined;
   /** Причина отказа, которую control plane сам же и проставил при маршрутизации. */
   readonly rejectReason: string | undefined;
+  /**
+   * Идентификатор тестового звонка, если это он
+   * ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)): вызов вне биллинга.
+   */
+  readonly testCallId: string | undefined;
+  /** Код SIP, которым закончилось плечо к шлюзу (`sip_term_status`). */
+  readonly sipStatus: string | undefined;
 }
 
 export class CdrParseError extends Error {
@@ -66,6 +73,8 @@ export function parseCdr(body: unknown): ParsedCdr {
     answeredAt: stamp(source['answer_stamp']),
     endedAt: stamp(source['end_stamp']),
     rejectReason: text(source['zvonix_reject_reason']),
+    testCallId: text(source['zvonix_test_call']),
+    sipStatus: text(source['sip_term_status']),
   };
 }
 

@@ -27,6 +27,7 @@ import {
   SIM_NETWORK_SCOPES,
   SIM_STATUSES,
   TERMINATION_KINDS,
+  TEST_CALL_STATUSES,
   type ChannelStatus,
   type GatewayPortState,
   type GatewayRegistrationMode,
@@ -36,11 +37,13 @@ import {
   type SimNetworkScope,
   type SimStatus,
   type TerminationKind,
+  type TestCallStatus,
 } from '@zvonix/shared';
 import { createdAt, idRef, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 import { clients, partners } from './billing.js';
 import { operators } from './catalog.js';
 import { nodes } from './nodes.js';
+import { users } from './users.js';
 
 /** Шлюз партнёра: GOIP или телефон на Android. */
 export const gateways = pgTable(
@@ -546,4 +549,71 @@ export const channelAllowedOperators = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('channel_allowed_operators_key').on(t.channelId, t.operatorId)],
+);
+
+/**
+ * Тестовый звонок с SIM ([ADR-0055](../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
+ *
+ * Не `Call`: у пробы нет клиента, канала, цены и проводок, а вызов в отчётах и сверке
+ * означал бы деньги. Запись нужна для трёх вещей — показать итог, держать предел
+ * «раз в минуту на SIM» и ответить потом, кто и когда звонил с карты.
+ */
+export const testCalls = pgTable(
+  'test_calls',
+  {
+    id: primaryId<'testCall'>(),
+
+    // Проба — диагностика карты: без карты она не значит ничего.
+    simCardId: idRef<'simCard'>()
+      .notNull()
+      .references(() => simCards.id, { onDelete: 'cascade' }),
+
+    /** Владелец карты на момент пробы — по нему партнёр видит свои пробы. */
+    partnerId: idRef<'partner'>()
+      .notNull()
+      .references(() => partners.id, { onDelete: 'cascade' }),
+
+    gatewayId: idRef<'gateway'>()
+      .notNull()
+      .references(() => gateways.id, { onDelete: 'cascade' }),
+
+    /** Номер порта на момент пробы: карту потом могут переставить. */
+    portNumber: integer().notNull(),
+
+    /** Узел, которому отдана команда. Выведенный узел запись не удаляет. */
+    nodeId: idRef<'node'>().references(() => nodes.id, { onDelete: 'set null' }),
+
+    /** Куда звонили — канонический номер. Персональные данные: в журнал уходит маской. */
+    destination: text().notNull(),
+
+    /** Учётная запись, которую набирали: вход линии или шлюза. */
+    sipUsername: text().notNull(),
+
+    requestedBy: idRef<'user'>().references(() => users.id, { onDelete: 'set null' }),
+
+    status: text().$type<TestCallStatus>().notNull().default('dialing'),
+
+    /** Причина отбоя FreeSWITCH (`USER_BUSY`, `USER_NOT_REGISTERED`…). */
+    hangupCause: text(),
+
+    /** Код SIP последнего ответа шлюза, из CDR. */
+    sipStatus: text(),
+
+    /** Секунды от ответа до отбоя, из CDR. */
+    talkSeconds: integer(),
+
+    createdAt: createdAt(),
+    finishedAt: timestamptz(),
+  },
+  (t) => [
+    check('test_calls_status_check', oneOf(t.status, TEST_CALL_STATUSES)),
+    check('test_calls_talk_seconds_non_negative', sql`${t.talkSeconds} >= 0`),
+    // Одна проба на карту одновременно: вторая команда тому же GOIP застала бы линию
+    // занятой первой, и итог второй ничего бы не сказал о карте.
+    uniqueIndex('test_calls_one_dialing_per_sim')
+      .on(t.simCardId)
+      .where(sql`${t.status} = 'dialing'`),
+    // Предел и последняя проба карты — по времени внутри карты.
+    index('test_calls_sim_created_idx').on(t.simCardId, t.createdAt),
+  ],
 );

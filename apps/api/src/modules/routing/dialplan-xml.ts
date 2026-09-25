@@ -7,6 +7,7 @@
  */
 
 import type { CallFailureReason, TerminationKind } from '@zvonix/shared';
+import { simEndpoint } from '../telephony/sim-dial.js';
 import { escapeXmlAttribute } from '../telephony/sip-credentials.js';
 
 const HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>';
@@ -149,13 +150,17 @@ export function routeDocument(plan: RoutePlan): string {
  * в квадратных скобках, потому что у каждого кандидата он свой.
  */
 function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
-  const name = escapeXmlAttribute(candidate.sipUsername);
-  const realm = escapeXmlAttribute(plan.realm);
-  const destination = escapeXmlAttribute(plan.destination);
-  if (candidate.kind === 'sip') return `sofia/gateway/${name}/${destination}`;
-
-  const dialled = `${escapeXmlAttribute(candidate.linePrefix ?? '')}${destination}`;
-  return `[sip_invite_req_uri=sip:${dialled}@${realm}]user/${name}@${realm}`;
+  if (candidate.kind === 'sip') {
+    const name = escapeXmlAttribute(candidate.sipUsername);
+    return `sofia/gateway/${name}/${escapeXmlAttribute(plan.destination)}`;
+  }
+  return escapeXmlAttribute(
+    simEndpoint(
+      { sipUsername: candidate.sipUsername, linePrefix: candidate.linePrefix },
+      plan.destination,
+      plan.realm,
+    ),
+  );
 }
 
 /** Отказ: тот же 200 и тот же XML, просто диалплан кладёт трубку. */

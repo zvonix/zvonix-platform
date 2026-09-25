@@ -6,6 +6,7 @@ import {
   GATEWAY_TYPES,
   goipLinePrefix,
   REGISTRABLE_GATEWAY_STATUSES,
+  TESTABLE_SIM_STATUSES,
   type GatewayPortState,
   type GatewayRegistrationMode,
   type GatewayStatus,
@@ -18,6 +19,7 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { StatusDialog } from '@/components/status-dialog';
+import { TestCallButton } from '@/components/test-call';
 import {
   LineCredentials,
   type IssuedLines,
@@ -698,6 +700,11 @@ function GatewayPorts({
               {byLine && <TableHead className="h-8">Регистрация</TableHead>}
               <TableHead className="h-8">Состояние</TableHead>
               <TableHead className="h-8">SIM</TableHead>
+              {canChange && (
+                <TableHead className="h-8">
+                  <span className="sr-only">Проверка</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -793,6 +800,11 @@ function GatewayPorts({
                     </span>
                   )}
                 </TableCell>
+                {canChange && (
+                  <TableCell>
+                    <PortTestCall sim={sims.find((sim) => sim.id === row.sim_card_id)} />
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -800,4 +812,13 @@ function GatewayPorts({
       </div>
     </div>
   );
+}
+
+/**
+ * Тестовый звонок с карты порта ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)):
+ * когда партнёр пишет «не работает», администратор проверяет карту сам.
+ */
+function PortTestCall({ sim }: { sim: SimOption | undefined }) {
+  if (sim === undefined || !TESTABLE_SIM_STATUSES.includes(sim.status)) return null;
+  return <TestCallButton scope="admin" simId={sim.id} msisdn={sim.msisdn} />;
 }

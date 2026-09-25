@@ -230,3 +230,21 @@ unset ADMIN_PASSWORD
 FreeSWITCH уже стоит — репозиторий пакетов не нужен
 ([ADR-0045](../docs/adr/0045-ustanovshchik-uzla.md), ревизии). Проверка после установки —
 навык `node-live` и [node/README.md](../node/README.md).
+
+### Узел, установленный до тестового звонка
+
+Тестовому звонку ([ADR-0055](../docs/adr/0055-testovyy-zvonok-s-sim.md)) нужен пароль ESL
+узла, а установщик сообщает его площадке только с этой версии. Узлу, поставленному раньше,
+его передают один раз под root на той же машине. Ключ узла берётся из его же конфигурации,
+в аргументы процесса секреты не попадают:
+
+```sh
+CONF=/usr/local/freeswitch/etc/freeswitch/autoload_configs/xml_curl.conf.xml   # у пакета — /etc/freeswitch/…
+CRED="$(sed -n 's/.*name="gateway-credentials" value="\([^"]*\)".*/\1/p' "$CONF" | head -1)"
+PASS="$(sed -n 's/^password => //p' /etc/fs_cli.conf | head -1)"
+BODY="$(umask 077 && mktemp)"; printf '{"password":"%s"}' "$PASS" >"$BODY"
+printf 'user = "%s"\n' "$CRED" | curl -fsS -K - -X PUT -H 'Content-Type: application/json' \
+  --data-binary "@$BODY" http://127.0.0.1:8000/node/esl; rm -f "$BODY"
+```
+
+Ответ `{"esl":"registered"}` — площадка может звонить через узел.

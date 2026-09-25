@@ -285,3 +285,44 @@ export function goipLinePrefix(portNumber: number): string {
   }
   return `99${String(portNumber).padStart(3, '0')}`;
 }
+
+/**
+ * Итог тестового звонка с SIM ([ADR-0055](../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
+ *
+ * `dialing`   — площадка отдала команду узлу и ждёт ответа;
+ * `answered`  — ответили: SIM, линия и шлюз работают;
+ * `busy`, `no_answer` — сеть дозвонилась, но разговора не было: SIM тоже работает;
+ * `failed`    — отказ до сети или в сети, причина в `hangup_cause`;
+ * `unknown`   — итог не пришёл: процесс площадки перезапустился посреди звонка, а узел
+ *               не прислал CDR. Ставится, когда запись переросла срок ожидания.
+ */
+export const TEST_CALL_STATUSES = [
+  'dialing',
+  'answered',
+  'busy',
+  'no_answer',
+  'failed',
+  'unknown',
+] as const;
+export type TestCallStatus = (typeof TEST_CALL_STATUSES)[number];
+
+/**
+ * Состояния SIM, с которых можно позвонить на пробу.
+ *
+ * `new` — прежде всего: карту проверяют при подключении, до подтверждения оператора.
+ * `throttled` — чтобы убедиться, что придержанная карта снова проходит в сеть.
+ * `blocked` и `retired` — нет: карту выключили намеренно.
+ */
+export const TESTABLE_SIM_STATUSES: readonly SimStatus[] = ['new', 'active', 'throttled'];
+
+/**
+ * Не чаще одного тестового звонка в минуту на SIM: иначе кнопка становится автодозвоном,
+ * за который оператор блокирует карту.
+ */
+export const TEST_CALL_INTERVAL_MS = 60_000;
+
+/**
+ * Сколько ждать итога. Дозвон — до сорока секунд, сигналы после ответа — пять секунд;
+ * всё, что дольше трёх минут, значит, что итог потерян.
+ */
+export const TEST_CALL_STALE_AFTER_MS = 180_000;

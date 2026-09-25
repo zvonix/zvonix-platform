@@ -34,6 +34,7 @@ export {
   channelPartnerPriorities,
   channelAllowedOperators,
   partnerCoverage,
+  testCalls,
 } from './telephony.js';
 export { partnerRates, priceBands, commissionRules } from './tariffs.js';
 export { calls, reservations } from './calls.js';
