@@ -6,13 +6,19 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { LineCredentials, type IssuedLines } from '@/components/sip-credentials';
-import { Table, TableBody, TableHeader } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { GATEWAY_TYPE_NAME } from '@/lib/labels';
 import {
   EQUIPMENT_KEY,
-  gatewayStateName,
   type Connection,
   type Equipment,
   type Gateway,
@@ -22,6 +28,7 @@ import {
   AddPorts,
   GatewayStatus,
   IssueMissingLines,
+  NewLineAccount,
   NewPassword,
   RegistrationMode,
 } from '../manage';
@@ -61,7 +68,7 @@ function GatewayCard({ id }: { id: string }) {
     queryFn: () => request<Equipment>('/partner/equipment'),
   });
   // Выданные входы линий живут здесь, над разделами: панель не должна пропадать
-  // вместе со строкой порта при обновлении таблицы, а второго показа пароля не будет.
+  // вместе со строкой при обновлении таблицы, а второго показа пароля не будет.
   const [issued, setIssued] = useState<readonly IssuedLines[]>([]);
   const onIssued = (lines: IssuedLines): void => {
     setIssued((list) => [...list, lines]);
@@ -101,21 +108,13 @@ function GatewayCard({ id }: { id: string }) {
             {gateway.model !== null && ` · ${gateway.model}`}
           </span>
         </div>
-        <dl className="flex flex-wrap gap-x-6 gap-y-1">
-          <div className="flex gap-1">
-            <dt className="text-muted-foreground">Состояние:</dt>
-            <dd>{gatewayStateName(gateway)}</dd>
-          </div>
-          <div className="flex gap-1">
-            <dt className="text-muted-foreground">Связь с площадкой:</dt>
-            <dd className={gateway.on_node ? '' : 'text-warn'}>
-              {gateway.on_node ? `есть · ${moment(gateway.registered_at)}` : 'нет'}
-            </dd>
-          </div>
-        </dl>
-        <div>
-          <GatewayStatus gateway={gateway} />
-        </div>
+        <GatewayStatus gateway={gateway} />
+        <p>
+          <span className="text-muted-foreground">Связь с площадкой: </span>
+          <span className={gateway.on_node ? '' : 'text-warn'}>
+            {gateway.on_node ? `есть · ${moment(gateway.registered_at)}` : 'нет'}
+          </span>
+        </p>
         <NextStep gateway={gateway} />
       </header>
 
@@ -135,7 +134,7 @@ function GatewayCard({ id }: { id: string }) {
         connection={equipment.data.connection}
         onIssued={onIssued}
       />
-      <PortsSection gateway={gateway} spare={equipment.data.spare_sims} onIssued={onIssued} />
+      <PortsSection gateway={gateway} spare={equipment.data.spare_sims} />
     </div>
   );
 }
@@ -143,22 +142,28 @@ function GatewayCard({ id }: { id: string }) {
 /**
  * Что сделать дальше — одна строка, а не инструкция. Шлюз работает, только когда
  * он включён, на связи и в нём есть включённая карта; первое невыполненное и называется.
+ *
+ * Невключённый шлюз площадка не пускает вовсе, даже с верными настройками, — и это
+ * говорится первым: партнёр настроил GOIP и ждал связи, не зная, что шлюз не включён
+ * (владелец, 2026-09-25).
  */
 function NextStep({ gateway }: { gateway: Gateway }) {
   const sims = gateway.ports.flatMap((port) => (port.sim === null ? [] : [port.sim]));
   const byLine = gateway.registration_mode === 'port';
-  const step =
-    gateway.status === 'pending'
-      ? 'Введите настройки подключения в устройство и включите шлюз.'
-      : gateway.status === 'active' && !gateway.on_node
-        ? byLine
-          ? 'Шлюз включён, но ни одна линия не на связи: проверьте в GOIP сервер, логины и пароли линий.'
-          : 'Шлюз включён, но не на связи: проверьте в устройстве сервер, логин и пароль ниже.'
-        : sims.length === 0
-          ? 'Вставьте SIM-карты в порты — без них вызовов не будет.'
-          : !sims.some((sim) => sim.status === 'active')
-            ? 'Включите карты в портах — выключенные вызовов не получают.'
-            : undefined;
+  const off =
+    gateway.status === 'pending' ||
+    (gateway.status === 'suspended' && gateway.suspended_by === 'partner');
+  const step = off
+    ? `Шлюз не включён — ${byLine ? 'линии не могут' : 'устройство не может'} подключиться к площадке даже с верными настройками. Введите настройки в устройство и нажмите «Включить шлюз».`
+    : gateway.status === 'active' && !gateway.on_node
+      ? byLine
+        ? 'Шлюз включён, но ни одна линия не на связи: проверьте в GOIP сервер, логины и пароли линий.'
+        : 'Шлюз включён, но не на связи: проверьте в устройстве сервер, логин и пароль ниже.'
+      : sims.length === 0
+        ? 'Вставьте SIM-карты в порты — без них вызовов не будет.'
+        : !sims.some((sim) => sim.status === 'active')
+          ? 'Включите карты в портах — выключенные вызовов не получают.'
+          : undefined;
   if (step === undefined) return null;
   return <p className="text-warn">{step}</p>;
 }
@@ -168,8 +173,8 @@ function NextStep({ gateway }: { gateway: Gateway }) {
  *
  * Названия полей — как в веб-интерфейсе GOIP (раздел Configurations → Basic VoIP):
  * партнёр переносит значения построчно, и переводить английские подписи в уме ему незачем.
- * Набор полей зависит от способа подключения (ADR-0054): при входе по линиям у каждой
- * линии свои логин и пароль, при входе на шлюз — один вход и префиксы линий.
+ * Набор полей зависит от способа подключения (ADR-0054): при входе на шлюз — один вход
+ * и префиксы линий, при входе по линиям — таблица «что ввести в каждую линию».
  */
 function ConnectionSection({
   gateway,
@@ -183,21 +188,35 @@ function ConnectionSection({
   const goip = gateway.type === 'goip';
   const byLine = gateway.registration_mode === 'port';
   return (
-    <section aria-labelledby="connection" className="flex max-w-[720px] flex-col gap-2">
+    <section aria-labelledby="connection" className="flex flex-col gap-2">
       <h3 id="connection" className="font-semibold">
         Подключение
       </h3>
       {goip && <RegistrationMode gateway={gateway} onIssued={onIssued} />}
-      <p className="text-muted-foreground">
+      <p className="max-w-[720px] text-muted-foreground">
         {goip
           ? 'В веб-интерфейсе GOIP: Configurations → Basic VoIP. Поля названы так же, как там.'
           : 'Эти данные вводятся в настройках SIP самого устройства.'}
       </p>
+      {byLine ? (
+        <LineSettings gateway={gateway} connection={connection} onIssued={onIssued} />
+      ) : (
+        <GatewaySettings gateway={gateway} connection={connection} />
+      )}
+    </section>
+  );
+}
+
+/** Один вход на весь шлюз: сервер, логин, пароль и, у GOIP, префиксы линий. */
+function GatewaySettings({ gateway, connection }: { gateway: Gateway; connection: Connection }) {
+  const goip = gateway.type === 'goip';
+  return (
+    <div className="flex max-w-[720px] flex-col gap-2">
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-card p-3">
         {goip && (
           <>
             <dt className="text-muted-foreground">Config Mode</dt>
-            <dd>{byLine ? 'Config by Line' : 'Single Server Mode'}</dd>
+            <dd>Single Server Mode</dd>
           </>
         )}
         <dt className="text-muted-foreground">
@@ -206,30 +225,16 @@ function ConnectionSection({
         <dd className="num select-all">{connection.server}</dd>
         <dt className="text-muted-foreground">Порт</dt>
         <dd className="num select-all">{connection.port}</dd>
-        {byLine ? (
-          <>
-            <dt className="text-muted-foreground">Authentication ID, Phone Number</dt>
-            <dd>у каждой линии свой — в таблице портов ниже, столбец «Линия»</dd>
-            <dt className="text-muted-foreground">Password</dt>
-            <dd>
-              показан один раз, при выдаче входа линии. Потеряли — «Новый пароль» у этой линии:
-              другие линии это не затронет.
-            </dd>
-          </>
-        ) : (
-          <>
-            <dt className="text-muted-foreground">
-              {goip ? 'Authentication ID, Phone Number' : 'Логин'}
-            </dt>
-            <dd className="num select-all">{gateway.sip_username}</dd>
-            <dt className="text-muted-foreground">{goip ? 'Password' : 'Пароль'}</dt>
-            <dd>
-              показан один раз, при добавлении шлюза. Потеряли — выдайте новый: старые логин и
-              пароль перестанут работать.
-            </dd>
-          </>
-        )}
-        {goip && !byLine && (
+        <dt className="text-muted-foreground">
+          {goip ? 'Authentication ID, Phone Number' : 'Логин'}
+        </dt>
+        <dd className="num select-all">{gateway.sip_username}</dd>
+        <dt className="text-muted-foreground">{goip ? 'Password' : 'Пароль'}</dt>
+        <dd>
+          показан один раз, при добавлении шлюза. Потеряли — выдайте новый: старые логин и пароль
+          перестанут работать.
+        </dd>
+        {goip && (
           <>
             <dt className="text-muted-foreground">Prefix Match Mode</dt>
             <dd>Match Callee</dd>
@@ -240,43 +245,94 @@ function ConnectionSection({
           </>
         )}
       </dl>
-      {goip && byLine && (
-        <p className="text-muted-foreground">
-          Площадка звонит в ту линию, где стоит карта нужного оператора, её собственным входом.
-          Чтобы проверить одну SIM, настройте в GOIP только её линию и вставьте в кабинете только
-          её.
-        </p>
-      )}
-      {goip && !byLine && (
+      {goip && (
         <p className="text-muted-foreground">
           По префиксу GOIP понимает, с какой SIM звонить: площадка выбирает карту нужного оператора
           и набирает номер с префиксом её линии. Звонит площадка только через карты, вставленные в
           порты здесь, — чтобы проверить одну SIM, вставьте в кабинете только её.
         </p>
       )}
-      {byLine ? (
-        <IssueMissingLines gateway={gateway} onIssued={onIssued} />
-      ) : (
-        <NewPassword gateway={gateway} />
-      )}
-    </section>
+      <NewPassword gateway={gateway} />
+    </div>
   );
 }
 
-function PortsSection({
+/**
+ * Что ввести в каждую линию GOIP — построчно, теми же полями, что у линии в устройстве
+ * ([ADR-0054](../../../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
+ *
+ * Раньше при входе по линиям здесь стояли общие поля, а логин линии — в таблице портов,
+ * и страница читалась как настройки всего шлюза (владелец, 2026-09-25). Сервер и порт
+ * повторены в каждой строке намеренно: в GOIP их вводят у каждой линии заново. Логин —
+ * сразу за линией: он единственный у линий разный и на телефоне не должен уезжать за край.
+ */
+function LineSettings({
   gateway,
-  spare,
+  connection,
   onIssued,
 }: {
   gateway: Gateway;
-  spare: readonly Sim[];
+  connection: Connection;
   onIssued: (issued: IssuedLines) => void;
 }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="max-w-[720px]">
+        <span className="text-muted-foreground">Config Mode: </span>Config by Line
+        <span className="text-muted-foreground">
+          {' '}
+          — одна настройка на весь GOIP. Остальное вводится в каждую линию (Line 1, Line 2…) по
+          строке таблицы. Чтобы проверить одну SIM, достаточно первой строки и её карты в порту 1.
+        </span>
+      </p>
+      <IssueMissingLines gateway={gateway} onIssued={onIssued} />
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <Table aria-label="Настройки линий" className="whitespace-nowrap">
+          <TableHeader>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className="h-8">Линия</TableHead>
+              <TableHead className="h-8">Authentication ID, Phone Number</TableHead>
+              <TableHead className="h-8">SIP Proxy, SIP Registrar Server</TableHead>
+              <TableHead className="h-8">Порт</TableHead>
+              <TableHead className="h-8">Password</TableHead>
+              <TableHead className="h-8">Связь</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {gateway.ports.map((port) => (
+              <TableRow key={port.id}>
+                <TableCell className="num">Line {port.port_number}</TableCell>
+                <TableCell className="num select-all">
+                  {port.sip_username ?? <span className="text-warn">вход не выдан</span>}
+                </TableCell>
+                <TableCell className="num select-all">{connection.server}</TableCell>
+                <TableCell className="num select-all">{connection.port}</TableCell>
+                <TableCell>
+                  {port.sip_username !== null && (
+                    <span className="flex items-center gap-2">
+                      <span className="text-muted-foreground">показан при выдаче</span>
+                      <NewLineAccount gateway={gateway} port={port} onIssued={onIssued} />
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className={port.on_node ? 'text-muted-foreground' : 'text-warn'}>
+                  {port.on_node ? `на связи · ${moment(port.registered_at)}` : 'не на связи'}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+function PortsSection({ gateway, spare }: { gateway: Gateway; spare: readonly Sim[] }) {
   return (
     <section aria-labelledby="ports" className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
         <h3 id="ports" className="font-semibold">
-          Порты
+          Порты и SIM-карты
         </h3>
         <AddPorts gateway={gateway} />
       </div>
@@ -293,13 +349,7 @@ function PortsSection({
             </TableHeader>
             <TableBody>
               {gateway.ports.map((port) => (
-                <PortRow
-                  key={port.id}
-                  gateway={gateway}
-                  port={port}
-                  spare={spare}
-                  onIssued={onIssued}
-                />
+                <PortRow key={port.id} gateway={gateway} port={port} spare={spare} />
               ))}
             </TableBody>
           </Table>
