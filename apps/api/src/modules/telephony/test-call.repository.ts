@@ -29,6 +29,8 @@ export interface TestCallOutcome {
   readonly hangupCause?: string | null;
   readonly sipStatus?: string | null;
   readonly talkSeconds?: number | null;
+  readonly sipPhrase?: string | null;
+  readonly rangAt?: Date | null;
 }
 
 @Injectable()
@@ -104,6 +106,8 @@ export class TestCallRepository {
     const details = {
       ...(outcome.sipStatus === undefined ? {} : { sipStatus: outcome.sipStatus }),
       ...(outcome.talkSeconds === undefined ? {} : { talkSeconds: outcome.talkSeconds }),
+      ...(outcome.sipPhrase === undefined ? {} : { sipPhrase: outcome.sipPhrase }),
+      ...(outcome.rangAt === undefined ? {} : { rangAt: outcome.rangAt }),
     };
 
     if (outcome.status !== undefined) {

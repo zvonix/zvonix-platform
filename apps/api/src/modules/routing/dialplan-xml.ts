@@ -144,22 +144,20 @@ export function routeDocument(plan: RoutePlan): string {
  * регистрируемся **мы** — он значится в конфигурации узла исходящим sofia-gateway,
  * и набор идёт через шлюз с номером назначения.
  *
- * У зарегистрированного шлюза `user/…` отвечает, **куда** слать INVITE, но в строке
- * запроса оставляет имя учётной записи — номера там нет. Номер с префиксом линии кладётся
- * туда переменной плеча `sip_invite_req_uri` ([ADR-0053](../../../../../docs/adr/0053-liniya-goip-po-prefiksu.md)):
- * в квадратных скобках, потому что у каждого кандидата он свой.
+ * У зарегистрированного шлюза `user/…` отвечает, **куда** слать INVITE; номер с префиксом
+ * линии уходит в заголовке `To` переменной плеча `sip_invite_to_uri` — в квадратных
+ * скобках, потому что у каждого кандидата он свой. Почему не в адресе запроса — `simEndpoint`.
  */
 function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
   if (candidate.kind === 'sip') {
     const name = escapeXmlAttribute(candidate.sipUsername);
     return `sofia/gateway/${name}/${escapeXmlAttribute(plan.destination)}`;
   }
-  return escapeXmlAttribute(
-    simEndpoint(
-      { sipUsername: candidate.sipUsername, linePrefix: candidate.linePrefix },
-      plan.destination,
-      plan.realm,
-    ),
+  // Без экранирования здесь: `action` экранирует значение целиком сам.
+  return simEndpoint(
+    { sipUsername: candidate.sipUsername, linePrefix: candidate.linePrefix },
+    plan.destination,
+    plan.realm,
   );
 }
 

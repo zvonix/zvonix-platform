@@ -25,7 +25,10 @@ interface TestCall {
   readonly status: TestCallStatus;
   readonly hangup_cause: string | null;
   readonly sip_status: string | null;
+  readonly sip_phrase: string | null;
+  readonly rang: boolean;
   readonly talk_seconds: number | null;
+  readonly finished_at: string | null;
 }
 
 /** Пути партнёра и администратора. */
@@ -119,8 +122,9 @@ function TestCallResult({ readPath, onAgain }: { readPath: string; onAgain: () =
   const call = useQuery({
     queryKey: ['test-call', readPath],
     queryFn: () => request<{ test_call: TestCall }>(readPath).then((body) => body.test_call),
-    // Пока идёт дозвон — опрос; итог пришёл — хватит.
-    refetchInterval: (query) => (query.state.data?.status === 'dialing' ? 1500 : false),
+    // Пока идёт дозвон — опрос. Итог пришёл — ещё несколько секунд: ответ шлюза
+    // и отметка о наборе приходят с записью о звонке чуть позже итога.
+    refetchInterval: (query) => (awaitingDetails(query.state.data) ? 1500 : false),
   });
 
   const data = call.data;
@@ -139,7 +143,7 @@ function TestCallResult({ readPath, onAgain }: { readPath: string; onAgain: () =
             </p>
             <p className={toneOf(data.status)}>
               {data.status === 'failed'
-                ? testCallFailureText(data.hangup_cause)
+                ? testCallFailureText(data)
                 : TEST_CALL_STATUS_TEXT[data.status]}
             </p>
             {data.talk_seconds !== null && data.talk_seconds > 0 && (
@@ -159,6 +163,15 @@ function TestCallResult({ readPath, onAgain }: { readPath: string; onAgain: () =
       )}
     </div>
   );
+}
+
+/** Сколько ждать записи о звонке после итога. */
+const DETAILS_WAIT_MS = 15_000;
+
+function awaitingDetails(call: TestCall | undefined): boolean {
+  if (call === undefined || call.status === 'dialing') return true;
+  if (call.sip_status !== null || call.finished_at === null) return false;
+  return Date.now() - new Date(call.finished_at).getTime() < DETAILS_WAIT_MS;
 }
 
 function toneOf(status: TestCallStatus): string {

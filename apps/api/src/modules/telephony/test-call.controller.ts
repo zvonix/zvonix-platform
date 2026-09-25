@@ -28,6 +28,9 @@ interface TestCallView {
   readonly status: TestCallStatus;
   readonly hangup_cause: string | null;
   readonly sip_status: string | null;
+  readonly sip_phrase: string | null;
+  /** Шлюз сообщал «набираю» — звонок дошёл до сети оператора. */
+  readonly rang: boolean;
   readonly talk_seconds: number | null;
   readonly created_at: string;
   readonly finished_at: string | null;
@@ -108,6 +111,8 @@ function toTestCallView(row: TestCallRow, now: Date = new Date()): TestCallView 
     status: stale ? 'unknown' : row.status,
     hangup_cause: row.hangupCause,
     sip_status: row.sipStatus,
+    sip_phrase: row.sipPhrase,
+    rang: row.rangAt !== null,
     talk_seconds: row.talkSeconds,
     created_at: row.createdAt.toISOString(),
     finished_at: row.finishedAt?.toISOString() ?? null,

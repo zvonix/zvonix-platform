@@ -261,7 +261,9 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatch(
-      new RegExp(`\\[sip_invite_req_uri=sip:${env.destination}@[^\\]]+\\]user/pt-[a-z0-9]{12}@`),
+      new RegExp(
+        `\\[sip_invite_to_uri=&lt;sip:${env.destination}@[^\\]]+&gt;\\]user/pt-[a-z0-9]{12}@`,
+      ),
     );
     expect(response.body).not.toContain('user/gw-');
   });
