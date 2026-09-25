@@ -365,6 +365,64 @@ else
 fi
 rm -f "$ESL_BODY"
 
+# --- Пульс узла (docs/api/node.md, POST /node/heartbeat) ----------------------
+# Раз в 30 секунд: число звонков и поднят ли профиль SIP. По пульсу площадка ставит
+# узлу «работает» и снимает замолчавший. Агента узла из ADR-0019 пока нет — до него
+# пульс шлёт таймер systemd; без пульса узел навсегда оставался «ставится» (2026-09-25).
+# Ключ — в файле только для root, в аргументы процесса не попадает.
+
+FS_CLI="$(command -v fs_cli)" || die "fs_cli не найден — пульсу нечем спрашивать FreeSWITCH"
+install -d -m 0700 /etc/zvonix-node
+( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/heartbeat"\n' \
+  "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >/etc/zvonix-node/heartbeat.curl )
+
+cat >/usr/local/sbin/zvonix-heartbeat <<HEARTBEAT
+#!/bin/sh
+# Пульс узла Zvonix — порождается node/install.sh, правится там.
+set -u
+CALLS="\$("${FS_CLI}" -x 'show calls count' 2>/dev/null | sed -n 's/^\([0-9][0-9]*\) total.*/\1/p' | head -1)"
+DEGRADED=false
+# FreeSWITCH не ответил — узел жив, но звонить не может: так и сообщаем.
+[ -n "\$CALLS" ] || { CALLS=0; DEGRADED=true; }
+"${FS_CLI}" -x 'sofia status' 2>/dev/null \\
+  | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING' || DEGRADED=true
+printf '{"activeCalls":%s,"degraded":%s,"agentVersion":"heartbeat.sh"}' "\$CALLS" "\$DEGRADED" \\
+  | curl -fsS --max-time 10 -K /etc/zvonix-node/heartbeat.curl \\
+      -H 'Content-Type: application/json' --data-binary @- >/dev/null
+HEARTBEAT
+chmod 0700 /usr/local/sbin/zvonix-heartbeat
+
+cat >/etc/systemd/system/zvonix-heartbeat.service <<'UNIT'
+[Unit]
+Description=Пульс узла Zvonix площадке
+After=network-online.target freeswitch.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zvonix-heartbeat
+UNIT
+
+cat >/etc/systemd/system/zvonix-heartbeat.timer <<'UNIT'
+[Unit]
+Description=Пульс узла Zvonix раз в 30 секунд
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now zvonix-heartbeat.timer >/dev/null 2>&1
+if /usr/local/sbin/zvonix-heartbeat; then
+  echo "Пульс узла идёт: площадка видит узел «работает»"
+else
+  echo "ВНИМАНИЕ: площадка не приняла пульс узла — узел останется «ставится» (journalctl -u zvonix-heartbeat)" >&2
+fi
+
 echo
 echo "Готово. Узел «${NODE_NAME}» настроен, профиль SIP zvonix работает."
 echo
