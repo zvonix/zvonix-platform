@@ -23,7 +23,7 @@ export interface Sim {
   readonly operator_id: string;
   readonly operator_name: string | null;
   readonly max_concurrent_calls: number;
-  /** Пусто — оператор карты не подтверждён. Такая карта вызовов не получает. */
+  /** Пусто — оператор карты не подтверждён источником; карта при этом включается и звонит. */
   readonly operator_confirmed_at: string | null;
 }
 
