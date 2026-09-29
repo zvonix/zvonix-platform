@@ -1,5 +1,5 @@
 {
-  "id": "7af2a50f-1896-4392-804d-324e1a725061",
+  "id": "9a2d15e5-dcd5-40ad-88a5-79ff3ff81ff0",
   "prevId": "db73d03e-0898-463d-9636-d557086f35e8",
   "version": "7",
   "dialect": "postgresql",
@@ -4177,7 +4177,7 @@
               "nulls": "last"
             },
             {
-              "expression": "lower(\"name\")",
+              "expression": "lower(\"name\" collate \"und-x-icu\")",
               "asc": true,
               "isExpression": true,
               "nulls": "last"

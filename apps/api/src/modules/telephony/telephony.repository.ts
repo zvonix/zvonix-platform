@@ -879,6 +879,42 @@ export class TelephonyRepository {
     return row;
   }
 
+  /** Тариф шлюза (ADR-0056); `null` — тариф партнёра по умолчанию. */
+  async setGatewayTariff(
+    id: GatewayId,
+    tariffId: Id<'partnerTariff'> | null,
+    executor: Executor = this.db,
+  ): Promise<GatewayRow | undefined> {
+    try {
+      const [row] = await executor
+        .update(gateways)
+        .set({ tariffId })
+        .where(eq(gateways.id, id))
+        .returning();
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /** Свой тариф SIM (ADR-0056); `null` — как у шлюза. */
+  async setSimTariff(
+    id: SimCardId,
+    tariffId: Id<'partnerTariff'> | null,
+    executor: Executor = this.db,
+  ): Promise<SimCardRow | undefined> {
+    try {
+      const [row] = await executor
+        .update(simCards)
+        .set({ tariffId })
+        .where(eq(simCards.id, id))
+        .returning();
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
   /** Меняется только администратором: превышение — путь к блокировке SIM оператором. */
   async setSimConcurrency(id: SimCardId, value: number): Promise<SimCardRow | undefined> {
     try {

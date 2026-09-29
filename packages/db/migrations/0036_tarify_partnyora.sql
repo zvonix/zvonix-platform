@@ -13,7 +13,7 @@ ALTER TABLE "gateways" ADD COLUMN "tariff_id" uuid;--> statement-breakpoint
 ALTER TABLE "partner_rates" ADD COLUMN "tariff_id" uuid;--> statement-breakpoint
 ALTER TABLE "sim_cards" ADD COLUMN "tariff_id" uuid;--> statement-breakpoint
 ALTER TABLE "partner_tariffs" ADD CONSTRAINT "partner_tariffs_partner_id_partners_id_fk" FOREIGN KEY ("partner_id") REFERENCES "public"."partners"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "partner_tariffs_partner_name_idx" ON "partner_tariffs" USING btree ("partner_id",lower("name"));--> statement-breakpoint
+CREATE UNIQUE INDEX "partner_tariffs_partner_name_idx" ON "partner_tariffs" USING btree ("partner_id",lower("name" collate "und-x-icu"));--> statement-breakpoint
 CREATE UNIQUE INDEX "partner_tariffs_default_idx" ON "partner_tariffs" USING btree ("partner_id") WHERE "partner_tariffs"."is_default";--> statement-breakpoint
 ALTER TABLE "calls" ADD CONSTRAINT "calls_partner_rate_id_partner_rates_id_fk" FOREIGN KEY ("partner_rate_id") REFERENCES "public"."partner_rates"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "gateways" ADD CONSTRAINT "gateways_tariff_id_partner_tariffs_id_fk" FOREIGN KEY ("tariff_id") REFERENCES "public"."partner_tariffs"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint

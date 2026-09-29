@@ -21,6 +21,7 @@ import {
   partnerCoverageSchema,
   partnerPrioritiesSchema,
   registrationModeSchema,
+  tariffChoiceSchema,
   simConcurrencySchema,
   simStatusSchema,
   updateChannelSchema,
@@ -79,6 +80,8 @@ interface GatewayView {
   readonly suspended_by: string | null;
   /** `gateway` — вход на шлюз, `port` — вход у каждой линии (ADR-0054). */
   readonly registration_mode: string;
+  /** Тариф SIM шлюза без своего; пусто — тариф партнёра по умолчанию (ADR-0056). */
+  readonly tariff_id: string | null;
   /** Вход шлюза. При `registration_mode = port` каталог его не отдаёт. */
   readonly sip_username: string;
   readonly node_id: string | null;
@@ -116,6 +119,8 @@ interface SimView {
   readonly max_concurrent_calls: number;
   readonly operator_confirmed_at: string | null;
   readonly activated_at: string | null;
+  /** Свой тариф; пусто — как у шлюза (ADR-0056). */
+  readonly tariff_id: string | null;
 }
 
 interface PortView {
@@ -545,6 +550,39 @@ export class TelephonyController {
    * Инвариант DOMAIN.md. Партнёр заинтересован поднять значение и не увидеть последствий
    * сразу: оператор блокирует SIM за поведение, не похожее на человеческое, и позже.
    */
+  /** Тариф шлюза или SIM у партнёра (ADR-0056) — то же, что делает он сам. */
+  @Roles('admin')
+  @Post('gateways/:id/tariff')
+  async setGatewayTariff(
+    @Param('id') id: string,
+    @Body(zodBody(tariffChoiceSchema)) body: z.infer<typeof tariffChoiceSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ gateway: GatewayView }> {
+    const updated = await this.telephony.setGatewayTariff(
+      parseId(id, 'gateway'),
+      body.tariffId === null ? null : parseId(body.tariffId, 'partnerTariff'),
+      actor.userId,
+      actor.role,
+    );
+    return { gateway: toGatewayView(updated) };
+  }
+
+  @Roles('admin')
+  @Post('sim-cards/:id/tariff')
+  async setSimTariff(
+    @Param('id') id: string,
+    @Body(zodBody(tariffChoiceSchema)) body: z.infer<typeof tariffChoiceSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ sim: SimView }> {
+    const updated = await this.telephony.setSimTariff(
+      parseId(id, 'simCard'),
+      body.tariffId === null ? null : parseId(body.tariffId, 'partnerTariff'),
+      actor.userId,
+      actor.role,
+    );
+    return { sim: toSimView(updated) };
+  }
+
   @Roles('admin')
   @Post('sim-cards/:id/concurrency')
   async setSimConcurrency(
@@ -657,6 +695,7 @@ function toSimView(row: SimCardRow): SimView {
     max_concurrent_calls: row.maxConcurrentCalls,
     operator_confirmed_at: row.operatorConfirmedAt?.toISOString() ?? null,
     activated_at: row.activatedAt?.toISOString() ?? null,
+    tariff_id: row.tariffId,
   };
 }
 
@@ -696,6 +735,7 @@ function toGatewayView(row: GatewayRow): GatewayView {
     status: row.status,
     suspended_by: row.suspendedBy,
     registration_mode: row.registrationMode,
+    tariff_id: row.tariffId,
     sip_username: row.sipUsername,
     node_id: row.nodeId,
     registered_at: row.registeredAt?.toISOString() ?? null,

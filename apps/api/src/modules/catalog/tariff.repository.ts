@@ -8,7 +8,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
-import { toDatabaseError, type Database, type Executor } from '@zvonix/db';
+import { orderByText, toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import { commissionRules, partnerRates, partnerTariffs, priceBands } from '@zvonix/db/schema';
 import {
   newId,
@@ -181,7 +181,7 @@ export class TariffRepository {
       .select()
       .from(partnerTariffs)
       .where(eq(partnerTariffs.partnerId, partnerId))
-      .orderBy(desc(partnerTariffs.isDefault), sql`lower(${partnerTariffs.name})`);
+      .orderBy(desc(partnerTariffs.isDefault), orderByText(partnerTariffs.name));
   }
 
   async findTariff(

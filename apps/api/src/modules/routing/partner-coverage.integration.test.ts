@@ -342,13 +342,16 @@ describe('неизвестный регион', () => {
 });
 
 describe('отказ остаётся различимым', () => {
-  it('без единой SIM причина прежняя: «нет свободной SIM», а не «нет покрытия»', async () => {
+  it('без единой SIM с ценой на номер — «нет тарифа», а не «нет покрытия»', async () => {
     const operator = await createOperator();
     const channel = await createChannel();
 
+    // Карты других проверок на узле есть, но цены на этого оператора нет ни у одной:
+    // куда SIM звонит, решает её тариф (ADR-0056). Это разговор о тарифах партнёров,
+    // а не о покрытии регионов.
     const preview = await route(channel, await createDestination(operator, 'Москва'));
     expect(preview.outcome).toBe('rejected');
-    expect(preview.reason).toBe('no_sim_available');
+    expect(preview.reason).toBe('no_tariff');
   }, 120_000);
 });
 

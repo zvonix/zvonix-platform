@@ -417,8 +417,9 @@ describe('анонимность партнёра', () => {
 describe('свои SIM (ADR-0052)', () => {
   it('вызов не уходит на SIM того же человека, даже если других кандидатов нет', async () => {
     // Один человек — и служба такси, и партнёр. Его звонок на его же SIM гонял бы
-    // деньги по кругу через комиссию площадки. Отказ — «нет SIM»: клиенту незачем
-    // знать, что причиной был он сам как партнёр.
+    // деньги по кругу через комиссию площадки. Своя SIM кандидатом не считается вовсе,
+    // и отказ говорит о прочих картах узла — у них нет цены на номер (ADR-0056). Клиенту
+    // обе причины видны одинаково — «площадка»: незачем знать, что причиной был он сам.
     const operator = (await post('/operators', { name: unique('Оператор') })).json<{
       operator: { id: string };
     }>().operator.id;
@@ -428,7 +429,7 @@ describe('свои SIM (ADR-0052)', () => {
 
     const alone = await route(channel, destination);
     expect(alone.outcome).toBe('rejected');
-    expect(alone.reason).toBe('no_sim_available');
+    expect(alone.reason).toBe('no_tariff');
 
     // Появился чужой партнёр — вызов уходит к нему.
     const stranger = await createPartner(operator, 2);

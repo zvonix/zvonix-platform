@@ -215,8 +215,20 @@ export class RoutingService {
       this.telephony.findTrunkCandidates(request.nodeId, { channelId: channel.id, region }),
     ]);
     const candidates: TerminationCandidate[] = [...simCandidates, ...trunkCandidates];
-    if (candidates.length === 0) {
-      const reason = await this.explainEmptyCandidates(operatorId, channel, region, request.nodeId);
+    // 5а. Цена: кандидат — только тот, у кого в тарифе есть цена на этот номер
+    //    ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)). Куда SIM звонит,
+    //    решает её тариф, поэтому отсев по цене идёт до лимитов и до разбора причин:
+    //    карта, которая на этого оператора не звонит, кандидатом не была никогда.
+    //    Заодно выстраивается порядок перебора: цена решает при равном приоритете (ADR-0040).
+    const priced = await this.orderByPrice(candidates, operatorId, region, at);
+    if (priced.length === 0) {
+      const reason = await this.explainEmptyCandidates(
+        operatorId,
+        channel,
+        region,
+        request.nodeId,
+        at,
+      );
       return this.reject(request, destination, channel.id, operatorId, region, reason);
     }
 
@@ -224,10 +236,11 @@ export class RoutingService {
     //    партнёра — защита его SIM, и он не должен мешать позвонить через другого.
     const candidateLimits = await this.limits.usage(
       {
-        partnerIds: [...new Set(candidates.map((candidate) => candidate.gateway.partnerId))],
+        partnerIds: [...new Set(priced.map((entry) => entry.candidate.gateway.partnerId))],
         simCardIds: [
           ...new Set(
-            candidates
+            priced
+              .map((entry) => entry.candidate)
               .filter((candidate) => candidate.kind === 'sim')
               .map((candidate) => candidate.sim.id),
           ),
@@ -240,12 +253,13 @@ export class RoutingService {
         .filter((usage) => usage.exceeded)
         .map((usage) => usage.rule.partnerId ?? usage.rule.simCardId),
     );
-    const available = candidates.filter(
-      (candidate) =>
+    // Фильтр сохраняет порядок, выстроенный ценой.
+    const ordered = priced.filter(
+      ({ candidate }) =>
         !exhausted.has(candidate.gateway.partnerId) &&
         (candidate.kind !== 'sim' || !exhausted.has(candidate.sim.id)),
     );
-    if (available.length === 0) {
+    if (ordered.length === 0) {
       // Отдельная причина: «все исчерпали лимит» и «SIM нет вовсе» — разные разговоры
       // с партнёром.
       return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
@@ -255,18 +269,6 @@ export class RoutingService {
       ...subjectLimits.map((usage) => usage.rule),
       ...candidateLimits.map((usage) => usage.rule),
     ];
-
-    // 6. Порядок перебора: цена решает при равном приоритете
-    //    ([ADR-0040](../../../../../docs/adr/0040-poryadok-terminacii-predlozhenie-i-cena.md)).
-    //    Здесь же отсеиваются те, у кого цены по направлению нет вовсе: звонить через
-    //    них нельзя — тарифицировать будет нечем, — и держать их в очереди значит
-    //    обещать перебор, который упрётся в отказ.
-    const ordered = await this.orderByPrice(available, operatorId, region, at);
-    if (ordered.length === 0) {
-      // Кандидаты были, но ни у одного нет действующей цены по направлению. Это разговор
-      // с партнёром о его прайсе, а не с клиентом о свободных SIM.
-      return this.reject(request, destination, channel.id, operatorId, region, 'no_tariff');
-    }
 
     // 7. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM
     //    и инкрементом счётчиков лимитов.
@@ -417,32 +419,44 @@ export class RoutingService {
     channel: ChannelRow,
     region: string | null,
     nodeId: Id<'node'>,
+    at: Date,
   ): Promise<CallFailureReason> {
+    // Каждый ослабленный отбор тоже сужается ценой (ADR-0056): карта, которая на этого
+    // оператора не звонит, не делает вызов ни «вопросом записи», ни «вопросом региона».
+    const pricedSims = async (
+      options: Parameters<TelephonyRepository['findSimCandidates']>[0],
+    ): Promise<number> => {
+      const found = await this.telephony.findSimCandidates(options);
+      return (await this.orderByPrice(found, operatorId, region, at)).length;
+    };
+
     if (channel.recordingRequired) {
-      const withoutRecording = await this.telephony.findSimCandidates({
-        channelId: channel.id,
-        region,
-        nodeId,
-      });
-      if (withoutRecording.length > 0) return 'recording_required';
+      if ((await pricedSims({ channelId: channel.id, region, nodeId })) > 0) {
+        return 'recording_required';
+      }
     }
 
-    const anyRegion = await this.telephony.findSimCandidates({
-      channelId: channel.id,
-      excludeRecordingIncapable: channel.recordingRequired,
-      nodeId,
-    });
-    if (anyRegion.length > 0) return 'no_coverage';
+    const recording = { excludeRecordingIncapable: channel.recordingRequired };
+    if ((await pricedSims({ channelId: channel.id, ...recording, nodeId })) > 0) {
+      return 'no_coverage';
+    }
 
     // Тот же отбор, но по всей площадке. Нашлось — значит SIM есть, а не хватает
     // регистрации: партнёр не включил оборудование, оно потеряло связь или пришло
     // на соседний узел. Для поддержки это разговор о железе, а не о недостатке SIM,
     // и смешивать их значит отправлять её не туда.
-    const anyNode = await this.telephony.findSimCandidates({
+    if ((await pricedSims({ channelId: channel.id, ...recording })) > 0) {
+      return 'gateway_unregistered';
+    }
+
+    // Карты есть, но ни в одном тарифе нет цены на этот номер — разговор с партнёрами
+    // об их тарифах, а не с клиентом о свободных SIM.
+    const any = await this.telephony.findSimCandidates({
       channelId: channel.id,
-      excludeRecordingIncapable: channel.recordingRequired,
+      ...recording,
+      nodeId,
     });
-    return anyNode.length > 0 ? 'gateway_unregistered' : 'no_sim_available';
+    return any.length > 0 ? 'no_tariff' : 'no_sim_available';
   }
 
   /**

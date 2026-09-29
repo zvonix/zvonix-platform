@@ -489,13 +489,12 @@ describe('отказы', () => {
     expect(decision.sip_response).toBe('404 Not Found');
   });
 
-  it('нет SIM нужного оператора — отказ', async () => {
+  it('единственная SIM с ценой на номер заблокирована — отказ', async () => {
     const env = await scenario();
     await post(`/sim-cards/${env.sim}/status`, { status: 'blocked' });
 
-    expect((await route(env.channel, env.destination)).json<Preview>().reason).toBe(
-      'no_sim_available',
-    );
+    // Прочие карты узла на этого оператора не звонят — в их тарифах нет цены (ADR-0056).
+    expect((await route(env.channel, env.destination)).json<Preview>().reason).toBe('no_tariff');
   });
 
   it('канал с записью не уходит на android, и причина отличается от «нет SIM»', async () => {

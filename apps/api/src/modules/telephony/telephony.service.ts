@@ -851,6 +851,70 @@ export class TelephonyService {
    * поднять значение и не увидеть последствий сразу — а последствие одно и позднее:
    * оператор блокирует SIM за поведение, не похожее на человеческое.
    */
+  /**
+   * Тариф шлюза — для всех его SIM без своего (ADR-0056). Тариф — только этого же
+   * партнёра: чужой тариф — чужие цены на своей карте. Проверка и запись — одна
+   * транзакция; удалить тариф, пока его выбирают, не даст внешний ключ.
+   */
+  async setGatewayTariff(
+    id: GatewayId,
+    tariffId: Id<'partnerTariff'> | null,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<GatewayRow> {
+    const { before, after } = await this.repository.transaction(async (tx) => {
+      const gateway = await this.repository.lockGatewayForPorts(id, tx);
+      if (gateway === undefined) throw notFound('Шлюз не найден');
+      if (gateway.status === 'retired') throw conflict('Шлюз списан: настраивать нечего');
+      if (tariffId !== null) await this.tariffs.requireTariffOf(gateway.partnerId, tariffId, tx);
+      const updated = await this.repository.setGatewayTariff(id, tariffId, tx);
+      if (updated === undefined) throw notFound('Шлюз не найден');
+      return { before: gateway, after: updated };
+    });
+    if (before.tariffId !== after.tariffId) {
+      await this.audit.record({
+        action: 'gateway.tariff_changed',
+        entityType: 'gateway',
+        entityId: id,
+        actorUserId,
+        actorRole,
+        before: { tariff_id: before.tariffId },
+        after: { tariff_id: after.tariffId },
+      });
+    }
+    return after;
+  }
+
+  /** Свой тариф SIM (ADR-0056); `null` — как у шлюза, в котором она стоит. */
+  async setSimTariff(
+    id: SimCardId,
+    tariffId: Id<'partnerTariff'> | null,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<SimCardRow> {
+    const { before, after } = await this.repository.transaction(async (tx) => {
+      const sim = await this.repository.lockSimCard(id, tx);
+      if (sim === undefined) throw notFound('SIM не найдена');
+      if (sim.status === 'retired') throw conflict('Карта удалена: настраивать нечего');
+      if (tariffId !== null) await this.tariffs.requireTariffOf(sim.partnerId, tariffId, tx);
+      const updated = await this.repository.setSimTariff(id, tariffId, tx);
+      if (updated === undefined) throw notFound('SIM не найдена');
+      return { before: sim, after: updated };
+    });
+    if (before.tariffId !== after.tariffId) {
+      await this.audit.record({
+        action: 'sim.tariff_changed',
+        entityType: 'sim_card',
+        entityId: id,
+        actorUserId,
+        actorRole,
+        before: { tariff_id: before.tariffId },
+        after: { tariff_id: after.tariffId },
+      });
+    }
+    return after;
+  }
+
   async setSimConcurrency(
     id: SimCardId,
     value: number,

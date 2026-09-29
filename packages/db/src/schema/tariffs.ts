@@ -60,8 +60,12 @@ export const partnerTariffs = pgTable(
   (t) => [
     check('partner_tariffs_name_length', sql`char_length(${t.name}) between 1 and 60`),
     // Имя уникально у партнёра без учёта регистра: «Основной» и «основной» в списке
-    // выбора неразличимы.
-    uniqueIndex('partner_tariffs_partner_name_idx').on(t.partnerId, sql`lower(${t.name})`),
+    // выбора неразличимы. Регистр приводится в локали ICU: в локали `C` `lower()`
+    // кириллицу не трогает, и индекс пропускал бы оба (ADR-0038; найдено тестом).
+    uniqueIndex('partner_tariffs_partner_name_idx').on(
+      t.partnerId,
+      sql`lower(${t.name} collate "und-x-icu")`,
+    ),
     uniqueIndex('partner_tariffs_default_idx')
       .on(t.partnerId)
       .where(sql`${t.isDefault}`),

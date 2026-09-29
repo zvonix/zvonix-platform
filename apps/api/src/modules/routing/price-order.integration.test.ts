@@ -252,6 +252,17 @@ beforeAll(async () => {
 const simOfA: Record<string, string> = {};
 const simOfB: Record<string, string> = {};
 
+/**
+ * Чья SIM приняла вызов. Партнёр отдаёт вызов **любой** своей карте с ценой на номер:
+ * куда SIM звонит, решает её тариф, а не её оператор (ADR-0056). Порядок решает
+ * предложение партнёра, и сравнивать надо партнёра, а не конкретную карту.
+ */
+function partnerOf(result: string): string {
+  if (Object.values(simOfA).includes(result)) return 'A';
+  if (Object.values(simOfB).includes(result)) return 'B';
+  return result;
+}
+
 /** Вторая SIM партнёра — другого оператора, чтобы он мог звонить в оба направления. */
 async function createSecondSim(partnerId: string, operatorId: string): Promise<string> {
   const gateway = (
@@ -281,14 +292,14 @@ afterAll(async () => {
 
 describe('цена решает порядок', () => {
   it('без приоритетов вызов уходит к дешёвому', async () => {
-    expect(await routeVia(numbers.a)).toBe(simOfA[operatorA]);
+    expect(partnerOf(await routeVia(numbers.a))).toBe('A');
   }, 120_000);
 
   it('разница цен по операторам решается сама, без настройки клиента', async () => {
     // Один и тот же канал, один и тот же пустой список приоритетов. Направления разные —
     // и первым встаёт тот, кто дешевле именно на нём.
-    expect(await routeVia(numbers.a)).toBe(simOfA[operatorA]);
-    expect(await routeVia(numbers.b)).toBe(simOfB[operatorB]);
+    expect(partnerOf(await routeVia(numbers.a))).toBe('A');
+    expect(partnerOf(await routeVia(numbers.b))).toBe('B');
   }, 120_000);
 
   it('приоритет клиента сильнее цены: он платит за то, чего вычислить нельзя', async () => {
@@ -300,16 +311,18 @@ describe('цена решает порядок', () => {
     });
     expect(saved.statusCode).toBe(200);
 
-    // На операторе А второй партнёр дороже вдвое — и всё равно первый, потому что
-    // клиент назвал его сам.
-    expect(await routeVia(numbers.a)).toBe(simOfB[operatorA]);
-
-    await api().inject({
-      method: 'PUT',
-      url: `/channels/${channelId}/partner-priorities`,
-      headers: auth(),
-      payload: { priorities: [] },
-    });
+    try {
+      // На операторе А второй партнёр дороже вдвое — и всё равно первый, потому что
+      // клиент назвал его сам.
+      expect(partnerOf(await routeVia(numbers.a))).toBe('B');
+    } finally {
+      await api().inject({
+        method: 'PUT',
+        url: `/channels/${channelId}/partner-priorities`,
+        headers: auth(),
+        payload: { priorities: [] },
+      });
+    }
   }, 120_000);
 });
 
@@ -391,7 +404,7 @@ describe('способ терминации у цены', () => {
     expect(rows.map((row) => row.termination_kind).sort()).toEqual(['sim', 'sip']);
 
     // На SIM приоритет 1 — вызов уходит к нему даже там, где он дороже.
-    expect(await routeVia(numbers.b)).toBe(simOfA[operatorB]);
+    expect(partnerOf(await routeVia(numbers.b))).toBe('A');
 
     await api().inject({
       method: 'PUT',
@@ -414,5 +427,112 @@ describe('способ терминации у цены', () => {
       },
     });
     expect(twice.statusCode).toBe(400);
+  }, 120_000);
+});
+
+describe('тарифы партнёра (ADR-0056)', () => {
+  /** Новый оператор и номер, подтверждённо принадлежащий ему. */
+  async function destinationOf(): Promise<{ operator: string; number: string }> {
+    const operator = (await post('/operators', { name: unique('Оператор-Т') })).json<{
+      operator: { id: string };
+    }>().operator.id;
+    const number = nextMsisdn();
+    await resolveNumber(number, operator);
+    return { operator, number };
+  }
+
+  it('карта звонит чужому оператору по цене «на все операторы»', async () => {
+    // Владелец: «какая разница какой оператор — звонки всё равно должны проходить».
+    // Карта оператора А, номер оператора Т: раньше кандидатом она не была вовсе.
+    const partner = await createPartner(operatorA);
+    const everywhere = await post('/partner-rates', {
+      partnerId: partner.id,
+      pricePerMinute: '2.50',
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+    });
+    expect(everywhere.statusCode).toBe(201);
+
+    const { number } = await destinationOf();
+    expect(await routeVia(number)).toBe(partner.simId);
+  }, 120_000);
+
+  it('свой тариф SIM сильнее тарифа шлюза и тарифа по умолчанию', async () => {
+    const { operator, number } = await destinationOf();
+    const cheap = await createPartner(operatorA);
+    const rival = await createPartner(operatorA);
+    await setRate(cheap.id, operator, '1.00');
+    // Дешевле цены «на все операторы» 2,50 из соседней проверки: та карта звонит
+    // и сюда, и иначе соперником оказалась бы она.
+    await setRate(rival.id, operator, '2.00');
+    expect(await routeVia(number)).toBe(cheap.simId);
+
+    // У дешёвого партнёра второй тариф — дорогой, и его карта переходит на него.
+    const expensive = (
+      await post(`/partners/${cheap.id}/tariffs`, { name: unique('Дорогой') })
+    ).json<{ tariff: { id: string } }>().tariff.id;
+    expect(
+      (
+        await post('/partner-rates', {
+          partnerId: cheap.id,
+          tariffId: expensive,
+          operatorId: operator,
+          pricePerMinute: '9.00',
+          effectiveFrom: '2020-01-01T00:00:00.000Z',
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (await post(`/sim-cards/${cheap.simId}/tariff`, { tariffId: expensive })).statusCode,
+    ).toBe(201);
+
+    // Теперь дешевле соперник: цена своя у каждой карты.
+    expect(await routeVia(number)).toBe(rival.simId);
+  }, 120_000);
+
+  it('вызов запоминает строку цены, по которой пошёл', async () => {
+    const { operator, number } = await destinationOf();
+    const partner = await createPartner(operatorA);
+    const rate = (
+      await post('/partner-rates', {
+        partnerId: partner.id,
+        operatorId: operator,
+        pricePerMinute: '1.50',
+        effectiveFrom: '2020-01-01T00:00:00.000Z',
+      })
+    ).json<{ rate: { id: string } }>().rate.id;
+
+    const callId = unique('call');
+    const response = await post('/routing/preview', {
+      callId,
+      channelId,
+      nodeId,
+      destination: number,
+    });
+    expect(response.json<{ outcome: string }>().outcome).toBe('routed');
+    const stored = await withDatabase(async (execute) =>
+      execute(sql`select partner_rate_id from calls where external_id = ${callId}`),
+    );
+    // По этой строке тарифицируется CDR: смена тарифа SIM посреди разговора цену
+    // этого вызова не меняет.
+    expect(stored.rows[0]?.['partner_rate_id']).toBe(rate);
+  }, 120_000);
+
+  it('оператор не подтверждён — цена по владельцу диапазона', async () => {
+    // Источник подтверждения в тестах отключён; номер есть только в плане нумерации.
+    const owner = (await post('/operators', { name: unique('Оператор-П') })).json<{
+      operator: { id: string };
+    }>().operator.id;
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        insert into numbering_plan_ranges
+          (id, def_code, range_start, range_end, capacity, operator_id, region, source, imported_at)
+        values (gen_random_uuid(), '947', 79470000000, 79470009999, 10000,
+                ${owner}::uuid, null, 'mincifry', now())
+      `);
+    });
+    const partner = await createPartner(operatorA);
+    await setRate(partner.id, owner, '2.00');
+
+    expect(await routeVia('79470001234')).toBe(partner.simId);
   }, 120_000);
 });
