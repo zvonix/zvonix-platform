@@ -93,6 +93,7 @@ describe('реестр фоновых задач', () => {
       'numbering-plan.refresh',
       'mail.deliver-due',
       'mail.purge-sent',
+      'applications.auto-approve-partners',
       'auth-tokens.purge-expired',
     ]);
   });

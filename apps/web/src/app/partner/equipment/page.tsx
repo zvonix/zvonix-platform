@@ -25,6 +25,8 @@ import {
 import {
   EQUIPMENT_KEY,
   gatewayStateName,
+  PARTNER_BLOCKED,
+  usePartnerStatus,
   type Equipment,
   type Gateway,
   type Sim,
@@ -52,6 +54,7 @@ function PartnerEquipment() {
     queryKey: EQUIPMENT_KEY,
     queryFn: () => request<Equipment>('/partner/equipment'),
   });
+  const partnerStatus = usePartnerStatus();
 
   if (equipment.isPending) return <p className="text-muted-foreground">Загружаем…</p>;
 
@@ -81,7 +84,14 @@ function PartnerEquipment() {
         Самое дорогое из невидимого: включённый шлюз без регистрации выглядит рабочим
         в любом списке, но вызов на него не уйдёт вовсе — набрать его с узла нечем.
       */}
-      {offline.length > 0 && (
+      {partnerStatus !== undefined && partnerStatus !== 'verified' && (
+        <p role="status" className="max-w-[860px] text-warn">
+          {PARTNER_BLOCKED[partnerStatus]}
+        </p>
+      )}
+
+      {/* Пока партнёр не допущен, «проверьте настройки» увело бы искать не там. */}
+      {offline.length > 0 && partnerStatus === 'verified' && (
         <p className="text-warn">
           {offline.length === 1
             ? 'Шлюз не на связи'

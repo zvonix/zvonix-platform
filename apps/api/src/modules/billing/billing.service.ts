@@ -708,8 +708,14 @@ export class BillingService {
       ownerUserId: UserId;
       name: string;
       displayName: string;
+      /**
+       * Сразу `verified` — только когда площадка допускает партнёров без проверки
+       * (настройка `partners.auto_approve`); иначе `pending`, как всегда.
+       */
+      status?: 'pending' | 'verified';
     },
-    actor: { userId: UserId; role: UserRole },
+    /** `null` — решение приняла сама площадка по настройке, а не человек. */
+    actor: { userId: UserId; role: UserRole } | null,
     executor?: Executor,
   ): Promise<PartnerRow> {
     if (executor === undefined) {
@@ -722,7 +728,7 @@ export class BillingService {
     }
 
     const partner = await this.repository.createPartner(
-      { ownerUserId: draft.ownerUserId, name: draft.name, status: 'pending' },
+      { ownerUserId: draft.ownerUserId, name: draft.name, status: draft.status ?? 'pending' },
       executor,
     );
     // Псевдоним в той же транзакции: занятое имя раньше оставляло партнёра без
@@ -737,8 +743,8 @@ export class BillingService {
         action: 'partner.created',
         entityType: 'partner',
         entityId: partner.id,
-        actorUserId: actor.userId,
-        actorRole: actor.role,
+        actorUserId: actor?.userId ?? null,
+        actorRole: actor?.role ?? null,
         after: {
           owner_user_id: partner.ownerUserId,
           name: partner.name,

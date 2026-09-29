@@ -61,6 +61,14 @@ export const SETTINGS = {
     fallback: 'false',
     hint: 'Капча при восстановлении пароля',
   },
+
+  'partners.auto_approve': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint:
+      'Партнёры получают кабинет и допуск к работе без проверки администратором — сразу после ' +
+      'подтверждения почты',
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof SETTINGS;

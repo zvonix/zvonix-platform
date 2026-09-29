@@ -12,8 +12,11 @@ import type {
   GatewayStatus,
   GatewayType,
   PartnerFacingSuspension,
+  PartnerStatus,
   SimStatus,
 } from '@zvonix/shared';
+import { useQuery } from '@tanstack/react-query';
+import { request } from '@/lib/api';
 import { GATEWAY_STATUS_NAME, PARTNER_SUSPENSION_NAME } from '@/lib/labels';
 
 export interface Sim {
@@ -110,4 +113,30 @@ export function gatewayStateName(gateway: Gateway): string {
   return gateway.suspended_by === null
     ? GATEWAY_STATUS_NAME[gateway.status]
     : PARTNER_SUSPENSION_NAME[gateway.suspended_by];
+}
+
+/**
+ * Почему шлюзы не подключаются, если дело не в них: пока площадка не допустила партнёра,
+ * каталог отвечает узлу «нет такого входа», и никакие логины в GOIP не помогут. Владелец
+ * искал ошибку в GOIP часами, а кабинет советовал проверить пароли (2026-09-25).
+ */
+export const PARTNER_BLOCKED: Readonly<Record<Exclude<PartnerStatus, 'verified'>, string>> = {
+  pending:
+    'Площадка ещё не допустила вас к работе: шлюзы не подключатся и карты не получат звонков, ' +
+    'пока администратор не проверит вашу карточку. Логины и пароли в GOIP здесь ни при чём.',
+  suspended:
+    'Площадка приостановила вашу работу: шлюзы не подключаются. Напишите площадке, чтобы узнать причину.',
+  closed: 'Ваша карточка партнёра закрыта: шлюзы не подключаются.',
+};
+
+/**
+ * Состояние карточки партнёра. Ключ тот же, что у страницы «Деньги»: запрос общий, кэш тоже.
+ * `undefined` — ещё не загрузилось: предупреждать не о чем, пока не знаем.
+ */
+export function usePartnerStatus(): PartnerStatus | undefined {
+  const account = useQuery({
+    queryKey: ['partner', 'account'],
+    queryFn: () => request<{ partner: { status: PartnerStatus } }>('/partner/account'),
+  });
+  return account.data?.partner.status;
 }
