@@ -114,17 +114,33 @@ function LineCell({ gateway, port }: { gateway: Gateway; port: Port }) {
   return (
     <>
       <span className="num">Line {port.port_number}</span>
+      <span className="text-faint"> · </span>
       {port.sip_username === null ? (
-        <span className="text-warn"> · вход не выдан</span>
+        <span className="text-warn">вход не выдан</span>
       ) : (
         // Когда отмечена связь — подсказкой: в строке важно «да или нет», время — по запросу.
-        <span
-          className={port.on_node ? 'text-muted-foreground' : 'text-warn'}
+        <Presence
+          online={port.on_node}
           title={port.on_node ? `отметка ${moment(port.registered_at)}` : undefined}
-        >
-          {port.on_node ? ' · на связи' : ' · не на связи'}
-        </span>
+        />
       )}
     </>
+  );
+}
+
+/**
+ * На связи ли устройство: точка и слово одного цвета — зелёный «да», жёлтый «нет»
+ * (владелец, 2026-09-29: «на связи может писать другим цветом»). Слово остаётся:
+ * один цвет не читается при нарушенном цветовосприятии.
+ */
+export function Presence({ online, title }: { online: boolean; title?: string | undefined }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 ${online ? 'text-ok' : 'text-warn'}`}
+      title={title}
+    >
+      <span aria-hidden className={`size-2 rounded-full ${online ? 'bg-ok' : 'bg-warn'}`} />
+      {online ? 'на связи' : 'не на связи'}
+    </span>
   );
 }

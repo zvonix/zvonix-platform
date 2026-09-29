@@ -33,7 +33,7 @@ import {
   NewPassword,
   RegistrationMode,
 } from '../manage';
-import { PortHeader, PortRow } from '../ports';
+import { PortHeader, PortRow, Presence } from '../ports';
 
 export default function PartnerGatewayPage() {
   const params = useParams<{ id: string }>();
@@ -349,8 +349,11 @@ function LineSettings({
                     <span className="text-muted-foreground">как Authentication ID</span>
                   )}
                 </TableCell>
-                <TableCell className={port.on_node ? 'text-muted-foreground' : 'text-warn'}>
-                  {port.on_node ? `на связи · ${moment(port.registered_at)}` : 'не на связи'}
+                <TableCell>
+                  <Presence
+                    online={port.on_node}
+                    title={port.on_node ? `отметка ${moment(port.registered_at)}` : undefined}
+                  />
                 </TableCell>
               </TableRow>
             ))}
