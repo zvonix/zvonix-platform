@@ -374,7 +374,9 @@ test.describe('партнёр добавляет своё оборудовани
     );
 
     await page.getByRole('link', { name: /Открыть шлюз/u }).click();
-    await expect(page.getByRole('heading', { name: 'GOIP на проверке', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'GOIP на проверке', exact: true }),
+    ).toBeVisible();
 
     // Сервер, порт и режим видны всегда: раньше — только в минуту добавления.
     const connection = page.getByRole('region', { name: 'Подключение' });
