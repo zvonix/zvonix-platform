@@ -135,7 +135,8 @@ interface EquipmentResponse {
 interface RatesResponse {
   reference_call_seconds: number;
   rates: {
-    operator_id: string;
+    /** Пусто — цена на все операторы (ADR-0056). */
+    operator_id: string | null;
     operator_name: string | null;
     termination_kind: string;
     price_per_minute: string;
@@ -145,7 +146,9 @@ interface RatesResponse {
     within_band: boolean;
   }[];
   operators_without_price: { operator_id: string; operator_name: string }[];
-  open_directions: { operator_id: string; min_price: string; max_price: string }[];
+  operators: { operator_id: string; min_price: string | null; max_price: string | null }[];
+  tariffs: { id: string; name: string; is_default: boolean }[];
+  bands_enabled: boolean;
 }
 
 /** Партнёр целиком: учётная запись, запись партнёра, шлюз с SIM, транк и цены. */
@@ -473,14 +476,17 @@ describe('цены партнёра', () => {
     expect(own.find((rate) => rate.termination_kind === 'sip')?.price_per_minute).toBe('4');
   });
 
-  it('открытые направления отдают общий коридор, а не коридор своей цены', async () => {
+  it('операторы для новой цены — с общим коридором, а не с коридором своей цены', async () => {
     // У цены стоит её собственный коридор — для региональной он может быть региональным.
     // Рамки для новой цены «на любой регион» обязаны быть общими, иначе форма назовёт
     // не те границы.
     const body = (await get('/partner/rates', as(mine.token))).json<RatesResponse>();
-    const open = body.open_directions.find((row) => row.operator_id === operatorId);
+    const choice = body.operators.find((row) => row.operator_id === operatorId);
 
-    expect(open).toMatchObject({ operator_id: operatorId, min_price: '1', max_price: '5' });
+    expect(choice).toMatchObject({ operator_id: operatorId, min_price: '1', max_price: '5' });
+    expect(body.bands_enabled).toBe(true);
+    // Тариф по умолчанию есть у каждого партнёра (ADR-0056).
+    expect(body.tariffs).toEqual([expect.objectContaining({ name: 'Основной', is_default: true })]);
   }, 60_000);
 
   it('коридор стоит рядом с ценой, иначе двигаться некуда', async () => {
@@ -585,24 +591,81 @@ describe('партнёр назначает себе цену', () => {
     expect(response.json<{ error: { code: string } }>().error.code).toBe('validation_failed');
   }, 60_000);
 
-  it('по направлению без коридора цену не назначить вовсе', async () => {
+  it('по направлению без коридора цена любая: коридор — рамка, а не пропуск (ADR-0056)', async () => {
     const bare = (await post('/operators', { name: unique('Оператор-без-коридора') })).json<{
       operator: { id: string };
     }>().operator.id;
+    // Коридоры отдаются по подтверждённым операторам — новый подтверждается.
+    await withDatabase(async (execute) => {
+      await execute(sql`update operators set verified_at = now() where id = ${bare}`);
+    });
 
     const response = await post(
       '/partner/rates',
-      { operatorId: bare, terminationKind: 'sim', pricePerMinute: '3' },
+      { operatorId: bare, terminationKind: 'sim', pricePerMinute: '300' },
       as(mine.token),
     );
-    expect(response.statusCode).toBe(400);
-    expect(response.json<{ error: { message: string } }>().error.message).toContain('коридор');
+    expect(response.statusCode).toBe(201);
 
-    // Кабинет обязан сказать это **до** отправки: направления нет среди открытых,
-    // и в форме оно не выбирается вовсе.
+    // В форме оператор выбирается, и рамок у него нет.
     const body = (await get('/partner/rates', as(mine.token))).json<RatesResponse>();
-    expect(body.open_directions.map((row) => row.operator_id)).not.toContain(bare);
-    expect(body.operators_without_price.map((row) => row.operator_id)).toContain(bare);
+    expect(body.operators.find((row) => row.operator_id === bare)).toMatchObject({
+      min_price: null,
+      max_price: null,
+    });
+  }, 60_000);
+
+  it('цена на все операторы обязана уложиться в коридор каждого', async () => {
+    const fresh = await createPartner('Сидоров Сидор');
+
+    // Коридоры: [1; 5] у одного оператора и [1; 9] у другого — пересечение [1; 5].
+    const outside = await post(
+      '/partner/rates',
+      { terminationKind: 'sim', pricePerMinute: '7' },
+      as(fresh.token),
+    );
+    expect(outside.statusCode).toBe(400);
+    expect(
+      outside.json<{ error: { details: { operator_id: string } } }>().error.details.operator_id,
+    ).toBe(operatorId);
+
+    const inside = await post(
+      '/partner/rates',
+      { operatorId: null, terminationKind: 'sim', pricePerMinute: '4' },
+      as(fresh.token),
+    );
+    expect(inside.statusCode).toBe(201);
+
+    const body = (await get('/partner/rates', as(fresh.token))).json<RatesResponse>();
+    const all = body.rates.find((row) => row.operator_id === null);
+    expect(all).toMatchObject({ band: { min_price: '1', max_price: '5' }, within_band: true });
+    // Цена на все операторы закрывает всех: «операторов без цены» не остаётся.
+    expect(body.operators_without_price).toEqual([]);
+  }, 60_000);
+
+  it('коридоры отключены настройкой — цена вне коридора принимается', async () => {
+    const setting = (value: boolean) =>
+      api().inject({
+        method: 'PUT',
+        url: '/settings',
+        headers: auth(),
+        payload: { settings: { 'pricing.price_bands_enabled': value } },
+      });
+    expect((await setting(false)).statusCode).toBe(200);
+    try {
+      const fresh = await createPartner('Кузнецов Кузьма');
+      const response = await post(
+        '/partner/rates',
+        { operatorId, terminationKind: 'sim', pricePerMinute: '99' },
+        as(fresh.token),
+      );
+      expect(response.statusCode).toBe(201);
+      const body = (await get('/partner/rates', as(fresh.token))).json<RatesResponse>();
+      expect(body.bands_enabled).toBe(false);
+      expect(body.rates[0]).toMatchObject({ band: null, within_band: true });
+    } finally {
+      expect((await setting(true)).statusCode).toBe(200);
+    }
   }, 60_000);
 
   it('администратору то же направление без коридора не запрещено', async () => {
@@ -703,6 +766,114 @@ describe('партнёр назначает себе цену', () => {
       (rate) => rate.operator_id === operatorId && rate.termination_kind === 'sim',
     );
     expect(new Date(added?.effective_from ?? 0).getUTCFullYear()).toBeGreaterThan(2019);
+  }, 60_000);
+});
+
+describe('тарифы партнёра (ADR-0056)', () => {
+  const tariffsOf = async (token: string) =>
+    (await get('/partner/rates', as(token))).json<RatesResponse>().tariffs;
+
+  it('заводит тариф, переименовывает, делает тарифом по умолчанию', async () => {
+    const owner = await createPartner('Тарифов Тариф');
+    const created = await post('/partner/tariffs', { name: 'Дорогой' }, as(owner.token));
+    expect(created.statusCode).toBe(201);
+    const id = created.json<{ tariff: { id: string } }>().tariff.id;
+
+    // Цена в названный тариф.
+    const priced = await post(
+      '/partner/rates',
+      { tariffId: id, operatorId, terminationKind: 'sim', pricePerMinute: '5' },
+      as(owner.token),
+    );
+    expect(priced.statusCode).toBe(201);
+    expect(priced.json<{ rate: { tariff_id: string } }>().rate.tariff_id).toBe(id);
+
+    const renamed = await api().inject({
+      method: 'PATCH',
+      url: `/partner/tariffs/${id}`,
+      headers: as(owner.token),
+      payload: { name: 'Премиум', isDefault: true },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(await tariffsOf(owner.token)).toEqual([
+      expect.objectContaining({ id, name: 'Премиум', is_default: true }),
+      expect.objectContaining({ name: 'Основной', is_default: false }),
+    ]);
+
+    // Тариф по умолчанию не удаляется — сначала назначается другой.
+    const refused = await api().inject({
+      method: 'DELETE',
+      url: `/partner/tariffs/${id}`,
+      headers: as(owner.token),
+    });
+    expect(refused.statusCode).toBe(409);
+  }, 60_000);
+
+  it('имя уникально у партнёра без учёта регистра', async () => {
+    const owner = await createPartner('Двойников Двойник');
+    const duplicate = await post('/partner/tariffs', { name: 'основной' }, as(owner.token));
+    expect(duplicate.statusCode).toBe(409);
+  }, 60_000);
+
+  it('тариф выбирается у шлюза; выбранный у шлюза не удаляется, чужой — не выбирается', async () => {
+    const owner = await createPartner('Шлюзов Шлюз');
+    const other = await createPartner('Чужов Чужак');
+    const tariff = (await post('/partner/tariffs', { name: 'Для GOIP' }, as(owner.token))).json<{
+      tariff: { id: string };
+    }>().tariff.id;
+    const foreign = (await post('/partner/tariffs', { name: 'Чужой' }, as(other.token))).json<{
+      tariff: { id: string };
+    }>().tariff.id;
+    const gateway = (
+      await post('/partner/gateways', { name: unique('Шлюз'), type: 'goip' }, as(owner.token))
+    ).json<{ gateway: { id: string } }>().gateway.id;
+
+    const chosen = await post(
+      `/partner/gateways/${gateway}/tariff`,
+      { tariffId: tariff },
+      as(owner.token),
+    );
+    expect(chosen.statusCode).toBe(201);
+    expect(chosen.json<{ gateway: { tariff_id: string } }>().gateway.tariff_id).toBe(tariff);
+
+    const alien = await post(
+      `/partner/gateways/${gateway}/tariff`,
+      { tariffId: foreign },
+      as(owner.token),
+    );
+    expect(alien.statusCode).toBe(404);
+
+    const inUse = await api().inject({
+      method: 'DELETE',
+      url: `/partner/tariffs/${tariff}`,
+      headers: as(owner.token),
+    });
+    expect(inUse.statusCode).toBe(409);
+
+    // Вернули шлюзу тариф по умолчанию — теперь удаляется.
+    expect(
+      (await post(`/partner/gateways/${gateway}/tariff`, { tariffId: null }, as(owner.token)))
+        .statusCode,
+    ).toBe(201);
+    const deleted = await api().inject({
+      method: 'DELETE',
+      url: `/partner/tariffs/${tariff}`,
+      headers: as(owner.token),
+    });
+    expect(deleted.statusCode).toBe(204);
+
+    const journal = await withDatabase(async (execute) =>
+      execute(
+        sql`select action from audit_log where entity_id in (${gateway}, ${tariff}) order by created_at`,
+      ),
+    );
+    expect(journal.rows.map((row) => (row as { action: string }).action)).toEqual(
+      expect.arrayContaining([
+        'partner_tariff.created',
+        'gateway.tariff_changed',
+        'partner_tariff.deleted',
+      ]),
+    );
   }, 60_000);
 });
 

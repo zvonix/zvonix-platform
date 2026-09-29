@@ -12,9 +12,12 @@
 import { Injectable } from '@nestjs/common';
 import {
   chargeForCall,
+  conflict,
+  DomainError,
   maxCharge,
   Money,
   notFound,
+  regionKeysOf,
   referenceCost,
   REFERENCE_CALL_SECONDS,
   validationFailed,
@@ -29,12 +32,30 @@ import {
 } from '@zvonix/shared';
 import { AuditService } from '../audit/audit.service.js';
 import type { Executor } from '@zvonix/db';
+import { SettingsService } from '../settings/settings.service.js';
 import {
   TariffRepository,
   type CommissionRuleRow,
   type PartnerRateRow,
+  type PartnerTariffRow,
   type PriceBandRow,
 } from './tariff.repository.js';
+
+/** Кто меняет тарифы: для журнала. Пусто у пользователя не бывает — решает человек. */
+interface Actor {
+  readonly userId: Id<'user'>;
+  readonly role: UserRole;
+}
+
+/**
+ * Запрос цены одного кандидата: его партнёр, его тариф (пусто — тариф партнёра
+ * по умолчанию) и способ терминации ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)).
+ */
+export interface RateRequest {
+  readonly partnerId: Id<'partner'>;
+  readonly tariffId: Id<'partnerTariff'> | null;
+  readonly terminationKind: TerminationKind;
+}
 
 /**
  * Цена предложения партнёра для клиента — диапазоном по всем его направлениям.
@@ -79,7 +100,8 @@ interface TariffExample {
 export interface ClientTariff {
   readonly partnerId: Id<'partner'>;
   readonly terminationKind: TerminationKind;
-  readonly operatorId: Id<'operator'>;
+  /** Пусто — цена на все операторы (ADR-0056). */
+  readonly operatorId: Id<'operator'> | null;
   readonly region: string | null;
   /** Шаг тарификации: единица — посекундно, шестьдесят — поминутно. */
   readonly billingIncrementSeconds: number;
@@ -119,10 +141,21 @@ export interface AppliedTariff {
  */
 export interface RateWithBand {
   readonly rate: PartnerRateRow;
-  readonly band: PriceBandRow | undefined;
+  /**
+   * Рамки цены: коридор её направления, а у цены «на все операторы» — пересечение
+   * коридоров всех операторов (ADR-0056). Пусто — коридора нет или коридоры отключены.
+   */
+  readonly limits: BandLimits | undefined;
   /** Стоимость эталонного вызова по этому тарифу — то, чем меряется коридор. */
   readonly referenceCost: MoneyAmount;
   readonly withinBand: boolean;
+  /** Первый коридор, в который цена не уложилась. */
+  readonly violated: PriceBandRow | undefined;
+}
+
+interface BandLimits {
+  readonly minPrice: MoneyAmount;
+  readonly maxPrice: MoneyAmount;
 }
 
 export interface BandViolation {
@@ -136,6 +169,7 @@ export class TariffService {
   constructor(
     private readonly repository: TariffRepository,
     private readonly audit: AuditService,
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -188,21 +222,80 @@ export class TariffService {
   }
 
   /**
-   * Действующие цены нескольких партнёров по одному направлению — одним запросом.
+   * Действующая цена каждого кандидата по его тарифу — одним запросом на способ
+   * терминации ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)).
    *
-   * Нужна отбору кандидатов: порядок терминации зависит от цены (ADR-0040), а цена
-   * лежит в тарифах. Отдаётся строка целиком, а не одно число: вызывающему нужна
-   * цена за минуту, но правило принадлежит тарифу, и половина строки наружу —
-   * это приглашение достроить недостающее у себя.
+   * Тариф кандидата без своего — тариф его партнёра по умолчанию. Ответ — по позиции
+   * запроса; пусто — цены по направлению в тарифе нет, и звонить через кандидата нельзя
+   * (ADR-0040): тарифицировать будет нечем.
    */
-  async effectiveRates(
-    partnerIds: readonly Id<'partner'>[],
+  async ratesFor(
+    requests: readonly RateRequest[],
     operatorId: Id<'operator'>,
-    terminationKind: TerminationKind,
     region: string | null,
     at: Date,
-  ): Promise<Map<string, PartnerRateRow>> {
-    return this.repository.findEffectiveRates(partnerIds, operatorId, terminationKind, region, at);
+  ): Promise<(PartnerRateRow | undefined)[]> {
+    const defaults = await this.repository.defaultTariffs([
+      ...new Set(requests.filter((r) => r.tariffId === null).map((r) => r.partnerId)),
+    ]);
+    const tariffOf = (request: RateRequest): Id<'partnerTariff'> | undefined =>
+      request.tariffId ?? defaults.get(request.partnerId);
+
+    const kinds = [...new Set(requests.map((request) => request.terminationKind))];
+    const byKind = new Map(
+      await Promise.all(
+        kinds.map(async (kind) => {
+          const tariffIds = [
+            ...new Set(
+              requests
+                .filter((request) => request.terminationKind === kind)
+                .map(tariffOf)
+                .filter((id): id is Id<'partnerTariff'> => id !== undefined),
+            ),
+          ];
+          const rates = await this.repository.findEffectiveRatesByTariffs(
+            tariffIds,
+            operatorId,
+            kind,
+            region,
+            at,
+          );
+          return [kind, rates] as const;
+        }),
+      ),
+    );
+
+    return requests.map((request) => {
+      const tariffId = tariffOf(request);
+      return tariffId === undefined
+        ? undefined
+        : byKind.get(request.terminationKind)?.get(tariffId);
+    });
+  }
+
+  /**
+   * Правила по строке цены, выбранной при маршрутизации (ADR-0056): цена вызова
+   * не зависит от того, что тариф SIM сменили посреди разговора. Наценка — на момент `at`.
+   */
+  async resolveRate(
+    rateId: Id<'partnerRate'>,
+    clientId: Id<'client'>,
+    at: Date,
+  ): Promise<AppliedTariff> {
+    const rate = await this.repository.findRate(rateId);
+    if (rate === undefined) {
+      throw notFound('Строка цены вызова не найдена', { details: { partner_rate_id: rateId } });
+    }
+    const commission = await this.repository.findCommissionRule(clientId, at);
+    if (commission === undefined) {
+      throw notFound('Нет действующего правила наценки', { details: { client_id: clientId } });
+    }
+    return {
+      rateId: rate.id,
+      commissionRuleId: commission.id,
+      rule: toTariffRule(rate),
+      commission: toCommissionRule(commission),
+    };
   }
 
   /**
@@ -331,8 +424,13 @@ export class TariffService {
     terminationKind: TerminationKind,
     durationSeconds: number,
     at: Date,
+    /** Строка цены, выбранная при маршрутизации; пусто — вызов до тарифов (ADR-0056). */
+    rateId: Id<'partnerRate'> | null = null,
   ): Promise<{ applied: AppliedTariff; charge: CallCharge }> {
-    const applied = await this.resolve(partnerId, clientId, direction, terminationKind, at);
+    const applied =
+      rateId === null
+        ? await this.resolve(partnerId, clientId, direction, terminationKind, at)
+        : await this.resolveRate(rateId, clientId, at);
     return { applied, charge: chargeForCall(durationSeconds, applied.rule, applied.commission) };
   }
 
@@ -345,14 +443,12 @@ export class TariffService {
    * все прошли бы проверку и все состоялись.
    */
   async priceReservation(
-    partnerId: Id<'partner'>,
+    rateId: Id<'partnerRate'>,
     clientId: Id<'client'>,
-    direction: Direction,
-    terminationKind: TerminationKind,
     maxDurationSeconds: number,
     at: Date,
   ): Promise<{ applied: AppliedTariff; charge: CallCharge }> {
-    const applied = await this.resolve(partnerId, clientId, direction, terminationKind, at);
+    const applied = await this.resolveRate(rateId, clientId, at);
     return {
       applied,
       charge: maxCharge(maxDurationSeconds, applied.rule, applied.commission),
@@ -364,7 +460,7 @@ export class TariffService {
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<PartnerRateRow> {
-    // Всё одной транзакцией: запирание направлений оператора, проверка коридора,
+    // Всё одной транзакцией: запирание направлений, проверка тарифа и коридора,
     // вставка и запись в журнал.
     //
     // Коридор — [ADR-0023](../../../../../docs/adr/0023-koridory-cen.md): проверка вне
@@ -376,7 +472,12 @@ export class TariffService {
     // цена без автора.
     return this.repository.pool.transaction(async (tx) => {
       await this.repository.lockOperatorTariffs(draft.operatorId, tx);
-      await this.assertWithinBand(draft, actorRole, tx);
+      // Тариф чужого партнёра — не его цена: проверка в той же транзакции, что вставка.
+      const tariff = await this.repository.findTariff(draft.tariffId, tx);
+      if (tariff?.partnerId !== draft.partnerId) {
+        throw notFound('Тариф не найден', { details: { tariff_id: draft.tariffId } });
+      }
+      await this.assertWithinBand(draft, tx);
 
       const row = await this.repository.insertPartnerRate(draft, tx);
       await this.audit.record(
@@ -386,16 +487,13 @@ export class TariffService {
           entityId: row.id,
           actorUserId,
           actorRole,
-          // Тариф записывается **целиком**, все пять чисел вместе со способом
-          // терминации. Половина тарифа в журнале не отвечает на вопрос, ради которого
-          // журнал и ведётся: спор «сколько он поставил» решается платой за соединение
-          // и минимальной длительностью не меньше, чем ценой за минуту. Особенно
-          // с тех пор, как цену ставит сам партнёр, а не администратор.
           after: {
             partner_id: row.partnerId,
+            tariff_id: row.tariffId,
+            tariff_name: tariff.name,
             operator_id: row.operatorId,
-            region: row.region,
             termination_kind: row.terminationKind,
+            region: row.region,
             price_per_minute: row.pricePerMinute.toString(),
             billing_increment_seconds: row.billingIncrementSeconds,
             minimum_duration_seconds: row.minimumDurationSeconds,
@@ -408,6 +506,133 @@ export class TariffService {
       );
       return row;
     });
+  }
+
+  // --- Тарифы партнёра (ADR-0056) ----------------------------------------------
+
+  /** Тарифы партнёра; тариф по умолчанию заводится, если его ещё нет. */
+  async listTariffs(partnerId: Id<'partner'>): Promise<PartnerTariffRow[]> {
+    await this.repository.ensureDefaultTariff(partnerId);
+    return this.repository.listTariffs(partnerId);
+  }
+
+  /** Тариф по умолчанию — к нему пишется цена, если тариф не назван. */
+  async defaultTariff(partnerId: Id<'partner'>): Promise<PartnerTariffRow> {
+    return this.repository.ensureDefaultTariff(partnerId);
+  }
+
+  /**
+   * Тариф этого партнёра — или отказ. Зовут те, кто привязывает тариф к шлюзу или SIM:
+   * чужой тариф — это чужие цены на своей карте.
+   */
+  async requireTariffOf(
+    partnerId: Id<'partner'>,
+    tariffId: Id<'partnerTariff'>,
+    executor?: Executor,
+  ): Promise<PartnerTariffRow> {
+    const tariff = await this.repository.findTariff(tariffId, executor);
+    if (tariff?.partnerId !== partnerId) {
+      throw notFound('Тариф не найден', { details: { tariff_id: tariffId } });
+    }
+    return tariff;
+  }
+
+  async createTariff(
+    partnerId: Id<'partner'>,
+    name: string,
+    actor: Actor,
+  ): Promise<PartnerTariffRow> {
+    return this.repository.pool.transaction(async (tx) => {
+      await this.repository.ensureDefaultTariff(partnerId, tx);
+      const row = await this.repository.insertTariff({ partnerId, name }, tx);
+      await this.recordTariff('partner_tariff.created', row, actor, undefined, tx);
+      return row;
+    });
+  }
+
+  /**
+   * Переименовать и (или) сделать тарифом по умолчанию. Снять «по умолчанию» нельзя —
+   * только назначить другой: без него SIM без тарифа осталась бы без цен.
+   */
+  async updateTariff(
+    partnerId: Id<'partner'>,
+    tariffId: Id<'partnerTariff'>,
+    change: { name?: string | undefined; isDefault?: true | undefined },
+    actor: Actor,
+  ): Promise<PartnerTariffRow> {
+    return this.repository.pool.transaction(async (tx) => {
+      await this.repository.lockPartnerTariffs(partnerId, tx);
+      const before = await this.requireTariffOf(partnerId, tariffId, tx);
+      if (change.name !== undefined && change.name !== before.name) {
+        await this.repository.renameTariff(tariffId, change.name, tx);
+      }
+      if (change.isDefault === true && !before.isDefault) {
+        await this.repository.makeDefaultTariff(partnerId, tariffId, tx);
+      }
+      const after = await this.requireTariffOf(partnerId, tariffId, tx);
+      await this.recordTariff('partner_tariff.updated', after, actor, before, tx);
+      return after;
+    });
+  }
+
+  /**
+   * Удалить тариф с его ценами. Нельзя удалить тариф по умолчанию, выбранный у шлюза
+   * или SIM и тот, по чьей цене уже был вызов: это держат внешние ключи.
+   */
+  async deleteTariff(
+    partnerId: Id<'partner'>,
+    tariffId: Id<'partnerTariff'>,
+    actor: Actor,
+  ): Promise<void> {
+    await this.repository.pool.transaction(async (tx) => {
+      await this.repository.lockPartnerTariffs(partnerId, tx);
+      const before = await this.requireTariffOf(partnerId, tariffId, tx);
+      if (before.isDefault) {
+        throw conflict('Тариф по умолчанию не удаляется — сначала назначьте другой', {
+          details: { tariff_id: tariffId },
+        });
+      }
+      try {
+        await this.repository.deleteTariff(tariffId, tx);
+      } catch (cause) {
+        if (cause instanceof DomainError && cause.code === 'conflict') {
+          throw conflict(
+            'Тариф используется: он выбран у шлюза или SIM, или по его цене уже были звонки',
+            { details: { tariff_id: tariffId } },
+          );
+        }
+        throw cause;
+      }
+      await this.recordTariff('partner_tariff.deleted', undefined, actor, before, tx);
+    });
+  }
+
+  private async recordTariff(
+    action: string,
+    after: PartnerTariffRow | undefined,
+    actor: Actor,
+    before: PartnerTariffRow | undefined,
+    tx: Executor,
+  ): Promise<void> {
+    const view = (row: PartnerTariffRow) => ({
+      partner_id: row.partnerId,
+      name: row.name,
+      is_default: row.isDefault,
+    });
+    const subject = after ?? before;
+    if (subject === undefined) return;
+    await this.audit.record(
+      {
+        action,
+        entityType: 'partner_tariff',
+        entityId: subject.id,
+        actorUserId: actor.userId,
+        actorRole: actor.role,
+        ...(before === undefined ? {} : { before: view(before) }),
+        ...(after === undefined ? {} : { after: view(after) }),
+      },
+      tx,
+    );
   }
 
   async addCommissionRule(
@@ -447,7 +672,7 @@ export class TariffService {
     return this.repository.pool.transaction(async (tx) => {
       // Та же очередь, что и у записи цены: иначе сужение коридора проскакивало бы
       // между её проверкой и вставкой (ADR-0023).
-      await this.repository.lockOperatorTariffs(draft.operatorId, tx);
+      await this.repository.lockOperatorTariffs(draft.operatorId, tx, 'band');
 
       const row = await this.repository.insertPriceBand(draft, tx);
       await this.audit.record(
@@ -500,10 +725,15 @@ export class TariffService {
   async findBandViolations(at: Date): Promise<BandViolation[]> {
     const rows = await this.ratesWithBands(at);
     return rows.flatMap((row) =>
-      row.band === undefined || row.withinBand
+      row.violated === undefined
         ? []
-        : [{ rate: row.rate, band: row.band, referenceCost: row.referenceCost }],
+        : [{ rate: row.rate, band: row.violated, referenceCost: row.referenceCost }],
     );
+  }
+
+  /** Проверяются ли коридоры вовсе — настройка площадки (ADR-0056). */
+  async bandsEnabled(): Promise<boolean> {
+    return (await this.settings.pricing()).priceBandsEnabled;
   }
 
   /**
@@ -516,77 +746,48 @@ export class TariffService {
    * за что заплатит клиент (ADR-0023).
    */
   async ratesWithBands(at: Date, partnerId?: Id<'partner'>): Promise<RateWithBand[]> {
-    const [rates, bands] = await Promise.all([
+    const [rates, bands, enabled] = await Promise.all([
       this.repository.listActivePartnerRates(at, partnerId),
       this.repository.listActivePriceBands(at),
+      this.bandsEnabled(),
     ]);
 
-    const general = new Map<string, PriceBandRow>();
-    const regional = new Map<string, PriceBandRow>();
-    for (const band of bands) {
-      const target = band.regionKey === null ? general : regional;
-      target.set(bandKey(band.operatorId, band.regionKey), band);
-    }
-
     return rates.map((rate) => {
-      // Цена без региона ограничивается только общим коридором: коридор конкретного
-      // региона к направлению «любой регион» отношения не имеет.
-      const band =
-        (rate.regionKey === null
-          ? undefined
-          : regional.get(bandKey(rate.operatorId, rate.regionKey))) ??
-        general.get(bandKey(rate.operatorId, null));
-
       const cost = referenceCost(toTariffRule(rate));
+      const applicable = enabled
+        ? applicableBands(rate.operatorId, rate.regionKey === null ? [] : [rate.regionKey], bands)
+        : [];
       return {
         rate,
-        band,
+        limits: limitsOf(applicable),
         referenceCost: cost,
+        violated: applicable.find((band) => !fits(cost, band)),
         // Коридора нет — ограничения нет: цена в него укладывается по определению.
-        withinBand:
-          band === undefined ||
-          (Money.compare(cost, band.minPrice) >= 0 && Money.compare(cost, band.maxPrice) <= 0),
+        withinBand: applicable.every((band) => fits(cost, band)),
       };
     });
   }
 
   /**
-   * Цена обязана укладываться в коридор, действующий по этому направлению.
+   * Цена обязана укладываться в коридоры, действующие по её направлению.
    *
    * Сравнивается **стоимость эталонного вызова**, а не цена за минуту: тариф — это пять
    * чисел, и коридор, ограничивающий одно из них, обходится платой за соединение или
-   * минимальной длительностью в десять минут (ADR-0023). Коридора нет — ограничения нет.
+   * минимальной длительностью в десять минут (ADR-0023).
+   *
+   * **Коридора нет — ограничения нет**, и для партнёра тоже: коридор — рамка, которую
+   * площадка ставит там, где хочет, а не пропуск; коридоры можно и отключить вовсе
+   * настройкой (владелец, 2026-09-25; ADR-0056). Цена «на все операторы» обязана
+   * уложиться в коридор **каждого** оператора — иначе через неё обходился бы коридор
+   * любого из них.
    */
   private async assertWithinBand(
     draft: Parameters<TariffRepository['insertPartnerRate']>[0],
-    actorRole: UserRole,
     executor: Executor,
   ): Promise<void> {
-    const band = await this.repository.findPriceBand(
-      draft.operatorId,
-      draft.region,
-      draft.effectiveFrom,
-      executor,
-    );
-
-    if (band === undefined) {
-      // «Коридора нет — ограничения нет» верно ровно до того дня, когда цену назначает
-      // не тот, кто задаёт коридор. Условие пересмотра названо в ADR-0023 прямо:
-      // обработчик партнёра обязан отказывать в цене по направлению без коридора,
-      // иначе правило становится добровольным для той стороны, ради ограничения
-      // которой заведено. Администратору запрет не нужен — он и есть тот, кто коридор
-      // задаёт, и запрет запер бы открытие нового направления в круг.
-      if (actorRole === 'admin') return;
-      throw validationFailed('По этому направлению не задан коридор цен', {
-        details: {
-          operator_id: draft.operatorId,
-          region: draft.region ?? 'любой регион',
-          // Не «попробуйте иначе», а «здесь решает площадка»: сам партнёр коридор
-          // не заводит, и без этой строки отказ читается как его собственная ошибка.
-          remedy: 'Коридор по направлению задаёт площадка — попросите её открыть его',
-        },
-      });
-    }
+    if (!(await this.bandsEnabled())) return;
+    const bands = await this.repository.listActivePriceBands(draft.effectiveFrom, executor);
+    const applicable = applicableBands(draft.operatorId, regionKeysOf(draft.region), bands);
 
     const cost = referenceCost({
       pricePerMinute: draft.pricePerMinute,
@@ -596,7 +797,8 @@ export class TariffService {
       rounding: draft.rounding,
     });
 
-    if (Money.compare(cost, band.minPrice) < 0 || Money.compare(cost, band.maxPrice) > 0) {
+    const band = applicable.find((candidate) => !fits(cost, candidate));
+    if (band !== undefined) {
       throw validationFailed('Цена вне коридора, заданного для этого направления', {
         details: {
           reference_call_seconds: REFERENCE_CALL_SECONDS,
@@ -606,6 +808,7 @@ export class TariffService {
           reference_cost: Money.format(cost),
           min_price: Money.format(band.minPrice),
           max_price: Money.format(band.maxPrice),
+          operator_id: band.operatorId,
           price_band_id: band.id,
         },
       });
@@ -635,11 +838,53 @@ function toCommissionRule(row: CommissionRuleRow): CommissionRule {
   return { fixedFee: row.fixedFee, percentBasisPoints: row.percentBasisPoints };
 }
 
-/** Ключ направления для сопоставления коридоров с ценами в памяти. */
-function bandKey(operatorId: Id<'operator'>, regionKey: string | null): string {
-  // Идентификатор оператора — UUID постоянной длины, поэтому разделитель
-  // не может склеить два разных направления в один ключ.
-  return `${operatorId}|${regionKey ?? ''}`;
+function fits(cost: MoneyAmount, band: PriceBandRow): boolean {
+  return Money.compare(cost, band.minPrice) >= 0 && Money.compare(cost, band.maxPrice) <= 0;
+}
+
+/**
+ * Коридоры, ограничивающие цену (ADR-0023, ADR-0056).
+ *
+ * У каждого оператора — один: региональный, если регион цены совпал, иначе общий;
+ * среди подошедших региональных — самый свежий. Цена без региона ограничивается только
+ * общими: коридор конкретного региона к направлению «любой регион» отношения не имеет.
+ * У цены с оператором — коридор этого оператора, у цены «на все» — каждого.
+ */
+function applicableBands(
+  operatorId: Id<'operator'> | null,
+  regionKeys: readonly string[],
+  bands: readonly PriceBandRow[],
+): PriceBandRow[] {
+  const byOperator = new Map<string, { general?: PriceBandRow; regional?: PriceBandRow }>();
+  for (const band of bands) {
+    if (operatorId !== null && band.operatorId !== operatorId) continue;
+    const entry = byOperator.get(band.operatorId) ?? {};
+    if (band.regionKey === null) {
+      entry.general = band;
+    } else if (
+      regionKeys.includes(band.regionKey) &&
+      (entry.regional === undefined || band.effectiveFrom > entry.regional.effectiveFrom)
+    ) {
+      entry.regional = band;
+    }
+    byOperator.set(band.operatorId, entry);
+  }
+  return [...byOperator.values()].flatMap((entry) => {
+    const band = entry.regional ?? entry.general;
+    return band === undefined ? [] : [band];
+  });
+}
+
+/** Общие рамки нескольких коридоров — их пересечение. */
+function limitsOf(bands: readonly PriceBandRow[]): BandLimits | undefined {
+  if (bands.length === 0) return undefined;
+  let minPrice = bands[0]?.minPrice ?? Money.ZERO;
+  let maxPrice = bands[0]?.maxPrice ?? Money.ZERO;
+  for (const band of bands) {
+    if (Money.compare(band.minPrice, minPrice) > 0) minPrice = band.minPrice;
+    if (Money.compare(band.maxPrice, maxPrice) < 0) maxPrice = band.maxPrice;
+  }
+  return { minPrice, maxPrice };
 }
 
 /**

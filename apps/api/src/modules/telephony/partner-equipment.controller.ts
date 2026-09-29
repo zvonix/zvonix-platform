@@ -45,6 +45,7 @@ import {
   partnerSimSchema,
   partnerSimStatusSchema,
   registrationModeSchema,
+  tariffChoiceSchema,
 } from './schemas.js';
 import { firstAndAll, toPortAccountView, type PortAccountView } from './telephony.controller.js';
 import { TelephonyService } from './telephony.service.js';
@@ -71,6 +72,8 @@ interface SimView {
   readonly max_concurrent_calls: number;
   /** Подтверждён ли оператор карты. Неподтверждённая карта вызовов не получает. */
   readonly operator_confirmed_at: string | null;
+  /** Свой тариф карты; пусто — как у шлюза (ADR-0056). */
+  readonly tariff_id: string | null;
 }
 
 /**
@@ -109,6 +112,8 @@ interface GatewayView {
   readonly model: string | null;
   /** `gateway` — один вход на шлюз, `port` — вход у каждой линии (ADR-0054). */
   readonly registration_mode: GatewayRegistrationMode;
+  /** Тариф всех SIM шлюза без своего; пусто — тариф по умолчанию (ADR-0056). */
+  readonly tariff_id: string | null;
   /**
    * Имя SIP, под которым шлюз регистрируется. Не секрет — секрет пароль, и он
    * не отдаётся никогда; имя же нужно партнёру каждый раз, когда он перенастраивает
@@ -294,6 +299,49 @@ export class PartnerEquipmentController {
       gateway: toGatewayView(result.gateway, []),
       port_accounts: result.portAccounts.map(toPortAccountView),
     };
+  }
+
+  /**
+   * Тариф своего шлюза — для всех его SIM без своего тарифа (ADR-0056; владелец:
+   * «тариф выбирается для всего GOIP и меняется у каждой SIM»).
+   */
+  @Cabinets('partner')
+  @Post('partner/gateways/:id/tariff')
+  async setGatewayTariff(
+    @Param('id') id: string,
+    @Body(zodBody(tariffChoiceSchema)) body: z.infer<typeof tariffChoiceSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ gateway: { id: string; tariff_id: string | null } }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const gatewayId = parseId(id, 'gateway');
+    await this.telephony.requireOwnGateway(gatewayId, partner.id);
+    const updated = await this.telephony.setGatewayTariff(
+      gatewayId,
+      body.tariffId === null ? null : parseId(body.tariffId, 'partnerTariff'),
+      actor.userId,
+      actor.role,
+    );
+    return { gateway: { id: updated.id, tariff_id: updated.tariffId } };
+  }
+
+  /** Свой тариф карты; `null` — как у шлюза (ADR-0056). */
+  @Cabinets('partner')
+  @Post('partner/sim-cards/:id/tariff')
+  async setSimTariff(
+    @Param('id') id: string,
+    @Body(zodBody(tariffChoiceSchema)) body: z.infer<typeof tariffChoiceSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ sim: { id: string; tariff_id: string | null } }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const simId = parseId(id, 'simCard');
+    await this.telephony.requireOwnSim(simId, partner.id);
+    const updated = await this.telephony.setSimTariff(
+      simId,
+      body.tariffId === null ? null : parseId(body.tariffId, 'partnerTariff'),
+      actor.userId,
+      actor.role,
+    );
+    return { sim: { id: updated.id, tariff_id: updated.tariffId } };
   }
 
   /** Входы линиям своего шлюза, у которых их ещё нет — например, после «Добавить порты». */
@@ -496,6 +544,7 @@ function toSimView(sim: SimCardRow, operators: Map<string, string>): SimView {
     network_scope: sim.networkScope,
     max_concurrent_calls: sim.maxConcurrentCalls,
     operator_confirmed_at: sim.operatorConfirmedAt?.toISOString() ?? null,
+    tariff_id: sim.tariffId,
   };
 }
 
@@ -521,6 +570,7 @@ function toGatewayView(gateway: GatewayRow, ports: readonly PortView[]): Gateway
       gateway.suspendedBy === null ? null : partnerFacingSuspension(gateway.suspendedBy),
     model: gateway.model,
     registration_mode: gateway.registrationMode,
+    tariff_id: gateway.tariffId,
     sip_username: gateway.sipUsername,
     ...presenceOf(gateway, ports),
     ports,

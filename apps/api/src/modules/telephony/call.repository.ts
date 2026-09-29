@@ -115,6 +115,8 @@ export class CallRepository {
       region: string | null;
       simCardId: Id<'simCard'> | null;
       gatewayId: Id<'gateway'> | null;
+      /** Строка цены, выбранная маршрутизацией (ADR-0056); у отказа её нет. */
+      partnerRateId?: Id<'partnerRate'> | null;
       status: CallStatus;
       failureReason: CallFailureReason | null;
     },

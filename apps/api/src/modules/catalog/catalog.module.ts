@@ -15,11 +15,12 @@ import { PartnerPricesController } from './partner-prices.controller.js';
 import { TariffController } from './tariff.controller.js';
 import { TariffRepository } from './tariff.repository.js';
 import { TariffService } from './tariff.service.js';
+import { SettingsModule } from '../settings/settings.module.js';
 
 @Module({
   // Биллинг — ради псевдонимов партнёров: прайс клиента называет партнёра только ими
   // (ADR-0014). Обратной зависимости нет, биллинг о каталоге не знает.
-  imports: [AuditModule, BillingModule],
+  imports: [AuditModule, BillingModule, SettingsModule],
   controllers: [
     CatalogController,
     TariffController,

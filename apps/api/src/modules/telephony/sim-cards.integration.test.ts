@@ -132,6 +132,16 @@ async function createSim(partnerId: string, operatorId: string, msisdn = nextMsi
 async function createActiveSim(partnerId: string, operatorId: string): Promise<SimView> {
   const created = await createSim(partnerId, operatorId);
   expect(created.statusCode).toBe(201);
+  // Цена на оператор карты: куда SIM звонит, решает её тариф (ADR-0056), и без цены она
+  // кандидатом не бывает. Цена именно на этот оператор — у каждого теста свой, и карты
+  // соседних тестов в отбор не попадают.
+  const priced = await api().inject({
+    method: 'POST',
+    url: '/partner-rates',
+    headers: auth(),
+    payload: { partnerId, operatorId, pricePerMinute: '1.00' },
+  });
+  expect(priced.statusCode).toBe(201);
   const sim = created.json<{ sim: SimView }>().sim;
 
   const activated = await api().inject({

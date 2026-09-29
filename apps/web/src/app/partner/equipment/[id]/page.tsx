@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { LineCredentials, type IssuedLines } from '@/components/sip-credentials';
+import { TariffSelect, useTariffName } from '@/components/tariff-select';
 import {
   Table,
   TableBody,
@@ -18,6 +19,7 @@ import {
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { GATEWAY_TYPE_NAME } from '@/lib/labels';
+import { PARTNER_RATES_KEY } from '@/lib/tariffs';
 import {
   EQUIPMENT_KEY,
   PARTNER_BLOCKED,
@@ -137,8 +139,37 @@ function GatewayCard({ id }: { id: string }) {
         connection={equipment.data.connection}
         onIssued={onIssued}
       />
+      <TariffSection gateway={gateway} />
       <PortsSection gateway={gateway} spare={equipment.data.spare_sims} />
     </div>
+  );
+}
+
+/**
+ * Тариф шлюза — для всех его карт без своего (ADR-0056). Что есть в тарифе, туда
+ * карта и звонит; свой тариф карты выбирается в строке порта ниже.
+ */
+function TariffSection({ gateway }: { gateway: Gateway }) {
+  const nameOf = useTariffName();
+  const fallback = nameOf(null);
+  return (
+    <section aria-labelledby="tariff" className="flex flex-col gap-2">
+      <h3 id="tariff" className="font-semibold">
+        Тариф
+      </h3>
+      <p className="max-w-prose text-muted-foreground">
+        По этому тарифу площадка платит за вызовы через все карты шлюза, кроме тех, у кого выбран
+        свой. Куда карта звонит, решают цены тарифа: нет цены на оператора — нет звонков на него.
+        Цены — в разделе <Link href="/partner/prices">«Мои тарифы»</Link>.
+      </p>
+      <TariffSelect
+        value={gateway.tariff_id}
+        inherited={fallback === undefined ? 'по умолчанию' : `по умолчанию — ${fallback}`}
+        endpoint={`/partner/gateways/${gateway.id}/tariff`}
+        label={`Тариф шлюза «${gateway.name}»`}
+        invalidate={[EQUIPMENT_KEY, PARTNER_RATES_KEY]}
+      />
+    </section>
   );
 }
 

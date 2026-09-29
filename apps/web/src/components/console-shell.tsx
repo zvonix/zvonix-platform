@@ -186,7 +186,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
           short: 'Оборудование',
           Icon: Radio,
         },
-        { href: '/partner/prices', label: 'Мои цены', short: 'Цены', Icon: ReceiptText },
+        { href: '/partner/prices', label: 'Мои тарифы', short: 'Тарифы', Icon: ReceiptText },
         { href: '/partner/money', label: 'Деньги', Icon: Wallet },
       ],
     },

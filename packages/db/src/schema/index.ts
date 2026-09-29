@@ -36,7 +36,7 @@ export {
   partnerCoverage,
   testCalls,
 } from './telephony.js';
-export { partnerRates, priceBands, commissionRules } from './tariffs.js';
+export { partnerTariffs, partnerRates, priceBands, commissionRules } from './tariffs.js';
 export { calls, reservations } from './calls.js';
 export { recordings, recordingGrants } from './recordings.js';
 export { limitRules, limitCounters } from './limits.js';

@@ -4,8 +4,10 @@ import { goipLinePrefix, TESTABLE_SIM_STATUSES } from '@zvonix/shared';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { moment } from '@/lib/format';
 import { PORT_STATE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
-import type { Gateway, Port, Sim } from './equipment';
 import { TestCallButton } from '@/components/test-call';
+import { TariffSelect, useTariffName } from '@/components/tariff-select';
+import { PARTNER_RATES_KEY } from '@/lib/tariffs';
+import { EQUIPMENT_KEY, type Gateway, type Port, type Sim } from './equipment';
 import { InsertSim, RemoveSim, SimActions } from './manage';
 
 /**
@@ -15,7 +17,7 @@ import { InsertSim, RemoveSim, SimActions } from './manage';
  */
 
 /** Столбцов у строки порта — для строк во всю ширину таблицы. */
-export const PORT_COLUMNS = 6;
+export const PORT_COLUMNS = 7;
 
 export function PortHeader() {
   return (
@@ -25,6 +27,7 @@ export function PortHeader() {
       <TableHead className="h-8">SIM-карта</TableHead>
       <TableHead className="h-8">Оператор</TableHead>
       <TableHead className="h-8">Состояние</TableHead>
+      <TableHead className="h-8">Тариф</TableHead>
       <TableHead className="h-8">
         <span className="sr-only">Действия</span>
       </TableHead>
@@ -74,6 +77,13 @@ export function PortRow({
         )}
       </TableCell>
       <TableCell>
+        {port.sim === null ? (
+          <span className="text-faint">—</span>
+        ) : (
+          <SimTariff gateway={gateway} sim={port.sim} />
+        )}
+      </TableCell>
+      <TableCell>
         <div className="flex items-start justify-end gap-2">
           {port.sim === null ? (
             <InsertSim portId={port.id} portNumber={port.port_number} spare={spare} />
@@ -89,6 +99,24 @@ export function PortRow({
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * Тариф карты: свой или «как у шлюза» (ADR-0056; владелец: «тариф выбирается для всего
+ * GOIP и меняется у каждой SIM»). Куда карта звонит, решает её тариф.
+ */
+function SimTariff({ gateway, sim }: { gateway: Gateway; sim: Sim }) {
+  const nameOf = useTariffName();
+  const inherited = nameOf(gateway.tariff_id);
+  return (
+    <TariffSelect
+      value={sim.tariff_id}
+      inherited={inherited === undefined ? 'как у шлюза' : `как у шлюза — ${inherited}`}
+      endpoint={`/partner/sim-cards/${sim.id}/tariff`}
+      label={`Тариф карты ${sim.msisdn}`}
+      invalidate={[EQUIPMENT_KEY, PARTNER_RATES_KEY]}
+    />
   );
 }
 

@@ -43,6 +43,7 @@ import { createdAt, idRef, oneOf, primaryId, timestamptz, updatedAt } from '../c
 import { clients, partners } from './billing.js';
 import { operators } from './catalog.js';
 import { nodes } from './nodes.js';
+import { partnerTariffs } from './tariffs.js';
 import { users } from './users.js';
 
 /** Шлюз партнёра: GOIP или телефон на Android. */
@@ -53,6 +54,15 @@ export const gateways = pgTable(
     partnerId: idRef<'partner'>()
       .notNull()
       .references(() => partners.id, { onDelete: 'restrict' }),
+
+    /**
+     * Тариф всех SIM этого шлюза, кроме тех, у кого свой
+     * ([ADR-0056](../../../../docs/adr/0056-tarify-partnyora.md)). Пусто — тариф
+     * партнёра по умолчанию. Удалить тариф, выбранный у шлюза, нельзя.
+     */
+    tariffId: idRef<'partnerTariff'>().references(() => partnerTariffs.id, {
+      onDelete: 'restrict',
+    }),
 
     /** Имя для партнёра: «GOIP в гараже». В клиентский контур не попадает (ADR-0014). */
     name: text().notNull(),
@@ -201,6 +211,15 @@ export const simCards = pgTable(
     partnerId: idRef<'partner'>()
       .notNull()
       .references(() => partners.id, { onDelete: 'restrict' }),
+
+    /**
+     * Свой тариф карты ([ADR-0056](../../../../docs/adr/0056-tarify-partnyora.md)).
+     * Пусто — тариф шлюза, в порту которого она стоит, а у того пусто — тариф партнёра
+     * по умолчанию. Тариф и решает, куда карта звонит: нет цены — нет звонка.
+     */
+    tariffId: idRef<'partnerTariff'>().references(() => partnerTariffs.id, {
+      onDelete: 'restrict',
+    }),
 
     /**
      * Оператор, которого объявил партнёр.

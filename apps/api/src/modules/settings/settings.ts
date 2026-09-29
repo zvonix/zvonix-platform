@@ -62,6 +62,14 @@ export const SETTINGS = {
     hint: 'Капча при восстановлении пароля',
   },
 
+  'pricing.price_bands_enabled': {
+    kind: 'boolean',
+    fallback: 'true',
+    hint:
+      'Коридоры цен проверяются: цена партнёра обязана уложиться в коридор, если он задан. ' +
+      'Выключено — партнёр назначает любую цену; коридоры сохраняются',
+  },
+
   'cabinets.partner_may_add_client': {
     kind: 'boolean',
     fallback: 'true',

@@ -52,6 +52,14 @@ export const registrationModeSchema = z.object({
 });
 
 /**
+ * Тариф шлюза или SIM ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)).
+ * `null` — «как у шлюза» для SIM и «тариф по умолчанию» для шлюза.
+ */
+export const tariffChoiceSchema = z.object({
+  tariffId: z.uuid('должен быть идентификатором').nullable(),
+});
+
+/**
  * Шлюз, который заводит **сам партнёр** ([ADR-0043](../../../../../docs/adr/0043-partnyor-zavodit-svoyo-oborudovanie.md)).
  *
  * Идентификатор партнёра берётся из сессии, поэтому его здесь нет: подставить чужой
