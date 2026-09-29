@@ -76,6 +76,14 @@ export class ApplicationsService {
     if (owned[input.cabinet] !== undefined) {
       throw conflict('Этот кабинет у вас уже подключён');
     }
+    // Второй кабинет — по настройке площадки (владелец, 2026-09-29).
+    const allowed = await this.settings.cabinets();
+    if (
+      (input.cabinet === 'client' && owned.partner !== undefined && !allowed.partnerMayAddClient) ||
+      (input.cabinet === 'partner' && owned.client !== undefined && !allowed.clientMayAddPartner)
+    ) {
+      throw permissionDenied('Площадка сейчас не подключает второй кабинет');
+    }
 
     let application: ApplicationRow;
     try {

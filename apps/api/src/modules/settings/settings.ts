@@ -70,6 +70,18 @@ export const SETTINGS = {
       'Выключено — партнёр назначает любую цену; коридоры сохраняются',
   },
 
+  'cabinets.partner_may_add_client': {
+    kind: 'boolean',
+    fallback: 'true',
+    hint: 'Партнёр может подать заявку на кабинет клиента («Стать клиентом»)',
+  },
+
+  'cabinets.client_may_add_partner': {
+    kind: 'boolean',
+    fallback: 'true',
+    hint: 'Клиент может подать заявку на кабинет партнёра («Стать партнёром»)',
+  },
+
   'partners.auto_approve': {
     kind: 'boolean',
     fallback: 'false',

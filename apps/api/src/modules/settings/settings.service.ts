@@ -98,10 +98,6 @@ export class SettingsService {
   }
 
   /**
-   * Допуск партнёров без проверки администратором (владелец, 2026-09-29: «чтобы партнёры
-   * могли регистрироваться без подтверждения от админа — настройка включать или нет»).
-   */
-  /**
    * Проверяются ли коридоры цен (ADR-0056; владелец, 2026-09-25: «коридор — сделать
    * возможность не задавать или отключить»).
    */
@@ -110,6 +106,26 @@ export class SettingsService {
     return { priceBandsEnabled: this.flag(values, 'pricing.price_bands_enabled') };
   }
 
+  /**
+   * Можно ли подключить второй кабинет (владелец, 2026-09-29: «сделай настройку —
+   * разрешать становиться клиентом или нет»). Выключено — пункта в меню нет, а заявку
+   * API не принимает; уже поданные заявки решает администратор.
+   */
+  async cabinets(): Promise<{
+    readonly partnerMayAddClient: boolean;
+    readonly clientMayAddPartner: boolean;
+  }> {
+    const values = await this.values();
+    return {
+      partnerMayAddClient: this.flag(values, 'cabinets.partner_may_add_client'),
+      clientMayAddPartner: this.flag(values, 'cabinets.client_may_add_partner'),
+    };
+  }
+
+  /**
+   * Допуск партнёров без проверки администратором (владелец, 2026-09-29: «чтобы партнёры
+   * могли регистрироваться без подтверждения от админа — настройка включать или нет»).
+   */
   async partners(): Promise<{ readonly autoApprove: boolean }> {
     const values = await this.values();
     return { autoApprove: this.flag(values, 'partners.auto_approve') };

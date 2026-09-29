@@ -94,6 +94,7 @@ function SettingsForm() {
     { title: 'Проверка «я не робот»', prefix: 'captcha.' },
     { title: 'Партнёры', prefix: 'partners.' },
     { title: 'Цены партнёров', prefix: 'pricing.' },
+    { title: 'Кабинеты', prefix: 'cabinets.' },
   ];
   const known = new Set(groups.map((group) => group.prefix));
   const rest = settings.data.settings.filter(
