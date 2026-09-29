@@ -16,10 +16,26 @@
 #
 # Целевая ОС — Ubuntu. Скрипт идемпотентен: повторный запуск с новым токеном
 # перенастраивает узел, не ломая уже работающий.
+#
+# Обновление уже установленного узла — без токена (ADR-0051, ревизия 2026-09-29):
+#
+#   zvonix-node-update            (ставится этим скриптом; то же, что ниже)
+#   curl -fsSL https://cp.example.com/install.sh | sudo bash -s -- --update
+#
+# Ключ узла уже лежит на машине, обменивать нечего. Набор конфигурации, правила
+# fail2ban и пульс приводятся к тем, что в текущем выпуске площадки; FreeSWITCH
+# перезапускается, только если набор изменился, и только когда на узле нет звонков.
+# Выкладка площадки (`zvonix-deploy`) зовёт это сама, если узел на той же машине.
 
 set -euo pipefail
 
-TOKEN="${1:-}"
+MODE=install
+TOKEN=""
+if [ "${1:-}" = "--update" ]; then
+  MODE=update
+else
+  TOKEN="${1:-}"
+fi
 CONTROL_PLANE="${ZVONIX_CONTROL_PLANE:-@@CONTROL_PLANE@@}"
 # SIP-домен площадки: входит в a1-hash каждой учётной записи (docs/api/telephony.md),
 # поэтому узел не выбирает его, а берёт у площадки (ADR-0051).
@@ -30,6 +46,11 @@ PACKAGE_KEY_FINGERPRINT="${ZVONIX_PACKAGE_KEY_FINGERPRINT:-@@PACKAGE_KEY_FINGERP
 CONF_DIR="${ZVONIX_CONF_DIR:-}"
 STATE_DIR="${ZVONIX_STATE_DIR:-/var/lib/zvonix}"
 KEYRING="/usr/share/keyrings/zvonix-packages.gpg"
+# Что узел знает о себе: ключ и каталог конфигурации. Отсюда их берёт обновление.
+NODE_ETC="${ZVONIX_NODE_ETC:-/etc/zvonix-node}"
+NODE_ENV="${NODE_ETC}/node.env"
+# Сколько обновление ждёт окончания звонков, прежде чем отложить перезапуск FreeSWITCH.
+DRAIN_SECONDS="${ZVONIX_DRAIN_SECONDS:-600}"
 
 # Control plane заменяет в этом файле **каждое** вхождение целой метки. Поэтому целая
 # метка стоит только в присваиваниях выше, а проверки «не подставлено» и замена меток
@@ -53,8 +74,31 @@ require() {
 # стоит владельцу выпуска новой команды. Прежняя редакция объявляла это правило
 # и нарушала его: наличие шаблонов выяснялось в самом конце (ADR-0045).
 
-[ -n "$TOKEN" ] || die "не передан токен установки. Команду выдаёт панель управления"
 [ "$(id -u)" -eq 0 ] || die "нужны права root: запускайте через sudo"
+
+# Поле файла node.env: разбирается, а не исполняется — файл не становится кодом root.
+node_env_field() {
+  [ -f "$NODE_ENV" ] && sed -n "s/^$1=//p" "$NODE_ENV" | head -1
+}
+
+if [ "$MODE" = install ]; then
+  [ -n "$TOKEN" ] || die "не передан токен установки. Команду выдаёт панель управления"
+else
+  command -v freeswitch >/dev/null 2>&1 \
+    || die "FreeSWITCH не установлен — это не узел. Установите его командой из панели"
+  KEY_ID="$(node_env_field KEY_ID || true)"
+  KEY_SECRET="$(node_env_field KEY_SECRET || true)"
+  # Узлы, поставленные до node.env, хранят ключ только в конфигурации пульса.
+  if [ -z "$KEY_ID" ] && [ -f "${NODE_ETC}/heartbeat.curl" ]; then
+    CREDENTIALS="$(sed -n 's/^user = "\([^"]*\)"$/\1/p' "${NODE_ETC}/heartbeat.curl" | head -1)"
+    KEY_ID="${CREDENTIALS%%:*}"
+    KEY_SECRET="${CREDENTIALS#*:}"
+  fi
+  [[ "$KEY_ID" =~ ^[A-Za-z0-9_-]+$ ]] && [[ "$KEY_SECRET" =~ ^[A-Za-z0-9_-]+$ ]] \
+    || die "ключ узла на машине не найден (${NODE_ENV}) — установите узел заново командой из панели"
+  CONF_DIR="${CONF_DIR:-$(node_env_field CONF_DIR || true)}"
+  NODE_NAME="$(hostname -f 2>/dev/null || hostname)"
+fi
 case "$CONTROL_PLANE" in
   "" | *"$MARK"*) die "адрес control plane не подставлен" ;;
 esac
@@ -170,7 +214,10 @@ fi
 
 # --- Обмен токена на постоянный ключ -----------------------------------------
 # Первое необратимое действие скрипта. После него не остаётся ни одной причины
-# остановиться, кроме отказа внешней системы.
+# остановиться, кроме отказа внешней системы. Обновлению обменивать нечего: ключ
+# уже на машине.
+
+if [ "$MODE" = install ]; then
 
 echo "Регистрация узла ${HOSTNAME_FQDN} в ${CONTROL_PLANE}"
 
@@ -198,6 +245,14 @@ KEY_SECRET="$(read_field 'key.secret')" || die "в ответе регистра
 NODE_NAME="$(read_field 'node.name')" || die "в ответе регистрации нет имени узла"
 
 echo "Узел «${NODE_NAME}» зарегистрирован, ключ ${KEY_ID}"
+
+fi
+
+# Ключ и каталог конфигурации — туда, откуда их возьмёт обновление. Только root:
+# это тот же секрет, что лежит в конфигурации FreeSWITCH.
+install -d -m 0700 "$NODE_ETC"
+( umask 077 && printf 'KEY_ID=%s\nKEY_SECRET=%s\nCONF_DIR=%s\n' \
+  "$KEY_ID" "$KEY_SECRET" "$CONF_DIR" >"${NODE_ENV}.new" && mv -f "${NODE_ENV}.new" "$NODE_ENV" )
 
 # --- Репозиторий пакетов и установка FreeSWITCH -------------------------------
 # Свой репозиторий, а не чужой (ADR-0045): в репозиториях Ubuntu пакета нет,
@@ -278,33 +333,98 @@ if grep -rqE "${MARK}[A-Z_]+${MARK}" "$STAGE"; then
   die "в наборе конфигурации остались незаполненные метки: $(grep -rlE "${MARK}[A-Z_]+${MARK}" "$STAGE" | tr '\n' ' ')"
 fi
 
-# Прежний каталог не удаляется, а откладывается: штатный — один раз, в .before-zvonix,
-# прежний наш — в .previous. Есть с чем сравнить и куда откатиться.
-if [ -e "$CONF_DIR" ]; then
-  if [ ! -e "${CONF_DIR}.before-zvonix" ]; then
-    mv "$CONF_DIR" "${CONF_DIR}.before-zvonix"
-  else
-    rm -rf "${CONF_DIR}.previous"
-    mv "$CONF_DIR" "${CONF_DIR}.previous"
+# --- Подмена набора и перезапуск ---------------------------------------------
+
+# Состояние профиля — из общего списка профилей: `sofia status profile zvonix` показывает
+# настройки профиля, а слова RUNNING в нём нет (проверено на живом узле 2026-09-22).
+profile_running() {
+  fs_cli -p "$ESL_PASSWORD" -x "sofia status" 2>/dev/null \
+    | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING'
+}
+
+# Перезапуск с ожиданием ответа ESL и профиля SIP.
+restart_freeswitch() {
+  systemctl enable freeswitch >/dev/null 2>&1 || true
+  systemctl restart freeswitch
+  for attempt in $(seq 1 30); do
+    fs_cli -p "$ESL_PASSWORD" -x status >/dev/null 2>&1 && break
+    sleep 1
+  done
+  # Профиль поднимается чуть позже ESL: несколько секунд на привязку порта.
+  for attempt in $(seq 1 10); do
+    profile_running && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Число звонков на узле; пусто — FreeSWITCH не ответил.
+active_calls() {
+  fs_cli -p "$ESL_PASSWORD" -x 'show calls count' 2>/dev/null \
+    | sed -n 's/^\([0-9][0-9]*\) total.*/\1/p' | head -1
+}
+
+# Ждёт, пока на узле не останется звонков: перезапуск FreeSWITCH рвёт каждый идущий
+# разговор, а обновление приходит посреди рабочего дня вместе с выпуском площадки.
+wait_idle() {
+  local waited=0 calls
+  while :; do
+    calls="$(active_calls)"
+    [ -z "$calls" ] || [ "$calls" -eq 0 ] && return 0
+    [ "$waited" -ge "$DRAIN_SECONDS" ] && return 1
+    [ $((waited % 60)) -eq 0 ] && echo "На узле идут звонки (${calls}) — жду их окончания перед перезапуском FreeSWITCH"
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
+
+# Набор сравнивается с действующим: не изменился — FreeSWITCH не трогается вовсе.
+# Каталог транков агента узла (ADR-0039) — его содержимое, не наше.
+CONF_POSTPONED=no
+if [ -d "$CONF_DIR" ] && diff -rq --exclude=zvonix-gateways "$STAGE" "$CONF_DIR" >/dev/null 2>&1; then
+  rm -rf "$STAGE"
+  echo "Конфигурация FreeSWITCH не изменилась: ${CONF_DIR}"
+  if ! profile_running; then
+    restart_freeswitch || die "профиль SIP zvonix не поднялся — journalctl -u freeswitch и журнал FreeSWITCH"
+  fi
+elif [ "$MODE" = update ] && ! wait_idle; then
+  # Звонки не кончились — конфигурация ждёт следующего запуска, а не рвёт разговоры.
+  rm -rf "$STAGE"
+  CONF_POSTPONED=yes
+  echo "ВНИМАНИЕ: звонки шли дольше ${DRAIN_SECONDS} с — новая конфигурация FreeSWITCH не применена. Повторите zvonix-node-update в тихое время" >&2
+else
+  # Транки агента переезжают в новый набор, иначе подмена стёрла бы их.
+  if [ -d "${CONF_DIR}/zvonix-gateways" ]; then
+    rm -rf "${STAGE}/zvonix-gateways"
+    cp -a "${CONF_DIR}/zvonix-gateways" "${STAGE}/zvonix-gateways"
+  fi
+  # Прежний каталог не удаляется, а откладывается: штатный — один раз, в .before-zvonix,
+  # прежний наш — в .previous. Есть с чем сравнить и куда откатиться.
+  if [ -e "$CONF_DIR" ]; then
+    if [ ! -e "${CONF_DIR}.before-zvonix" ]; then
+      mv "$CONF_DIR" "${CONF_DIR}.before-zvonix"
+    else
+      rm -rf "${CONF_DIR}.previous"
+      mv "$CONF_DIR" "${CONF_DIR}.previous"
+    fi
+  fi
+  mv "$STAGE" "$CONF_DIR"
+  chown -R freeswitch:freeswitch "$STATE_DIR" "$CONF_DIR"
+  echo "Конфигурация FreeSWITCH заменена набором площадки: ${CONF_DIR}"
+
+  if ! restart_freeswitch; then
+    # Работавший узел не оставляется лежать: прежний набор возвращается. При первой
+    # установке возвращать нечего — прежним был демонстрационный набор.
+    if [ "$MODE" = update ] && [ -d "${CONF_DIR}.previous" ]; then
+      rm -rf "${CONF_DIR}.failed"
+      mv "$CONF_DIR" "${CONF_DIR}.failed"
+      mv "${CONF_DIR}.previous" "$CONF_DIR"
+      restart_freeswitch || true
+      die "с новой конфигурацией профиль SIP zvonix не поднялся — возвращена прежняя, новая лежит в ${CONF_DIR}.failed"
+    fi
+    die "профиль SIP zvonix не поднялся — journalctl -u freeswitch и журнал FreeSWITCH"
   fi
 fi
-mv "$STAGE" "$CONF_DIR"
-chown -R freeswitch:freeswitch "$STATE_DIR" "$CONF_DIR"
-echo "Конфигурация FreeSWITCH заменена набором площадки: ${CONF_DIR}"
-
-# --- Запуск ------------------------------------------------------------------
-
-systemctl enable freeswitch >/dev/null 2>&1 || true
-systemctl restart freeswitch
-
-for attempt in $(seq 1 30); do
-  fs_cli -p "$ESL_PASSWORD" -x status >/dev/null 2>&1 && break
-  sleep 1
-done
-# Состояние — из общего списка профилей: `sofia status profile zvonix` показывает
-# настройки профиля, а слова RUNNING в нём нет (проверено на живом узле 2026-09-22).
-fs_cli -p "$ESL_PASSWORD" -x "sofia status" 2>/dev/null | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING' \
-  || die "профиль SIP zvonix не поднялся — journalctl -u freeswitch и журнал FreeSWITCH"
 
 # --- Защита от подбора паролей SIP (ADR-0051, ревизия) -----------------------
 # Каждая неудачная попытка регистрации — это запрос учётной записи у площадки. Один
@@ -330,7 +450,12 @@ if command -v fail2ban-client >/dev/null 2>&1; then
 @@FAIL2BAN_FILES@@
     sed -i "s|${MARK}FREESWITCH_LOG${MARK}|${FREESWITCH_LOG}|" /etc/fail2ban/jail.d/zvonix-freeswitch.conf
     systemctl enable fail2ban >/dev/null 2>&1 || true
-    systemctl restart fail2ban
+    # Работающий fail2ban перечитывает правила, не снимая блокировок; стоящий — запускается.
+    if fail2ban-client ping >/dev/null 2>&1; then
+      fail2ban-client reload >/dev/null
+    else
+      systemctl restart fail2ban
+    fi
     for attempt in $(seq 1 15); do
       fail2ban-client ping >/dev/null 2>&1 && break
       sleep 1
@@ -372,9 +497,9 @@ rm -f "$ESL_BODY"
 # Ключ — в файле только для root, в аргументы процесса не попадает.
 
 FS_CLI="$(command -v fs_cli)" || die "fs_cli не найден — пульсу нечем спрашивать FreeSWITCH"
-install -d -m 0700 /etc/zvonix-node
+install -d -m 0700 "$NODE_ETC"
 ( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/heartbeat"\n' \
-  "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >/etc/zvonix-node/heartbeat.curl )
+  "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/heartbeat.curl" )
 
 cat >/usr/local/sbin/zvonix-heartbeat <<HEARTBEAT
 #!/bin/sh
@@ -387,7 +512,7 @@ DEGRADED=false
 "${FS_CLI}" -x 'sofia status' 2>/dev/null \\
   | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING' || DEGRADED=true
 printf '{"activeCalls":%s,"degraded":%s,"agentVersion":"heartbeat.sh"}' "\$CALLS" "\$DEGRADED" \\
-  | curl -fsS --max-time 10 -K /etc/zvonix-node/heartbeat.curl \\
+  | curl -fsS --max-time 10 -K "${NODE_ETC}/heartbeat.curl" \\
       -H 'Content-Type: application/json' --data-binary @- >/dev/null
 HEARTBEAT
 chmod 0700 /usr/local/sbin/zvonix-heartbeat
@@ -423,8 +548,35 @@ else
   echo "ВНИМАНИЕ: площадка не приняла пульс узла — узел останется «ставится» (journalctl -u zvonix-heartbeat)" >&2
 fi
 
+# --- Команда обновления узла -------------------------------------------------
+# Узел на другой машине выкладка площадки не видит: его обновляют этой командой.
+# Скрипт скачивается целиком и только потом исполняется: в конвейере `curl | bash`
+# оборванная загрузка исполнилась бы наполовину.
+
+cat >/usr/local/sbin/zvonix-node-update <<UPDATE
+#!/bin/sh
+# Обновление узла Zvonix набором текущего выпуска площадки — порождается node/install.sh.
+set -eu
+SCRIPT="\$(mktemp)"
+trap 'rm -f "\$SCRIPT"' EXIT
+curl -fsSL --max-time 60 -o "\$SCRIPT" "${CONTROL_PLANE}/install.sh"
+exec bash "\$SCRIPT" --update
+UPDATE
+chmod 0700 /usr/local/sbin/zvonix-node-update
+
 echo
+if [ "$MODE" = update ]; then
+  if [ "$CONF_POSTPONED" = yes ]; then
+    echo "Узел обновлён частично: правила блокировки и пульс — да, конфигурация FreeSWITCH — отложена."
+    exit 3
+  fi
+  echo "Готово. Узел обновлён набором площадки, профиль SIP zvonix работает."
+  exit 0
+fi
 echo "Готово. Узел «${NODE_NAME}» настроен, профиль SIP zvonix работает."
+echo
+echo "Обновить узел до набора нового выпуска площадки: zvonix-node-update"
+echo "(узел на одной машине с площадкой обновляет сама выкладка — zvonix-deploy)."
 echo
 echo "Проверить, что ключ принимается с этого адреса:"
 echo "  curl -fsS -u '${KEY_ID}:<секрет>' ${CONTROL_PLANE}/machine/self"

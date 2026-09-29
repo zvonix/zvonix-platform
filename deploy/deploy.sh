@@ -22,7 +22,8 @@ BACKUPS=/var/backups/zvonix
 # Имя базы — то, что заводит deploy/server-setup.sh.
 DATABASE=zvonix
 SERVICES=(zvonix-api zvonix-worker zvonix-web)
-API_READY=http://127.0.0.1:8000/health/ready
+API_BASE=http://127.0.0.1:8000
+API_READY="${API_BASE}/health/ready"
 WEB_READY=http://127.0.0.1:3000/login
 TAG_PATTERN='^v?[0-9A-Za-z][0-9A-Za-z._-]*$'
 
@@ -127,6 +128,22 @@ first_run_hint() {
     "$1" || echo "код первого запуска не получен — см. deploy/README.md, «Первый вход»" >&2
 }
 
+# Узел АТС на этой же машине получает набор нового выпуска: конфигурацию FreeSWITCH,
+# правила fail2ban, пульс (ADR-0051, ревизия 2026-09-29). Признак узла — его ключ
+# в /etc/zvonix-node. Скрипт берётся у только что поднятого API: это набор ровно этого
+# выпуска. Сбой выкладку не отменяет — площадка уже работает, а узел обновляется
+# отдельно той же командой (zvonix-node-update).
+update_local_node() {
+  local script
+  [ -f /etc/zvonix-node/node.env ] || [ -f /etc/zvonix-node/heartbeat.curl ] || return 0
+  step "Узел АТС на этой машине"
+  script="${WORK}/node-install.sh"
+  if curl -fsS --max-time 30 -o "$script" "${API_BASE}/install.sh" && bash "$script" --update; then
+    return 0
+  fi
+  echo "ВНИМАНИЕ: узел АТС не обновлён — площадка работает; повторите zvonix-node-update" >&2
+}
+
 # Скачивание выпуска по токену только на чтение (ADR-0049).
 download() {
   local tag="$1" env_file="${ETC}/github.env" headers api name id release_id
@@ -212,6 +229,7 @@ install_release() {
       point "$PREVIOUS" "$before"
     fi
     prune
+    update_local_node
     first_run_hint "$release"
     echo "DEPLOY_OK $(head -1 "${release}/RELEASE")"
     return 0
@@ -233,6 +251,7 @@ rollback() {
   step "Откат на ${target}"
   activate "$target" || die "предыдущий выпуск не поднялся — journalctl -u zvonix-api -u zvonix-web"
   point "$PREVIOUS" "$current"
+  update_local_node
   echo "ROLLBACK_OK ${target}"
 }
 
