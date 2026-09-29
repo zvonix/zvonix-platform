@@ -54,7 +54,15 @@ export function TariffSelect({
         }}
         className="h-8 max-w-[16rem] rounded-md border border-input bg-transparent px-2"
       >
-        <option value="">{inherited}</option>
+        {/*
+          Пока тарифы не пришли, выбранный нечем назвать, и пустой пункт показал бы
+          «наследовать» у карты, у которой свой тариф.
+        */}
+        {rates.isPending ? (
+          <option value={value ?? ''}>загружаем…</option>
+        ) : (
+          <option value="">{inherited}</option>
+        )}
         {tariffs.map((tariff) => (
           <option key={tariff.id} value={tariff.id}>
             {tariff.name}

@@ -153,7 +153,7 @@ export interface RateWithBand {
   readonly violated: PriceBandRow | undefined;
 }
 
-export interface BandLimits {
+interface BandLimits {
   readonly minPrice: MoneyAmount;
   readonly maxPrice: MoneyAmount;
 }

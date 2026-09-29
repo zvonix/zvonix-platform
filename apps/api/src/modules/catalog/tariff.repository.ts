@@ -28,7 +28,7 @@ export type PriceBandRow = typeof priceBands.$inferSelect;
 export type PartnerTariffRow = typeof partnerTariffs.$inferSelect;
 
 /** Имя тарифа по умолчанию, который получает каждый партнёр (ADR-0056). */
-export const DEFAULT_TARIFF_NAME = 'Основной';
+const DEFAULT_TARIFF_NAME = 'Основной';
 
 @Injectable()
 export class TariffRepository {
