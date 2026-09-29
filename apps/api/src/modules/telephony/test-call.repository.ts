@@ -59,7 +59,7 @@ export class TestCallRepository {
     return row;
   }
 
-  /** Последняя проба карты — по ней держится предел «раз в минуту». */
+  /** Последняя проба карты — по ней видно, идёт ли уже проба. */
   async lastForSim(
     simCardId: Id<'simCard'>,
     executor: Executor = this.db,

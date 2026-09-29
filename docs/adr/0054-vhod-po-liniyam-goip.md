@@ -146,9 +146,9 @@ API без нового поля ведёт себя как раньше. Каб
 Работает то же, что при входе на шлюз: **Routing Prefix у каждой линии** (`99NNN`) и номер
 с префиксом в адресе запроса, направленном прямо на GOIP.
 
-- Набор: `[zvonix_dial=<префикс><номер>]user/<вход>@realm`. Строка набора каталога
+- Набор: `[zvonix_dial=<префикс>+<номер>]user/<вход>@realm`. Строка набора каталога
   (`dial-string`) берёт адрес регистрации (`sofia_contact`) и ставит `zvonix_dial` на место
-  входа: `sip:99004<номер>@<адрес GOIP>`. Выражение проверено на живом узле через `eval`.
+  входа: `sip:99004+<номер>@<адрес GOIP>`. Выражение проверено на живом узле через `eval`.
 - Кабинет показывает поля GOIP Basic VoIP полностью: Config Mode, SIP Proxy, SIP Registrar,
   Re-register Period, Prefix Match Mode, Delete Callee Prefix, Routing Prefix линии, а также
   Call Out → Call OUT via GSM.

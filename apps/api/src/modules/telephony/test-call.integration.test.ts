@@ -343,7 +343,7 @@ describe('тестовый звонок с SIM', () => {
     // Набрана линия карты — так же, как её набирает маршрутизация (ADR-0054).
     const command = commands.at(-1) ?? '';
     expect(command).toContain(`zvonix_test_call=${call.id}`);
-    expect(command).toContain(`[zvonix_dial=9900179130001122]user/${port(1).username}@${REALM}`);
+    expect(command).toContain(`[zvonix_dial=99001+79130001122]user/${port(1).username}@${REALM}`);
     expect(command).toMatch(/^originate \{.*originate_timeout=40.*\}\[/u);
     expect(command).toContain('&playback(tone_stream://');
   });
@@ -408,7 +408,8 @@ describe('тестовый звонок с SIM', () => {
     expect(done).toMatchObject({ status: 'busy', hangup_cause: 'USER_BUSY' });
   });
 
-  it('вторая проба с той же карты раньше минуты — 429 с Retry-After', async () => {
+  it('вторая проба с той же карты сразу после первой проходит — предела по времени нет', async () => {
+    // Владелец, 2026-09-29: «убери это ограничение». Держится только «одна проба одновременно».
     const simId = await simInPort(partner.token, port(4));
     nextReply = '-ERR NO_ANSWER';
     const first = await post(
@@ -428,8 +429,7 @@ describe('тестовый звонок с SIM', () => {
       { destination: '79130001125' },
       partner.token,
     );
-    expect(second.statusCode).toBe(429);
-    expect(Number(second.headers['retry-after'])).toBeGreaterThan(0);
+    expect(second.statusCode).toBe(202);
   });
 
   it('линия, не подключившаяся к узлу, — 409 с понятной причиной, без звонка', async () => {

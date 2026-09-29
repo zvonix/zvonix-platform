@@ -316,12 +316,6 @@ export type TestCallStatus = (typeof TEST_CALL_STATUSES)[number];
 export const TESTABLE_SIM_STATUSES: readonly SimStatus[] = ['new', 'active', 'throttled'];
 
 /**
- * Не чаще одного тестового звонка в минуту на SIM: иначе кнопка становится автодозвоном,
- * за который оператор блокирует карту.
- */
-export const TEST_CALL_INTERVAL_MS = 60_000;
-
-/**
  * Сколько ждать итога. Дозвон — до сорока секунд, сигналы после ответа — пять секунд;
  * всё, что дольше трёх минут, значит, что итог потерян.
  */
