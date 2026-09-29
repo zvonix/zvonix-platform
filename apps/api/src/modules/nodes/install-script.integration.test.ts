@@ -301,6 +301,9 @@ describe('обновление узла', () => {
     if (options.gateways === true) {
       writeFileSync(`${conf}/zvonix-gateways/trunk.xml`, 'trunk', 'utf8');
     }
+    // Сертификаты FreeSWITCH порождает сам в каталоге конфигурации — не наше.
+    mkdirSync(`${conf}/tls`);
+    writeFileSync(`${conf}/tls/wss.pem`, 'certificate', 'utf8');
     const log = `${root}/systemctl.log`;
     const file = `${root}/swap.sh`;
     writeFileSync(
@@ -371,6 +374,7 @@ describe('обновление узла', () => {
     expect(result.log).toContain('restart freeswitch');
     expect(result.read('conf/vars.xml')).toBe('new');
     expect(result.read('conf/zvonix-gateways/trunk.xml')).toBe('trunk');
+    expect(result.read('conf/tls/wss.pem')).toBe('certificate');
     expect(result.read('conf.previous/vars.xml')).toBe('old');
   });
 

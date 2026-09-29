@@ -119,7 +119,8 @@ describe('кабинеты участника', () => {
     const member = await person('member');
 
     const cabinets = (await get('/me/cabinets', member.auth)).json<CabinetsBody>().cabinets;
-    expect(cabinets).toEqual({ client: null, partner: null });
+    // Без кабинетов заявка на первый открыта всегда — настройка касается второго.
+    expect(cabinets).toEqual({ client: null, partner: null, second_cabinet_open: true });
 
     const response = await get('/partner/account', member.auth);
     expect(response.statusCode).toBe(403);
@@ -151,7 +152,7 @@ describe('сотрудник площадки', () => {
 
   it('кабинетов не имеет и в собственный контур не входит', async () => {
     const cabinets = (await get('/me/cabinets', admin)).json<CabinetsBody>().cabinets;
-    expect(cabinets).toEqual({ client: null, partner: null });
+    expect(cabinets).toEqual({ client: null, partner: null, second_cabinet_open: false });
     expect((await get('/client/account', admin)).statusCode).toBe(403);
   });
 });

@@ -15,6 +15,7 @@ import { Controller, Get } from '@nestjs/common';
 import { isStaffRole, type ClientStatus, type PartnerStatus } from '@zvonix/shared';
 import { CurrentUser } from '../../http/request-context.js';
 import type { Principal } from '../identity/identity.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { BillingService } from './billing.service.js';
 
 interface CabinetsView {
@@ -32,22 +33,39 @@ interface CabinetsView {
     readonly display_name: string | null;
     readonly status: PartnerStatus;
   } | null;
+  /**
+   * Можно ли подать заявку на недостающий кабинет. Для второго кабинета решает
+   * настройка площадки; без кабинетов вовсе заявка на первый открыта всегда.
+   */
+  readonly second_cabinet_open: boolean;
 }
 
 @Controller()
 export class CabinetsController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly settings: SettingsService,
+  ) {}
 
   @Get('me/cabinets')
   async mine(@CurrentUser() user: Principal): Promise<{ cabinets: CabinetsView }> {
-    if (isStaffRole(user.role)) return { cabinets: { client: null, partner: null } };
+    if (isStaffRole(user.role)) {
+      return { cabinets: { client: null, partner: null, second_cabinet_open: false } };
+    }
 
     const owned = await this.billing.cabinetsOf(user.userId);
-    const [client, partner, alias] = await Promise.all([
+    const [client, partner, alias, allowed] = await Promise.all([
       owned.client === undefined ? undefined : this.billing.requireClientOwnedBy(user.userId),
       owned.partner === undefined ? undefined : this.billing.requirePartnerOwnedBy(user.userId),
       owned.partner === undefined ? undefined : this.billing.partnerAliasOf(owned.partner),
+      this.settings.cabinets(),
     ]);
+    const secondCabinetOpen =
+      owned.partner !== undefined && owned.client === undefined
+        ? allowed.partnerMayAddClient
+        : owned.client !== undefined && owned.partner === undefined
+          ? allowed.clientMayAddPartner
+          : owned.client === undefined;
 
     return {
       cabinets: {
@@ -57,6 +75,7 @@ export class CabinetsController {
           partner === undefined
             ? null
             : { id: partner.id, display_name: alias ?? null, status: partner.status },
+        second_cabinet_open: secondCabinetOpen,
       },
     };
   }

@@ -289,6 +289,42 @@ describe('вторая заявка из кабинета', () => {
     expect(cabinets.partner).not.toBeNull();
   });
 
+  it('площадка не подключает второй кабинет — ни пункта в меню, ни заявки', async () => {
+    const setting = (value: boolean) =>
+      api().inject({
+        method: 'PUT',
+        url: '/settings',
+        headers: admin,
+        payload: { settings: { 'cabinets.partner_may_add_client': value } },
+      });
+    expect((await setting(false)).statusCode).toBe(200);
+    try {
+      const { email, applicationId } = await applicant(PARTNER_APPLICATION);
+      expect((await approve(applicationId, { displayName: unique('Партнёр') })).statusCode).toBe(
+        200,
+      );
+      const auth = await login(email);
+
+      const cabinets = (
+        await api().inject({ method: 'GET', url: '/me/cabinets', headers: auth })
+      ).json<{ cabinets: { second_cabinet_open: boolean } }>().cabinets;
+      expect(cabinets.second_cabinet_open).toBe(false);
+
+      const refused = await api().inject({
+        method: 'POST',
+        url: '/me/applications',
+        headers: auth,
+        payload: CLIENT_APPLICATION,
+      });
+      expect(refused.statusCode).toBe(403);
+      expect(refused.json<{ error: { message: string } }>().error.message).toBe(
+        'Площадка сейчас не подключает второй кабинет',
+      );
+    } finally {
+      expect((await setting(true)).statusCode).toBe(200);
+    }
+  });
+
   it('кабинет, который уже есть, заявкой не просится', async () => {
     const { email, applicationId } = await applicant(CLIENT_APPLICATION);
     expect((await approve(applicationId)).statusCode).toBe(200);

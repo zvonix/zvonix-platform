@@ -245,10 +245,16 @@ Cookie снимается всегда, в том числе когда вошл
 ```json
 { "cabinets": {
     "client":  { "id": "…", "name": "Такси «Бриз»", "status": "active" },
-    "partner": { "id": "…", "display_name": "Партнёр 31", "status": "pending" } } }
+    "partner": { "id": "…", "display_name": "Партнёр 31", "status": "pending" },
+    "second_cabinet_open": true } }
 ```
 
 Нет карточки — `null`. Сотруднику площадки оба `null`: кабинетов у него не бывает.
+`second_cabinet_open` — можно ли подать заявку на недостающий кабинет: для второго
+кабинета решают настройки `cabinets.partner_may_add_client` и
+`cabinets.client_may_add_partner`; без кабинетов вовсе — всегда `true`, сотруднику —
+`false`. Закрыто — `POST /me/applications` на второй кабинет отвечает `403`
+«Площадка сейчас не подключает второй кабинет».
 Живёт в модуле биллинга, а не в `/auth/me`: «чья это карточка» знает только он.
 
 **Доступ к собственному контуру** (`/client/*`, `/partner/*` и общие с сотрудниками

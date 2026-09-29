@@ -39,6 +39,9 @@ const LABELS: Record<string, string> = {
   'captcha.on_register': 'При регистрации',
   'captcha.on_login': 'При входе',
   'captcha.on_password_reset': 'При восстановлении пароля',
+  'partners.auto_approve': 'Допускать партнёров без проверки',
+  'cabinets.partner_may_add_client': 'Партнёр может стать клиентом',
+  'cabinets.client_may_add_partner': 'Клиент может стать партнёром',
 };
 
 export function labelOf(key: string): string {

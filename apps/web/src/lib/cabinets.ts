@@ -17,6 +17,8 @@ export interface OwnedCabinets {
     readonly display_name: string | null;
     readonly status: PartnerStatus;
   } | null;
+  /** Можно ли подать заявку на недостающий кабинет — решает настройка площадки. */
+  readonly second_cabinet_open: boolean;
 }
 
 /**
