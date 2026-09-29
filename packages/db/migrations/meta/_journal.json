@@ -253,6 +253,13 @@
       "when": 1790344418677,
       "tag": "0035_otvet_shlyuza",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790679311376,
+      "tag": "0036_tarify_partnyora",
+      "breakpoints": true
     }
   ]
 }

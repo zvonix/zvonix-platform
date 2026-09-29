@@ -299,8 +299,13 @@ export class OperatorResolverService {
     };
   }
 
-  /** Последний рубеж: кому выделен диапазон. Оператора не подтверждает. */
-  private async fromNumberingPlan(msisdn: Msisdn, reason?: string): Promise<OperatorResolution> {
+  /**
+   * Последний рубеж: кому выделен диапазон. Оператора не подтверждает.
+   *
+   * Открыт маршрутизации: когда источник не уложился в её бюджет, цена вызова берётся
+   * по владельцу диапазона (ADR-0056) — это запрос к своей базе, без сети.
+   */
+  async fromNumberingPlan(msisdn: Msisdn, reason?: string): Promise<OperatorResolution> {
     const owner = await this.repository.findRangeOwner(msisdn);
 
     if (owner === undefined) {

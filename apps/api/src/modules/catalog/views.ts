@@ -7,7 +7,18 @@
  */
 
 import { Money } from '@zvonix/shared';
-import type { PartnerRateRow } from './tariff.repository.js';
+import type { PartnerRateRow, PartnerTariffRow } from './tariff.repository.js';
+
+/** Тариф партнёра (ADR-0056) — одинаково для партнёра и администратора. */
+export interface TariffView {
+  readonly id: string;
+  readonly name: string;
+  readonly is_default: boolean;
+}
+
+export function toTariffView(row: PartnerTariffRow): TariffView {
+  return { id: row.id, name: row.name, is_default: row.isDefault };
+}
 
 /**
  * Цена партнёра по направлению — как её отдают человеку.
@@ -19,7 +30,10 @@ import type { PartnerRateRow } from './tariff.repository.js';
 export interface RateView {
   readonly id: string;
   readonly partner_id: string;
-  readonly operator_id: string;
+  /** Тариф цены (ADR-0056); пусто — строка, записанная до тарифов. */
+  readonly tariff_id: string | null;
+  /** Пусто — цена на все операторы. */
+  readonly operator_id: string | null;
   readonly termination_kind: string;
   readonly region: string | null;
   readonly price_per_minute: string;
@@ -34,6 +48,7 @@ export function toRateView(row: PartnerRateRow): RateView {
   return {
     id: row.id,
     partner_id: row.partnerId,
+    tariff_id: row.tariffId,
     operator_id: row.operatorId,
     termination_kind: row.terminationKind,
     region: row.region,

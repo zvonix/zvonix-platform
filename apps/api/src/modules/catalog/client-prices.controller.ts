@@ -53,7 +53,8 @@ interface TariffView {
   readonly alias_id: string;
   readonly display_name: string;
   readonly termination_kind: TerminationKind;
-  readonly operator_id: string;
+  /** Пусто — цена на все операторы (ADR-0056). */
+  readonly operator_id: string | null;
   readonly region: string | null;
   /** Шаг тарификации в секундах: единица — посекундно, шестьдесят — поминутно. */
   readonly billing_increment_seconds: number;

@@ -34,6 +34,7 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { AuditService } from '../audit/audit.service.js';
 import { BillingRepository } from '../billing/billing.repository.js';
 import { CatalogRepository } from '../catalog/catalog.repository.js';
+import { TariffService } from '../catalog/tariff.service.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
 import { MAX_GATEWAY_PORTS } from './schemas.js';
@@ -121,6 +122,7 @@ export class TelephonyService {
     private readonly audit: AuditService,
     private readonly resolver: OperatorResolverService,
     private readonly catalog: CatalogRepository,
+    private readonly tariffs: TariffService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -1045,13 +1047,26 @@ export class TelephonyService {
     requiresRecording: boolean,
     region?: string,
   ): Promise<SimCandidate[]> {
-    return this.repository.findSimCandidates(operatorId, {
+    const found = await this.repository.findSimCandidates({
       excludeRecordingIncapable: requiresRecording,
       // Без региона покрытие не проверяется: вопрос «какие SIM вообще подходят»
       // задаётся и тогда, когда номера ещё нет. С регионом — то же, что увидит
       // маршрутизация (ADR-0022).
       ...(region === undefined ? {} : { region }),
     });
+    // Под оператора подходит SIM, в тарифе которой есть цена на него (ADR-0056) —
+    // тот же отсев, что у маршрутизации.
+    const rates = await this.tariffs.ratesFor(
+      found.map((candidate) => ({
+        partnerId: candidate.gateway.partnerId,
+        tariffId: candidate.sim.tariffId ?? candidate.gateway.tariffId,
+        terminationKind: 'sim',
+      })),
+      operatorId,
+      region ?? null,
+      new Date(),
+    );
+    return found.filter((_, index) => rates[index] !== undefined);
   }
 
   // --- SIP-транки (ADR-0039) ---------------------------------------------------

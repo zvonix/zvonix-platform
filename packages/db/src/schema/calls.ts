@@ -25,6 +25,7 @@ import { clients } from './billing.js';
 import { operators } from './catalog.js';
 import { nodes } from './nodes.js';
 import { channels, gateways, simCards } from './telephony.js';
+import { partnerRates } from './tariffs.js';
 
 export const calls = pgTable(
   'calls',
@@ -43,6 +44,16 @@ export const calls = pgTable(
     channelId: idRef<'channel'>()
       .notNull()
       .references(() => channels.id, { onDelete: 'restrict' }),
+
+    /**
+     * Строка цены партнёра, выбранная при маршрутизации
+     * ([ADR-0056](../../../../docs/adr/0056-tarify-partnyora.md)). По ней тарифицируется
+     * CDR: смена тарифа у SIM посреди разговора не меняет цену идущего вызова. Пусто —
+     * отказ до выбора SIM или вызов, маршрутизированный до этой версии.
+     */
+    partnerRateId: idRef<'partnerRate'>().references(() => partnerRates.id, {
+      onDelete: 'restrict',
+    }),
 
     /** Узел, обслуживающий вызов. */
     nodeId: idRef<'node'>()

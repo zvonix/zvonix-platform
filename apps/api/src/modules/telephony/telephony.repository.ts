@@ -105,7 +105,7 @@ export interface TrunkCandidate {
 export type TerminationCandidate = SimCandidate | TrunkCandidate;
 
 /**
- * Кандидат на терминацию вызова: годная SIM нужного оператора вместе с портом,
+ * Кандидат на терминацию вызова: годная SIM вместе с портом,
  * в котором она стоит, и шлюзом, к которому этот порт относится.
  */
 export interface SimCandidate {
@@ -1095,7 +1095,6 @@ export class TelephonyRepository {
    * список закрытый, пустой означает «все регионы».
    */
   async findSimCandidates(
-    operatorId: Id<'operator'>,
     options: {
       channelId?: ChannelId;
       excludeRecordingIncapable?: boolean;
@@ -1119,8 +1118,10 @@ export class TelephonyRepository {
   ): Promise<SimCandidate[]> {
     const channelId = options.channelId;
 
+    // Оператора карты здесь нет: куда SIM звонит, решает цена в её тарифе
+    // ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)) — отсев по цене
+    // делает маршрутизация, одним запросом на всех кандидатов.
     const conditions = [
-      eq(simCards.operatorId, operatorId),
       inArray(simCards.status, [...USABLE_SIM_STATUSES]),
       inArray(gatewayPorts.state, [...USABLE_PORT_STATES]),
       eq(gateways.status, 'active'),

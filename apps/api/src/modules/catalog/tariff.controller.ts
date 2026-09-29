@@ -5,7 +5,7 @@
  * остаётся целой, а звонок, тарифицированный вчера, не переоценивается сегодняшней ценой.
  */
 
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { Money, parseId, REFERENCE_CALL_SECONDS } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
@@ -17,10 +17,12 @@ import {
   addPartnerRateSchema,
   addPriceBandSchema,
   priceCallSchema,
+  createTariffSchema,
+  updateTariffSchema,
 } from './schemas.js';
 import type { CommissionRuleRow, PriceBandRow } from './tariff.repository.js';
 import { TariffService, type BandViolation } from './tariff.service.js';
-import { toRateView, type RateView } from './views.js';
+import { toRateView, toTariffView, type RateView, type TariffView } from './views.js';
 
 interface PriceBandView {
   readonly id: string;
@@ -49,10 +51,15 @@ export class TariffController {
     @Body(zodBody(addPartnerRateSchema)) body: z.infer<typeof addPartnerRateSchema>,
     @CurrentUser() actor: Principal,
   ): Promise<{ rate: RateView }> {
+    const partnerId = parseId(body.partnerId, 'partner');
     const row = await this.tariffs.addPartnerRate(
       {
-        partnerId: parseId(body.partnerId, 'partner'),
-        operatorId: parseId(body.operatorId, 'operator'),
+        partnerId,
+        tariffId:
+          body.tariffId === undefined
+            ? (await this.tariffs.defaultTariff(partnerId)).id
+            : parseId(body.tariffId, 'partnerTariff'),
+        operatorId: body.operatorId == null ? null : parseId(body.operatorId, 'operator'),
         terminationKind: body.terminationKind,
         region: body.region ?? null,
         pricePerMinute: body.pricePerMinute,
@@ -73,6 +80,58 @@ export class TariffController {
   async listPartnerRates(@Query('partnerId') partnerId: string): Promise<{ rates: RateView[] }> {
     const rows = await this.tariffs.listPartnerRates(parseId(partnerId, 'partner'));
     return { rates: rows.map(toRateView) };
+  }
+
+  // --- Тарифы партнёра (ADR-0056) ---------------------------------------------
+
+  @Roles('admin', 'support')
+  @Get('partners/:partnerId/tariffs')
+  async listTariffs(@Param('partnerId') partnerId: string): Promise<{ tariffs: TariffView[] }> {
+    const rows = await this.tariffs.listTariffs(parseId(partnerId, 'partner'));
+    return { tariffs: rows.map(toTariffView) };
+  }
+
+  @Roles('admin')
+  @Post('partners/:partnerId/tariffs')
+  async createTariff(
+    @Param('partnerId') partnerId: string,
+    @Body(zodBody(createTariffSchema)) body: z.infer<typeof createTariffSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ tariff: TariffView }> {
+    const row = await this.tariffs.createTariff(parseId(partnerId, 'partner'), body.name, actor);
+    return { tariff: toTariffView(row) };
+  }
+
+  @Roles('admin')
+  @Patch('partners/:partnerId/tariffs/:tariffId')
+  async updateTariff(
+    @Param('partnerId') partnerId: string,
+    @Param('tariffId') tariffId: string,
+    @Body(zodBody(updateTariffSchema)) body: z.infer<typeof updateTariffSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ tariff: TariffView }> {
+    const row = await this.tariffs.updateTariff(
+      parseId(partnerId, 'partner'),
+      parseId(tariffId, 'partnerTariff'),
+      body,
+      actor,
+    );
+    return { tariff: toTariffView(row) };
+  }
+
+  @Roles('admin')
+  @Delete('partners/:partnerId/tariffs/:tariffId')
+  @HttpCode(204)
+  async deleteTariff(
+    @Param('partnerId') partnerId: string,
+    @Param('tariffId') tariffId: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<void> {
+    await this.tariffs.deleteTariff(
+      parseId(partnerId, 'partner'),
+      parseId(tariffId, 'partnerTariff'),
+      actor,
+    );
   }
 
   // --- Коридоры цен (ADR-0023) -------------------------------------------------

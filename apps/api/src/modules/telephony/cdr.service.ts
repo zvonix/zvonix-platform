@@ -129,6 +129,9 @@ export class CdrService {
       terminationKindOf(gateway.type),
       cdr.billableSeconds,
       call.startedAt,
+      // Строка цены, выбранная при маршрутизации (ADR-0056): смена тарифа у SIM посреди
+      // разговора цену этого вызова не меняет.
+      call.partnerRateId,
     );
 
     // Минуты засчитываются в окно **начала вызова**, а не приёма CDR: узел мог держать

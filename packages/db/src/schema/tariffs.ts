@@ -18,7 +18,16 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, integer, pgTable, text } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  check,
+  index,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import {
   ROUNDING_MODES,
   TERMINATION_KINDS,
@@ -28,6 +37,36 @@ import {
 import { createdAt, idRef, money, oneOf, primaryId, timestamptz } from '../columns.js';
 import { clients, partners } from './billing.js';
 import { operators } from './catalog.js';
+
+/**
+ * Тариф партнёра — именованный набор его цен
+ * ([ADR-0056](../../../docs/adr/0056-tarify-partnyora.md)).
+ *
+ * Тариф выбирается у шлюза и меняется у SIM; не выбран — действует тариф партнёра
+ * по умолчанию. Он у партнёра ровно один: частичный уникальный индекс, а не соглашение
+ * в коде — два «по умолчанию» дали бы вызову две цены.
+ */
+export const partnerTariffs = pgTable(
+  'partner_tariffs',
+  {
+    id: primaryId<'partnerTariff'>(),
+    partnerId: idRef<'partner'>()
+      .notNull()
+      .references(() => partners.id, { onDelete: 'restrict' }),
+    name: text().notNull(),
+    isDefault: boolean().notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check('partner_tariffs_name_length', sql`char_length(${t.name}) between 1 and 60`),
+    // Имя уникально у партнёра без учёта регистра: «Основной» и «основной» в списке
+    // выбора неразличимы.
+    uniqueIndex('partner_tariffs_partner_name_idx').on(t.partnerId, sql`lower(${t.name})`),
+    uniqueIndex('partner_tariffs_default_idx')
+      .on(t.partnerId)
+      .where(sql`${t.isDefault}`),
+  ],
+);
 
 /**
  * Цена партнёра и его правила тарификации.
@@ -43,10 +82,20 @@ export const partnerRates = pgTable(
       .notNull()
       .references(() => partners.id, { onDelete: 'restrict' }),
 
-    /** Оператор назначения. Берётся из ответа резолвера, а не из префикса номера. */
-    operatorId: idRef<'operator'>()
-      .notNull()
-      .references(() => operators.id, { onDelete: 'restrict' }),
+    /**
+     * Тариф, которому принадлежит цена (ADR-0056). Пусто допускается только на время
+     * выкладки: прежний код пишет цены без тарифа; `NOT NULL` — следующей миграцией,
+     * которая сначала переносит такие строки в тариф по умолчанию.
+     */
+    tariffId: idRef<'partnerTariff'>().references(() => partnerTariffs.id, {
+      onDelete: 'restrict',
+    }),
+
+    /**
+     * Оператор назначения. Берётся из ответа резолвера, а не из префикса номера.
+     * Пусто — **цена на все операторы** тарифа; цена с оператором её уточняет (ADR-0056).
+     */
+    operatorId: idRef<'operator'>().references(() => operators.id, { onDelete: 'restrict' }),
 
     /**
      * Регион назначения. Пусто — «любой регион».
@@ -114,6 +163,14 @@ export const partnerRates = pgTable(
     // Горячий путь: действующий тариф партнёра по направлению на момент вызова.
     // Способ терминации — сразу после партнёра: отбор кандидатов спрашивает цены
     // пачкой по способу, а не по одному направлению.
+    // Отбор кандидатов спрашивает цены по тарифам SIM (ADR-0056).
+    index('partner_rates_tariff_lookup_idx').on(
+      t.tariffId,
+      t.terminationKind,
+      t.operatorId,
+      t.regionKey,
+      t.effectiveFrom,
+    ),
     index('partner_rates_lookup_idx').on(
       t.partnerId,
       t.terminationKind,

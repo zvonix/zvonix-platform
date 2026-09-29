@@ -106,8 +106,17 @@ const tariffAmount = z
 export const addPartnerRateSchema = z.object({
   partnerId: z.uuid('должен быть идентификатором'),
 
-  /** Оператор назначения. Из ответа резолвера, а не из префикса номера (ADR-0013). */
-  operatorId: z.uuid('должен быть идентификатором'),
+  /**
+   * Тариф, которому принадлежит цена (ADR-0056). Не назван — тариф партнёра
+   * по умолчанию.
+   */
+  tariffId: z.uuid('должен быть идентификатором').optional(),
+
+  /**
+   * Оператор назначения. Из ответа резолвера, а не из префикса номера (ADR-0013).
+   * `null` или отсутствие — **цена на все операторы** тарифа (ADR-0056).
+   */
+  operatorId: z.uuid('должен быть идентификатором').nullable().optional(),
 
   /**
    * Через что уходит вызов по этой цене (ADR-0040).
@@ -169,6 +178,21 @@ export const addPartnerRateSchema = z.object({
 export const partnerOwnRateSchema = addPartnerRateSchema
   .omit({ partnerId: true, effectiveFrom: true })
   .extend({ terminationKind: z.enum(TERMINATION_KINDS) });
+
+/** Имя тарифа партнёра (ADR-0056): то, что партнёр выбирает у шлюза и SIM. */
+const tariffName = z.string().trim().min(1, 'не может быть пустым').max(60, 'не длиннее 60 знаков');
+
+export const createTariffSchema = z.object({ name: tariffName });
+
+/**
+ * Изменение тарифа: имя и (или) «сделать тарифом по умолчанию». Снять умолчание нельзя —
+ * только назначить другой тариф: без тарифа по умолчанию SIM осталась бы без цен.
+ */
+export const updateTariffSchema = z
+  .object({ name: tariffName.optional(), isDefault: z.literal(true).optional() })
+  .refine((body) => body.name !== undefined || body.isDefault !== undefined, {
+    message: 'нечего менять',
+  });
 
 /**
  * Коридор цены по направлению (ADR-0023).

@@ -155,10 +155,12 @@ export class RoutingService {
       return this.reject(request, destination, channel.id, null, null, 'destination_blocked');
     }
 
-    // 3. Оператор. Гадать запрещено: неверный оператор — платный звонок с денег
-    //    партнёра, а промежуточного варианта нет (ADR-0013).
+    // 3. Оператор: подтверждённый, иначе владелец диапазона
+    //    ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)). По нему ищется цена
+    //    в тарифе SIM; куда SIM звонит, решает её тариф, а не совпадение сетей. Номера
+    //    нет в плане нумерации вовсе — отказ: такой почти всегда набран с ошибкой.
     const resolution = await this.resolveWithinBudget(destination);
-    if (!resolution.confirmed || resolution.serving === undefined) {
+    if (resolution.serving === undefined) {
       return this.reject(request, destination, channel.id, null, null, 'operator_unconfirmed');
     }
     const operatorId = resolution.serving.id;
@@ -199,7 +201,7 @@ export class RoutingService {
     // 5. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
     //    регион — партнёров, которые в него не звонят (ADR-0022).
     const [simCandidates, trunkCandidates] = await Promise.all([
-      this.telephony.findSimCandidates(operatorId, {
+      this.telephony.findSimCandidates({
         channelId: channel.id,
         excludeRecordingIncapable: channel.recordingRequired,
         region,
@@ -268,7 +270,8 @@ export class RoutingService {
 
     // 7. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM
     //    и инкрементом счётчиков лимитов.
-    let claimed: { call: CallRow; candidate: TerminationCandidate } | undefined;
+    let claimed:
+      { call: CallRow; candidate: TerminationCandidate; rateId: Id<'partnerRate'> } | undefined;
     try {
       claimed = await this.claimSim(request, destination, channel, operatorId, region, ordered, {
         rules: applicableLimits,
@@ -315,10 +318,8 @@ export class RoutingService {
     //    покрывать любой исход, иначе он не защищает ни от чего.
     try {
       const priced = await this.tariffs.priceReservation(
-        claimed.candidate.gateway.partnerId,
+        claimed.rateId,
         routable.clientId,
-        { operatorId, region },
-        terminationKindOf(claimed.candidate.gateway.type),
         this.config.MAX_CALL_DURATION_SECONDS,
         new Date(),
       );
@@ -343,7 +344,9 @@ export class RoutingService {
       // Выбранная SIM первой: узел пробует кандидатов по порядку.
       candidates: [
         claimed.candidate,
-        ...ordered.filter((other) => !isSameCandidate(other, claimed.candidate)),
+        ...ordered
+          .map((entry) => entry.candidate)
+          .filter((other) => !isSameCandidate(other, claimed.candidate)),
       ],
       recordingRequired: channel.recordingRequired,
       callerId: channel.callerId,
@@ -384,44 +387,29 @@ export class RoutingService {
     operatorId: Id<'operator'>,
     region: string | null,
     at: Date,
-  ): Promise<TerminationCandidate[]> {
-    // Цены спрашиваются по способу терминации: у одного партнёра с SIM и транком два
-    // прайса, различающихся в разы (ADR-0040). Два запроса, а не один на всех: способ —
-    // часть ключа цены, и смешивать их в одном ответе значило бы выбирать наугад.
-    const byKind = await Promise.all(
-      TERMINATION_KINDS.map(async (kind) => {
-        const partnerIds = [
-          ...new Set(
-            candidates
-              .filter((candidate) => terminationKindOf(candidate.gateway.type) === kind)
-              .map((candidate) => candidate.gateway.partnerId),
-          ),
-        ];
-        return [
-          kind,
-          await this.tariffs.effectiveRates(partnerIds, operatorId, kind, region, at),
-        ] as const;
-      }),
+  ): Promise<PricedCandidate[]> {
+    // Цена — своя у каждого кандидата: по тарифу SIM, иначе тарифу шлюза, иначе тарифу
+    // партнёра по умолчанию (ADR-0056). Способ терминации — часть ключа цены (ADR-0040).
+    const rates = await this.tariffs.ratesFor(
+      candidates.map((candidate) => ({
+        partnerId: candidate.gateway.partnerId,
+        tariffId:
+          (candidate.kind === 'sim' ? candidate.sim.tariffId : null) ?? candidate.gateway.tariffId,
+        terminationKind: terminationKindOf(candidate.gateway.type),
+      })),
+      operatorId,
+      region,
+      at,
     );
-    const rates = new Map(byKind);
 
-    const priced = candidates
-      .map((candidate) => ({
-        candidate,
-        price: rates
-          .get(terminationKindOf(candidate.gateway.type))
-          ?.get(candidate.gateway.partnerId)?.pricePerMinute,
-      }))
-      .filter(
-        (entry): entry is { candidate: TerminationCandidate; price: MoneyAmount } =>
-          entry.price !== undefined,
-      );
+    const priced = candidates.flatMap((candidate, index) => {
+      const rate = rates[index];
+      return rate === undefined ? [] : [{ candidate, price: rate.pricePerMinute, rateId: rate.id }];
+    });
 
     // Устойчивая сортировка: при полном равенстве остаётся порядок, заданный запросом,
     // то есть по номеру SIM. Без него один и тот же отбор давал бы разный перебор.
-    return priced
-      .sort((left, right) => compareCandidates(left, right))
-      .map((entry) => entry.candidate);
+    return priced.sort((left, right) => compareCandidates(left, right));
   }
 
   private async explainEmptyCandidates(
@@ -431,7 +419,7 @@ export class RoutingService {
     nodeId: Id<'node'>,
   ): Promise<CallFailureReason> {
     if (channel.recordingRequired) {
-      const withoutRecording = await this.telephony.findSimCandidates(operatorId, {
+      const withoutRecording = await this.telephony.findSimCandidates({
         channelId: channel.id,
         region,
         nodeId,
@@ -439,7 +427,7 @@ export class RoutingService {
       if (withoutRecording.length > 0) return 'recording_required';
     }
 
-    const anyRegion = await this.telephony.findSimCandidates(operatorId, {
+    const anyRegion = await this.telephony.findSimCandidates({
       channelId: channel.id,
       excludeRecordingIncapable: channel.recordingRequired,
       nodeId,
@@ -450,7 +438,7 @@ export class RoutingService {
     // регистрации: партнёр не включил оборудование, оно потеряло связь или пришло
     // на соседний узел. Для поддержки это разговор о железе, а не о недостатке SIM,
     // и смешивать их значит отправлять её не туда.
-    const anyNode = await this.telephony.findSimCandidates(operatorId, {
+    const anyNode = await this.telephony.findSimCandidates({
       channelId: channel.id,
       excludeRecordingIncapable: channel.recordingRequired,
     });
@@ -471,12 +459,14 @@ export class RoutingService {
     channel: ChannelRow,
     operatorId: Id<'operator'>,
     region: string | null,
-    candidates: readonly TerminationCandidate[],
+    candidates: readonly PricedCandidate[],
     limits: { rules: readonly LimitRuleRow[]; at: Date },
-  ): Promise<{ call: CallRow; candidate: TerminationCandidate } | undefined> {
+  ): Promise<
+    { call: CallRow; candidate: TerminationCandidate; rateId: Id<'partnerRate'> } | undefined
+  > {
     const channelId = channel.id;
     return this.callsRepository.db.transaction(async (tx) => {
-      for (const candidate of candidates) {
+      for (const { candidate, rateId } of candidates) {
         // Ёмкость у SIM и транка своя, но правило одно: блокировка строки, потом счёт
         // открытых вызовов. У SIM предел ставит оператор, у транка — договор
         // с провайдером, и превышение обоих одинаково кончается сорванными вызовами.
@@ -496,6 +486,8 @@ export class RoutingService {
             region,
             simCardId: candidate.kind === 'sim' ? candidate.sim.id : null,
             gatewayId: candidate.gateway.id,
+            // Цена, по которой вызов пошёл: по ней и тарифицируется (ADR-0056).
+            partnerRateId: rateId,
             status: 'routing',
             failureReason: null,
           },
@@ -520,7 +512,7 @@ export class RoutingService {
           verify: true,
         });
 
-        return { call, candidate };
+        return { call, candidate, rateId };
       }
       return undefined;
     });
@@ -549,6 +541,7 @@ export class RoutingService {
    */
   private async resolveWithinBudget(destination: Msisdn): Promise<{
     confirmed: boolean;
+    /** Обслуживающий оператор, а без подтверждения — владелец диапазона (ADR-0056). */
     serving: { id: Id<'operator'> } | undefined;
     region: string | null;
   }> {
@@ -564,17 +557,27 @@ export class RoutingService {
         this.logger.warn('Определение оператора не уложилось в бюджет', {
           budget_ms: OPERATOR_LOOKUP_BUDGET_MS,
         });
-        return { confirmed: false, serving: undefined, region: null };
+        return this.rangeOwnerOf(destination);
       }
       return {
         confirmed: resolution.confirmed,
-        serving: resolution.serving,
+        serving: resolution.serving ?? resolution.rangeOwner,
         region: resolution.region ?? null,
       };
     } catch (cause) {
       this.logger.error('Определение оператора не удалось', cause);
-      return { confirmed: false, serving: undefined, region: null };
+      return this.rangeOwnerOf(destination);
     }
+  }
+
+  /** Владелец диапазона по своему плану нумерации — запасной путь без сети. */
+  private async rangeOwnerOf(destination: Msisdn): Promise<{
+    confirmed: boolean;
+    serving: { id: Id<'operator'> } | undefined;
+    region: string | null;
+  }> {
+    const plan = await this.resolver.fromNumberingPlan(destination);
+    return { confirmed: false, serving: plan.rangeOwner, region: plan.region ?? null };
   }
 
   /** Отказ по известному каналу пишется вызовом: иначе разбирать нечего. */
@@ -698,10 +701,14 @@ const WITHOUT_PRIORITY = Number.MAX_SAFE_INTEGER;
  * делить трафик поровну между дешёвым и дорогим значит половину вызовов делать дороже
  * без причины.
  */
-function compareCandidates(
-  left: { candidate: TerminationCandidate; price: MoneyAmount },
-  right: { candidate: TerminationCandidate; price: MoneyAmount },
-): number {
+/** Кандидат с ценой, по которой через него пойдёт вызов (ADR-0056). */
+interface PricedCandidate {
+  readonly candidate: TerminationCandidate;
+  readonly price: MoneyAmount;
+  readonly rateId: Id<'partnerRate'>;
+}
+
+function compareCandidates(left: PricedCandidate, right: PricedCandidate): number {
   const byPriority =
     (left.candidate.priority ?? WITHOUT_PRIORITY) - (right.candidate.priority ?? WITHOUT_PRIORITY);
   if (byPriority !== 0) return byPriority;
