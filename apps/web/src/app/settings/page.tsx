@@ -92,6 +92,7 @@ function SettingsForm() {
   const groups = [
     { title: 'Почта', prefix: 'mail.' },
     { title: 'Проверка «я не робот»', prefix: 'captcha.' },
+    { title: 'Партнёры', prefix: 'partners.' },
   ];
   const known = new Set(groups.map((group) => group.prefix));
   const rest = settings.data.settings.filter(

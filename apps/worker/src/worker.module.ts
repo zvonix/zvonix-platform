@@ -8,6 +8,7 @@
 
 import { Module } from '@nestjs/common';
 import {
+  ApplicationsModule,
   BillingModule,
   CatalogModule,
   IdentityModule,
@@ -37,6 +38,8 @@ import { BackgroundTasks } from './tasks.js';
     RecordingsModule,
     // Почта берёт узел, порт и пароль отсюда (ADR-0031).
     SettingsModule,
+    // Допуск партнёров без администратора (partners.auto_approve).
+    ApplicationsModule,
   ],
   providers: [BackgroundTasks, SchedulerService],
 })

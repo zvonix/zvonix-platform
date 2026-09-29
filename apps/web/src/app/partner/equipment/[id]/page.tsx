@@ -20,6 +20,8 @@ import { moment } from '@/lib/format';
 import { GATEWAY_TYPE_NAME } from '@/lib/labels';
 import {
   EQUIPMENT_KEY,
+  PARTNER_BLOCKED,
+  usePartnerStatus,
   type Connection,
   type Equipment,
   type Gateway,
@@ -149,6 +151,12 @@ function GatewayCard({ id }: { id: string }) {
  * (владелец, 2026-09-25).
  */
 function NextStep({ gateway }: { gateway: Gateway }) {
+  const partnerStatus = usePartnerStatus();
+  // Партнёр не допущен — главное и единственное, что стоит сказать: остальные советы
+  // уведут искать ошибку в устройстве.
+  if (partnerStatus !== undefined && partnerStatus !== 'verified') {
+    return <p className="text-warn">{PARTNER_BLOCKED[partnerStatus]}</p>;
+  }
   const sims = gateway.ports.flatMap((port) => (port.sim === null ? [] : [port.sim]));
   const byLine = gateway.registration_mode === 'port';
   const off =

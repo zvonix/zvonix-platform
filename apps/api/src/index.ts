@@ -61,3 +61,5 @@ export {
   RecordingsService,
   RETENTION_SWEEP_LIMIT,
 } from './modules/recordings/recordings.service.js';
+export { ApplicationsModule } from './modules/applications/applications.module.js';
+export { ApplicationsService } from './modules/applications/applications.service.js';

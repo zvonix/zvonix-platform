@@ -14,6 +14,7 @@
 
 import { Injectable } from '@nestjs/common';
 import {
+  ApplicationsService,
   CdrService,
   NumberingPlanService,
   EXPIRY_SWEEP_LIMIT,
@@ -154,6 +155,13 @@ const RESOLUTION_REFRESH_SECONDS = 300;
  */
 const MAIL_CLEANUP_SECONDS = 3600;
 
+/**
+ * Как часто площадка одобряет заявки партнёров сама, когда это включено
+ * (`partners.auto_approve`). Раз в минуту: человек, подтвердивший почту, ждёт кабинет,
+ * а выключенная настройка стоит одного чтения из кэша.
+ */
+const AUTO_APPROVE_SECONDS = 60;
+
 @Injectable()
 export class BackgroundTasks {
   constructor(
@@ -167,6 +175,7 @@ export class BackgroundTasks {
     private readonly mail: MailService,
     private readonly numberingPlan: NumberingPlanService,
     private readonly resolver: OperatorResolverService,
+    private readonly applications: ApplicationsService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -229,6 +238,11 @@ export class BackgroundTasks {
         name: 'mail.purge-sent',
         everySeconds: MAIL_CLEANUP_SECONDS,
         run: (now) => this.mail.purgeSent(now),
+      },
+      {
+        name: 'applications.auto-approve-partners',
+        everySeconds: AUTO_APPROVE_SECONDS,
+        run: () => this.applications.autoApprovePartners(),
       },
       {
         name: 'auth-tokens.purge-expired',

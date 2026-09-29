@@ -348,3 +348,77 @@ describe('вторая заявка из кабинета', () => {
     expect(mine.map((row) => row.status).sort()).toEqual(['approved', 'withdrawn']);
   });
 });
+
+describe('допуск партнёров без администратора (partners.auto_approve)', () => {
+  async function setAutoApprove(value: boolean): Promise<void> {
+    const response = await api().inject({
+      method: 'PUT',
+      url: '/settings',
+      headers: admin,
+      payload: { settings: { 'partners.auto_approve': value } },
+    });
+    expect(response.statusCode).toBe(200);
+  }
+
+  async function runAutoApprove(): Promise<number> {
+    const { ApplicationsService } = await import('./applications.service.js');
+    return api().get(ApplicationsService).autoApprovePartners();
+  }
+
+  afterAll(async () => {
+    await setAutoApprove(false);
+  });
+
+  it('выключено — заявка ждёт администратора, как всегда', async () => {
+    const { applicationId } = await applicant(PARTNER_APPLICATION);
+    expect(await runAutoApprove()).toBe(0);
+    const status = await withDatabase(async (execute) => {
+      const found = await execute(sql`select status from applications where id = ${applicationId}`);
+      return (found.rows[0] as { status: string }).status;
+    });
+    expect(status).toBe('submitted');
+  });
+
+  it('включено — партнёр получает кабинет и сразу допущен к работе, журнал без администратора', async () => {
+    await setAutoApprove(true);
+    const { email, applicationId } = await applicant(PARTNER_APPLICATION);
+    const unconfirmed = await applicant(PARTNER_APPLICATION, { confirmed: false });
+    const taxi = await applicant(CLIENT_APPLICATION);
+
+    expect(await runAutoApprove()).toBeGreaterThanOrEqual(1);
+
+    const cabinets = (
+      await api().inject({ method: 'GET', url: '/me/cabinets', headers: await login(email) })
+    ).json<{ cabinets: { partner: { display_name: string; status: string } | null } }>().cabinets;
+    expect(cabinets.partner).toEqual(
+      expect.objectContaining({
+        status: 'verified',
+        display_name: expect.stringMatching(/^Партнёр \d{6}$/u) as string,
+      }),
+    );
+
+    const rows = await withDatabase(async (execute) => {
+      const found = await execute(sql`
+        select a.id, a.status, a.decided_by_user_id as decided_by from applications a
+        where a.id in (${applicationId}, ${unconfirmed.applicationId}, ${taxi.applicationId})
+      `);
+      return found.rows as { id: string; status: string; decided_by: string | null }[];
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get(applicationId)).toMatchObject({ status: 'approved', decided_by: null });
+    // Без подтверждённой почты кабинет не открывается — иначе его получал бы любой,
+    // вписавший чужой адрес. Службу такси площадка сама не одобряет вовсе.
+    expect(byId.get(unconfirmed.applicationId)?.status).toBe('submitted');
+    expect(byId.get(taxi.applicationId)?.status).toBe('submitted');
+
+    const audit = await withDatabase(async (execute) => {
+      const found = await execute(sql`
+        select actor_user_id, after from audit_log
+        where action = 'application.approved' and entity_id = ${applicationId}
+      `);
+      return found.rows[0] as { actor_user_id: string | null; after: { automatic: boolean } };
+    });
+    expect(audit).toMatchObject({ actor_user_id: null, after: { automatic: true } });
+    expect(await outbox(email)).toContain('application_approved');
+  });
+});
