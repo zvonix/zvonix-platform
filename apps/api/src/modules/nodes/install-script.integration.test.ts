@@ -7,8 +7,15 @@
  * даст синтаксически битый скрипт, который выяснится на живой машине.
  */
 
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -117,7 +124,7 @@ describe('установщик узла', () => {
     // Пока `sed` на узле искал целую метку, площадка успевала заменить и её: в конфигурацию
     // FreeSWITCH уходило `@@CONTROL_PLANE@@/node/directory`, и узел не спросил бы маршрут.
     const start = script.indexOf('conf_file() {');
-    const end = script.indexOf('# Прежний каталог не удаляется');
+    const end = script.indexOf('# --- Подмена набора и перезапуск');
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
 
@@ -241,5 +248,200 @@ describe('установщик узла', () => {
     expect(checks).toBeGreaterThan(0);
     expect(enroll).toBeGreaterThan(checks);
     expect(install).toBeGreaterThan(enroll);
+  });
+});
+
+/**
+ * Обновление узла вместе с выпуском (ADR-0051, ревизия 2026-09-29): настоящий bash
+ * над участками собранного скрипта, FreeSWITCH и systemd подменены функциями.
+ * Проверяется то, что стоит звонков: перезапуск только при изменившемся наборе
+ * и только без разговоров на узле, откат при неподнявшемся профиле.
+ */
+describe('обновление узла', () => {
+  const slash = (value: string) => value.replaceAll('\\', '/');
+
+  /** Участок скрипта между двумя метками — целиком, как он придёт на узел. */
+  function slice(from: string, to: string): string {
+    const start = script.indexOf(from);
+    const end = script.indexOf(to, start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    return script.slice(start, end);
+  }
+
+  function run(file: string, args: readonly string[] = [], env: NodeJS.ProcessEnv = {}) {
+    const result = spawnSync('bash', [file, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    });
+    return { status: result.status ?? -1, output: result.stdout + result.stderr };
+  }
+
+  /**
+   * Подмена набора. `installed` — узел уже обновлялся раньше: штатный набор отложен
+   * в `.before-zvonix`, и прежний наш уйдёт в `.previous`, откуда его можно вернуть.
+   */
+  function swap(options: {
+    changed: boolean;
+    calls: number;
+    profile: 'up' | 'down';
+    gateways?: boolean;
+    installed?: boolean;
+  }) {
+    const root = slash(mkdtempSync(path.join(tmpdir(), 'zvonix-update-')));
+    const conf = `${root}/conf`;
+    const stage = `${conf}.zvonix-new`;
+    const directories = [conf, `${conf}/zvonix-gateways`, `${stage}/zvonix-gateways`];
+    if (options.installed === true) directories.push(`${conf}.before-zvonix`);
+    for (const directory of [...directories, `${root}/state`]) {
+      mkdirSync(directory, { recursive: true });
+    }
+    writeFileSync(`${conf}/vars.xml`, 'old', 'utf8');
+    writeFileSync(`${stage}/vars.xml`, options.changed ? 'new' : 'old', 'utf8');
+    if (options.gateways === true) {
+      writeFileSync(`${conf}/zvonix-gateways/trunk.xml`, 'trunk', 'utf8');
+    }
+    const log = `${root}/systemctl.log`;
+    const file = `${root}/swap.sh`;
+    writeFileSync(
+      file,
+      [
+        'set -euo pipefail',
+        'die() { echo "$*" >&2; exit 1; }',
+        'sleep() { :; }',
+        'chown() { :; }',
+        `systemctl() { echo "$*" >> '${log}'; }`,
+        'fs_cli() {',
+        '  case "$*" in',
+        `    *"show calls count"*) printf '\\n${String(options.calls)} total.\\n' ;;`,
+        options.profile === 'up'
+          ? `    *"sofia status"*) echo '  zvonix  profile  sip:mod_sofia@192.0.2.1:5060  RUNNING (0)' ;;`
+          : `    *"sofia status"*) echo '  internal  profile  sip:mod_sofia@192.0.2.1:5080  RUNNING (0)' ;;`,
+        '    *) return 0 ;;',
+        '  esac',
+        '}',
+        'MODE=update',
+        'DRAIN_SECONDS=10',
+        'ESL_PASSWORD=e',
+        `STATE_DIR='${root}/state'`,
+        `CONF_DIR='${conf}'`,
+        `STAGE='${stage}'`,
+        slice('# --- Подмена набора и перезапуск', '# --- Защита от подбора паролей SIP'),
+        'echo "POSTPONED=$CONF_POSTPONED"',
+      ].join('\n'),
+      'utf8',
+    );
+    const result = run(file);
+    return {
+      ...result,
+      log: existsSync(log) ? readFileSync(log, 'utf8') : '',
+      read: (name: string) => {
+        const target = `${root}/${name}`;
+        return existsSync(target) ? readFileSync(target, 'utf8') : undefined;
+      },
+    };
+  }
+
+  it('набор не изменился — FreeSWITCH не перезапускается', () => {
+    const result = swap({ changed: false, calls: 3, profile: 'up' });
+    expect(result.output).toContain('POSTPONED=no');
+    expect(result.status).toBe(0);
+    expect(result.log).not.toContain('restart');
+    expect(result.read('conf.zvonix-new/vars.xml')).toBeUndefined();
+  });
+
+  it('набор изменился, а звонки не кончаются — конфигурация откладывается, разговоры целы', () => {
+    const result = swap({ changed: true, calls: 2, profile: 'up' });
+    expect(result.output).toContain('POSTPONED=yes');
+    expect(result.status).toBe(0);
+    expect(result.log).not.toContain('restart');
+    expect(result.read('conf/vars.xml')).toBe('old');
+  });
+
+  it('набор изменился, звонков нет — подмена, перезапуск, транки агента на месте', () => {
+    const result = swap({
+      changed: true,
+      calls: 0,
+      profile: 'up',
+      gateways: true,
+      installed: true,
+    });
+    expect(result.output).toContain('POSTPONED=no');
+    expect(result.status).toBe(0);
+    expect(result.log).toContain('restart freeswitch');
+    expect(result.read('conf/vars.xml')).toBe('new');
+    expect(result.read('conf/zvonix-gateways/trunk.xml')).toBe('trunk');
+    expect(result.read('conf.previous/vars.xml')).toBe('old');
+  });
+
+  it('с новым набором профиль не поднялся — прежний набор возвращается', () => {
+    const result = swap({ changed: true, calls: 0, profile: 'down', installed: true });
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain('возвращена прежняя');
+    expect(result.read('conf/vars.xml')).toBe('old');
+    expect(result.read('conf.failed/vars.xml')).toBe('new');
+  });
+
+  /** Начало скрипта в режиме `--update`: откуда он берёт ключ и каталог конфигурации. */
+  function preamble(files: { nodeEnv?: string; heartbeat?: string }) {
+    const root = slash(mkdtempSync(path.join(tmpdir(), 'zvonix-preamble-')));
+    const etc = `${root}/etc`;
+    const conf = `${root}/conf`;
+    const bin = `${root}/bin`;
+    for (const directory of [etc, `${conf}/autoload_configs`, bin]) {
+      mkdirSync(directory, { recursive: true });
+    }
+    writeFileSync(`${conf}/autoload_configs/modules.conf.xml`, '<configuration/>', 'utf8');
+    writeFileSync(`${bin}/freeswitch`, '#!/bin/sh\n', { encoding: 'utf8', mode: 0o755 });
+    if (files.nodeEnv !== undefined) writeFileSync(`${etc}/node.env`, files.nodeEnv, 'utf8');
+    if (files.heartbeat !== undefined) {
+      writeFileSync(`${etc}/heartbeat.curl`, files.heartbeat, 'utf8');
+    }
+    const file = `${root}/preamble.sh`;
+    writeFileSync(
+      file,
+      [
+        'set -euo pipefail',
+        // Скрипт требует root; здесь проверяется разбор, а не права.
+        'id() { echo 0; }',
+        // Через pwd: в Git Bash путь «C:/…» разорвал бы PATH на двоеточии.
+        `PATH="$(cd '${bin}' && pwd):$PATH"`,
+        slice('MODE=install', 'require curl'),
+        'echo "KEY=$KEY_ID|$KEY_SECRET"',
+      ].join('\n'),
+      'utf8',
+    );
+    return run(file, ['--update'], { ZVONIX_CONF_DIR: conf, ZVONIX_NODE_ETC: etc });
+  }
+
+  it('без токена: ключ узла берётся из node.env', () => {
+    const result = preamble({ nodeEnv: 'KEY_ID=zvx_node_abc123def456\nKEY_SECRET=Se_cr-et\n' });
+    expect(result.output).toContain('KEY=zvx_node_abc123def456|Se_cr-et');
+    expect(result.status).toBe(0);
+  });
+
+  it('узел, поставленный до node.env: ключ — из конфигурации пульса', () => {
+    const result = preamble({
+      heartbeat: 'user = "zvx_node_abc123def456:Se_cr-et"\nurl = "https://cp/node/heartbeat"\n',
+    });
+    expect(result.output).toContain('KEY=zvx_node_abc123def456|Se_cr-et');
+    expect(result.status).toBe(0);
+  });
+
+  it('ключа на машине нет — отказ с причиной, а не узел без ключа', () => {
+    const result = preamble({});
+    expect(result.status).not.toBe(0);
+    expect(result.output).toContain('ключ узла на машине не найден');
+  });
+
+  it('выкладка площадки обновляет узел на той же машине и не падает из-за него', () => {
+    const deploy = readFileSync(
+      path.join(import.meta.dirname, '..', '..', '..', '..', '..', 'deploy', 'deploy.sh'),
+      'utf8',
+    );
+    expect(deploy).toContain('bash "$script" --update');
+    // До строки DEPLOY_OK: выкладка сообщает об узле, прежде чем сказать «готово».
+    expect(deploy.indexOf('update_local_node\n    first_run_hint')).toBeGreaterThan(0);
+    expect(deploy).toContain('узел АТС не обновлён — площадка работает');
   });
 });
