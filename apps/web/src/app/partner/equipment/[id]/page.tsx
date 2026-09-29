@@ -277,10 +277,13 @@ function LineSettings({
   connection: Connection;
   onIssued: (issued: IssuedLines) => void;
 }) {
+  // Порт 5060 у GOIP по умолчанию и отдельно не вводится; другой — пишется через двоеточие.
   const proxy =
     connection.port === 5060
       ? connection.server
       : `${connection.server}:${String(connection.port)}`;
+  const portNote =
+    connection.port === 5060 ? 'порт 5060 — по умолчанию, отдельно не вводится' : undefined;
   return (
     <div className="flex flex-col gap-3">
       <div className="flex max-w-[720px] flex-col gap-2">
@@ -289,8 +292,8 @@ function LineSettings({
         </p>
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-card p-3">
           <GoipField name="Config Mode" value="Config by Line" />
-          <GoipField name="SIP Proxy" value={proxy} copy />
-          <GoipField name="SIP Registrar" value={proxy} copy />
+          <GoipField name="SIP Proxy" value={proxy} copy note={portNote} />
+          <GoipField name="SIP Registrar" value={proxy} copy note={portNote} />
           <GoipField name="Re-register Period (s)" value="60" />
           <GoipField name="Outbound Proxy" value="пусто" empty />
           <GoipField name="Home Domain" value="пусто" empty />
@@ -364,16 +367,24 @@ function GoipField({
   value,
   copy = false,
   empty = false,
+  note,
 }: {
   name: string;
   value: string;
   copy?: boolean;
   empty?: boolean;
+  /** Пояснение серым после значения — не копируется вместе с ним. */
+  note?: string | undefined;
 }) {
   return (
     <>
       <dt className="text-muted-foreground">{name}</dt>
-      <dd className={`${copy ? 'num select-all' : ''} ${empty ? 'text-faint' : ''}`}>{value}</dd>
+      <dd>
+        <span className={`${copy ? 'num select-all' : ''} ${empty ? 'text-faint' : ''}`}>
+          {value}
+        </span>
+        {note !== undefined && <span className="text-muted-foreground"> · {note}</span>}
+      </dd>
     </>
   );
 }
