@@ -1,5 +1,6 @@
 'use client';
 
+import { goipLinePrefix } from '@zvonix/shared';
 import type { ReactNode } from 'react';
 import { OneTimeSecret } from '@/components/one-time-secret';
 
@@ -114,7 +115,8 @@ export function LineCredentials({
             <tr>
               <th className="pr-4 font-normal">Линия</th>
               <th className="pr-4 font-normal">Authentication ID, Phone Number</th>
-              <th className="font-normal">Password</th>
+              <th className="pr-4 font-normal">Password</th>
+              <th className="font-normal">Routing Prefix</th>
             </tr>
           </thead>
           <tbody>
@@ -122,7 +124,8 @@ export function LineCredentials({
               <tr key={line.port_id}>
                 <td className="num pr-4">Line {line.port_number}</td>
                 <td className="num select-all pr-4">{line.username}</td>
-                <td className="num select-all">{line.password}</td>
+                <td className="num select-all pr-4">{line.password}</td>
+                <td className="num select-all">{goipLinePrefix(line.port_number)}</td>
               </tr>
             ))}
           </tbody>

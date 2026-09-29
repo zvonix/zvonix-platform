@@ -346,8 +346,8 @@ SIP-транк подчиняется тому же правилу по той �
 
 | Способ | Набор в диалплане | Почему |
 |---|---|---|
-| `sim`, вход на шлюз | `[sip_invite_to_uri=<sip:99001<номер>@<realm>>]user/gw-a1b2c3d4e5f6@<realm>` | GOIP регистрируется **у нас**; линию выбирает префикс ([ADR-0053](../adr/0053-liniya-goip-po-prefiksu.md)) |
-| `sim`, вход по линиям | `[sip_invite_to_uri=<sip:<номер>@<realm>>]user/pt-k2m9x0a1b2c3@<realm>` | регистрируется каждая линия; набирается та, где стоит SIM ([ADR-0054](../adr/0054-vhod-po-liniyam-goip.md)) |
+| `sim`, вход на шлюз | `[zvonix_dial=99001<номер>]user/gw-a1b2c3d4e5f6@<realm>` | GOIP регистрируется **у нас**; линию выбирает префикс ([ADR-0053](../adr/0053-liniya-goip-po-prefiksu.md)) |
+| `sim`, вход по линиям | `[zvonix_dial=99001<номер>]user/pt-k2m9x0a1b2c3@<realm>` | регистрируется каждая линия; набирается та, где стоит SIM ([ADR-0054](../adr/0054-vhod-po-liniyam-goip.md)) |
 | `sip` | `sofia/gateway/gw-a1b2c3d4e5f6/79001234567` | к провайдеру регистрируемся **мы**, и он значится исходящим sofia-gateway ([node.md](node.md)) |
 
 Имя у транка и у GOIP со входом на шлюз одно и то же — `sip_username` шлюза;

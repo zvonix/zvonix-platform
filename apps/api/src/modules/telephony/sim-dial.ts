@@ -40,26 +40,31 @@ export function simDialTarget(
     if (port.sipUsername === null) {
       throw new Error(`У порта ${port.id} нет входа линии, а набирают именно его`);
     }
-    return { sipUsername: port.sipUsername, linePrefix: null };
+    // Префикс нужен и при входе по линиям: GOIP в Config by Line набирает номер из звонка,
+    // только если тот начинается с Routing Prefix линии; звонок на сам вход линии он
+    // принимает как двухступенчатый — отвечает сразу и ждёт номер тоном (живой GOIP,
+    // 2026-09-29).
+    return { sipUsername: port.sipUsername, linePrefix: goipLinePrefix(port.portNumber) };
   }
   return { sipUsername: gateway.sipUsername, linePrefix: goipLinePrefix(port.portNumber) };
 }
 
 /**
- * Строка набора для FreeSWITCH: `[sip_invite_to_uri=<sip:<набор>@realm>]user/<имя>@realm`.
+ * Строка набора для FreeSWITCH: `[zvonix_dial=<префикс><номер>]user/<вход>@realm`.
  *
- * **Номер — в заголовке `To`, адрес запроса — вход линии.** Раньше номер клали в адрес
- * запроса (`sip_invite_req_uri=sip:<номер>@realm`), и на живом узле (2026-09-25) это
- * сломалось дважды: FreeSWITCH отправлял такой запрос по адресу realm — то есть самому
- * себе, и до GOIP звонок не доходил; а направленный на GOIP, он получал `404`: GOIP
- * со входом по линиям ждёт в адресе запроса свой вход. С номером в `To` запрос уходит
- * по адресу регистрации линии (`user/…` → `sofia_contact`), и GOIP начинает набор —
- * проверено ручной пробой с узла.
+ * Куда и что набирать, решает строка набора из каталога (`directory-xml.ts`, `dial-string`):
+ * она берёт адрес регистрации входа (`sofia_contact`) и ставит в него вместо имени входа
+ * `zvonix_dial`. Получается `sip:99004<номер>@<адрес GOIP>` — запрос уходит прямо на GOIP,
+ * а номер с префиксом линии стоит там, где GOIP его читает.
+ *
+ * Как к этому пришли на живом узле (2026-09-25…29): номер в адресе запроса с realm уходил
+ * на сам узел; номер в `To` GOIP не читал и ждал тонового набора; номер без префикса
+ * на адрес линии получал `404`. Работает только префикс линии в адресе запроса на GOIP.
  *
  * Не экранирована: диалплан экранирует её под XML сам, команде ESL экранирование
  * не нужно — имя, префикс и номер здесь только из букв, цифр и дефиса.
  */
 export function simEndpoint(target: SimDialTarget, destination: string, realm: string): string {
   const dialled = `${target.linePrefix ?? ''}${destination}`;
-  return `[sip_invite_to_uri=<sip:${dialled}@${realm}>]user/${target.sipUsername}@${realm}`;
+  return `[zvonix_dial=${dialled}]user/${target.sipUsername}@${realm}`;
 }
