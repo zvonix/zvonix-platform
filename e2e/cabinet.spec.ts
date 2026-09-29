@@ -558,7 +558,8 @@ test.describe('оборудование одной таблицей, вход п
     await page.getByRole('link', { name: 'Открыть шлюз — порты и настройки →' }).click();
     // Настройки — построчно для каждой линии, теми же полями, что у линии в GOIP.
     const lines = page.getByRole('table', { name: 'Настройки линий' });
-    await expect(lines.getByRole('row', { name: /^Line 1 pt-/u })).toContainText('sip.');
+    // Префикс линии — в строке: без Routing Prefix GOIP ждёт тонового набора (2026-09-29).
+    await expect(lines.getByRole('row', { name: /^Line 1 pt-/u })).toContainText('99001');
     await expect(lines.getByRole('row', { name: /^Line 2 pt-/u })).toContainText('не на связи');
     const ports = page.getByRole('region', { name: 'Порты' });
 

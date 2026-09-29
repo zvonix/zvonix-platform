@@ -54,8 +54,8 @@ describe('диалплан с маршрутом', () => {
     // Разделитель `|` означает «пробовать по очереди»: перебор выполняет узел.
     // Номер — в строке запроса каждого плеча: у `user/…` там иначе имя учётной записи.
     expect(xml).toContain(
-      'data="[sip_invite_to_uri=&lt;sip:79001234567@sip.zvonix.test&gt;]user/gw-aaaaaaaaaaaa@sip.zvonix.test' +
-        '|[sip_invite_to_uri=&lt;sip:79001234567@sip.zvonix.test&gt;]user/gw-bbbbbbbbbbbb@sip.zvonix.test"',
+      'data="[zvonix_dial=79001234567]user/gw-aaaaaaaaaaaa@sip.zvonix.test' +
+        '|[zvonix_dial=79001234567]user/gw-bbbbbbbbbbbb@sip.zvonix.test"',
     );
   });
 
@@ -71,8 +71,8 @@ describe('диалплан с маршрутом', () => {
     });
     expect(() => parse(xml)).not.toThrow();
     expect(xml).toContain(
-      'data="[sip_invite_to_uri=&lt;sip:9900379001234567@sip.zvonix.test&gt;]user/gw-aaaaaaaaaaaa@sip.zvonix.test' +
-        '|[sip_invite_to_uri=&lt;sip:9900179001234567@sip.zvonix.test&gt;]user/gw-aaaaaaaaaaaa@sip.zvonix.test"',
+      'data="[zvonix_dial=9900379001234567]user/gw-aaaaaaaaaaaa@sip.zvonix.test' +
+        '|[zvonix_dial=9900179001234567]user/gw-aaaaaaaaaaaa@sip.zvonix.test"',
     );
   });
 
@@ -84,9 +84,7 @@ describe('диалплан с маршрутом', () => {
       candidates: [{ kind: 'sim' as const, sipUsername: 'pt-cccccccccccc', linePrefix: null }],
     });
     expect(() => parse(xml)).not.toThrow();
-    expect(xml).toContain(
-      'data="[sip_invite_to_uri=&lt;sip:79001234567@sip.zvonix.test&gt;]user/pt-cccccccccccc@sip.zvonix.test"',
-    );
+    expect(xml).toContain('data="[zvonix_dial=79001234567]user/pt-cccccccccccc@sip.zvonix.test"');
   });
 
   it('транк набирается через свой sofia-gateway, без префикса', () => {

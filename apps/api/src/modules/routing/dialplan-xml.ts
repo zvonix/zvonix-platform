@@ -145,8 +145,8 @@ export function routeDocument(plan: RoutePlan): string {
  * и набор идёт через шлюз с номером назначения.
  *
  * У зарегистрированного шлюза `user/…` отвечает, **куда** слать INVITE; номер с префиксом
- * линии уходит в заголовке `To` переменной плеча `sip_invite_to_uri` — в квадратных
- * скобках, потому что у каждого кандидата он свой. Почему не в адресе запроса — `simEndpoint`.
+ * линии — переменная плеча `zvonix_dial` в квадратных скобках, у каждого кандидата своя.
+ * Как она попадает в адрес запроса — `simEndpoint` и строка набора каталога.
  */
 function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
   if (candidate.kind === 'sip') {

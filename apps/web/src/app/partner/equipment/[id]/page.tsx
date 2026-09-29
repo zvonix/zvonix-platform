@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { goipLinePrefix } from '@zvonix/shared';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
@@ -258,13 +259,14 @@ function GatewaySettings({ gateway, connection }: { gateway: Gateway; connection
 }
 
 /**
- * Что ввести в каждую линию GOIP — построчно, теми же полями, что у линии в устройстве
+ * Что ввести в GOIP при входе по линиям — **полем в поле, как на странице Basic VoIP**
  * ([ADR-0054](../../../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
  *
- * Раньше при входе по линиям здесь стояли общие поля, а логин линии — в таблице портов,
- * и страница читалась как настройки всего шлюза (владелец, 2026-09-25). Сервер и порт
- * повторены в каждой строке намеренно: в GOIP их вводят у каждой линии заново. Логин —
- * сразу за линией: он единственный у линий разный и на телефоне не должен уезжать за край.
+ * Раньше здесь были только логин, сервер и порт, и партнёр, введя всё показанное, получал
+ * GOIP, который не набирает номер: без Routing Prefix линия принимает звонок площадки как
+ * двухступенчатый и ждёт тонового набора (владелец, 2026-09-29: «там нет ничего про префикс
+ * и про Config Mode»). Теперь — общие поля одним блоком в порядке страницы GOIP и таблица
+ * того, что у линий разное; ни одно поле, которое надо трогать, не остаётся за кадром.
  */
 function LineSettings({
   gateway,
@@ -275,15 +277,41 @@ function LineSettings({
   connection: Connection;
   onIssued: (issued: IssuedLines) => void;
 }) {
+  // Порт 5060 у GOIP по умолчанию и отдельно не вводится; другой — пишется через двоеточие.
+  const proxy =
+    connection.port === 5060
+      ? connection.server
+      : `${connection.server}:${String(connection.port)}`;
+  const portNote =
+    connection.port === 5060 ? 'порт 5060 — по умолчанию, отдельно не вводится' : undefined;
   return (
-    <div className="flex flex-col gap-2">
-      <p className="max-w-[720px]">
-        <span className="text-muted-foreground">Config Mode: </span>Config by Line
-        <span className="text-muted-foreground">
-          {' '}
-          — одна настройка на весь GOIP. Остальное вводится в каждую линию (Line 1, Line 2…) по
-          строке таблицы. Чтобы проверить одну SIM, достаточно первой строки и её карты в порту 1.
-        </span>
+    <div className="flex flex-col gap-3">
+      <div className="flex max-w-[720px] flex-col gap-2">
+        <p className="text-muted-foreground">
+          Configurations → Basic VoIP. Сначала общее — одинаково у всех линий:
+        </p>
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-card p-3">
+          <GoipField name="Config Mode" value="Config by Line" />
+          <GoipField name="SIP Proxy" value={proxy} copy note={portNote} />
+          <GoipField name="SIP Registrar" value={proxy} copy note={portNote} />
+          <GoipField name="Re-register Period (s)" value="60" />
+          <GoipField name="Outbound Proxy" value="пусто" empty />
+          <GoipField name="Home Domain" value="пусто" empty />
+          <GoipField name="Backup Server" value="Disable" />
+          <GoipField name="Prefix Match Mode" value="Match Callee" />
+          <GoipField name="Delete Callee Prefix while Dialing" value="Enable" />
+        </dl>
+        <p className="text-muted-foreground">
+          И на странице Configurations → Call Out:{' '}
+          <span className="text-foreground">Call OUT via GSM — Enable</span>, Dial Plan — пусто.
+        </p>
+      </div>
+
+      <p className="max-w-[720px] text-muted-foreground">
+        Потом каждая линия (Line 1, Line 2…) — по строке таблицы.{' '}
+        <span className="text-foreground">Routing Prefix обязателен</span>: по нему GOIP понимает,
+        что звонок площадки нужно набрать с этой линии; без него линия ждёт номер тоновым набором и
+        звонки не проходят.
       </p>
       <IssueMissingLines gateway={gateway} onIssued={onIssued} />
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
@@ -291,10 +319,10 @@ function LineSettings({
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Линия</TableHead>
-              <TableHead className="h-8">Authentication ID, Phone Number</TableHead>
-              <TableHead className="h-8">SIP Proxy, SIP Registrar Server</TableHead>
-              <TableHead className="h-8">Порт</TableHead>
+              <TableHead className="h-8">Authentication ID</TableHead>
               <TableHead className="h-8">Password</TableHead>
+              <TableHead className="h-8">Routing Prefix</TableHead>
+              <TableHead className="h-8">Phone Number</TableHead>
               <TableHead className="h-8">Связь</TableHead>
             </TableRow>
           </TableHeader>
@@ -305,14 +333,20 @@ function LineSettings({
                 <TableCell className="num select-all">
                   {port.sip_username ?? <span className="text-warn">вход не выдан</span>}
                 </TableCell>
-                <TableCell className="num select-all">{connection.server}</TableCell>
-                <TableCell className="num select-all">{connection.port}</TableCell>
                 <TableCell>
                   {port.sip_username !== null && (
                     <span className="flex items-center gap-2">
                       <span className="text-muted-foreground">показан при выдаче</span>
                       <NewLineAccount gateway={gateway} port={port} onIssued={onIssued} />
                     </span>
+                  )}
+                </TableCell>
+                <TableCell className="num select-all">{goipLinePrefix(port.port_number)}</TableCell>
+                <TableCell className="num">
+                  {port.sip_username === null ? (
+                    <span className="text-faint">—</span>
+                  ) : (
+                    <span className="text-muted-foreground">как Authentication ID</span>
                   )}
                 </TableCell>
                 <TableCell className={port.on_node ? 'text-muted-foreground' : 'text-warn'}>
@@ -324,6 +358,34 @@ function LineSettings({
         </Table>
       </div>
     </div>
+  );
+}
+
+/** Поле страницы GOIP: название как в устройстве, значение — что туда ввести. */
+function GoipField({
+  name,
+  value,
+  copy = false,
+  empty = false,
+  note,
+}: {
+  name: string;
+  value: string;
+  copy?: boolean;
+  empty?: boolean;
+  /** Пояснение серым после значения — не копируется вместе с ним. */
+  note?: string | undefined;
+}) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{name}</dt>
+      <dd>
+        <span className={`${copy ? 'num select-all' : ''} ${empty ? 'text-faint' : ''}`}>
+          {value}
+        </span>
+        {note !== undefined && <span className="text-muted-foreground"> · {note}</span>}
+      </dd>
+    </>
   );
 }
 

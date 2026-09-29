@@ -16,6 +16,9 @@ allowBuilds:
   # скрипт зависимости ради этого — лишняя поверхность.
   msgpackr-extract: false
 
+minimumReleaseAgeExclude:
+  - nodemailer@10.0.12
+
 # drizzle-kit тянет esbuild через устаревшие пакеты @esbuild-kit/*, застрявшие
 # на версии с известной уязвимостью (GHSA-67mh-4wv8-2f99). Она касается только
 # режима `esbuild --serve`, которым drizzle-kit не пользуется, но оставлять

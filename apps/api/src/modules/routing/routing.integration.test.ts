@@ -222,14 +222,15 @@ afterAll(async () => {
 });
 
 describe('вход по линиям GOIP (ADR-0054)', () => {
-  it('набирается вход линии, где стоит SIM, без префикса', async () => {
+  it('набирается вход линии, где стоит SIM, с префиксом этой линии', async () => {
     const env = await scenario({ registrationMode: 'port' });
     const decision = (await route(env.channel, env.destination)).json<Preview>();
 
     expect(decision.outcome).toBe('routed');
     expect(decision.candidates[0]?.sim_card_id).toBe(env.sim);
     expect(decision.candidates[0]?.sip_username).toMatch(/^pt-[a-z0-9]{12}$/);
-    expect(decision.candidates[0]?.line_prefix).toBeNull();
+    // Префикс и при входе по линиям: без него GOIP ждёт тонового набора (2026-09-29).
+    expect(decision.candidates[0]?.line_prefix).toBe('99001');
   });
 
   it('линия без регистрации — не кандидат, и отказ говорит о железе', async () => {
@@ -261,9 +262,7 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatch(
-      new RegExp(
-        `\\[sip_invite_to_uri=&lt;sip:${env.destination}@[^\\]]+&gt;\\]user/pt-[a-z0-9]{12}@`,
-      ),
+      new RegExp(`\\[zvonix_dial=99001${env.destination}\\]user/pt-[a-z0-9]{12}@`),
     );
     expect(response.body).not.toContain('user/gw-');
   });

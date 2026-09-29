@@ -320,7 +320,7 @@ describe('каталог для узла', () => {
     // Без строки набора `user/…` отвечает MANDATORY_IE_MISSING до всякого набора — так упал
     // первый тестовый звонок на живом узле (2026-09-25), и так падал бы любой вызов на шлюз.
     expect(response.body).toContain(
-      '<param name="dial-string" value="{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})}"/>',
+      '<param name="dial-string" value="${regex(${sofia_contact(*/${dialed_user}@${dialed_domain})}|^(sofia/[^/]+/)sip:[^@]+(@.*)$|%1sip:${zvonix_dial}%2)}"/>',
     );
   });
 

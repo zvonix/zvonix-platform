@@ -343,9 +343,7 @@ describe('тестовый звонок с SIM', () => {
     // Набрана линия карты — так же, как её набирает маршрутизация (ADR-0054).
     const command = commands.at(-1) ?? '';
     expect(command).toContain(`zvonix_test_call=${call.id}`);
-    expect(command).toContain(
-      `[sip_invite_to_uri=<sip:79130001122@${REALM}>]user/${port(1).username}@${REALM}`,
-    );
+    expect(command).toContain(`[zvonix_dial=9900179130001122]user/${port(1).username}@${REALM}`);
     expect(command).toMatch(/^originate \{.*originate_timeout=40.*\}\[/u);
     expect(command).toContain('&playback(tone_stream://');
   });
