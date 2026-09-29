@@ -369,10 +369,14 @@ test.describe('партнёр добавляет своё оборудовани
 
     // Пароли линий показываются один раз, а шлюз встаёт строкой в общую таблицу.
     await expect(page.getByText('Входы линий шлюза «GOIP на проверке»')).toBeVisible();
-    await expect(page.getByRole('row', { name: /GOIP на проверке/u })).toContainText('карт 0 из 4');
+    await expect(page.getByRole('region', { name: 'GOIP на проверке', exact: true })).toContainText(
+      'карт 0 из 4',
+    );
 
     await page.getByRole('link', { name: /Открыть шлюз/u }).click();
-    await expect(page.getByRole('heading', { name: 'GOIP на проверке' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'GOIP на проверке', exact: true }),
+    ).toBeVisible();
 
     // Сервер, порт и режим видны всегда: раньше — только в минуту добавления.
     const connection = page.getByRole('region', { name: 'Подключение' });
@@ -527,7 +531,7 @@ test.describe('оборудование одной таблицей, вход п
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
     await page.getByRole('button', { name: 'Записал, закрыть' }).click();
 
-    const group = page.getByRole('rowgroup').filter({ hasText: 'GOIP в общей таблице' });
+    const group = page.getByRole('region', { name: 'GOIP в общей таблице', exact: true });
     await expect(group.getByRole('button', { name: 'Вставить SIM' })).toHaveCount(3);
 
     await group
@@ -601,7 +605,7 @@ test.describe('оборудование одной таблицей, вход п
     expect(created.status()).toBe(201);
     await page.reload();
 
-    const group = page.getByRole('rowgroup').filter({ hasText: 'GOIP для пробы' });
+    const group = page.getByRole('region', { name: 'GOIP для пробы', exact: true });
     await group.getByRole('button', { name: 'Вставить SIM' }).click();
     const insert = page.getByRole('dialog');
     await insert.getByRole('combobox').selectOption({ label: '79135550001 · МегаФон' });

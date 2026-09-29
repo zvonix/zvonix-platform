@@ -30,7 +30,7 @@ import {
   type Sim,
 } from './equipment';
 import { AddGateway, SimActions } from './manage';
-import { PORT_COLUMNS, PortHeader, PortRow } from './ports';
+import { PORT_COLUMNS, PortHeader, PortRow, Presence } from './ports';
 
 export default function PartnerEquipmentPage() {
   return (
@@ -198,8 +198,13 @@ function PartnerEquipment() {
 }
 
 /**
- * Все шлюзы с портами — одна таблица. Шлюз сворачивается, когда его карты сейчас
- * не нужны; по умолчанию раскрыто всё — ради этого таблица и заведена.
+ * У каждого шлюза своя карточка с таблицей его портов (владелец, 2026-09-29: «может
+ * разделить таблицы на каждый GOIP своя таблица?»). В общей таблице шапки шлюзов терялись
+ * среди строк портов, а пустые слоты занимали бо́льшую часть экрана.
+ *
+ * Пустые порты сворачиваются в одну строку, когда на шлюзе уже есть карты: тогда важны
+ * карты, а слоты — по запросу. У шлюза без единой карты порты видны все: его как раз
+ * заполняют, и прятать то, куда вставлять, значило бы добавлять лишний шаг.
  */
 function GatewaysTable({
   gateways,
@@ -221,7 +226,7 @@ function GatewaysTable({
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       {gateways.length > 1 && (
         <div>
           <Button
@@ -235,96 +240,147 @@ function GatewaysTable({
           </Button>
         </div>
       )}
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
-        <Table>
-          <TableHeader>
-            <PortHeader />
-          </TableHeader>
-          {gateways.map((gateway) => (
-            <TableBody key={gateway.id} className="border-t border-border">
-              <GatewayRow
-                gateway={gateway}
-                expanded={!collapsed.has(gateway.id)}
-                onToggle={() => {
-                  toggle(gateway.id);
-                }}
-              />
-              {!collapsed.has(gateway.id) &&
-                (gateway.ports.length === 0 ? (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={PORT_COLUMNS} className="text-muted-foreground">
-                      Портов нет — добавьте их на странице шлюза.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  gateway.ports.map((port) => (
-                    <PortRow key={port.id} gateway={gateway} port={port} spare={spare} />
-                  ))
-                ))}
-            </TableBody>
-          ))}
-        </Table>
-      </div>
+      {gateways.map((gateway) => (
+        <GatewayCard
+          key={gateway.id}
+          gateway={gateway}
+          spare={spare}
+          expanded={!collapsed.has(gateway.id)}
+          onToggle={() => {
+            toggle(gateway.id);
+          }}
+        />
+      ))}
     </div>
   );
 }
 
-/** Строка шлюза во всю ширину: что это, в каком состоянии, на связи ли, сколько карт. */
-function GatewayRow({
+function GatewayCard({
   gateway,
+  spare,
   expanded,
   onToggle,
 }: {
   gateway: Gateway;
+  spare: readonly Sim[];
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const filled = gateway.ports.filter((port) => port.sim !== null).length;
+  const [showEmpty, setShowEmpty] = useState(false);
+  const filled = gateway.ports.filter((port) => port.sim !== null);
+  const empty = gateway.ports.filter((port) => port.sim === null);
+  const foldable = filled.length > 0 && empty.length > 0;
+  const visible = foldable && !showEmpty ? filled : gateway.ports;
   const Chevron = expanded ? ChevronDown : ChevronRight;
+
   return (
-    <TableRow className="bg-muted/40 hover:bg-muted/40">
-      <TableCell colSpan={PORT_COLUMNS} className="py-2">
-        {/*
-          Прилипает к левому краю и не шире экрана: на телефоне таблица прокручивается вбок,
-          и сведения о шлюзе иначе уезжали бы за край вместе с дальними столбцами.
-        */}
-        <div className="sticky left-2 flex max-w-[calc(100vw-4.5rem)] flex-wrap items-center gap-x-4 gap-y-1 sm:max-w-none">
-          <Button
-            variant="ghost"
-            size="xs"
-            aria-expanded={expanded}
-            aria-label={`${expanded ? 'Свернуть' : 'Раскрыть'} порты шлюза «${gateway.name}»`}
-            onClick={onToggle}
-          >
-            <Chevron aria-hidden className="size-4" />
-          </Button>
+    <section
+      aria-label={gateway.name}
+      className="overflow-hidden rounded-lg border border-border bg-card"
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-muted/40 px-3 py-2">
+        <Button
+          variant="ghost"
+          size="xs"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Свернуть' : 'Раскрыть'} порты шлюза «${gateway.name}»`}
+          onClick={onToggle}
+        >
+          <Chevron aria-hidden className="size-4" />
+        </Button>
+        <h3 className="min-w-0 font-semibold [overflow-wrap:anywhere]">
           <Link
             href={`/partner/equipment/${gateway.id}`}
-            className="min-w-0 font-semibold text-primary underline-offset-4 [overflow-wrap:anywhere] hover:underline"
+            className="text-primary underline-offset-4 hover:underline"
           >
             {gateway.name}
           </Link>
-          <span className="text-muted-foreground">
-            {GATEWAY_TYPE_NAME[gateway.type]}
-            {gateway.model !== null && ` · ${gateway.model}`}
-            {gateway.type === 'goip' && ` · ${REGISTRATION_MODE_NAME[gateway.registration_mode]}`}
-          </span>
-          <span>{gatewayStateName(gateway)}</span>
-          <span className={gateway.on_node ? 'text-muted-foreground' : 'text-warn'}>
-            {gateway.on_node ? `на связи · ${moment(gateway.registered_at)}` : 'не на связи'}
-          </span>
-          <span className="text-muted-foreground">
-            карт <span className="num">{filled}</span> из{' '}
-            <span className="num">{gateway.ports.length}</span>
-          </span>
-          <Link
-            href={`/partner/equipment/${gateway.id}`}
-            className="ml-auto text-primary underline-offset-4 hover:underline"
-          >
-            Настройки →
-          </Link>
-        </div>
-      </TableCell>
-    </TableRow>
+        </h3>
+        <span className="text-muted-foreground">
+          {GATEWAY_TYPE_NAME[gateway.type]}
+          {gateway.model !== null && ` · ${gateway.model}`}
+          {gateway.type === 'goip' && ` · ${REGISTRATION_MODE_NAME[gateway.registration_mode]}`}
+        </span>
+        <span>{gatewayStateName(gateway)}</span>
+        <Presence
+          online={gateway.on_node}
+          title={gateway.on_node ? `отметка ${moment(gateway.registered_at)}` : undefined}
+        />
+        <span className="text-muted-foreground">
+          карт <span className="num">{filled.length}</span> из{' '}
+          <span className="num">{gateway.ports.length}</span>
+        </span>
+        <Link
+          href={`/partner/equipment/${gateway.id}`}
+          className="ml-auto text-primary underline-offset-4 hover:underline"
+        >
+          Настройки →
+        </Link>
+      </div>
+
+      {expanded &&
+        (gateway.ports.length === 0 ? (
+          <p className="px-3 py-2 text-muted-foreground">
+            Портов нет — добавьте их на странице шлюза.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <PortHeader />
+              </TableHeader>
+              <TableBody>
+                {visible.map((port) => (
+                  <PortRow key={port.id} gateway={gateway} port={port} spare={spare} />
+                ))}
+                {foldable && (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell colSpan={PORT_COLUMNS} className="text-muted-foreground">
+                      {!showEmpty && (
+                        <>
+                          Пустые порты:{' '}
+                          <span className="num">
+                            {portRanges(empty.map((port) => port.port_number))}
+                          </span>
+                          {' · '}
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        className="text-primary underline-offset-4 hover:underline"
+                        onClick={() => {
+                          setShowEmpty((current) => !current);
+                        }}
+                      >
+                        {showEmpty ? 'Скрыть пустые порты' : 'Показать — вставить SIM'}
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        ))}
+    </section>
   );
+}
+
+/** Номера портов короткой записью: `2, 3, 5–8`. */
+function portRanges(numbers: readonly number[]): string {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let index = 0;
+  while (index < sorted.length) {
+    const start = sorted[index] ?? 0;
+    let end = start;
+    while (sorted[index + 1] === end + 1) {
+      index += 1;
+      end += 1;
+    }
+    if (end === start) parts.push(String(start));
+    else if (end === start + 1) parts.push(`${String(start)}, ${String(end)}`);
+    else parts.push(`${String(start)}–${String(end)}`);
+    index += 1;
+  }
+  return parts.join(', ');
 }
