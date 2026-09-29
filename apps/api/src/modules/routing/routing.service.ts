@@ -10,7 +10,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   DomainError,
-  TERMINATION_KINDS,
   dialledDigits,
   type CallDestination,
   normalizeMsisdn,
@@ -571,7 +570,7 @@ export class RoutingService {
         this.logger.warn('Определение оператора не уложилось в бюджет', {
           budget_ms: OPERATOR_LOOKUP_BUDGET_MS,
         });
-        return this.rangeOwnerOf(destination);
+        return await this.rangeOwnerOf(destination);
       }
       return {
         confirmed: resolution.confirmed,

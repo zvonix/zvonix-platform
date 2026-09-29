@@ -28,7 +28,10 @@ import { TERMINATION_KIND_NAME } from '@/lib/labels';
 
 interface Rate {
   readonly id: string;
-  readonly operator_id: string;
+  /** Пусто — строка, записанная до тарифов: цена тарифа по умолчанию (ADR-0056). */
+  readonly tariff_id: string | null;
+  /** Пусто — цена на все операторы. */
+  readonly operator_id: string | null;
   readonly termination_kind: TerminationKind;
   readonly region: string | null;
   readonly price_per_minute: string;
@@ -50,10 +53,31 @@ interface Rate {
  * Записи не редактируются, а добавляются: вызов, тарифицированный вчера, не должен
  * переоцениваться сегодняшней ценой. Поэтому в списке видна вся история, свежее сверху.
  */
+interface Tariff {
+  readonly id: string;
+  readonly name: string;
+  readonly is_default: boolean;
+}
+
+/** Значение пункта «Все операторы»: цена без оператора (ADR-0056). */
+const ALL_OPERATORS = '*';
+
 export function PartnerRates({ partnerId }: { partnerId: string }) {
   const canChange = useCanChange();
   const queryClient = useQueryClient();
   const operators = useOperators();
+
+  // Тарифы партнёра (ADR-0056): цена принадлежит тарифу, тариф выбирается у шлюза и SIM.
+  const tariffs = useQuery({
+    queryKey: ['partner-tariffs', partnerId],
+    queryFn: () => request<{ tariffs: Tariff[] }>(`/partners/${partnerId}/tariffs`),
+  });
+  const tariffName = (id: string | null): string => {
+    const rows = tariffs.data?.tariffs ?? [];
+    const found =
+      id === null ? rows.find((row) => row.is_default) : rows.find((row) => row.id === id);
+    return found?.name ?? '—';
+  };
 
   const list = useQuery({
     queryKey: ['partner-rates', partnerId],
@@ -79,7 +103,10 @@ export function PartnerRates({ partnerId }: { partnerId: string }) {
         <h3 className="font-semibold">Цены по направлениям</h3>
         {canChange && (
           <FormDialog label="Назначить цену" title="Новая цена" variant="outline">
-            <NewRateForm onAdd={(draft) => add.mutateAsync(draft)} />
+            <NewRateForm
+              tariffs={tariffs.data?.tariffs ?? []}
+              onAdd={(draft) => add.mutateAsync(draft)}
+            />
           </FormDialog>
         )}
       </div>
@@ -100,6 +127,7 @@ export function PartnerRates({ partnerId }: { partnerId: string }) {
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className="h-8">Тариф</TableHead>
               <TableHead className="h-8">Оператор</TableHead>
               <TableHead className="h-8">Через что</TableHead>
               <TableHead className="h-8">Регион</TableHead>
@@ -114,7 +142,7 @@ export function PartnerRates({ partnerId }: { partnerId: string }) {
           <TableBody>
             {list.isPending && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={9} className="text-muted-foreground">
+                <TableCell colSpan={10} className="text-muted-foreground">
                   Загружаем…
                 </TableCell>
               </TableRow>
@@ -122,9 +150,14 @@ export function PartnerRates({ partnerId }: { partnerId: string }) {
 
             {rates.map((rate) => (
               <TableRow key={rate.id}>
+                <TableCell>{tariffName(rate.tariff_id)}</TableCell>
                 <TableCell>
-                  {operators.nameOf(rate.operator_id) ?? (
-                    <span className="num text-faint">{rate.operator_id}</span>
+                  {rate.operator_id === null ? (
+                    <span className="font-semibold">Все операторы</span>
+                  ) : (
+                    (operators.nameOf(rate.operator_id) ?? (
+                      <span className="num text-faint">{rate.operator_id}</span>
+                    ))
                   )}
                 </TableCell>
                 <TableCell>{TERMINATION_KIND_NAME[rate.termination_kind]}</TableCell>
@@ -157,7 +190,10 @@ export function PartnerRates({ partnerId }: { partnerId: string }) {
 }
 
 interface RateDraft {
-  readonly operatorId: string;
+  /** Не назван — тариф партнёра по умолчанию. */
+  readonly tariffId?: string;
+  /** `null` — цена на все операторы. */
+  readonly operatorId: string | null;
   readonly terminationKind: TerminationKind;
   readonly region?: string;
   readonly pricePerMinute: string;
@@ -168,9 +204,16 @@ interface RateDraft {
 }
 
 /** Назначение цены — поля окна «Новая цена». */
-function NewRateForm({ onAdd }: { onAdd: (draft: RateDraft) => Promise<unknown> }) {
+function NewRateForm({
+  tariffs,
+  onAdd,
+}: {
+  tariffs: readonly Tariff[];
+  onAdd: (draft: RateDraft) => Promise<unknown>;
+}) {
   const operators = useOperators();
-  const [operatorId, setOperatorId] = useState('');
+  const [tariffId, setTariffId] = useState('');
+  const [operatorId, setOperatorId] = useState(ALL_OPERATORS);
   const [terminationKind, setTerminationKind] = useState<TerminationKind>('sim');
   const [region, setRegion] = useState('');
   const [pricePerMinute, setPricePerMinute] = useState('');
@@ -185,7 +228,8 @@ function NewRateForm({ onAdd }: { onAdd: (draft: RateDraft) => Promise<unknown> 
       canSubmit={operatorId !== '' && pricePerMinute.trim() !== ''}
       onSubmit={() =>
         onAdd({
-          operatorId,
+          ...(tariffId === '' ? {} : { tariffId }),
+          operatorId: operatorId === ALL_OPERATORS ? null : operatorId,
           terminationKind,
           ...(region.trim() === '' ? {} : { region: region.trim() }),
           pricePerMinute: numberFromInput(pricePerMinute),
@@ -196,6 +240,23 @@ function NewRateForm({ onAdd }: { onAdd: (draft: RateDraft) => Promise<unknown> 
         })
       }
     >
+      <DialogField label="Тариф">
+        <select
+          value={tariffId}
+          onChange={(event) => {
+            setTariffId(event.target.value);
+          }}
+          className="h-9 rounded-md border border-input bg-transparent px-2"
+        >
+          <option value="">по умолчанию</option>
+          {tariffs.map((tariff) => (
+            <option key={tariff.id} value={tariff.id}>
+              {tariff.name}
+            </option>
+          ))}
+        </select>
+      </DialogField>
+
       <DialogField label="Оператор">
         <select
           value={operatorId}
@@ -204,7 +265,7 @@ function NewRateForm({ onAdd }: { onAdd: (draft: RateDraft) => Promise<unknown> 
           }}
           className="h-9 rounded-md border border-input bg-transparent px-2"
         >
-          <option value="">выберите оператора</option>
+          <option value={ALL_OPERATORS}>Все операторы</option>
           {operators.rows.map((operator) => (
             <option key={operator.id} value={operator.id}>
               {operator.name}

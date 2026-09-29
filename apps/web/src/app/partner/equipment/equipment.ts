@@ -28,6 +28,8 @@ export interface Sim {
   readonly max_concurrent_calls: number;
   /** Пусто — оператор карты не подтверждён источником; карта при этом включается и звонит. */
   readonly operator_confirmed_at: string | null;
+  /** Свой тариф карты; пусто — как у шлюза (ADR-0056). */
+  readonly tariff_id: string | null;
 }
 
 export interface Port {
@@ -55,6 +57,8 @@ export interface Gateway {
   readonly model: string | null;
   /** `port` — у каждой линии свой вход, `gateway` — один вход на шлюз (ADR-0054). */
   readonly registration_mode: GatewayRegistrationMode;
+  /** Тариф всех карт шлюза без своего; пусто — тариф по умолчанию (ADR-0056). */
+  readonly tariff_id: string | null;
   /** Имя SIP, под которым шлюз регистрируется. Пароль не отдаётся никогда. */
   readonly sip_username: string;
   /**

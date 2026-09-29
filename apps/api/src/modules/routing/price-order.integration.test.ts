@@ -514,7 +514,7 @@ describe('тарифы партнёра (ADR-0056)', () => {
     );
     // По этой строке тарифицируется CDR: смена тарифа SIM посреди разговора цену
     // этого вызова не меняет.
-    expect(stored.rows[0]?.['partner_rate_id']).toBe(rate);
+    expect((stored.rows[0] as { partner_rate_id: string } | undefined)?.partner_rate_id).toBe(rate);
   }, 120_000);
 
   it('оператор не подтверждён — цена по владельцу диапазона', async () => {

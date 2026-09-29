@@ -10,20 +10,10 @@ import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { TERMINATION_KIND_NAME } from '@/lib/labels';
 import { money, numberFromInput } from '@/lib/money';
+import { PARTNER_RATES_KEY, type OperatorChoice, type Tariff } from '@/lib/tariffs';
 
-/**
- * Направление, открытое площадкой, — как его отдаёт `GET /partner/rates`.
- *
- * Здесь только те, по которым коридор задан: чего в списке нет, того и назначить
- * нельзя. Рамки — **общие** для направления; если по региону задан свой коридор,
- * точные числа придут в отказе.
- */
-interface Direction {
-  readonly operator_id: string;
-  readonly operator_name: string;
-  readonly min_price: string;
-  readonly max_price: string;
-}
+/** Значение пункта «Все операторы» в списке: цена без оператора (ADR-0056). */
+const ALL_OPERATORS = '*';
 
 interface Draft {
   operatorId: string;
@@ -36,7 +26,7 @@ interface Draft {
 }
 
 const EMPTY: Draft = {
-  operatorId: '',
+  operatorId: ALL_OPERATORS,
   terminationKind: 'sim',
   region: '',
   pricePerMinute: '',
@@ -46,51 +36,51 @@ const EMPTY: Draft = {
 };
 
 /**
- * Назначение своей цены — первое, что партнёр в этой площадке меняет сам.
+ * Назначение цены в тарифе ([ADR-0056](../../../../../../docs/adr/0056-tarify-partnyora.md)).
  *
  * Коридор стоит **рядом с полем**, а не в отказе после отправки: без рамок человек
  * вводит число вслепую ([ADR-0023](../../../../../../docs/adr/0023-koridory-cen.md)).
- * Направление без коридора здесь не выбирается вовсе — площадка его ещё не открыла,
- * и назначить там цену нельзя ни партнёру, ни через форму.
+ * Направление без коридора открыто — коридор площадка ставит там, где хочет.
  *
  * Стоимость эталонного вызова не считается в браузере: кабинет деньги показывает,
  * а не вычисляет ([money.ts](../../../lib/money.ts)). Когда тариф не помещается
  * в коридор, точные числа приходят в отказе — считает их та же функция, которой
  * тарифицируется настоящий вызов.
  */
-export function SetPrice({ directions }: { directions: readonly Direction[] }) {
+export function SetPrice({
+  tariff,
+  operators,
+  bandsEnabled,
+}: {
+  tariff: Tariff;
+  operators: readonly OperatorChoice[];
+  bandsEnabled: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
   return (
-    <div className="flex flex-wrap items-baseline gap-3">
-      <FormDialog
-        label="Назначить цену"
-        title="Назначить цену"
-        description="Цена начинает действовать сразу и не переоценивает прошлое."
-        variant="outline"
-        disabled={directions.length === 0}
-        open={open}
-        onOpenChange={(next) => {
-          // Пока цена отправляется, окно не закрывается: иначе ответ пришёл бы в пустоту.
-          if (!pending) setOpen(next);
+    <FormDialog
+      label="Назначить цену"
+      title={`Цена в тарифе «${tariff.name}»`}
+      description="Цена начинает действовать сразу на все карты с этим тарифом и не переоценивает прошлое."
+      size="sm"
+      open={open}
+      onOpenChange={(next) => {
+        // Пока цена отправляется, окно не закрывается: иначе ответ пришёл бы в пустоту.
+        if (!pending) setOpen(next);
+      }}
+    >
+      <PriceForm
+        tariff={tariff}
+        operators={operators}
+        bandsEnabled={bandsEnabled}
+        onPending={setPending}
+        onSaved={() => {
+          setOpen(false);
         }}
-      >
-        <PriceForm
-          directions={directions}
-          onPending={setPending}
-          onSaved={() => {
-            setOpen(false);
-          }}
-        />
-      </FormDialog>
-      {directions.length === 0 && (
-        <span className="text-muted-foreground">
-          Площадка не открыла ни одного направления с коридором цен — назначать цену пока не по
-          чему.
-        </span>
-      )}
-    </div>
+      />
+    </FormDialog>
   );
 }
 
@@ -101,25 +91,31 @@ export function SetPrice({ directions }: { directions: readonly Direction[] }) {
  * строка отказа окна их не знает.
  */
 function PriceForm({
-  directions,
+  tariff,
+  operators,
+  bandsEnabled,
   onPending,
   onSaved,
 }: {
-  directions: readonly Direction[];
+  tariff: Tariff;
+  operators: readonly OperatorChoice[];
+  bandsEnabled: boolean;
   onPending: (pending: boolean) => void;
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Draft>(EMPTY);
 
-  const chosen = directions.find((direction) => direction.operator_id === draft.operatorId);
+  const everyone = draft.operatorId === ALL_OPERATORS;
+  const chosen = operators.find((operator) => operator.operator_id === draft.operatorId);
 
   const save = useMutation({
     mutationFn: () =>
       request<{ rate: { id: string } }>('/partner/rates', {
         method: 'POST',
         body: {
-          operatorId: draft.operatorId,
+          tariffId: tariff.id,
+          operatorId: everyone ? null : draft.operatorId,
           terminationKind: draft.terminationKind,
           // Пустой регион означает «любой», и отправлять пустую строку нельзя:
           // схема требует осмысленное название, а не пробел.
@@ -140,7 +136,7 @@ function PriceForm({
     },
     onSuccess: () => {
       onSaved();
-      void queryClient.invalidateQueries({ queryKey: ['partner', 'rates'] });
+      void queryClient.invalidateQueries({ queryKey: PARTNER_RATES_KEY });
     },
   });
 
@@ -153,7 +149,7 @@ function PriceForm({
       }}
     >
       <div className="grid min-h-0 gap-3 overflow-y-auto px-5 pb-4 sm:grid-cols-2">
-        <DialogField label="Оператор">
+        <DialogField label="Куда">
           <select
             required
             autoFocus
@@ -163,10 +159,10 @@ function PriceForm({
             }}
             className="h-9 w-full rounded-md border border-input bg-transparent px-2"
           >
-            <option value="">выберите</option>
-            {directions.map((direction) => (
-              <option key={direction.operator_id} value={direction.operator_id}>
-                {direction.operator_name}
+            <option value={ALL_OPERATORS}>Все операторы</option>
+            {operators.map((operator) => (
+              <option key={operator.operator_id} value={operator.operator_id}>
+                {operator.operator_name}
               </option>
             ))}
           </select>
@@ -225,7 +221,7 @@ function PriceForm({
           />
         </DialogField>
 
-        <DialogField label="Шаг, с">
+        <DialogField label="Шаг, с" hint="1 — посекундно, 60 — поминутно">
           <Input
             type="number"
             className="num"
@@ -251,14 +247,9 @@ function PriceForm({
           />
         </DialogField>
 
-        {chosen !== undefined && (
-          <p className="text-muted-foreground sm:col-span-2">
-            Коридор по этому направлению: {money(chosen.min_price)} — {money(chosen.max_price)}.
-            Сравнивается не цена за минуту, а стоимость вызова в 60 секунд по всему тарифу — плата
-            за соединение и минимальная длительность входят в неё. Если по региону задан свой
-            коридор, он строже этого, и точные числа придут в отказе.
-          </p>
-        )}
+        <p className="text-muted-foreground sm:col-span-2">
+          <BandNote everyone={everyone} chosen={chosen} bandsEnabled={bandsEnabled} />
+        </p>
 
         {save.error !== null && (
           <div className="sm:col-span-2">
@@ -268,9 +259,8 @@ function PriceForm({
 
         <p className="text-muted-foreground sm:col-span-2">
           Цена начинает действовать сразу и не переоценивает прошлое: прежняя строка остаётся в
-          истории, а вызовы, тарифицированные по ней, пересчитаны не будут. В списке — только
-          направления, открытые площадкой: по остальным цену не назначить, и просить её об этом
-          нужно отдельно.
+          истории, а вызовы, тарифицированные по ней, пересчитаны не будут. Цена на оператора
+          перекрывает цену «на все операторы» только для него.
         </p>
       </div>
 
@@ -296,6 +286,38 @@ function PriceForm({
         </DialogClose>
       </div>
     </form>
+  );
+}
+
+/** Рамки цены рядом с полем: коридор оператора, всех операторов или его отсутствие. */
+function BandNote({
+  everyone,
+  chosen,
+  bandsEnabled,
+}: {
+  everyone: boolean;
+  chosen: OperatorChoice | undefined;
+  bandsEnabled: boolean;
+}) {
+  if (!bandsEnabled) return <>Площадка коридоры цен не проверяет — цена любая.</>;
+  if (everyone) {
+    return (
+      <>
+        Цена на все операторы должна уложиться в коридор каждого оператора, у которого площадка его
+        задала. Сравнивается стоимость вызова в 60 секунд по всему тарифу.
+      </>
+    );
+  }
+  if (chosen?.min_price == null || chosen.max_price == null) {
+    return <>Коридора по этому оператору нет — цена любая.</>;
+  }
+  return (
+    <>
+      Коридор по этому оператору: {money(chosen.min_price)} — {money(chosen.max_price)}.
+      Сравнивается не цена за минуту, а стоимость вызова в 60 секунд по всему тарифу — плата за
+      соединение и минимальная длительность входят в неё. Если по региону задан свой коридор, он
+      строже этого, и точные числа придут в отказе.
+    </>
   );
 }
 

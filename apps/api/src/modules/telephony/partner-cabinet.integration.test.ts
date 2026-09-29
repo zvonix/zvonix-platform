@@ -135,7 +135,8 @@ interface EquipmentResponse {
 interface RatesResponse {
   reference_call_seconds: number;
   rates: {
-    operator_id: string;
+    /** Пусто — цена на все операторы (ADR-0056). */
+    operator_id: string | null;
     operator_name: string | null;
     termination_kind: string;
     price_per_minute: string;
@@ -866,7 +867,7 @@ describe('тарифы партнёра (ADR-0056)', () => {
         sql`select action from audit_log where entity_id in (${gateway}, ${tariff}) order by created_at`,
       ),
     );
-    expect(journal.rows.map((row) => row['action'])).toEqual(
+    expect(journal.rows.map((row) => (row as { action: string }).action)).toEqual(
       expect.arrayContaining([
         'partner_tariff.created',
         'gateway.tariff_changed',
