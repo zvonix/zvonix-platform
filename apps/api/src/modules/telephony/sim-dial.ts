@@ -54,7 +54,7 @@ export function simDialTarget(
  *
  * Куда и что набирать, решает строка набора из каталога (`directory-xml.ts`, `dial-string`):
  * она берёт адрес регистрации входа (`sofia_contact`) и ставит в него вместо имени входа
- * `zvonix_dial`. Получается `sip:99004<номер>@<адрес GOIP>` — запрос уходит прямо на GOIP,
+ * `zvonix_dial`. Получается `sip:99004+<номер>@<адрес GOIP>` — запрос уходит прямо на GOIP,
  * а номер с префиксом линии стоит там, где GOIP его читает.
  *
  * Как к этому пришли на живом узле (2026-09-25…29): номер в адресе запроса с realm уходил
@@ -65,6 +65,9 @@ export function simDialTarget(
  * не нужно — имя, префикс и номер здесь только из букв, цифр и дефиса.
  */
 export function simEndpoint(target: SimDialTarget, destination: string, realm: string): string {
-  const dialled = `${target.linePrefix ?? ''}${destination}`;
+  // «+» перед номером: SIM набирает его в сеть как есть, и `79230189196` без плюса сеть
+  // отклоняет (`404`), а `+79230189196` соединяет — так набирает и сам GOIP (живой GOIP,
+  // 2026-09-29: с плюсом звонок прошёл). Префикс линии GOIP отрезает, плюс остаётся.
+  const dialled = `${target.linePrefix ?? ''}+${destination}`;
   return `[zvonix_dial=${dialled}]user/${target.sipUsername}@${realm}`;
 }

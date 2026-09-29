@@ -12,8 +12,6 @@ import {
   conflict,
   notFound,
   parseMsisdn,
-  rateLimited,
-  TEST_CALL_INTERVAL_MS,
   TEST_CALL_STALE_AFTER_MS,
   TESTABLE_SIM_STATUSES,
   type Id,
@@ -142,7 +140,9 @@ export class TestCallService {
 
     const target = simDialTarget(gateway, port);
     const row = await this.telephony.transaction(async (tx) => {
-      // Карта запирается, чтобы две пробы одновременно не прошли проверку предела вместе.
+      // Карта запирается, чтобы две пробы одновременно не прошли проверку «идёт ли уже»
+      // вместе. Предела «раз в минуту» больше нет (владелец, 2026-09-29: «убери это
+      // ограничение»); одна проба одновременно остаётся — вторая застала бы линию занятой.
       await this.telephony.lockSimCard(sim.id, tx);
       const now = Date.now();
       await this.repository.expireStale(sim.id, new Date(now - TEST_CALL_STALE_AFTER_MS), tx);
@@ -152,14 +152,6 @@ export class TestCallService {
         throw conflict('С этой карты уже идёт тестовый звонок — дождитесь итога', {
           details: { reason: 'test_call_in_progress', test_call_id: last.id },
         });
-      }
-      const wait = last === undefined ? 0 : last.createdAt.getTime() + TEST_CALL_INTERVAL_MS - now;
-      if (wait > 0) {
-        const seconds = Math.ceil(wait / 1000);
-        throw rateLimited(
-          `С карты звонили меньше минуты назад — повторите через ${String(seconds)} с`,
-          { details: { retry_after_seconds: seconds } },
-        );
       }
 
       return this.repository.create(
