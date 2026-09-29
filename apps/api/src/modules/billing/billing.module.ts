@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { MachineModule } from '../machine/machine.module.js';
+import { SettingsModule } from '../settings/settings.module.js';
 import { BillingController } from './billing.controller.js';
 import { ClientApiBillingController } from './client-api.controller.js';
 import { ClientKeysController } from './client-keys.controller.js';
@@ -18,7 +19,7 @@ import { ReservationService } from './reservation.service.js';
   // знает только этот модуль, и обратная стрелка замкнула бы модули в кольцо.
   // Учётные записи — ради одного правила при заведении карточки: владельцем
   // не бывает сотрудник площадки (ADR-0052). Обратной стрелки нет.
-  imports: [AuditModule, IdentityModule, MachineModule],
+  imports: [AuditModule, IdentityModule, MachineModule, SettingsModule],
   controllers: [
     BillingController,
     CabinetsController,

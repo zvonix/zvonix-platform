@@ -418,6 +418,8 @@ function secondCabinetGroup(owned: OwnedCabinets | undefined): readonly NavGroup
       },
     ];
   }
+  // Площадка второй кабинет не подключает — и пункта в меню нет: он вёл бы в отказ.
+  if (!owned.second_cabinet_open) return [];
   const missing =
     owned.client === null
       ? { href: '/apply?cabinet=client', label: 'Стать клиентом' }

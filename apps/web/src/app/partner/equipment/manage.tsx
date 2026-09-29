@@ -765,23 +765,28 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
   });
 
   const error = asApiError(activate.error);
-  if (sim.status === 'retired' || sim.status === 'active') return null;
+  if (sim.status === 'retired') return null;
   if (sim.status === 'blocked' || sim.status === 'throttled') {
     return <span className="text-muted-foreground">распоряжается администратор площадки</span>;
   }
+  // Включённая карта в порту действий здесь не имеет; вне шлюза её можно удалить
+  // (владелец, 2026-09-29: «карты вне шлюза — как удалить?»).
+  if (sim.status === 'active' && inPort) return null;
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          disabled={activate.isPending}
-          onClick={() => {
-            activate.mutate();
-          }}
-        >
-          Включить
-        </Button>
+      <div className="flex flex-wrap justify-end gap-2">
+        {sim.status === 'new' && (
+          <Button
+            size="sm"
+            disabled={activate.isPending}
+            onClick={() => {
+              activate.mutate();
+            }}
+          >
+            Включить
+          </Button>
+        )}
         {!inPort && (
           <ConfirmAction
             label="Удалить"

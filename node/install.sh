@@ -379,9 +379,12 @@ wait_idle() {
 }
 
 # Набор сравнивается с действующим: не изменился — FreeSWITCH не трогается вовсе.
-# Каталог транков агента узла (ADR-0039) — его содержимое, не наше.
+# Не наше и в сравнение не входит: каталог транков агента узла (ADR-0039) и `tls/` —
+# сертификаты, которые FreeSWITCH порождает сам при запуске (живой узел, 2026-09-29:
+# без исключения каждое обновление видело отличие и перезапускало узел).
+UNOWNED_DIRS="zvonix-gateways tls"
 CONF_POSTPONED=no
-if [ -d "$CONF_DIR" ] && diff -rq --exclude=zvonix-gateways "$STAGE" "$CONF_DIR" >/dev/null 2>&1; then
+if [ -d "$CONF_DIR" ] && diff -rq --exclude=zvonix-gateways --exclude=tls "$STAGE" "$CONF_DIR" >/dev/null 2>&1; then
   rm -rf "$STAGE"
   echo "Конфигурация FreeSWITCH не изменилась: ${CONF_DIR}"
   if ! profile_running; then
@@ -393,11 +396,14 @@ elif [ "$MODE" = update ] && ! wait_idle; then
   CONF_POSTPONED=yes
   echo "ВНИМАНИЕ: звонки шли дольше ${DRAIN_SECONDS} с — новая конфигурация FreeSWITCH не применена. Повторите zvonix-node-update в тихое время" >&2
 else
-  # Транки агента переезжают в новый набор, иначе подмена стёрла бы их.
-  if [ -d "${CONF_DIR}/zvonix-gateways" ]; then
-    rm -rf "${STAGE}/zvonix-gateways"
-    cp -a "${CONF_DIR}/zvonix-gateways" "${STAGE}/zvonix-gateways"
-  fi
+  # Транки агента и сертификаты FreeSWITCH переезжают в новый набор, иначе подмена
+  # стёрла бы их.
+  for unowned in $UNOWNED_DIRS; do
+    if [ -d "${CONF_DIR}/${unowned}" ]; then
+      rm -rf "${STAGE:?}/${unowned}"
+      cp -a "${CONF_DIR}/${unowned}" "${STAGE}/${unowned}"
+    fi
+  done
   # Прежний каталог не удаляется, а откладывается: штатный — один раз, в .before-zvonix,
   # прежний наш — в .previous. Есть с чем сравнить и куда откатиться.
   if [ -e "$CONF_DIR" ]; then
