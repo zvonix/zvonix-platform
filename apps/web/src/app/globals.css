@@ -51,20 +51,22 @@
   --card-foreground: #101c26;
   --popover: #ffffff;
   --popover-foreground: #101c26;
-  --primary: #b4622f;
+  --primary: #985328;
   --primary-foreground: #ffffff;
   --secondary: #e4eaef;
   --secondary-foreground: #101c26;
   --muted: #e4eaef;
   --muted-foreground: #475766;
   --accent: #f5e4d8;
-  --accent-foreground: #b4622f;
-  --destructive: #b53e36;
+  --accent-foreground: #985328;
+  --destructive: #ad3b34;
   --border: #d3dbe2;
   --input: #d3dbe2;
-  --ring: #b4622f;
+  --ring: #985328;
   --radius: 5px;
 
+  /* Светлая палитра: цвета статусов и акцент затемнены до контраста не ниже 4,5:1 на своих
+     подложках — обход `pnpm ui:screens` 2026-09-30 нашёл 3,3–4,4. */
   /* Своё: то, чего в словаре shadcn нет. */
   --faint: #5a6975;
   --border-soft: #e3e9ee;
@@ -72,11 +74,11 @@
   --rail-ink: #c3d0dc;
   --rail-ink-dim: #90a0af;
   --rail-active: #263646;
-  --ok: #2c8f62;
+  --ok: #24744f;
   --ok-soft: #dcefe5;
-  --warn: #a8791a;
+  --warn: #876115;
   --warn-soft: #f7edd3;
-  --crit: #b53e36;
+  --crit: #ad3b34;
   --crit-soft: #f8dedc;
 
   color-scheme: light;

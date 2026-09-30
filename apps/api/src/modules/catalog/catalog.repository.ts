@@ -226,7 +226,14 @@ export class CatalogRepository {
   /** Когда план нумерации этого источника загружался последний раз. */
   async lastPlanImportAt(source: NumberingPlanSource): Promise<Date | undefined> {
     const [row] = await this.database.db
-      .select({ importedAt: sql<Date | null>`max(${numberingPlanRanges.importedAt})` })
+      // Агрегат драйвер отдаёт строкой: у выражения нет колонки, по которой drizzle разобрал бы
+      // время. Без `mapWith` проверка срока падала `last.getTime is not a function`, и план
+      // нумерации на боевом сервере не обновлялся после первой загрузки (2026-09-30).
+      .select({
+        importedAt: sql<Date | null>`max(${numberingPlanRanges.importedAt})`.mapWith((value) =>
+          value === null ? null : new Date(String(value)),
+        ),
+      })
       .from(numberingPlanRanges)
       .where(eq(numberingPlanRanges.source, source));
     return row?.importedAt ?? undefined;

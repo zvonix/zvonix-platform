@@ -33,7 +33,7 @@ export function BarChart({
 
   return (
     <figure className="flex flex-col gap-1" aria-label={summary}>
-      <div className="num text-muted-foreground">{peak}</div>
+      <div className="text-muted-foreground">{peak}</div>
       <div
         role="img"
         aria-label={summary}
