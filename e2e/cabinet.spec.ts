@@ -292,6 +292,18 @@ test.describe('кабинет клиента', () => {
     await expect(page.getByRole('row').filter({ hasText: /Линия \d/u })).toBeVisible();
   });
 
+  test('обновление вызовов включается и помнится после перезагрузки', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/calls');
+
+    const live = page.getByLabel('Обновлять');
+    await expect(live).toHaveValue('0');
+    await live.selectOption('5');
+    await page.reload();
+    await expect(page.getByLabel('Обновлять')).toHaveValue('5');
+    await page.getByLabel('Обновлять').selectOption('0');
+  });
+
   test('остаток счёта виден в шапке на любой странице кабинета', async ({ page }) => {
     await signIn(page, PEOPLE.client);
     await expect(page.getByRole('link', { name: /Можно потратить/u })).toBeVisible();

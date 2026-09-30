@@ -5,7 +5,9 @@ import { CALL_STATUSES, type CallStatus } from '@zvonix/shared';
 import { Suspense } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
+import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
+import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
 import {
   Table,
@@ -75,8 +77,10 @@ function PartnerCalls() {
   const search = new URLSearchParams(url.query);
   search.set('limit', String(PAGE_SIZE));
 
+  const live = useLiveInterval();
   const list = useQuery({
     queryKey: ['partner', 'calls', search.toString()],
+    refetchInterval: live,
     queryFn: () =>
       request<{ calls: PartnerCall[]; total: number }>(`/partner/calls?${search.toString()}`),
   });
@@ -139,7 +143,8 @@ function PartnerCalls() {
           }}
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <LiveSwitch />
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}
