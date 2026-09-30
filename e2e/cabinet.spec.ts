@@ -114,9 +114,6 @@ test.describe('заявки', () => {
     await page.getByLabel('Ваше имя').fill('Орлов Максим');
     await page.getByLabel('Почта — она же логин').fill('orlov@e2e.zvonix.test');
     await page.getByLabel('Пароль').fill('очень-длинный-пароль');
-    await page.getByLabel('Регион, где стоят шлюзы').fill('Пермский край');
-    await page.getByRole('button', { name: 'МТС' }).click();
-    await page.getByLabel('Телефон').fill('+7 902 111-22-33');
     await page.getByLabel(/Согласен/u).check();
     await page.getByRole('button', { name: 'Отправить заявку' }).click();
 

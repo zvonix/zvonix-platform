@@ -12,8 +12,7 @@
 
 ```json
 { "id": "…", "cabinet": "partner", "status": "submitted",
-  "answers": { "region": "Свердловская область", "phone": "+7 900 000-00-00",
-               "operators": ["МТС"] },
+  "answers": {},
   "created_at": "…", "decided_at": null, "decision_note": null }
 ```
 

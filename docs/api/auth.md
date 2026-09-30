@@ -92,18 +92,19 @@ cookie с `Secure`, без `Domain` и с `Path=/`. Принимается **т�
 ```json
 { "email": "ivan@example.com", "password": "не короче 12 символов",
   "fullName": "Иван Петров",
-  "cabinet": "partner",
-  "answers": { "region": "Свердловская область", "phone": "+7 900 000-00-00",
-               "simCount": 16, "operators": ["МТС", "T2"] } }
+  "cabinet": "client",
+  "answers": {} }
 ```
 
-`cabinet` — `client` (служба такси) или `partner`; `answers` — анкета **этого** вида,
-лишние поля отвергаются:
+`cabinet` — `client` или `partner`. Клиент — не только служба такси, но и человек, который
+звонит друзьям, поэтому **анкеты нет**: `answers` может быть пустым (владелец, 2026-09-30).
+Поля остаются допустимыми и необязательными — ради заявок, поданных раньше; лишние
+отвергаются:
 
-| Кабинет | Поля анкеты |
+| Кабинет | Необязательные поля |
 |---|---|
-| `client` | `companyName` (станет названием карточки), `city`, `phone`, `callsPerDay` — необязательно |
-| `partner` | `region`, `phone`, `operators` (1–10 названий), `simCount` — необязательно |
+| `client` | `companyName` (станет названием карточки, иначе — имя заявителя), `city`, `phone`, `callsPerDay` |
+| `partner` | `region`, `phone`, `operators` (до 10 названий), `simCount` |
 
 Решение по заявке и вторая заявка из кабинета — [applications.md](applications.md).
 

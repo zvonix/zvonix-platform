@@ -240,9 +240,10 @@ export class BackgroundTasks {
         run: (now) => this.mail.purgeSent(now),
       },
       {
+        // Имя прежнее: переименование оставило бы в Redis расписание без обработчика.
         name: 'applications.auto-approve-partners',
         everySeconds: AUTO_APPROVE_SECONDS,
-        run: () => this.applications.autoApprovePartners(),
+        run: () => this.applications.autoApprove(),
       },
       {
         name: 'auth-tokens.purge-expired',

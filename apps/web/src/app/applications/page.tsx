@@ -262,7 +262,8 @@ function ApplicationRow({
               consequence={
                 application.cabinet === 'client' ? (
                   <p>
-                    Заведётся карточка службы такси «{answerText(application, 'companyName')}» —
+                    Заведётся карточка клиента «
+                    {answerText(application, 'companyName') || application.applicant.full_name}» —
                     сразу рабочая, с нулевым разрешённым минусом. Заявителю откроется вход, и уйдёт
                     письмо.
                   </p>
