@@ -9,34 +9,9 @@ import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
-import type { LimitRuleRow } from './limit.repository.js';
-import { LimitService, type LimitUsage } from './limit.service.js';
+import { LimitService } from './limit.service.js';
 import { addLimitSchema, changeLimitSchema } from './schemas.js';
-
-interface LimitView {
-  readonly id: string;
-  readonly client_id: string | null;
-  readonly channel_id: string | null;
-  readonly partner_id: string | null;
-  readonly sim_card_id: string | null;
-  readonly window: string;
-  readonly metric: string;
-  readonly value: number;
-}
-
-/**
- * Лимит вместе с израсходованным.
- *
- * `used` и `limit` — в единицах хранения: звонки штуками, минуты секундами. Разбор
- * «почему не звонит» начинается отсюда, и пересчитывать секунды в минуты на глаз
- * там не нужно.
- */
-interface LimitUsageView extends LimitView {
-  readonly bucket_start: string;
-  readonly used: number;
-  readonly limit: number;
-  readonly exceeded: boolean;
-}
+import { toLimitView, toUsageView, type LimitUsageView, type LimitView } from './views.js';
 
 @Controller()
 export class LimitController {
@@ -57,6 +32,10 @@ export class LimitController {
         window: body.window,
         metric: body.metric,
         value: body.value,
+        perSim: body.perSim,
+        rounding: body.rounding,
+        periodStartDay: body.periodStartDay ?? null,
+        setBy: 'platform',
       },
       actor.userId,
       actor.role,
@@ -97,12 +76,7 @@ export class LimitController {
     @Body(zodBody(changeLimitSchema)) body: z.infer<typeof changeLimitSchema>,
     @CurrentUser() actor: Principal,
   ): Promise<{ limit: LimitView }> {
-    const row = await this.limits.changeValue(
-      parseId(id, 'limitRule'),
-      body.value,
-      actor.userId,
-      actor.role,
-    );
+    const row = await this.limits.changeRule(parseId(id, 'limitRule'), body, actor);
     return { limit: toLimitView(row) };
   }
 
@@ -113,30 +87,7 @@ export class LimitController {
     @Param('id') id: string,
     @CurrentUser() actor: Principal,
   ): Promise<{ limit: LimitView }> {
-    const row = await this.limits.remove(parseId(id, 'limitRule'), actor.userId, actor.role);
+    const row = await this.limits.remove(parseId(id, 'limitRule'), actor);
     return { limit: toLimitView(row) };
   }
-}
-
-function toLimitView(row: LimitRuleRow): LimitView {
-  return {
-    id: row.id,
-    client_id: row.clientId,
-    channel_id: row.channelId,
-    partner_id: row.partnerId,
-    sim_card_id: row.simCardId,
-    window: row.window,
-    metric: row.metric,
-    value: row.value,
-  };
-}
-
-function toUsageView(usage: LimitUsage): LimitUsageView {
-  return {
-    ...toLimitView(usage.rule),
-    bucket_start: usage.bucketStart.toISOString(),
-    used: usage.used,
-    limit: usage.limit,
-    exceeded: usage.exceeded,
-  };
 }

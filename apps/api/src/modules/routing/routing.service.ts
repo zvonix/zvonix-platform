@@ -233,30 +233,37 @@ export class RoutingService {
 
     // 5в. Лимиты партнёров и SIM отсеивают кандидатов, а не отклоняют вызов: лимит
     //    партнёра — защита его SIM, и он не должен мешать позвонить через другого.
+    const candidateSims = priced
+      .map((entry) => entry.candidate)
+      .filter((candidate) => candidate.kind === 'sim')
+      .map((candidate) => ({
+        partnerId: candidate.gateway.partnerId,
+        simCardId: candidate.sim.id,
+      }));
     const candidateLimits = await this.limits.usage(
       {
         partnerIds: [...new Set(priced.map((entry) => entry.candidate.gateway.partnerId))],
-        simCardIds: [
-          ...new Set(
-            priced
-              .map((entry) => entry.candidate)
-              .filter((candidate) => candidate.kind === 'sim')
-              .map((candidate) => candidate.sim.id),
-          ),
-        ],
+        simCardIds: [...new Set(candidateSims.map((sim) => sim.simCardId))],
       },
       at,
+      // Правило «на каждую карту» (ADR-0057) считается у каждой кандидатки отдельно.
+      candidateSims,
     );
-    const exhausted = new Set(
-      candidateLimits
-        .filter((usage) => usage.exceeded)
-        .map((usage) => usage.rule.partnerId ?? usage.rule.simCardId),
+    const exhausted = candidateLimits.filter((usage) => usage.exceeded);
+    // Исчерпанный лимит «на каждую карту» закрывает только свою SIM, а не партнёра.
+    const exhaustedPartners = new Set(
+      exhausted
+        .filter((usage) => usage.rule.partnerId !== null && !usage.rule.perSim)
+        .map((usage) => usage.rule.partnerId),
+    );
+    const exhaustedSims = new Set(
+      exhausted.map((usage) => usage.simCardId ?? usage.rule.simCardId).filter((id) => id !== null),
     );
     // Фильтр сохраняет порядок, выстроенный ценой.
     const ordered = priced.filter(
       ({ candidate }) =>
-        !exhausted.has(candidate.gateway.partnerId) &&
-        (candidate.kind !== 'sim' || !exhausted.has(candidate.sim.id)),
+        !exhaustedPartners.has(candidate.gateway.partnerId) &&
+        (candidate.kind !== 'sim' || !exhaustedSims.has(candidate.sim.id)),
     );
     if (ordered.length === 0) {
       // Отдельная причина: «все исчерпали лимит» и «SIM нет вовсе» — разные разговоры
@@ -264,9 +271,12 @@ export class RoutingService {
       return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
     }
 
+    // По одному разу каждое правило: у правила «на каждую карту» строк израсходованного
+    // столько, сколько карт (ADR-0057), и повтор увеличил бы счётчик вызова дважды.
     const applicableLimits = [
-      ...subjectLimits.map((usage) => usage.rule),
-      ...candidateLimits.map((usage) => usage.rule),
+      ...new Map(
+        [...subjectLimits, ...candidateLimits].map((usage) => [usage.rule.id, usage.rule]),
+      ).values(),
     ];
 
     // 7. Место на SIM и создание вызова — одной транзакцией с блокировкой SIM
@@ -521,9 +531,14 @@ export class RoutingService {
         // Той же транзакцией: счётчик и вызов не должны расходиться ни в одну сторону,
         // а повторная проверка после инкремента — единственное, что держит лимит
         // при одновременных заявках (ADR-0026).
-        await this.limits.consume(limitsFor(candidate, limits.rules), 'calls', 0, limits.at, tx, {
-          verify: true,
-        });
+        await this.limits.consume(
+          limitsFor(candidate, limits.rules),
+          'calls',
+          { seconds: 0, simCardId: candidate.kind === 'sim' ? candidate.sim.id : null },
+          limits.at,
+          tx,
+          { verify: true },
+        );
 
         return { call, candidate, rateId };
       }
@@ -683,7 +698,9 @@ function limitsFor(
     (rule) =>
       rule.clientId !== null ||
       rule.channelId !== null ||
-      rule.partnerId === candidate.gateway.partnerId ||
+      // «На каждую карту» у транка не считается: карты у него нет (ADR-0057).
+      (rule.partnerId === candidate.gateway.partnerId &&
+        (!rule.perSim || candidate.kind === 'sim')) ||
       // Лимит на SIM транка не касается: карты у него нет, и правило про чужую карту
       // не должно его задевать.
       (candidate.kind === 'sim' && rule.simCardId === candidate.sim.id),

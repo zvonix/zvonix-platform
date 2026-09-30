@@ -6,7 +6,14 @@ import { Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
 import { toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import { limitCounters, limitRules } from '@zvonix/db/schema';
-import { newId, type Id, type LimitMetric, type LimitWindow } from '@zvonix/shared';
+import {
+  newId,
+  type Id,
+  type LimitMetric,
+  type LimitRounding,
+  type LimitSetBy,
+  type LimitWindow,
+} from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type LimitRuleId = Id<'limitRule'>;
@@ -31,10 +38,30 @@ export interface LimitSubjects {
 }
 
 /** Начало окна у конкретного правила: вычисляется вызывающим одной и той же функцией. */
+/**
+ * Счётчик: правило, окно и — у правила «на каждую карту» — SIM (ADR-0057).
+ * У прочих правил `simCardId` пуст: счётчик один на правило.
+ */
 export interface CounterKey {
   readonly ruleId: LimitRuleId;
+  readonly simCardId: Id<'simCard'> | null;
   readonly bucketStart: Date;
 }
+
+/** Израсходованное по счётчику: правило, SIM (или пусто) и сумма. */
+export interface CounterAmount {
+  readonly ruleId: LimitRuleId;
+  readonly simCardId: Id<'simCard'> | null;
+  readonly amount: number;
+}
+
+/** Ключ счётчика строкой — для словаря: правило и SIM. */
+export function counterKeyOf(ruleId: LimitRuleId, simCardId: Id<'simCard'> | null): string {
+  return `${ruleId}|${simCardId ?? ''}`;
+}
+
+/** Сколько живут счётчики коротких окон: минутные и часовые нужны только сейчас. */
+const SHORT_WINDOWS: readonly LimitWindow[] = ['minute', 'hour'];
 
 @Injectable()
 export class LimitRepository {
@@ -79,11 +106,21 @@ export class LimitRepository {
    * Пары «правило и начало окна» перечисляются явно: выбрать по одному правилу без окна
    * значило бы вычитать всю его историю — при часовом окне это тысячи строк за квартал.
    */
-  async listUsage(keys: readonly CounterKey[]): Promise<Map<LimitRuleId, number>> {
-    if (keys.length === 0) return new Map();
+  /**
+   * Израсходованное в текущих окнах правил — **по всем картам** у правил «на каждую
+   * карту»: ключ здесь правило и начало окна, а SIM приходит строкой ответа.
+   */
+  async listUsage(
+    keys: readonly { ruleId: LimitRuleId; bucketStart: Date }[],
+  ): Promise<CounterAmount[]> {
+    if (keys.length === 0) return [];
 
-    const rows = await this.db
-      .select({ ruleId: limitCounters.limitRuleId, amount: limitCounters.amount })
+    return this.db
+      .select({
+        ruleId: limitCounters.limitRuleId,
+        simCardId: limitCounters.simCardId,
+        amount: limitCounters.amount,
+      })
       .from(limitCounters)
       .where(
         or(
@@ -95,25 +132,19 @@ export class LimitRepository {
           ),
         ),
       );
-
-    return new Map(rows.map((row) => [row.ruleId, row.amount]));
   }
 
   /**
-   * Увеличивает счётчики и возвращает новые значения.
+   * Увеличивает счётчики и возвращает новые суммы — ключом `counterKeyOf`.
    *
-   * Одним запросом на правило, но **в переданной транзакции**: инкремент отдельно
-   * от вставки вызова означал бы, что счётчик и вызов расходятся при сбое, а две
-   * одновременные заявки обе прочитают «осталось одно» и обе пройдут.
-   *
-   * `on conflict` вместо «прочитать и обновить»: окно создаётся первым же вызовом
-   * в нём, и делать это чтением значило бы гонку на ровном месте.
+   * Ключ уникальности — правило, SIM и окно, `NULLS NOT DISTINCT`: у правила без SIM
+   * счётчик один, а не по строке на каждый вызов.
    */
   async increase(
     entries: readonly { key: CounterKey; delta: number }[],
     executor: Executor,
-  ): Promise<Map<LimitRuleId, number>> {
-    const result = new Map<LimitRuleId, number>();
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
 
     for (const entry of entries) {
       if (entry.delta === 0) continue;
@@ -123,11 +154,12 @@ export class LimitRepository {
           .values({
             id: newId<'limitCounter'>(),
             limitRuleId: entry.key.ruleId,
+            simCardId: entry.key.simCardId,
             bucketStart: entry.key.bucketStart,
             amount: entry.delta,
           })
           .onConflictDoUpdate({
-            target: [limitCounters.limitRuleId, limitCounters.bucketStart],
+            target: [limitCounters.limitRuleId, limitCounters.simCardId, limitCounters.bucketStart],
             set: {
               amount: sql`${limitCounters.amount} + ${entry.delta}`,
               updatedAt: new Date(),
@@ -135,7 +167,9 @@ export class LimitRepository {
           })
           .returning({ amount: limitCounters.amount });
 
-        if (row !== undefined) result.set(entry.key.ruleId, row.amount);
+        if (row !== undefined) {
+          result.set(counterKeyOf(entry.key.ruleId, entry.key.simCardId), row.amount);
+        }
       } catch (cause) {
         throw toDatabaseError(cause);
       }
@@ -154,6 +188,10 @@ export class LimitRepository {
     window: LimitWindow;
     metric: LimitMetric;
     value: number;
+    perSim: boolean;
+    rounding: LimitRounding;
+    periodStartDay: number | null;
+    setBy: LimitSetBy;
   }): Promise<LimitRuleRow> {
     try {
       const [row] = await this.db
@@ -178,11 +216,18 @@ export class LimitRepository {
    * Именно так, а не «удалить и завести заново»: квота изменилась, а израсходованное
    * никуда не делось. Удаление правила счётчик уносит — это и есть способ обнулить.
    */
-  async updateValue(id: LimitRuleId, value: number): Promise<LimitRuleRow | undefined> {
+  async updateRule(
+    id: LimitRuleId,
+    change: {
+      value: number;
+      rounding?: LimitRounding | undefined;
+      periodStartDay?: number | null | undefined;
+    },
+  ): Promise<LimitRuleRow | undefined> {
     try {
       const [row] = await this.db
         .update(limitRules)
-        .set({ value })
+        .set(change)
         .where(eq(limitRules.id, id))
         .returning();
       return row;
@@ -215,11 +260,19 @@ export class LimitRepository {
    *
    * Догоняюще по сроку, а не «с прошлого запуска» ([ADR-0020](../../../../../docs/adr/0020-fonovye-zadachi.md)):
    * пропущенный тик не теряет работу, а два экземпляра воркера не мешают друг другу.
+   * Короткие окна (минута, час) — старше `shortBefore`, прочие — старше `before`:
+   * минутные окна за квартал дали бы миллионы строк (ADR-0057).
    */
-  async deleteCountersBefore(before: Date): Promise<number> {
+  async deleteCountersBefore(before: Date, shortBefore: Date): Promise<number> {
+    const short = sql`${limitCounters.limitRuleId} in (select id from ${limitRules} where ${inArray(limitRules.window, [...SHORT_WINDOWS])})`;
     const removed = await this.db
       .delete(limitCounters)
-      .where(lt(limitCounters.bucketStart, before))
+      .where(
+        or(
+          lt(limitCounters.bucketStart, before),
+          and(lt(limitCounters.bucketStart, shortBefore), short),
+        ),
+      )
       .returning({ id: limitCounters.id });
     return removed.length;
   }
