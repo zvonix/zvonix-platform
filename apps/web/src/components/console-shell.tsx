@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isStaffRole, type Cabinet, type StaffRole, type UserRole } from '@zvonix/shared';
 import {
+  BarChart3,
   Coins,
   Gauge,
   Inbox,
@@ -107,6 +108,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
     {
       title: 'Деньги',
       items: [
+        { href: '/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
         { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
       ],
@@ -153,6 +155,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
     {
       title: 'Деньги',
       items: [
+        { href: '/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
         { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
       ],
@@ -182,6 +185,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
     {
       title: 'Мой кабинет',
       items: [
+        { href: '/partner/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/partner/calls', label: 'Вызовы через меня', short: 'Вызовы', Icon: PhoneCall },
         {
           href: '/partner/equipment',
@@ -209,6 +213,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
     {
       title: 'Мой кабинет',
       items: [
+        { href: '/my/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/my/calls', label: 'Вызовы', Icon: PhoneCall },
         { href: '/my/channels', label: 'Мои линии', Icon: Route },
         { href: '/my/prices', label: 'Мои цены', Icon: ReceiptText },

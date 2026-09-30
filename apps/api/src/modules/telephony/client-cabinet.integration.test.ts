@@ -73,10 +73,14 @@ interface Account {
   funds: { balance: string; overdraft_limit: string; held: string; available: string };
 }
 
+/** Почта последней созданной `createUser`: нужна, чтобы войти этим партнёром. */
+let lastCreatedEmail = '';
+
 async function createUser(role: 'client' | 'partner'): Promise<string> {
   const { IdentityService } = await import('../identity/identity.service.js');
+  lastCreatedEmail = uniqueEmail();
   const created = await api().get(IdentityService).createByAdmin({
-    email: uniqueEmail(),
+    email: lastCreatedEmail,
     password: TEST_PASSWORD,
     fullName: 'Владелец',
     role,
@@ -152,6 +156,7 @@ let operatorId = '';
 let operatorName = '';
 let partnerName = '';
 let partnerId = '';
+let partnerEmail = '';
 let rich: Awaited<ReturnType<typeof createClient>>;
 let poor: Awaited<ReturnType<typeof createClient>>;
 let untariffed: Awaited<ReturnType<typeof createClient>>;
@@ -175,9 +180,11 @@ async function buildScenario(): Promise<void> {
   }>().operator.id;
 
   partnerName = 'Петров Пётр';
+  const partnerOwner = await createUser('partner');
+  partnerEmail = lastCreatedEmail;
   partnerId = (
     await post('/partners', {
-      ownerUserId: await createUser('partner'),
+      ownerUserId: partnerOwner,
       name: partnerName,
       displayName: unique('Партнёр'),
     })
@@ -320,6 +327,88 @@ describe('свой счёт', () => {
     expect(entries.entries.map((entry) => entry.kind)).toEqual(
       expect.arrayContaining(['deposit', 'charge']),
     );
+  }, 120_000);
+});
+
+describe('сводки (ADR-0059)', () => {
+  interface Overview {
+    totals: Record<string, unknown>;
+    series: { day: string }[];
+  }
+
+  it('сотруднику — выручка, закупка и маржа: 11,50 = 10 партнёру + 1,50 площадке', async () => {
+    const response = await get('/reports/overview?days=1&offset=0');
+    expect(response.statusCode).toBe(200);
+    const overview = response.json<Overview>();
+    expect(overview.series).toHaveLength(1);
+    expect(overview.totals).toMatchObject({
+      calls: 3,
+      answered: 1,
+      talk_seconds: 60,
+      revenue: '11.5',
+      partner_cost: '10',
+      margin: '1.5',
+    });
+  }, 120_000);
+
+  it('клиенту — только своё: потрачено, без партнёра, закупки и маржи', async () => {
+    const overview = (
+      await get('/client/reports/overview?days=7', as(rich.token))
+    ).json<Overview>();
+    expect(overview.series).toHaveLength(7);
+    expect(Object.keys(overview.totals).sort()).toEqual(
+      ['answered', 'calls', 'spent', 'talk_seconds'].sort(),
+    );
+    expect(overview.totals).toMatchObject({ calls: 1, answered: 1, spent: '11.5' });
+
+    // Чужого клиента в его сводке нет.
+    const other = (await get('/client/reports/overview?days=7', as(poor.token))).json<Overview>();
+    expect(other.totals).toMatchObject({ calls: 1, answered: 0, spent: '0' });
+  }, 120_000);
+
+  it('клиенту закрыт разрез по партнёру и SIM, открыт по оператору', async () => {
+    expect((await get('/client/reports/breakdown?days=7&by=sim', as(rich.token))).statusCode).toBe(
+      400,
+    );
+    expect(
+      (await get('/client/reports/breakdown?days=7&by=partner', as(rich.token))).statusCode,
+    ).toBe(400);
+    const byOperator = (
+      await get('/client/reports/breakdown?days=7&by=operator', as(rich.token))
+    ).json<{ rows: { name: string; spent: string }[] }>();
+    expect(byOperator.rows).toEqual([
+      expect.objectContaining({ name: operatorName, spent: '11.5' }),
+    ]);
+  }, 120_000);
+
+  it('партнёру — только заработок; клиента и маржи нет', async () => {
+    const partnerToken = await login(partnerEmail);
+    const overview = (
+      await get('/partner/reports/overview?days=7', as(partnerToken))
+    ).json<Overview>();
+    expect(Object.keys(overview.totals).sort()).toEqual(
+      ['answered', 'calls', 'earned', 'talk_seconds'].sort(),
+    );
+    expect(overview.totals).toMatchObject({ answered: 1, earned: '10' });
+
+    const bySim = (await get('/partner/reports/breakdown?days=7&by=sim', as(partnerToken))).json<{
+      rows: { name: string; earned: string }[];
+    }>();
+    expect(bySim.rows[0]).toMatchObject({ earned: '10' });
+    expect(
+      (await get('/partner/reports/breakdown?days=7&by=client', as(partnerToken))).statusCode,
+    ).toBe(400);
+  }, 120_000);
+
+  it('чужая роль не читает чужие сводки', async () => {
+    expect((await get('/reports/overview?days=7', as(rich.token))).statusCode).toBe(403);
+    expect((await get('/partner/reports/overview?days=7', as(rich.token))).statusCode).toBe(403);
+    // Сотрудник в кабинете клиента не бывает: сводка клиента — только владельцу карточки.
+    expect((await get('/client/reports/overview?days=7')).statusCode).toBe(403);
+  }, 120_000);
+
+  it('период вне списка — отказ проверки', async () => {
+    expect((await get('/reports/overview?days=5')).statusCode).toBe(400);
   }, 120_000);
 });
 

@@ -6,7 +6,9 @@ import type { CallFailureReason, CallStatus } from '@zvonix/shared';
 import { Suspense, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { FilterInput } from '@/components/filter-input';
+import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
+import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
 import { Button } from '@/components/ui/button';
 import {
@@ -86,8 +88,10 @@ function CallsView() {
   search.set('limit', String(PAGE_SIZE));
   if (offset > 0) search.set('offset', String(offset));
 
+  const live = useLiveInterval();
   const list = useQuery({
     queryKey: ['calls', search.toString()],
+    refetchInterval: live,
     queryFn: () => request<{ calls: Call[]; total: number }>(`/calls?${search.toString()}`),
   });
 
@@ -229,7 +233,8 @@ function CallsView() {
           }}
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <LiveSwitch />
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}

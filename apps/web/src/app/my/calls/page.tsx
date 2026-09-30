@@ -5,7 +5,9 @@ import { CALL_STATUSES, type CallStatus, type ClientFailureReason } from '@zvoni
 import { Suspense } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { FilterInput } from '@/components/filter-input';
+import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
+import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
 import {
   Table,
@@ -82,8 +84,10 @@ function MyCalls() {
   if (!numberReady) search.delete('destination');
   search.set('limit', String(PAGE_SIZE));
 
+  const live = useLiveInterval();
   const list = useQuery({
     queryKey: ['my', 'calls', search.toString()],
+    refetchInterval: live,
     queryFn: () => request<{ calls: Call[]; total: number }>(`/client/calls?${search.toString()}`),
   });
 
@@ -158,7 +162,8 @@ function MyCalls() {
           }}
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <LiveSwitch />
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}

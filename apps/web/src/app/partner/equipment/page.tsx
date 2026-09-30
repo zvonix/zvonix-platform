@@ -1,6 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { LiveSwitch } from '@/components/live-switch';
+import { useLiveInterval } from '@/lib/live';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -50,9 +52,11 @@ export default function PartnerEquipmentPage() {
  * осталась для подключения — сервера, входов и способа подключения.
  */
 function PartnerEquipment() {
+  const live = useLiveInterval();
   const equipment = useQuery({
     queryKey: EQUIPMENT_KEY,
     queryFn: () => request<Equipment>('/partner/equipment'),
+    refetchInterval: live,
   });
   const partnerStatus = usePartnerStatus();
 
@@ -101,7 +105,12 @@ function PartnerEquipment() {
         </p>
       )}
 
-      <AddGateway />
+      <div className="flex flex-wrap items-center gap-3">
+        <AddGateway />
+        <div className="ml-auto">
+          <LiveSwitch />
+        </div>
+      </div>
 
       {gateways.length === 0 && trunks.length === 0 ? (
         <div className="flex max-w-prose flex-col gap-1 text-muted-foreground">
