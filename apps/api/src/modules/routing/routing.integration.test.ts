@@ -262,7 +262,9 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatch(
-      new RegExp(`\\[zvonix_dial=99001\\+${env.destination}\\]user/pt-[a-z0-9]{12}@`),
+      new RegExp(
+        `sofia_contact[(][*]/pt-[a-z0-9]{12}@[^)]+[)][}].*%1sip:99001[+]${env.destination}%2`,
+      ),
     );
     expect(response.body).not.toContain('user/gw-');
   });

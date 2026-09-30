@@ -75,8 +75,21 @@ function ClientsTable() {
 
   const listError = asApiError(list.error);
 
+  // Ключ и форма ответа те же, что на странице наценок: общий ключ — общая форма данных.
+  const rules = useQuery({
+    queryKey: ['commission-rules'],
+    queryFn: () => request<{ rules: { id: string }[] }>('/commission-rules'),
+  });
+
   return (
     <div className="flex flex-col gap-3">
+      {rules.data?.rules.length === 0 && (
+        <p role="alert" className="text-warn">
+          Наценки нет ни у кого: вызовы клиентов отклоняются («нет тарифа»). Задайте правило «для
+          всех клиентов» в разделе «Тарифы и наценка».
+        </p>
+      )}
+
       {canChange ? (
         <div>
           <NewClientForm />

@@ -31,6 +31,11 @@ function parse(xml: string): unknown {
   return parser.parse(xml);
 }
 
+/** Строка набора, как её раскрывает узел: адрес регистрации входа с номером на месте имени. */
+const via = (user: string, dialled: string): string =>
+  `\${regex(\${sofia_contact(*/${user}@sip.zvonix.test)}` +
+  `|^(sofia/[^/]+/)sip:[^@]+(@.*)$|%1sip:${dialled}%2)}`;
+
 const plan = {
   callId: '0198f3c4-1111-7000-8000-aaaaaaaaaaaa',
   destination: '79001234567',
@@ -54,9 +59,18 @@ describe('диалплан с маршрутом', () => {
     // Разделитель `|` означает «пробовать по очереди»: перебор выполняет узел.
     // Номер — в строке запроса каждого плеча: у `user/…` там иначе имя учётной записи.
     expect(xml).toContain(
-      'data="[zvonix_dial=+79001234567]user/gw-aaaaaaaaaaaa@sip.zvonix.test' +
-        '|[zvonix_dial=+79001234567]user/gw-bbbbbbbbbbbb@sip.zvonix.test"',
+      `data="${via('gw-aaaaaaaaaaaa', '+79001234567')}|${via('gw-bbbbbbbbbbbb', '+79001234567')}"`,
     );
+  });
+
+  it('номер стоит в самой строке набора, а не в переменной плеча', () => {
+    // Живой узел, 2026-09-30: `[zvonix_dial=…]` из `bridge` до строки набора каталога не
+    // доходила, и вызов уходил на адрес с пустым именем.
+    const xml = routeDocument({
+      ...plan,
+      candidates: [{ kind: 'sim' as const, sipUsername: 'pt-cccccccccccc', linePrefix: null }],
+    });
+    expect(xml).not.toContain('zvonix_dial');
   });
 
   it('линия GOIP выбирается префиксом: две SIM одного шлюза — две разные попытки', () => {
@@ -71,8 +85,7 @@ describe('диалплан с маршрутом', () => {
     });
     expect(() => parse(xml)).not.toThrow();
     expect(xml).toContain(
-      'data="[zvonix_dial=99003+79001234567]user/gw-aaaaaaaaaaaa@sip.zvonix.test' +
-        '|[zvonix_dial=99001+79001234567]user/gw-aaaaaaaaaaaa@sip.zvonix.test"',
+      `data="${via('gw-aaaaaaaaaaaa', '99003+79001234567')}|${via('gw-aaaaaaaaaaaa', '99001+79001234567')}"`,
     );
   });
 
@@ -84,7 +97,7 @@ describe('диалплан с маршрутом', () => {
       candidates: [{ kind: 'sim' as const, sipUsername: 'pt-cccccccccccc', linePrefix: null }],
     });
     expect(() => parse(xml)).not.toThrow();
-    expect(xml).toContain('data="[zvonix_dial=+79001234567]user/pt-cccccccccccc@sip.zvonix.test"');
+    expect(xml).toContain(`data="${via('pt-cccccccccccc', '+79001234567')}"`);
   });
 
   it('транк набирается через свой sofia-gateway, без префикса', () => {
