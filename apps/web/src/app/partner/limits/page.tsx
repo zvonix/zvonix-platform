@@ -108,16 +108,8 @@ function PartnerLimits() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <p className="max-w-prose text-muted-foreground">
-          Лимиты защищают ваши карты: оператор блокирует SIM, если с неё звонят слишком часто или
-          слишком много. Когда лимит исчерпан, площадка не отдаёт вызовы на эту карту до конца окна
-          — они уходят другим. Пакет минут можно считать поминутно, как оператор: каждый разговор
-          округляется вверх до минуты.
-        </p>
-        <div>
-          <NewLimit sims={sims} />
-        </div>
+      <div>
+        <NewLimit sims={sims} />
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
@@ -138,8 +130,7 @@ function PartnerLimits() {
             {groups.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={6} className="whitespace-normal text-muted-foreground">
-                  Лимитов нет — карты не ограничены ничем, кроме занятости. Начните с лимита «каждая
-                  карта отдельно» на звонки в минуту и в сутки.
+                  Лимитов нет.
                 </TableCell>
               </TableRow>
             )}
@@ -247,12 +238,7 @@ function NewLimit({ sims }: { sims: Limits['sims'] }) {
   const valid = Number.isInteger(number) && number >= 1 && (scope !== 'sim' || simCardId !== '');
 
   return (
-    <FormDialog
-      label="Добавить лимит"
-      title="Новый лимит"
-      description="Лимит начинает действовать сразу."
-      variant="outline"
-    >
+    <FormDialog label="Добавить лимит" title="Новый лимит" variant="outline">
       <DialogForm
         submitLabel="Добавить лимит"
         canSubmit={valid}
@@ -386,11 +372,6 @@ function NewLimit({ sims }: { sims: Limits['sims'] }) {
             />
           </DialogField>
         )}
-
-        <p className="text-muted-foreground sm:col-span-2">
-          «Каждая карта отдельно» — один лимит, свой счёт у каждой карты, и новая карта защищена
-          сразу. «Все карты вместе» — общий счёт по всем картам.
-        </p>
       </DialogForm>
     </FormDialog>
   );

@@ -63,7 +63,6 @@ export function SetPrice({
     <FormDialog
       label="Назначить цену"
       title={`Цена в тарифе «${tariff.name}»`}
-      description="Цена начинает действовать сразу на все карты с этим тарифом и не переоценивает прошлое."
       size="sm"
       open={open}
       onOpenChange={(next) => {
@@ -247,21 +246,13 @@ function PriceForm({
           />
         </DialogField>
 
-        <p className="text-muted-foreground sm:col-span-2">
-          <BandNote everyone={everyone} chosen={chosen} bandsEnabled={bandsEnabled} />
-        </p>
+        <BandNote everyone={everyone} chosen={chosen} bandsEnabled={bandsEnabled} />
 
         {save.error !== null && (
           <div className="sm:col-span-2">
             <Refusal error={save.error} />
           </div>
         )}
-
-        <p className="text-muted-foreground sm:col-span-2">
-          Цена начинает действовать сразу и не переоценивает прошлое: прежняя строка остаётся в
-          истории, а вызовы, тарифицированные по ней, пересчитаны не будут. Цена на оператора
-          перекрывает цену «на все операторы» только для него.
-        </p>
       </div>
 
       <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
@@ -289,7 +280,11 @@ function PriceForm({
   );
 }
 
-/** Рамки цены рядом с полем: коридор оператора, всех операторов или его отсутствие. */
+/**
+ * Рамки цены рядом с полем — только когда они есть: коридор выбранного оператора.
+ * У цены «на все операторы» рамки назовёт отказ, с числами (владелец, 2026-09-30:
+ * «зачем эта информация, если и так всё понятно»).
+ */
 function BandNote({
   everyone,
   chosen,
@@ -299,25 +294,13 @@ function BandNote({
   chosen: OperatorChoice | undefined;
   bandsEnabled: boolean;
 }) {
-  if (!bandsEnabled) return <>Площадка коридоры цен не проверяет — цена любая.</>;
-  if (everyone) {
-    return (
-      <>
-        Цена на все операторы должна уложиться в коридор каждого оператора, у которого площадка его
-        задала. Сравнивается стоимость вызова в 60 секунд по всему тарифу.
-      </>
-    );
-  }
-  if (chosen?.min_price == null || chosen.max_price == null) {
-    return <>Коридора по этому оператору нет — цена любая.</>;
+  if (!bandsEnabled || everyone || chosen?.min_price == null || chosen.max_price == null) {
+    return null;
   }
   return (
-    <>
-      Коридор по этому оператору: {money(chosen.min_price)} — {money(chosen.max_price)}.
-      Сравнивается не цена за минуту, а стоимость вызова в 60 секунд по всему тарифу — плата за
-      соединение и минимальная длительность входят в неё. Если по региону задан свой коридор, он
-      строже этого, и точные числа придут в отказе.
-    </>
+    <p className="text-muted-foreground sm:col-span-2">
+      Коридор: {money(chosen.min_price)} — {money(chosen.max_price)} за вызов 60 с
+    </p>
   );
 }
 
