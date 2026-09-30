@@ -281,6 +281,17 @@ test.describe('кабинет клиента', () => {
     await expect(page.getByText('Диспетчерская')).toBeVisible();
   });
 
+  test('клиент сам получает линию: пароль показан один раз, в списке его нет', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/channels');
+
+    await page.getByRole('button', { name: 'Получить линию' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Получить линию' }).click();
+
+    await expect(page.getByText(/Пароль показывается/u)).toBeVisible();
+    await expect(page.getByRole('row').filter({ hasText: /Линия \d/u })).toBeVisible();
+  });
+
   test('остаток счёта виден в шапке на любой странице кабинета', async ({ page }) => {
     await signIn(page, PEOPLE.client);
     await expect(page.getByRole('link', { name: /Можно потратить/u })).toBeVisible();

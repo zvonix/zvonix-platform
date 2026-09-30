@@ -111,6 +111,9 @@ export const createChannelSchema = z.object({
     .optional(),
 });
 
+/** Линия, которую клиент заводит сам (ADR-0058): название необязательно. */
+export const createOwnChannelSchema = z.object({ name: name.optional() });
+
 export const channelStatusSchema = z.object({
   status: z.enum(CHANNEL_STATUSES),
 });

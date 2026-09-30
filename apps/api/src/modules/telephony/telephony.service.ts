@@ -99,6 +99,9 @@ export interface PartnerCoverageView {
   readonly regionKey: string;
 }
 
+/** Сколько линий клиент заводит себе сам (ADR-0058). */
+const OWN_CHANNELS_MAX = 5;
+
 /** Учётная запись вместе с паролем. Пароль существует только здесь и только один раз. */
 export interface IssuedSipAccount {
   readonly username: string;
@@ -574,6 +577,8 @@ export class TelephonyService {
       name: string;
       recordingRequired: boolean;
       callerId: string | null;
+      /** Заводит администратор — `pending`; клиент, получающий линию сам, — `active` (ADR-0058). */
+      status?: ChannelStatus;
     },
     actorUserId: Id<'user'>,
     actorRole: UserRole,
@@ -582,7 +587,7 @@ export class TelephonyService {
     const channel = await this.repository.createChannel({
       clientId: input.clientId,
       name: input.name,
-      status: 'pending',
+      status: input.status ?? 'pending',
       sipUsername: credentials.username,
       a1Hash: credentials.a1Hash,
       recordingRequired: input.recordingRequired,
@@ -603,6 +608,48 @@ export class TelephonyService {
     });
 
     return { channel, account: this.toAccount(credentials) };
+  }
+
+  /**
+   * Линия, которую клиент заводит себе сам ([ADR-0058](../../../../../docs/adr/0058-klient-sam-poluchaet-liniyu.md)).
+   *
+   * Сразу `active`: допуск клиента уже состоялся, второй проверки нет. Клиент не в
+   * состоянии `active` линий не заводит, и линий не больше `OWN_CHANNELS_MAX`.
+   */
+  async createOwnChannel(
+    requester: { userId: Id<'user'>; role: UserRole },
+    name: string | undefined,
+  ): Promise<{ channel: ChannelRow; account: IssuedSipAccount }> {
+    const own = await this.billing.findClientOwnedBy(requester.userId);
+    const client = own === undefined ? undefined : await this.billing.findClient(own.id);
+    if (client === undefined) throw notFound('Клиент не найден');
+    if (client.status !== 'active') {
+      throw conflict('Клиент не работает — линию завести нельзя');
+    }
+    const existing = await this.repository.listChannels(client.id);
+    if (existing.length >= OWN_CHANNELS_MAX) {
+      throw conflict(`Линий уже ${String(OWN_CHANNELS_MAX)} — больше завести нельзя`);
+    }
+    return this.createChannel(
+      {
+        clientId: client.id,
+        name: name ?? `Линия ${String(existing.length + 1)}`,
+        recordingRequired: false,
+        callerId: null,
+        status: 'active',
+      },
+      requester.userId,
+      requester.role,
+    );
+  }
+
+  /** Новый доступ своей линии: чужая линия — `404` (ADR-0058). */
+  async resetOwnChannelCredentials(
+    id: ChannelId,
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<IssuedSipAccount> {
+    await this.assertChannelAccess(id, requester);
+    return this.resetChannelCredentials(id, requester.userId, requester.role);
   }
 
   /**

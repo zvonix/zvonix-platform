@@ -334,6 +334,57 @@ describe('свои линии', () => {
     expect(channels[0]?.status).toBe('active');
   }, 120_000);
 
+  it('клиент сам получает линию, пароль виден один раз, перевыпуск — только своей (ADR-0058)', async () => {
+    const owner = await createClientUser();
+    const id = (
+      await post('/clients', { ownerUserId: owner.userId, name: unique('Друзья') })
+    ).json<{
+      client: { id: string };
+    }>().client.id;
+
+    // Пока клиент не работает, линию себе не заводят.
+    const early = await post('/client/channels', {}, as(owner.token));
+    expect(early.statusCode).toBe(409);
+
+    expect((await patch(`/clients/${id}/status`, { status: 'active' })).statusCode).toBe(200);
+
+    const created = await post('/client/channels', {}, as(owner.token));
+    expect(created.statusCode).toBe(201);
+    const body = created.json<{
+      channel: { id: string; name: string; status: string };
+      account: { username: string; password: string; realm: string };
+    }>();
+    expect(body.channel).toMatchObject({ name: 'Линия 1', status: 'active' });
+    expect(body.account.password.length).toBeGreaterThan(8);
+
+    // В списке пароля нет.
+    const listed = await get('/client/channels', as(owner.token));
+    expect(listed.body).not.toContain(body.account.password);
+
+    const reset = await post(
+      `/client/channels/${body.channel.id}/credentials`,
+      {},
+      as(owner.token),
+    );
+    expect(reset.statusCode).toBe(201);
+    expect(reset.json<{ account: { username: string } }>().account.username).not.toBe(
+      body.account.username,
+    );
+
+    // Чужая линия — как несуществующая.
+    const foreign = await post(`/client/channels/${rich.channel}/credentials`, {}, as(owner.token));
+    expect(foreign.statusCode).toBe(404);
+
+    // Предел — пять.
+    for (let count = 2; count <= 5; count += 1) {
+      expect(
+        (await post('/client/channels', { name: `Линия ${String(count)}` }, as(owner.token)))
+          .statusCode,
+      ).toBe(201);
+    }
+    expect((await post('/client/channels', {}, as(owner.token))).statusCode).toBe(409);
+  }, 120_000);
+
   it('чужие не показываются', async () => {
     const channels = (await get('/client/channels', as(poor.token))).json<{
       channels: { id: string }[];
