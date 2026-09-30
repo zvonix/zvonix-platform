@@ -157,10 +157,9 @@ function TariffSection({ gateway }: { gateway: Gateway }) {
       <h3 id="tariff" className="font-semibold">
         Тариф
       </h3>
-      <p className="max-w-prose text-muted-foreground">
-        По этому тарифу площадка платит за вызовы через все карты шлюза, кроме тех, у кого выбран
-        свой. Куда карта звонит, решают цены тарифа: нет цены на оператора — нет звонков на него.
-        Цены — в разделе <Link href="/partner/prices">«Мои тарифы»</Link>.
+      <p className="text-muted-foreground">
+        Для всех карт шлюза без своего тарифа. Цены —{' '}
+        <Link href="/partner/prices">«Мои тарифы»</Link>.
       </p>
       <TariffSelect
         value={gateway.tariff_id}

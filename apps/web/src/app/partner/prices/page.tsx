@@ -59,17 +59,9 @@ function PartnerTariffs() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <p className="max-w-prose text-muted-foreground">
-          Здесь цены, по которым площадка платит вам за минуту разговора. Тариф выбирается у шлюза и
-          при желании меняется у отдельной карты — на странице «Моё оборудование». Карта звонит
-          туда, где в её тарифе есть цена: цена «на все операторы» открывает всех, цена на оператора
-          — только его и перекрывает общую. Изменённая цена действует сразу на все карты с этим
-          тарифом; прошлые звонки не пересчитываются.
-        </p>
-        <div>
-          <NewTariff />
-        </div>
+      {/* Без вступительного текста: страница читается по таблицам (владелец, 2026-09-30). */}
+      <div>
+        <NewTariff />
       </div>
 
       {outside.length > 0 && (
@@ -93,11 +85,7 @@ function PartnerTariffs() {
 
       {silent.length > 0 && (
         <div className="flex max-w-prose flex-col gap-2">
-          <h3 className="font-semibold">Операторы без вашей цены</h3>
-          <p className="text-muted-foreground">
-            Ни в одном тарифе нет цены на этих операторов, а без неё вызов через вас не пойдёт — его
-            нечем тарифицировать. Цена «на все операторы» закрывает их всех разом.
-          </p>
+          <h3 className="font-semibold">Нет цены — не звоните на</h3>
           <p>{silent.map((operator) => operator.operator_name).join(' · ')}</p>
         </div>
       )}
@@ -175,8 +163,7 @@ function TariffCard({
             {ordered.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={columns} className="whitespace-normal text-muted-foreground">
-                  В тарифе нет цен. Карты с этим тарифом не звонят никуда: вызов нечем
-                  тарифицировать. Назначьте цену «на все операторы» или на нужных операторов.
+                  Цен нет — карты с этим тарифом не звонят.
                 </TableCell>
               </TableRow>
             )}
@@ -264,12 +251,7 @@ function NewTariff() {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   return (
-    <FormDialog
-      label="Новый тариф"
-      title="Новый тариф"
-      description="Тариф создаётся пустым: цены в него добавляются так же, как в тариф по умолчанию."
-      variant="outline"
-    >
+    <FormDialog label="Новый тариф" title="Новый тариф" variant="outline">
       <DialogForm
         submitLabel="Создать тариф"
         canSubmit={name.trim() !== ''}
