@@ -61,7 +61,7 @@ export function Report({ config }: { config: ReportConfig }) {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
         <div
-          className="flex gap-0.5 rounded-md border border-border bg-muted p-0.5"
+          className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
           role="group"
           aria-label="Период"
         >
@@ -73,7 +73,7 @@ export function Report({ config }: { config: ReportConfig }) {
               onClick={() => {
                 setDays(period.days);
               }}
-              className={`rounded px-2.5 py-1 ${days === period.days ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`rounded px-2.5 py-1.5 ${days === period.days ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
             >
               {period.label}
             </button>
@@ -94,7 +94,12 @@ export function Report({ config }: { config: ReportConfig }) {
         overview.error === null && <p className="text-muted-foreground">Загружаем…</p>
       ) : (
         <>
-          <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {/* Столько колонок, сколько влезает: шесть карточек администратора — в один ряд, четыре
+              клиентские — тоже, на телефоне — по две. Без «сирот» во втором ряду. */}
+          <dl
+            className="grid gap-3"
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}
+          >
             <Card title="Вызовов" value={String(overview.data.totals.calls)} />
             <Card
               title="Состоялось"
@@ -120,7 +125,7 @@ export function Report({ config }: { config: ReportConfig }) {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-semibold">По дням</h2>
               <div
-                className="flex gap-0.5 rounded-md border border-border bg-muted p-0.5"
+                className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
                 role="group"
                 aria-label="Показатель"
               >
@@ -132,18 +137,22 @@ export function Report({ config }: { config: ReportConfig }) {
                     onClick={() => {
                       setMetric(entry.key);
                     }}
-                    className={`rounded px-2 py-0.5 ${metric === entry.key ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
+                    className={`rounded px-2.5 py-1.5 ${metric === entry.key ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
                   >
                     {entry.label}
                   </button>
                 ))}
               </div>
             </div>
-            <Chart
-              series={overview.data.series}
-              metric={metric}
-              label={metric === 'calls' ? 'Вызовы' : moneyLabel(metric)}
-            />
+            {overview.data.totals.calls === 0 ? (
+              <p className="py-6 text-muted-foreground">За этот период вызовов не было.</p>
+            ) : (
+              <Chart
+                series={overview.data.series}
+                metric={metric}
+                label={metric === 'calls' ? 'Вызовы' : moneyLabel(metric)}
+              />
+            )}
           </section>
         </>
       )}
@@ -152,7 +161,7 @@ export function Report({ config }: { config: ReportConfig }) {
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="font-semibold">Разрез</h2>
           <div
-            className="flex gap-0.5 rounded-md border border-border bg-muted p-0.5"
+            className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
             role="group"
             aria-label="Разрез"
           >
@@ -164,7 +173,7 @@ export function Report({ config }: { config: ReportConfig }) {
                 onClick={() => {
                   setBy(dimension.by);
                 }}
-                className={`rounded px-2 py-0.5 ${by === dimension.by ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`rounded px-2.5 py-1.5 ${by === dimension.by ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
               >
                 {dimension.label}
               </button>

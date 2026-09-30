@@ -181,6 +181,20 @@ describe('загрузка', () => {
   });
 });
 
+describe('обновление по сроку', () => {
+  it('время последней загрузки — дата, а не строка драйвера', async () => {
+    // Регрессия 2026-09-30: агрегат приходил строкой, `refresh` падал на `.getTime()`, и план
+    // нумерации на боевом сервере не обновлялся вовсе.
+    const { CatalogRepository } = await import('./catalog.repository.js');
+    const last = await api().get(CatalogRepository).lastPlanImportAt('mincifry');
+    expect(last).toBeInstanceOf(Date);
+  });
+
+  it('свежий план не качается заново и проход не падает', async () => {
+    expect(await (await plan()).refresh(new Date())).toBe(0);
+  });
+});
+
 describe('негодная выгрузка', () => {
   it('не стирает уже загруженный план', async () => {
     // Источник отдаёт страницу с ошибкой тем же кодом 200. Замена целиком необратима:
