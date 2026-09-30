@@ -62,6 +62,26 @@ interface UserRow {
   readonly locked_until: string | null;
 }
 
+interface Owner {
+  readonly user_id: string;
+  readonly client: { readonly name: string } | null;
+  readonly partner: { readonly name: string } | null;
+}
+
+/**
+ * Кем работает участник: «Клиент «Корона»», «Партнёр «Иван»», оба сразу или «без кабинета»
+ * (заявка ещё не одобрена). Сотрудник остаётся своей ролью.
+ */
+function roleOf(user: UserRow, owner: Owner | undefined): string {
+  if (user.role !== 'member') return ROLE_NAME[user.role];
+  if (owner === undefined) return ROLE_NAME[user.role];
+  const parts = [
+    owner.client === null ? undefined : `Клиент «${owner.client.name}»`,
+    owner.partner === null ? undefined : `Партнёр «${owner.partner.name}»`,
+  ].filter((part) => part !== undefined);
+  return parts.length === 0 ? 'Без кабинета' : parts.join(' и ');
+}
+
 const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
 
@@ -95,6 +115,17 @@ function UsersTable() {
   });
 
   const listError = asApiError(list.error);
+
+  const ids = (list.data?.users ?? [])
+    .filter((user) => user.role === 'member')
+    .map((user) => user.id);
+  const owners = useQuery({
+    queryKey: ['users', 'owners', ids.join(',')],
+    queryFn: () => request<{ owners: Owner[] }>(`/cabinets/owners?userIds=${ids.join(',')}`),
+    enabled: ids.length > 0,
+  });
+  const ownerOf = (user: UserRow): Owner | undefined =>
+    owners.data?.owners.find((owner) => owner.user_id === user.id);
 
   return (
     <div className="flex flex-col gap-3">
@@ -180,7 +211,13 @@ function UsersTable() {
             )}
 
             {list.data?.users.map((user) => (
-              <RowGroup key={user.id} user={user} self={user.id === selfId} canChange={canChange} />
+              <RowGroup
+                key={user.id}
+                user={user}
+                role={roleOf(user, ownerOf(user))}
+                self={user.id === selfId}
+                canChange={canChange}
+              />
             ))}
           </TableBody>
         </Table>
@@ -198,7 +235,17 @@ function UsersTable() {
  * одним нажатием, всё, что вход закрывает, — через подтверждение с последствием
  * (ui-review, 2026-09-14).
  */
-function RowGroup({ user, self, canChange }: { user: UserRow; self: boolean; canChange: boolean }) {
+function RowGroup({
+  user,
+  role,
+  self,
+  canChange,
+}: {
+  user: UserRow;
+  role: string;
+  self: boolean;
+  canChange: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const locked = isFuture(user.locked_until);
   const changeable = canChange && !self && user.status !== 'disabled';
@@ -214,7 +261,7 @@ function RowGroup({ user, self, canChange }: { user: UserRow; self: boolean; can
         )}
       </TableCell>
       <TableCell>{user.full_name}</TableCell>
-      <TableCell>{ROLE_NAME[user.role]}</TableCell>
+      <TableCell>{role}</TableCell>
       <TableCell>
         <span className={`rounded-sm px-1.5 py-0.5 ${statusTone(user.status)}`}>
           {STATUS_NAME[user.status]}

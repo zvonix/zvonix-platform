@@ -46,11 +46,6 @@ function MyChannels() {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground">
-        Линия — это ваше SIP-подключение к площадке. Название, номер для показа и требование записи
-        задаёт площадка; порядок партнёров и разрешённых операторов — вы сами.
-      </p>
-
       {list.error !== null && (
         <p role="alert" className="text-crit">
           {list.error.message}

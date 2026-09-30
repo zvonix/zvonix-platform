@@ -65,7 +65,9 @@ function MyCalls() {
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
 
   const channels = useQuery({
-    queryKey: ['my', 'channels'],
+    // Свой ключ: у страницы «Мои линии» под `['my', 'channels']` лежит весь ответ, а здесь —
+    // только список. Общий ключ с разной формой данных ронял ту страницу (2026-09-30).
+    queryKey: ['my', 'channels', 'names'],
     queryFn: async () => (await request<{ channels: Channel[] }>('/client/channels')).channels,
     staleTime: 60_000,
   });

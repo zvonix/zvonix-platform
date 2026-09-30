@@ -1,24 +1,12 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { PartnerStatus } from '@zvonix/shared';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { AccountLedger } from '@/components/account-ledger';
 import { ConsoleShell } from '@/components/console-shell';
+import { usePartnerAccount } from '@/lib/account';
 import { request } from '@/lib/api';
 import { PARTNER_STATUS_MEANING, PARTNER_STATUS_NAME } from '@/lib/labels';
 import { money } from '@/lib/money';
-
-interface Account {
-  readonly partner: {
-    readonly id: string;
-    readonly name: string;
-    readonly display_name: string | null;
-    readonly status: PartnerStatus;
-    readonly listens_to_recordings: boolean;
-    readonly created_at: string;
-  };
-  readonly funds: { readonly balance: string };
-}
 
 export default function PartnerMoneyPage() {
   return (
@@ -29,10 +17,7 @@ export default function PartnerMoneyPage() {
 }
 
 function PartnerMoney() {
-  const account = useQuery({
-    queryKey: ['partner', 'account'],
-    queryFn: () => request<Account>('/partner/account'),
-  });
+  const account = usePartnerAccount();
 
   if (account.error !== null) {
     return (
@@ -74,12 +59,6 @@ function PartnerMoney() {
             </dd>
           </div>
         </dl>
-
-        <p className="max-w-prose text-muted-foreground">
-          Начисление приходит за каждый состоявшийся разговор — это ваша доля от того, что заплатил
-          клиент. Выплаты пока делает площадка вручную; когда они появятся в кабинете, они будут
-          уменьшать эту же сумму проводкой.
-        </p>
       </div>
 
       <RecordingsAccess partnerId={partner.id} listens={partner.listens_to_recordings} />

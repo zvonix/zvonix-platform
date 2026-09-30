@@ -265,6 +265,26 @@ test.describe('кабинет клиента', () => {
 
     await expect(page.getByText('Диспетчерская')).toBeVisible();
   });
+
+  // Регрессия 2026-09-30: «Вызовы» клали в кэш список линий, «Мои линии» ждали в том же
+  // ключе объект, и переход по меню ронял страницу. Прямой заход этого не показывал.
+  test('линии открываются переходом из меню после вызовов', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await expect(page).toHaveURL(/\/my\/calls$/u);
+    await expect(page.getByLabel('Линия')).toBeVisible();
+
+    await page
+      .getByRole('navigation', { name: 'Разделы' })
+      .getByRole('link', { name: 'Мои линии' })
+      .click();
+    await expect(page).toHaveURL(/\/my\/channels$/u);
+    await expect(page.getByText('Диспетчерская')).toBeVisible();
+  });
+
+  test('остаток счёта виден в шапке на любой странице кабинета', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await expect(page.getByRole('link', { name: /Можно потратить/u })).toBeVisible();
+  });
 });
 
 test.describe('ввод денег', () => {
@@ -663,6 +683,18 @@ test.describe('учётные записи', () => {
     // Обратная половина: у чужой записи выбор есть, иначе проверка прошла бы и на пустом экране.
     const other = page.getByRole('row').filter({ hasText: PEOPLE.support });
     await expect(other.getByRole('button', { name: 'Изменить' })).toBeVisible();
+  });
+
+  test('участник назван клиентом или партнёром, а не «участником»', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/users');
+
+    // Строка — по ячейке с точным адресом: «applicant.client@…» содержит «client@…».
+    const rowOf = (email: string) =>
+      page.getByRole('row').filter({ has: page.getByRole('cell', { name: email, exact: true }) });
+    await expect(rowOf(PEOPLE.client)).toContainText('Клиент «');
+    await expect(rowOf(PEOPLE.partner)).toContainText('Партнёр «');
+    await expect(page.getByRole('cell', { name: 'Участник', exact: true })).toHaveCount(0);
   });
 });
 
