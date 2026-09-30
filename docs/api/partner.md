@@ -266,6 +266,38 @@
 `gateway.tariff_changed`, `sim.tariff_changed`. Тариф виден в `GET /partner/equipment`
 полем `tariff_id` у шлюза и у карты.
 
+## Лимиты ([ADR-0057](../adr/0057-limity-partnyora.md))
+
+Партнёр задаёт себе звонки в минуту, час, сутки, неделю, месяц и пакет минут — на себя
+целиком, «на каждую карту» или на одну карту. Лимиты площадки ему видны, но не меняются.
+Исчерпанный лимит не отклоняет вызов клиента: площадка просто не отдаёт вызовы
+на карту (или на партнёра) до конца окна, они уходят другим.
+
+### `GET /partner/limits`
+
+`200` → `{ "limits": [ … ], "sims": [ { "id", "msisdn" } ] }`. Строка лимита — как
+у `GET /limits` ([limits.md](limits.md)): `window`, `metric`, `value`, `per_sim`,
+`rounding`, `period_start_day`, `set_by`, `usage_sim_card_id`, `resets_at`, `used`,
+`limit`, `exceeded`. У лимита «на каждую карту» — строка по каждой карте партнёра, в том
+числе ещё не звонившей. `sims` — карты партнёра, чтобы назвать их номером.
+
+### `POST /partner/limits`
+
+```json
+{ "scope": "each_sim", "window": "month", "metric": "minutes", "value": 500,
+  "rounding": "minute", "periodStartDay": 15 }
+```
+
+`scope`: `partner` — все карты вместе, `each_sim` — каждая карта отдельно, `sim` — одна
+карта (`simCardId`, только своя, иначе `404`). `201` → `{ "limit": { … } }`, `set_by`
+всегда `partner`. Тот же лимит второй раз — `409`.
+
+### `PATCH /partner/limits/:id`, `DELETE /partner/limits/:id`
+
+`PATCH` — тело `{ "value", "rounding"?, "periodStartDay"? }`, `200`. `DELETE` — `204`,
+счётчики уходят вместе с правилом. Лимит площадки — `403`, чужой — `404`. Журнал:
+`limit.added`, `limit.changed`, `limit.removed` с партнёром в роли автора.
+
 ## `GET /partner/calls?from=…&to=…&status=…&limit=…&offset=…`
 
 `200` → `{ "calls": [ … ], "total": 342 }`

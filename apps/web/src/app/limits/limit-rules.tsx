@@ -21,7 +21,7 @@ import { atMost } from '@/lib/wait';
 import { useCanChange } from '@/lib/access';
 import { useChannels, useClients, usePartners, useSimCards } from '@/lib/dictionaries';
 import { moment } from '@/lib/format';
-import { LIMIT_METRIC_NAME, LIMIT_WINDOW_NAME } from '@/lib/labels';
+import { LIMIT_METRIC_NAME, LIMIT_WINDOW_NAME, limitRuleNote } from '@/lib/labels';
 import { integerFromInput } from '@/lib/money';
 
 const COLUMNS = 5;
@@ -38,6 +38,12 @@ interface Rule {
   readonly window: LimitWindow;
   readonly metric: LimitMetric;
   readonly value: number;
+  readonly per_sim: boolean;
+  readonly rounding: 'second' | 'minute';
+  readonly period_start_day: number | null;
+  readonly set_by: 'platform' | 'partner';
+  /** У правила «на каждую карту» — карта этой строки (ADR-0057). */
+  readonly usage_sim_card_id: string | null;
   readonly bucket_start: string;
   readonly used: number;
   readonly limit: number;
@@ -202,7 +208,7 @@ export function LimitRules() {
               const subjectOf = describe(rule);
               const subjectTitle = `${SUBJECT_NAME[subjectOf.kind].toLowerCase()} «${subjectOf.name}»`;
               return (
-                <TableRow key={rule.id}>
+                <TableRow key={`${rule.id}:${rule.usage_sim_card_id ?? ''}`}>
                   <TableCell>
                     {subjectOf.name}
                     <span className="block text-faint">{SUBJECT_NAME[subjectOf.kind]}</span>
@@ -211,6 +217,12 @@ export function LimitRules() {
                   <TableCell>
                     <span className="num">{rule.value}</span> {LIMIT_METRIC_NAME[rule.metric]}{' '}
                     {LIMIT_WINDOW_NAME[rule.window]}
+                    <span className="block text-faint">{limitRuleNote(rule)}</span>
+                    {rule.usage_sim_card_id !== null && (
+                      <span className="num block text-faint">
+                        карта {sims.nameOf(rule.usage_sim_card_id) ?? rule.usage_sim_card_id}
+                      </span>
+                    )}
                   </TableCell>
 
                   <TableCell>

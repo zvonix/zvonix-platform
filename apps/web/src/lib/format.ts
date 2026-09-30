@@ -40,3 +40,14 @@ export function duration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   return `${String(minutes)}:${String(seconds % 60).padStart(2, '0')}`;
 }
+
+const PLURAL = new Intl.PluralRules('ru-RU');
+
+/**
+ * Слово при числе по правилам русского: «1 звонок», «3 звонка», «5 звонков».
+ * Формы — единственное, «несколько» (2–4), «много».
+ */
+export function plural(count: number, forms: readonly [string, string, string]): string {
+  const rule = PLURAL.select(count);
+  return rule === 'one' ? forms[0] : rule === 'few' ? forms[1] : forms[2];
+}

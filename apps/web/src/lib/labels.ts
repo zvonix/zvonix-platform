@@ -439,6 +439,7 @@ export function nodeTone(status: NodeStatus): string {
  * окно фиксированное, а не скользящее.
  */
 export const LIMIT_WINDOW_NAME: Record<LimitWindow, string> = {
+  minute: 'в минуту',
   hour: 'в час',
   day: 'в сутки',
   week: 'в неделю',
@@ -455,6 +456,25 @@ export const LIMIT_METRIC_NAME: Record<LimitMetric, string> = {
   calls: 'вызовов',
   minutes: 'секунд разговора',
 };
+
+/**
+ * Уточнения правила лимита одной строкой (ADR-0057): «на каждую карту», поминутный
+ * счёт, день обновления месяца, кто задал. Одна функция на кабинет партнёра и админку —
+ * иначе одно правило читалось бы у двух сторон по-разному.
+ */
+export function limitRuleNote(rule: {
+  readonly per_sim: boolean;
+  readonly rounding: 'second' | 'minute';
+  readonly period_start_day: number | null;
+  readonly set_by: 'platform' | 'partner';
+}): string {
+  const parts: string[] = [];
+  if (rule.per_sim) parts.push('на каждую карту');
+  if (rule.rounding === 'minute') parts.push('поминутно');
+  if (rule.period_start_day !== null) parts.push(`обновляется ${String(rule.period_start_day)}-го`);
+  parts.push(rule.set_by === 'partner' ? 'задал партнёр' : 'задала площадка');
+  return parts.join(' · ');
+}
 
 /**
  * Причина отказа так, как её видит клиент.
