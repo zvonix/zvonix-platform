@@ -7,7 +7,7 @@
  */
 
 import type { CallFailureReason, TerminationKind } from '@zvonix/shared';
-import { simEndpoint } from '../telephony/sim-dial.js';
+import { simBridgeEndpoint } from '../telephony/sim-dial.js';
 import { escapeXmlAttribute } from '../telephony/sip-credentials.js';
 
 const HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>';
@@ -144,9 +144,9 @@ export function routeDocument(plan: RoutePlan): string {
  * регистрируемся **мы** — он значится в конфигурации узла исходящим sofia-gateway,
  * и набор идёт через шлюз с номером назначения.
  *
- * У зарегистрированного шлюза `user/…` отвечает, **куда** слать INVITE; номер с префиксом
- * линии — переменная плеча `zvonix_dial` в квадратных скобках, у каждого кандидата своя.
- * Как она попадает в адрес запроса — `simEndpoint` и строка набора каталога.
+ * Зарегистрированный шлюз набирается адресом его регистрации, а номер с префиксом линии
+ * стоит в самой строке (`simBridgeEndpoint`): переменная плеча `zvonix_dial` из `bridge`
+ * до строки набора каталога не доходит (живой узел, 2026-09-30).
  */
 function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
   if (candidate.kind === 'sip') {
@@ -154,7 +154,7 @@ function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
     return `sofia/gateway/${name}/${escapeXmlAttribute(plan.destination)}`;
   }
   // Без экранирования здесь: `action` экранирует значение целиком сам.
-  return simEndpoint(
+  return simBridgeEndpoint(
     { sipUsername: candidate.sipUsername, linePrefix: candidate.linePrefix },
     plan.destination,
     plan.realm,

@@ -71,3 +71,30 @@ export function simEndpoint(target: SimDialTarget, destination: string, realm: s
   const dialled = `${target.linePrefix ?? ''}+${destination}`;
   return `[zvonix_dial=${dialled}]user/${target.sipUsername}@${realm}`;
 }
+
+/**
+ * Адрес набора для `bridge` в диалплане: номер стоит в самой строке, без переменной плеча.
+ *
+ * Тот же результат, что у `simEndpoint` (`sofia/zvonix/sip:99004+<номер>@<адрес GOIP>`),
+ * но иным путём. Переменная плеча `[zvonix_dial=…]` доходит до строки набора каталога
+ * при `originate` из ESL (тестовый звонок) и **не доходит из `bridge` диалплана**: строка
+ * набора раскрывается в контексте вызывающего плеча, где переменной нет. На живом узле
+ * (2026-09-30) вызов клиента ушёл на `sofia/zvonix/@<адрес>` — пустое имя вместо
+ * `99004+<номер>` — и 32 секунды звонил в пустоту. Здесь номер — литерал внутри выражения,
+ * которое узел раскрывает при выполнении `bridge`; выражение то же, что в
+ * `directory-xml.ts`, и проверено на узле через `eval`.
+ *
+ * Не зарегистрирован — `sofia_contact` отдаёт `error/user_not_registered`, выражение его не
+ * трогает, и `bridge` падает с `USER_NOT_REGISTERED`, как и раньше.
+ */
+export function simBridgeEndpoint(
+  target: SimDialTarget,
+  destination: string,
+  realm: string,
+): string {
+  const dialled = `${target.linePrefix ?? ''}+${destination}`;
+  return (
+    `\${regex(\${sofia_contact(*/${target.sipUsername}@${realm})}` +
+    `|^(sofia/[^/]+/)sip:[^@]+(@.*)$|%1sip:${dialled}%2)}`
+  );
+}
