@@ -68,14 +68,23 @@ const roughCount = z
   .max(1_000_000, 'слишком много');
 
 /**
- * Анкета службы такси ([ADR-0052](../../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)).
- * Название становится названием карточки клиента при одобрении.
+ * Анкета клиента ([ADR-0052](../../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)).
+ *
+ * Ничего обязательного (владелец, 2026-09-30): клиент — не только служба такси, но и
+ * человек, который звонит друзьям, и спрашивать у него название и телефон незачем.
+ * Поля остаются необязательными ради заявок, поданных до этого. Карточка называется
+ * `companyName`, а без него — именем заявителя.
  */
 const clientAnswers = z
   .object({
-    companyName: z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное'),
-    city: z.string().trim().min(2, 'слишком короткое').max(100, 'слишком длинное'),
-    phone,
+    companyName: z
+      .string()
+      .trim()
+      .min(2, 'слишком короткое')
+      .max(200, 'слишком длинное')
+      .optional(),
+    city: z.string().trim().min(2, 'слишком короткое').max(100, 'слишком длинное').optional(),
+    phone: phone.optional(),
     callsPerDay: roughCount.optional(),
   })
   .strict();
@@ -86,13 +95,13 @@ const clientAnswers = z
  */
 const partnerAnswers = z
   .object({
-    region: z.string().trim().min(2, 'слишком короткое').max(100, 'слишком длинное'),
-    phone,
+    region: z.string().trim().min(2, 'слишком короткое').max(100, 'слишком длинное').optional(),
+    phone: phone.optional(),
     simCount: roughCount.optional(),
     operators: z
       .array(z.string().trim().min(1, 'пустое название').max(50, 'слишком длинное'))
-      .min(1, 'назовите хотя бы одного оператора')
-      .max(10, 'не больше десяти'),
+      .max(10, 'не больше десяти')
+      .optional(),
   })
   .strict();
 

@@ -87,7 +87,7 @@ export function applicationTone(status: ApplicationStatus): string {
 
 /** Вид кабинета — так, как его называет человек. */
 export const CABINET_KIND_NAME: Record<Cabinet, string> = {
-  client: 'Служба такси',
+  client: 'Клиент',
   partner: 'Партнёр',
 };
 

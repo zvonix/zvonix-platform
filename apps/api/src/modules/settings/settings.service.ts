@@ -131,6 +131,16 @@ export class SettingsService {
     return { autoApprove: this.flag(values, 'partners.auto_approve') };
   }
 
+  /**
+   * Допуск клиентов без проверки администратором (владелец, 2026-09-30: «настройка нужна,
+   * чтобы клиенты регистрировались без проверки»). Клиент — не только служба такси, но и
+   * человек, который звонит друзьям.
+   */
+  async clients(): Promise<{ readonly autoApprove: boolean }> {
+    const values = await this.values();
+    return { autoApprove: this.flag(values, 'clients.auto_approve') };
+  }
+
   /** Полный список для админки: и заданные, и оставшиеся на умолчании. */
   async list(): Promise<SettingView[]> {
     const stored = new Map((await this.repository.list()).map((row) => [row.key, row]));

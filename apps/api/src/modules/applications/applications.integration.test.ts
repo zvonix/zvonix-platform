@@ -398,7 +398,7 @@ describe('допуск партнёров без администратора (p
 
   async function runAutoApprove(): Promise<number> {
     const { ApplicationsService } = await import('./applications.service.js');
-    return api().get(ApplicationsService).autoApprovePartners();
+    return api().get(ApplicationsService).autoApprove();
   }
 
   afterAll(async () => {
@@ -456,5 +456,70 @@ describe('допуск партнёров без администратора (p
     });
     expect(audit).toMatchObject({ actor_user_id: null, after: { automatic: true } });
     expect(await outbox(email)).toContain('application_approved');
+  });
+});
+
+describe('допуск клиентов без администратора (clients.auto_approve)', () => {
+  async function setClients(value: boolean): Promise<void> {
+    const response = await api().inject({
+      method: 'PUT',
+      url: '/settings',
+      headers: admin,
+      payload: { settings: { 'clients.auto_approve': value } },
+    });
+    expect(response.statusCode).toBe(200);
+  }
+
+  async function runAutoApprove(): Promise<number> {
+    const { ApplicationsService } = await import('./applications.service.js');
+    return api().get(ApplicationsService).autoApprove();
+  }
+
+  afterAll(async () => {
+    await setClients(false);
+  });
+
+  it('клиент без анкеты получает кабинет сразу, с нулевым минусом и именем заявителя', async () => {
+    // Клиент — не только служба такси, а человек, который звонит друзьям: анкеты нет.
+    await setClients(true);
+    const empty = { cabinet: 'client', answers: {} } as unknown as typeof CLIENT_APPLICATION;
+    const { email, applicationId } = await applicant(empty);
+    const partner = await applicant(PARTNER_APPLICATION);
+
+    expect(await runAutoApprove()).toBeGreaterThanOrEqual(1);
+
+    const card = await withDatabase(async (execute) => {
+      const found = await execute(sql`
+        select c.name, c.status, c.overdraft_limit::text as overdraft
+        from clients c join users u on u.id = c.owner_user_id where u.email = ${email}
+      `);
+      return found.rows[0] as { name: string; status: string; overdraft: string } | undefined;
+    });
+    expect(card).toEqual({ name: 'Анна Заявкина', status: 'active', overdraft: '0' });
+
+    const cabinets = (
+      await api().inject({ method: 'GET', url: '/me/cabinets', headers: await login(email) })
+    ).json<{ cabinets: { client: unknown } }>().cabinets;
+    expect(cabinets.client).not.toBeNull();
+
+    // Партнёра эта настройка не касается: у него своя (`partners.auto_approve`).
+    const states = await withDatabase(async (execute) => {
+      const found = await execute(sql`
+        select id, status from applications where id in (${applicationId}, ${partner.applicationId})
+      `);
+      return new Map((found.rows as { id: string; status: string }[]).map((r) => [r.id, r.status]));
+    });
+    expect(states.get(applicationId)).toBe('approved');
+    expect(states.get(partner.applicationId)).toBe('submitted');
+
+    const audit = await withDatabase(async (execute) => {
+      const found = await execute(sql`
+        select actor_user_id from audit_log
+        where action = 'client.created' and after->>'name' = 'Анна Заявкина'
+        order by created_at desc limit 1
+      `);
+      return found.rows[0] as { actor_user_id: string | null } | undefined;
+    });
+    expect(audit?.actor_user_id).toBeNull();
   });
 });

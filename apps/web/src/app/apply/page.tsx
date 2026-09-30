@@ -4,12 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isStaffRole, type ApplicationStatus, type Cabinet } from '@zvonix/shared';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import {
-  ApplicationFields,
-  EMPTY_APPLICATION,
-  toApplication,
-  type ApplicationDraft,
-} from '@/components/application-fields';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { Button } from '@/components/ui/button';
@@ -28,8 +22,8 @@ interface OwnApplication {
 
 /**
  * Заявка на кабинет из уже открытого входа
- * ([ADR-0052](../../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)): служба такси
- * просит кабинет партнёра и наоборот. Анкета та же, что при регистрации. Здесь же —
+ * ([ADR-0052](../../../../../docs/adr/0052-odin-vkhod-dva-kabineta.md)): клиент
+ * просит кабинет партнёра и наоборот. Анкеты нет. Здесь же —
  * свои заявки и решения по ним: отказ с причиной человек видит не только в письме.
  */
 export default function ApplyPage() {
@@ -77,13 +71,14 @@ function Apply() {
       : available[0];
   const [chosen, setChosen] = useState<Cabinet | undefined>(undefined);
   const cabinet = chosen ?? initial;
-  const [draft, setDraft] = useState<ApplicationDraft>(EMPTY_APPLICATION);
 
   const submit = useMutation({
     mutationFn: (kind: Cabinet) =>
-      request<unknown>('/me/applications', { method: 'POST', body: toApplication(kind, draft) }),
+      request<unknown>('/me/applications', {
+        method: 'POST',
+        body: { cabinet: kind, answers: {} },
+      }),
     onSuccess: async () => {
-      setDraft(EMPTY_APPLICATION);
       setChosen(undefined);
       await queryClient.invalidateQueries({ queryKey: ['me'] });
     },
@@ -160,7 +155,7 @@ function Apply() {
           }}
         >
           <h2 className="font-semibold">
-            Заявка: {cabinet === 'partner' ? 'кабинет партнёра' : 'кабинет службы такси'}
+            Заявка: {cabinet === 'partner' ? 'кабинет партнёра' : 'кабинет клиента'}
           </h2>
           {available.length > 1 && (
             <div role="group" aria-label="Кабинет" className="flex gap-2">
@@ -184,7 +179,6 @@ function Apply() {
             Войдёте тем же логином, деньги учитываются отдельно от первого кабинета. Звонки ваших
             линий на ваши же SIM не пойдут.
           </p>
-          <ApplicationFields cabinet={cabinet} value={draft} onChange={setDraft} />
           <Button type="submit" disabled={submit.isPending} className="self-start">
             {submit.isPending ? 'Отправляем…' : 'Отправить заявку'}
           </Button>

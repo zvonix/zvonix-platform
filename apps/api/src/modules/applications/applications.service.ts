@@ -106,9 +106,9 @@ export class ApplicationsService {
       userAgent: meta.userAgent,
     });
 
-    // Почта уже подтверждена, а площадка допускает партнёров сама — решение сразу,
+    // Почта уже подтверждена, а площадка допускает без проверки — решение сразу,
     // не дожидаясь фоновой задачи.
-    if (application.kind === 'partner' && (await this.autoApprovePartners()) > 0) {
+    if ((await this.autoApprove()) > 0) {
       const fresh = await this.identity.applicationsOf(actor.userId);
       return fresh.find((row) => row.id === application.id) ?? application;
     }
@@ -177,8 +177,9 @@ export class ApplicationsService {
   }
 
   /**
-   * Одобряет поданные заявки партнёров сама — если площадка это разрешила
-   * (`partners.auto_approve`, владелец 2026-09-29).
+   * Одобряет поданные заявки сама — партнёров и клиентов по отдельным настройкам
+   * (`partners.auto_approve` — владелец 2026-09-29, `clients.auto_approve` — 2026-09-30).
+   * Клиент не обязательно служба такси: заявку может подать человек, который звонит друзьям.
    *
    * Тем же путём, что одобрение человеком: карточка, открытый вход, решение, журнал,
    * письмо. Отличий два: партнёр сразу `verified` — «без подтверждения админа» значит
@@ -190,8 +191,12 @@ export class ApplicationsService {
    * раз в минуту и сразу после подачи заявки; включили настройку — разберёт и то, что
    * накопилось. Возвращает число одобренных.
    */
-  async autoApprovePartners(): Promise<number> {
-    if (!(await this.settings.partners()).autoApprove) return 0;
+  async autoApprove(): Promise<number> {
+    const [partners, clients] = await Promise.all([
+      this.settings.partners(),
+      this.settings.clients(),
+    ]);
+    if (!partners.autoApprove && !clients.autoApprove) return 0;
 
     const { rows } = await this.identity.listApplications({
       status: 'submitted',
@@ -200,7 +205,8 @@ export class ApplicationsService {
     });
     let approved = 0;
     for (const { application, applicant } of rows) {
-      if (application.kind !== 'partner' || applicant.emailConfirmedAt === null) continue;
+      const allowed = application.kind === 'partner' ? partners.autoApprove : clients.autoApprove;
+      if (!allowed || applicant.emailConfirmedAt === null) continue;
       try {
         await this.database.db.transaction((tx) =>
           this.approveLocked(tx, application.id, {
@@ -251,12 +257,12 @@ export class ApplicationsService {
     });
     let cardId: string;
     if (parsed.cabinet === 'client') {
-      if (actor === null) throw conflict('Клиента площадка без человека не одобряет');
-      // Клиент работает сразу: решение о нём уже принял человек, одобрив заявку.
+      // Клиент работает сразу, но без разрешённого минуса: пока не пополнит счёт, звонить
+      // ему нечем — автоматический допуск денег не открывает.
       const client = await this.billing.createClient(
         {
           ownerUserId: applicant.id,
-          name: parsed.answers.companyName,
+          name: parsed.answers.companyName ?? applicant.fullName,
           overdraftLimit: Money.ZERO,
           status: 'active',
         },

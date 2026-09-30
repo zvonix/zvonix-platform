@@ -65,29 +65,31 @@ export const SETTINGS = {
   'pricing.price_bands_enabled': {
     kind: 'boolean',
     fallback: 'true',
-    hint:
-      'Коридоры цен проверяются: цена партнёра обязана уложиться в коридор, если он задан. ' +
-      'Выключено — партнёр назначает любую цену; коридоры сохраняются',
+    hint: 'Выключено — партнёр назначает любую цену; коридоры сохраняются',
   },
 
   'cabinets.partner_may_add_client': {
     kind: 'boolean',
     fallback: 'true',
-    hint: 'Партнёр может подать заявку на кабинет клиента («Стать клиентом»)',
+    hint: 'Пункт «Стать клиентом» в меню партнёра',
   },
 
   'cabinets.client_may_add_partner': {
     kind: 'boolean',
     fallback: 'true',
-    hint: 'Клиент может подать заявку на кабинет партнёра («Стать партнёром»)',
+    hint: 'Пункт «Стать партнёром» в меню клиента',
   },
 
   'partners.auto_approve': {
     kind: 'boolean',
     fallback: 'false',
-    hint:
-      'Партнёры получают кабинет и допуск к работе без проверки администратором — сразу после ' +
-      'подтверждения почты',
+    hint: 'Кабинет и допуск к работе сразу после подтверждения почты',
+  },
+
+  'clients.auto_approve': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Кабинет сразу после подтверждения почты. Минус на счёте не разрешён',
   },
 } as const satisfies Record<string, SettingDefinition>;
 

@@ -4,12 +4,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import type { Cabinet } from '@zvonix/shared';
 import Link from 'next/link';
 import { useState } from 'react';
-import {
-  ApplicationFields,
-  EMPTY_APPLICATION,
-  toApplication,
-  type ApplicationDraft,
-} from '@/components/application-fields';
 import { ErrorNote } from '@/components/error-note';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { YandexCaptcha } from '@/components/yandex-captcha';
@@ -24,24 +18,21 @@ interface CaptchaSettings {
 }
 
 /**
- * Что говорит левая колонка. Текст зависит от выбора: службе такси и партнёру
- * площадка обещает разное, и общий текст не сказал бы ничего ни тому, ни другому.
+ * Что говорит левая колонка. Текст зависит от выбора: клиенту и партнёру площадка
+ * обещает разное. Про проверку администратором ничего не сказано: допуск зависит
+ * от настроек площадки (`clients.auto_approve`, `partners.auto_approve`).
  */
 const PITCH: Record<Cabinet, { title: string; text: string; steps: readonly string[] }> = {
   client: {
-    title: 'Звонки водителям и пассажирам — дешевле и без сбоев',
-    text: 'Площадка отправляет звонки вашей диспетчерской через SIM-карты нужного оператора: внутри сети дешевле, а получатель видит мобильный номер, а не городской.',
-    steps: [
-      'Заявку проверяет администратор площадки',
-      'Линии настраиваются в кабинете',
-      'Каждый звонок и каждое списание — в отчёте',
-    ],
+    title: 'Звонки через SIM-карты — дешевле и без сбоев',
+    text: 'Звонки идут через SIM-карты партнёров, а получатель видит мобильный номер, а не городской.',
+    steps: ['Подтвердите почту', 'Пополните счёт', 'Каждый звонок и каждое списание — в отчёте'],
   },
   partner: {
     title: 'Ваши SIM звонят — вы получаете деньги',
-    text: 'Подключите GOIP с SIM-картами: площадка направит на них звонки служб такси внутри сети каждой SIM. Вы назначаете цену в пределах коридора и видите заработок по каждой карте.',
+    text: 'Подключите GOIP с SIM-картами: площадка направит на них звонки клиентов. Цену назначаете вы, заработок виден по каждой карте.',
     steps: [
-      'Заявку проверяет администратор площадки',
+      'Подтвердите почту',
       'Шлюз подключается по инструкции из кабинета',
       'По каждому звонку — отчёт и заработок',
     ],
@@ -49,7 +40,7 @@ const PITCH: Record<Cabinet, { title: string; text: string; steps: readonly stri
 };
 
 const ROLES: readonly { id: Cabinet; title: string; text: string }[] = [
-  { id: 'client', title: 'Служба такси', text: 'Звоню водителям и пассажирам через площадку' },
+  { id: 'client', title: 'Клиент', text: 'Хочу звонить через площадку' },
   { id: 'partner', title: 'Партнёр', text: 'Есть SIM и GOIP — хочу зарабатывать на звонках' },
 ];
 
@@ -65,7 +56,6 @@ export default function RegisterPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [draft, setDraft] = useState<ApplicationDraft>(EMPTY_APPLICATION);
   const [consent, setConsent] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | undefined>(undefined);
   const [captchaReset, setCaptchaReset] = useState(0);
@@ -89,7 +79,9 @@ export default function RegisterPage() {
           email,
           password,
           fullName,
-          ...toApplication(cabinet, draft),
+          // Анкеты нет: клиент — не только такси, а спрашивать телефон незачем (владелец, 2026-09-30).
+          cabinet,
+          answers: {},
           ...(captchaToken === undefined ? {} : { captchaToken }),
         },
       }),
@@ -224,8 +216,6 @@ export default function RegisterPage() {
                 <span className="text-xs text-muted-foreground">Не короче 12 символов</span>
               </div>
             </div>
-
-            <ApplicationFields cabinet={cabinet} value={draft} onChange={setDraft} />
 
             {siteKey !== undefined && (
               <YandexCaptcha

@@ -559,7 +559,8 @@ export class BillingService {
       overdraftLimit: MoneyAmount;
       status?: ClientStatus;
     },
-    actor: { userId: UserId; role: UserRole },
+    /** `null` — карточку завела сама площадка по настройке `clients.auto_approve`. */
+    actor: { userId: UserId; role: UserRole } | null,
     executor?: Executor,
   ): Promise<ClientRow> {
     if (executor === undefined) {
@@ -588,8 +589,8 @@ export class BillingService {
         action: 'client.created',
         entityType: 'client',
         entityId: client.id,
-        actorUserId: actor.userId,
-        actorRole: actor.role,
+        actorUserId: actor?.userId ?? null,
+        actorRole: actor?.role ?? null,
         after: {
           owner_user_id: client.ownerUserId,
           name: client.name,

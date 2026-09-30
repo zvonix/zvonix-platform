@@ -92,7 +92,8 @@ function SettingsForm() {
   const groups = [
     { title: 'Почта', prefix: 'mail.' },
     { title: 'Проверка «я не робот»', prefix: 'captcha.' },
-    { title: 'Партнёры', prefix: 'partners.' },
+    { title: 'Регистрация', prefix: 'partners.' },
+    { title: 'Регистрация клиентов', prefix: 'clients.' },
     { title: 'Цены партнёров', prefix: 'pricing.' },
     { title: 'Кабинеты', prefix: 'cabinets.' },
   ];

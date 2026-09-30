@@ -58,9 +58,17 @@ describe('схема регистрации', () => {
     expect(registerSchema.safeParse({ ...partner, cabinet: 'client' }).success).toBe(false);
   });
 
-  it('партнёр называет хотя бы одного оператора', () => {
+  it('анкеты нет: заявка проходит с пустыми ответами (владелец, 2026-09-30)', () => {
+    // Клиент — не только служба такси, а человек, который звонит друзьям: телефон и название
+    // у него не спрашиваются. Поля остаются допустимыми ради заявок, поданных раньше.
+    for (const cabinet of ['client', 'partner'] as const) {
+      expect(registerSchema.safeParse({ ...valid, cabinet, answers: {} }).success).toBe(true);
+    }
+  });
+
+  it('неверно заполненное необязательное поле всё равно отвергается', () => {
     expect(
-      registerSchema.safeParse({ ...partner, answers: { ...partner.answers, operators: [] } })
+      registerSchema.safeParse({ ...partner, answers: { ...partner.answers, operators: [''] } })
         .success,
     ).toBe(false);
   });
