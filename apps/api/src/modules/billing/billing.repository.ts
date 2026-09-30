@@ -486,6 +486,38 @@ export class BillingRepository {
     return row;
   }
 
+  /**
+   * Карточки, которыми владеют перечисленные учётные записи, — одним обращением на список.
+   * Нужен списку учётных записей: «участник» без слов «клиент» и «партнёр» не говорит ничего.
+   */
+  async listCabinetsOwnedBy(userIds: readonly Id<'user'>[]): Promise<{
+    clients: { ownerUserId: Id<'user'>; id: ClientId; name: string; status: ClientStatus }[];
+    partners: { ownerUserId: Id<'user'>; id: PartnerId; name: string; status: PartnerStatus }[];
+  }> {
+    if (userIds.length === 0) return { clients: [], partners: [] };
+    const [clientRows, partnerRows] = await Promise.all([
+      this.db
+        .select({
+          ownerUserId: clients.ownerUserId,
+          id: clients.id,
+          name: clients.name,
+          status: clients.status,
+        })
+        .from(clients)
+        .where(inArray(clients.ownerUserId, [...userIds])),
+      this.db
+        .select({
+          ownerUserId: partners.ownerUserId,
+          id: partners.id,
+          name: partners.name,
+          status: partners.status,
+        })
+        .from(partners)
+        .where(inArray(partners.ownerUserId, [...userIds])),
+    ]);
+    return { clients: clientRows, partners: partnerRows };
+  }
+
   async findPartnerAlias(partnerId: PartnerId): Promise<string | undefined> {
     const [row] = await this.db
       .select({ displayName: partnerAliases.displayName })

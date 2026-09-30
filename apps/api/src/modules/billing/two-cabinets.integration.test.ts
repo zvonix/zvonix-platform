@@ -129,6 +129,30 @@ describe('кабинеты участника', () => {
     );
   });
 
+  it('сотрудник видит, чьи карточки у учётных записей; участнику список закрыт', async () => {
+    const both = await person('member');
+    const onlyClient = await person('member');
+    const nobody = await person('member');
+    await createClient(both.id);
+    await createPartner(both.id);
+    await createClient(onlyClient.id);
+
+    const ids = [both.id, onlyClient.id, nobody.id].join(',');
+    const response = await get(`/cabinets/owners?userIds=${ids}`, admin);
+    expect(response.statusCode).toBe(200);
+    const owners = response.json<{
+      owners: { user_id: string; client: unknown; partner: unknown }[];
+    }>().owners;
+    const byUser = (id: string) => owners.find((owner) => owner.user_id === id);
+    expect(byUser(both.id)?.client).not.toBeNull();
+    expect(byUser(both.id)?.partner).not.toBeNull();
+    expect(byUser(onlyClient.id)?.client).not.toBeNull();
+    expect(byUser(onlyClient.id)?.partner).toBeNull();
+    expect(byUser(nobody.id)).toEqual({ user_id: nobody.id, client: null, partner: null });
+
+    expect((await get(`/cabinets/owners?userIds=${ids}`, both.auth)).statusCode).toBe(403);
+  }, 120_000);
+
   it('одна карточка открывает только свой кабинет', async () => {
     const member = await person('member');
     expect((await createClient(member.id)).statusCode).toBe(201);

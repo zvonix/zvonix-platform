@@ -1,22 +1,10 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import type { ClientStatus } from '@zvonix/shared';
 import { AccountLedger } from '@/components/account-ledger';
 import { ConsoleShell } from '@/components/console-shell';
-import { request } from '@/lib/api';
+import { useClientAccount } from '@/lib/account';
 import { CLIENT_STATUS_MEANING, CLIENT_STATUS_NAME } from '@/lib/labels';
 import { isNegative, money } from '@/lib/money';
-
-interface Account {
-  readonly client: { id: string; name: string; status: ClientStatus; created_at: string };
-  readonly funds: {
-    readonly balance: string;
-    readonly overdraft_limit: string;
-    readonly held: string;
-    readonly available: string;
-  };
-}
 
 export default function MyMoneyPage() {
   return (
@@ -27,10 +15,7 @@ export default function MyMoneyPage() {
 }
 
 function MyMoney() {
-  const account = useQuery({
-    queryKey: ['my', 'account'],
-    queryFn: () => request<Account>('/client/account'),
-  });
+  const account = useClientAccount();
 
   if (account.error !== null) {
     return (
@@ -66,12 +51,6 @@ function MyMoney() {
           <Figure title="Придержано под вызовы" value={funds.held} />
           <Figure title="Разрешённый минус" value={funds.overdraft_limit} />
         </dl>
-
-        <p className="text-muted-foreground">
-          «Можно потратить» — это остаток плюс разрешённый минус минус придержанное. Придержанное
-          освобождается, когда вызов закончится: под каждый идущий разговор резервируется его
-          предельная стоимость, иначе длинный разговор мог бы увести счёт ниже разрешённого.
-        </p>
       </div>
 
       <AccountLedger source="/client/entries" account="client" />

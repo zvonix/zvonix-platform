@@ -27,6 +27,7 @@ import { useEffect } from 'react';
 import { MobileMenuButton, MobileTabs, SideNav, type NavGroup } from '@/components/shell-nav';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { Button } from '@/components/ui/button';
+import { useClientAccount, usePartnerAccount } from '@/lib/account';
 import { ApiError, request } from '@/lib/api';
 import {
   CABINET_HOME,
@@ -36,6 +37,7 @@ import {
   useCabinets,
   type OwnedCabinets,
 } from '@/lib/cabinets';
+import { isNegative, money } from '@/lib/money';
 import { useSession, type CurrentUser } from '@/lib/session';
 
 /**
@@ -354,6 +356,9 @@ export function ConsoleShell({
           {!tabs && <MobileMenuButton groups={groups} footer={footer} />}
           <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {owned !== undefined && current !== undefined && owned[current] !== null ? (
+              <BalanceChip cabinet={current} />
+            ) : null}
             {owned !== undefined && current !== undefined ? (
               <CabinetSwitch owned={owned} current={current} />
             ) : null}
@@ -427,6 +432,32 @@ function secondCabinetGroup(owned: OwnedCabinets | undefined): readonly NavGroup
       ? { href: '/apply?cabinet=client', label: 'Стать клиентом' }
       : { href: '/apply?cabinet=partner', label: 'Стать партнёром' };
   return [{ title: 'Второй кабинет', items: [{ ...missing, Icon: Plus }] }];
+}
+
+/**
+ * Деньги на виду: у клиента — сколько ещё можно потратить, у партнёра — сколько к выплате.
+ * Ссылка ведёт на «Деньги». Пока счёт не загрузился или не отвечает, шапка обходится без
+ * плашки: неверное число на месте денег хуже пустого места.
+ */
+function BalanceChip({ cabinet }: { cabinet: Cabinet }) {
+  const client = useClientAccount(cabinet === 'client');
+  const partner = usePartnerAccount(cabinet === 'partner');
+  const [title, value] =
+    cabinet === 'client'
+      ? ['Можно потратить', client.data?.funds.available]
+      : ['К выплате', partner.data?.funds.balance];
+  if (value === undefined) return null;
+  return (
+    <Link
+      href={cabinet === 'client' ? '/my/money' : '/partner/money'}
+      className="flex items-baseline gap-1.5 rounded-md border border-border px-2.5 py-1 hover:bg-muted"
+    >
+      <span className="text-muted-foreground">{title}</span>
+      <span className={`num font-semibold ${isNegative(value) ? 'text-crit' : ''}`}>
+        {money(value)}
+      </span>
+    </Link>
+  );
 }
 
 /**

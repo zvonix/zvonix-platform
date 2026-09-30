@@ -11,8 +11,9 @@
  * переключатель.
  */
 
-import { Controller, Get } from '@nestjs/common';
-import { isStaffRole, type ClientStatus, type PartnerStatus } from '@zvonix/shared';
+import { Controller, Get, Query } from '@nestjs/common';
+import { isStaffRole, parseId, type ClientStatus, type PartnerStatus } from '@zvonix/shared';
+import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import type { Principal } from '../identity/identity.service.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -40,12 +41,53 @@ interface CabinetsView {
   readonly second_cabinet_open: boolean;
 }
 
+/** Не больше страницы списка учётных записей. */
+const OWNERS_MAX = 200;
+
+interface OwnerCabinetsView {
+  readonly user_id: string;
+  readonly client: { id: string; name: string; status: ClientStatus } | null;
+  readonly partner: { id: string; name: string; status: PartnerStatus } | null;
+}
+
 @Controller()
 export class CabinetsController {
   constructor(
     private readonly billing: BillingService,
     private readonly settings: SettingsService,
   ) {}
+
+  /**
+   * Чьи это карточки — для списка учётных записей сотрудников: без него «участник»
+   * не отличает клиента от партнёра. Идентификаторы — через запятую, не больше страницы.
+   */
+  @Roles('admin', 'support')
+  @Get('cabinets/owners')
+  async owners(@Query('userIds') raw?: string): Promise<{ owners: OwnerCabinetsView[] }> {
+    const ids = (raw ?? '')
+      .split(',')
+      .filter((part) => part !== '')
+      .slice(0, OWNERS_MAX)
+      .map((part) => parseId(part, 'user'));
+    const found = await this.billing.cabinetsOfMany(ids);
+    return {
+      owners: ids.map((userId) => {
+        const client = found.clients.find((row) => row.ownerUserId === userId);
+        const partner = found.partners.find((row) => row.ownerUserId === userId);
+        return {
+          user_id: userId,
+          client:
+            client === undefined
+              ? null
+              : { id: client.id, name: client.name, status: client.status },
+          partner:
+            partner === undefined
+              ? null
+              : { id: partner.id, name: partner.name, status: partner.status },
+        };
+      }),
+    };
+  }
 
   @Get('me/cabinets')
   async mine(@CurrentUser() user: Principal): Promise<{ cabinets: CabinetsView }> {

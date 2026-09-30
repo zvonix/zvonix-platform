@@ -510,6 +510,13 @@ export class BillingService {
     return { client: client?.id, partner: partner?.id };
   }
 
+  /** Карточки списка учётных записей — для экрана сотрудников, не для собственного контура. */
+  async cabinetsOfMany(
+    userIds: readonly UserId[],
+  ): ReturnType<BillingRepository['listCabinetsOwnedBy']> {
+    return this.repository.listCabinetsOwnedBy(userIds);
+  }
+
   /**
    * Партнёр, которым владеет учётная запись.
    *
