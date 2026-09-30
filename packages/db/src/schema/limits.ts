@@ -12,8 +12,28 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, integer, pgTable, text, unique } from 'drizzle-orm/pg-core';
-import { LIMIT_METRICS, LIMIT_WINDOWS, type LimitMetric, type LimitWindow } from '@zvonix/shared';
+import {
+  bigint,
+  boolean,
+  check,
+  index,
+  integer,
+  pgTable,
+  smallint,
+  text,
+  unique,
+} from 'drizzle-orm/pg-core';
+import {
+  LIMIT_METRICS,
+  LIMIT_PERIOD_START_DAY_MAX,
+  LIMIT_ROUNDINGS,
+  LIMIT_SET_BY,
+  LIMIT_WINDOWS,
+  type LimitMetric,
+  type LimitRounding,
+  type LimitSetBy,
+  type LimitWindow,
+} from '@zvonix/shared';
 import { createdAt, idRef, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 import { clients, partners } from './billing.js';
 import { channels, simCards } from './telephony.js';
@@ -45,6 +65,22 @@ export const limitRules = pgTable(
     /** Предел в единицах метрики: звонков или минут. В счётчике минуты копятся секундами. */
     value: integer().notNull(),
 
+    /**
+     * Правило партнёра считается **у каждой его SIM отдельно** — одно правило, свой
+     * счётчик у каждой карты ([ADR-0057](../../../docs/adr/0057-limity-partnyora.md)).
+     * Карта, вставленная позже, защищена сразу. Только у правила партнёра.
+     */
+    perSim: boolean().notNull().default(false),
+
+    /** Как разговор идёт в счётчик минут: посекундно или с округлением до минуты. */
+    rounding: text().$type<LimitRounding>().notNull().default('second'),
+
+    /** День обновления месячного окна (1–28); пусто — первое число. Только у `month`. */
+    periodStartDay: smallint(),
+
+    /** Кто задал: площадка или сам партнёр. Партнёр меняет только свои правила. */
+    setBy: text().$type<LimitSetBy>().notNull().default('platform'),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -54,14 +90,31 @@ export const limitRules = pgTable(
     // Ноль означал бы «звонить нельзя вовсе», а это выражается состоянием субъекта,
     // а не лимитом: отключённый канал видно, а лимит в ноль выглядит как поломка.
     check('limit_rules_value_positive', sql`${t.value} > 0`),
+    check('limit_rules_rounding_check', oneOf(t.rounding, LIMIT_ROUNDINGS)),
+    check('limit_rules_set_by_check', oneOf(t.setBy, LIMIT_SET_BY)),
+    // Округлять звонки нечего; «на каждую карту» бывает только у правила партнёра;
+    // день обновления — только у месячного окна.
+    check('limit_rules_rounding_minutes', sql`${t.metric} = 'minutes' or ${t.rounding} = 'second'`),
+    check('limit_rules_per_sim_partner', sql`not ${t.perSim} or ${t.partnerId} is not null`),
+    check(
+      'limit_rules_period_start_day',
+      sql`${t.periodStartDay} is null or (${t.window} = 'month' and ${t.periodStartDay} between 1 and ${sql.raw(String(LIMIT_PERIOD_START_DAY_MAX))})`,
+    ),
+    // Партнёр видит правила площадки, а своё задаёт рядом, не стирая чужого.
+    check(
+      'limit_rules_partner_sets_own',
+      sql`${t.setBy} = 'platform' or ${t.partnerId} is not null or ${t.simCardId} is not null`,
+    ),
     check(
       'limit_rules_single_subject',
       sql`(${t.clientId} is not null)::int + (${t.channelId} is not null)::int + (${t.partnerId} is not null)::int + (${t.simCardId} is not null)::int = 1`,
     ),
     // Два одинаковых окна с одной метрикой у одного субъекта означали бы, что предел
     // зависит от того, какую строку прочитали первой.
+    // «На каждую карту» и «всего по партнёру» — разные правила; площадка и партнёр —
+    // тоже: оба предела действуют (ADR-0057).
     unique('limit_rules_subject_key')
-      .on(t.clientId, t.channelId, t.partnerId, t.simCardId, t.window, t.metric)
+      .on(t.clientId, t.channelId, t.partnerId, t.simCardId, t.window, t.metric, t.perSim, t.setBy)
       .nullsNotDistinct(),
     // Горячий путь: все лимиты субъекта одним чтением.
     index('limit_rules_client_idx').on(t.clientId),
@@ -91,6 +144,12 @@ export const limitCounters = pgTable(
       // Правила нет — считать нечего.
       .references(() => limitRules.id, { onDelete: 'cascade' }),
 
+    /**
+     * SIM, чей это счётчик, — у правила «на каждую карту» (ADR-0057). У прочих пусто:
+     * счётчик один на правило.
+     */
+    simCardId: idRef<'simCard'>().references(() => simCards.id, { onDelete: 'cascade' }),
+
     /** Начало окна в UTC. */
     bucketStart: timestamptz().notNull(),
 
@@ -101,7 +160,9 @@ export const limitCounters = pgTable(
   },
   (t) => [
     check('limit_counters_amount_non_negative', sql`${t.amount} >= 0`),
-    unique('limit_counters_bucket_key').on(t.limitRuleId, t.bucketStart),
+    unique('limit_counters_bucket_key')
+      .on(t.limitRuleId, t.simCardId, t.bucketStart)
+      .nullsNotDistinct(),
     // Уборка по сроку ходит по началу окна.
     index('limit_counters_bucket_idx').on(t.bucketStart),
   ],

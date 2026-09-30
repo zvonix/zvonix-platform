@@ -158,7 +158,8 @@ export class CdrService {
         await this.limits.consume(
           limitRules,
           'minutes',
-          cdr.billableSeconds,
+          // SIM вызова — для правил «на каждую карту» (ADR-0057).
+          { seconds: cdr.billableSeconds, simCardId: call.simCardId },
           call.startedAt,
           tx,
           // Разговор уже состоялся: отменить его нельзя, и проверять предел здесь

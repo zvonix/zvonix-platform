@@ -260,6 +260,13 @@
       "when": 1790689424454,
       "tag": "0036_tarify_partnyora",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1790739810930,
+      "tag": "0037_limity_partnyora",
+      "breakpoints": true
     }
   ]
 }

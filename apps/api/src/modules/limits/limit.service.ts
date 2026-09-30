@@ -15,33 +15,55 @@
 import { Injectable } from '@nestjs/common';
 import {
   amountFor,
+  bucketEnd,
   bucketStart,
   limitInStoredUnits,
   notFound,
+  permissionDenied,
   validationFailed,
   type Id,
   type LimitMetric,
+  type LimitRounding,
+  type LimitSetBy,
   type LimitWindow,
   type UserRole,
 } from '@zvonix/shared';
 import { AuditService } from '../audit/audit.service.js';
 import {
+  counterKeyOf,
   LimitRepository,
-  type CounterKey,
   type Executor,
   type LimitRuleId,
   type LimitRuleRow,
   type LimitSubjects,
 } from './limit.repository.js';
 
-/** Правило вместе с израсходованным за его текущее окно. */
+/**
+ * Правило вместе с израсходованным за его текущее окно. У правила «на каждую карту»
+ * (ADR-0057) таких строк по одной на SIM, `simCardId` называет её.
+ */
 export interface LimitUsage {
   readonly rule: LimitRuleRow;
+  readonly simCardId: Id<'simCard'> | null;
   readonly bucketStart: Date;
+  /** Когда окно закончится и счётчик обнулится. */
+  readonly resetsAt: Date;
   /** В единицах хранения: звонки — штуками, минуты — секундами. */
   readonly used: number;
   readonly limit: number;
   readonly exceeded: boolean;
+}
+
+/** SIM партнёра — для правил «на каждую карту»: чьи счётчики показать и проверить. */
+export interface PartnerSim {
+  readonly partnerId: Id<'partner'>;
+  readonly simCardId: Id<'simCard'>;
+}
+
+/** Кто меняет правило: для журнала и для проверки «партнёр — только свои». */
+interface Actor {
+  readonly userId: Id<'user'>;
+  readonly role: UserRole;
 }
 
 /** Кого именно остановил лимит. Наружу уходит идентификатор правила, а не догадка. */
@@ -52,6 +74,9 @@ export class LimitBreach extends Error {
     super(`Превышен лимит ${rule.metric} за ${rule.window}`);
   }
 }
+
+/** Сколько хранятся счётчики минутных и часовых окон: они нужны только сейчас. */
+const SHORT_COUNTER_RETENTION_DAYS = 2;
 
 /**
  * Сколько дней хранятся счётчики закрытых окон.
@@ -86,7 +111,8 @@ export class LimitService {
    */
   async purgeClosedWindows(now: Date): Promise<number> {
     const before = new Date(now.getTime() - COUNTER_RETENTION_DAYS * 86_400_000);
-    return this.repository.deleteCountersBefore(before);
+    const shortBefore = new Date(now.getTime() - SHORT_COUNTER_RETENTION_DAYS * 86_400_000);
+    return this.repository.deleteCountersBefore(before, shortBefore);
   }
 
   /** Только правила, без счётчиков: тому, кто собирается их увеличивать, счёт не нужен. */
@@ -94,8 +120,16 @@ export class LimitService {
     return this.repository.listRules(subjects);
   }
 
-  async usage(subjects: LimitSubjects, at: Date): Promise<LimitUsage[]> {
-    return this.withUsage(await this.repository.listRules(subjects), at);
+  /**
+   * Лимиты субъектов с израсходованным. `sims` — карты, по которым показать правила
+   * «на каждую карту»: у отбора кандидатов это кандидаты, у кабинета — карты партнёра.
+   */
+  async usage(
+    subjects: LimitSubjects,
+    at: Date,
+    sims: readonly PartnerSim[] = [],
+  ): Promise<LimitUsage[]> {
+    return this.withUsage(await this.repository.listRules(subjects), at, sims);
   }
 
   /**
@@ -109,19 +143,30 @@ export class LimitService {
   async consume(
     rules: readonly LimitRuleRow[],
     metric: LimitMetric,
-    seconds: number,
+    call: {
+      readonly seconds: number;
+      /** SIM вызова: по ней считаются правила «на каждую карту». У транка — пусто. */
+      readonly simCardId: Id<'simCard'> | null;
+    },
     at: Date,
     executor: Executor,
     options: { verify: boolean },
   ): Promise<void> {
-    const applicable = rules.filter((rule) => rule.metric === metric);
+    // Правило «на каждую карту» без карты не считается: у транка SIM нет.
+    const applicable = rules.filter(
+      (rule) => rule.metric === metric && (!rule.perSim || call.simCardId !== null),
+    );
     if (applicable.length === 0) return;
 
-    const delta = amountFor(metric, seconds);
     const updated = await this.repository.increase(
       applicable.map((rule) => ({
-        key: { ruleId: rule.id, bucketStart: bucketStart(rule.window, at) },
-        delta,
+        key: {
+          ruleId: rule.id,
+          simCardId: rule.perSim ? call.simCardId : null,
+          bucketStart: bucketStart(rule.window, at, rule.periodStartDay),
+        },
+        // Поминутный счёт округляет каждый разговор до минуты — у каждого правила свой.
+        delta: amountFor(metric, call.seconds, rule.rounding),
       })),
       executor,
     );
@@ -129,7 +174,7 @@ export class LimitService {
     if (!options.verify) return;
 
     for (const rule of applicable) {
-      const amount = updated.get(rule.id);
+      const amount = updated.get(counterKeyOf(rule.id, rule.perSim ? call.simCardId : null));
       if (amount === undefined) continue;
       if (amount > limitInStoredUnits(rule.metric, rule.value)) {
         throw new LimitBreach(rule);
@@ -148,6 +193,10 @@ export class LimitService {
       window: LimitWindow;
       metric: LimitMetric;
       value: number;
+      perSim?: boolean;
+      rounding?: LimitRounding;
+      periodStartDay?: number | null;
+      setBy?: LimitSetBy;
     },
     actorUserId: Id<'user'>,
     actorRole: UserRole,
@@ -160,8 +209,16 @@ export class LimitService {
     if (named.length !== 1) {
       throw validationFailed('Лимит задаётся ровно одному: клиенту, каналу, партнёру или SIM');
     }
+    const draft = {
+      ...input,
+      perSim: input.perSim ?? false,
+      rounding: input.rounding ?? 'second',
+      periodStartDay: input.periodStartDay ?? null,
+      setBy: input.setBy ?? 'platform',
+    } as const;
+    assertShape(draft);
 
-    const row = await this.repository.insertRule(input);
+    const row = await this.repository.insertRule(draft);
     await this.audit.record({
       action: 'limit.added',
       entityType: 'limit_rule',
@@ -174,40 +231,52 @@ export class LimitService {
   }
 
   /**
-   * Меняет предел, не трогая израсходованное.
+   * Меняет предел (и у минут — счёт, у месяца — день обновления), не трогая
+   * израсходованное. Квота изменилась — потраченное никуда не делось. Чтобы обнулить
+   * счёт, лимит удаляют: счётчики уходят вместе с правилом.
    *
-   * Квота изменилась — потраченное никуда не делось. Чтобы обнулить счёт, лимит
-   * удаляют: счётчики уходят вместе с правилом.
+   * `owner` — партнёр, меняющий своё: чужое правило и правило площадки ему не видны
+   * как изменяемые (ADR-0057). Администратор меняет любое.
    */
-  async changeValue(
+  async changeRule(
     id: LimitRuleId,
-    value: number,
-    actorUserId: Id<'user'>,
-    actorRole: UserRole,
+    change: {
+      value: number;
+      rounding?: LimitRounding | undefined;
+      periodStartDay?: number | null | undefined;
+    },
+    actor: Actor,
+    owner?: (rule: LimitRuleRow) => boolean,
   ): Promise<LimitRuleRow> {
-    const before = await this.repository.findRule(id);
-    if (before === undefined) throw notFound('Лимит не найден');
+    const before = await this.requireRule(id, owner);
+    assertShape({
+      ...before,
+      rounding: change.rounding ?? before.rounding,
+      periodStartDay:
+        change.periodStartDay === undefined ? before.periodStartDay : change.periodStartDay,
+    });
 
-    const row = await this.repository.updateValue(id, value);
+    const row = await this.repository.updateRule(id, change);
     if (row === undefined) throw notFound('Лимит не найден');
 
     await this.audit.record({
       action: 'limit.changed',
       entityType: 'limit_rule',
       entityId: id,
-      actorUserId,
-      actorRole,
-      before: { value: before.value },
-      after: { value: row.value },
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: subjectOf(before),
+      after: subjectOf(row),
     });
     return row;
   }
 
   async remove(
     id: LimitRuleId,
-    actorUserId: Id<'user'>,
-    actorRole: UserRole,
+    actor: Actor,
+    owner?: (rule: LimitRuleRow) => boolean,
   ): Promise<LimitRuleRow> {
+    await this.requireRule(id, owner);
     const removed = await this.repository.deleteRule(id);
     if (removed === undefined) throw notFound('Лимит не найден');
 
@@ -215,16 +284,31 @@ export class LimitService {
       action: 'limit.removed',
       entityType: 'limit_rule',
       entityId: id,
-      actorUserId,
-      actorRole,
-      before: { ...subjectOf(removed), value: removed.value },
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: subjectOf(removed),
     });
     return removed;
   }
 
+  /** Правило — или отказ; партнёру — только своё и заданное им самим. */
+  private async requireRule(
+    id: LimitRuleId,
+    owner: ((rule: LimitRuleRow) => boolean) | undefined,
+  ): Promise<LimitRuleRow> {
+    const rule = await this.repository.findRule(id);
+    if (rule === undefined || (owner !== undefined && !owner(rule))) {
+      throw notFound('Лимит не найден');
+    }
+    if (owner !== undefined && rule.setBy !== 'partner') {
+      throw permissionDenied('Этот лимит задала площадка — изменить его может только она');
+    }
+    return rule;
+  }
+
   /** Лимиты субъекта вместе с израсходованным — для разбора «почему не звонит». */
   async list(subject: LimitSubjects, at: Date): Promise<LimitUsage[]> {
-    return this.withUsage(await this.repository.listRulesOf(subject), at);
+    return this.withUsage(await this.repository.listRulesOf(subject), at, []);
   }
 
   /**
@@ -233,26 +317,66 @@ export class LimitService {
    * Одно место на всех: горячий путь и разбор обязаны считать окно **одинаково**,
    * иначе поддержка увидит не то, что видела маршрутизация.
    */
-  private async withUsage(rules: readonly LimitRuleRow[], at: Date): Promise<LimitUsage[]> {
+  private async withUsage(
+    rules: readonly LimitRuleRow[],
+    at: Date,
+    sims: readonly PartnerSim[],
+  ): Promise<LimitUsage[]> {
     if (rules.length === 0) return [];
 
-    const keys: CounterKey[] = rules.map((rule) => ({
-      ruleId: rule.id,
-      bucketStart: bucketStart(rule.window, at),
-    }));
-    const used = await this.repository.listUsage(keys);
-
-    return rules.map((rule, index) => {
-      const amount = used.get(rule.id) ?? 0;
-      const limit = limitInStoredUnits(rule.metric, rule.value);
-      return {
-        rule,
-        bucketStart: keys[index]?.bucketStart ?? bucketStart(rule.window, at),
-        used: amount,
-        limit,
-        exceeded: amount >= limit,
-      };
+    const windowOf = (rule: LimitRuleRow) => ({
+      bucketStart: bucketStart(rule.window, at, rule.periodStartDay),
+      resetsAt: bucketEnd(rule.window, at, rule.periodStartDay),
     });
+    const counters = await this.repository.listUsage(
+      rules.map((rule) => ({ ruleId: rule.id, bucketStart: windowOf(rule).bucketStart })),
+    );
+    const used = new Map(
+      counters.map((row) => [counterKeyOf(row.ruleId, row.simCardId), row.amount]),
+    );
+
+    return rules.flatMap((rule) => {
+      const window = windowOf(rule);
+      const limit = limitInStoredUnits(rule.metric, rule.value);
+      const entry = (simCardId: Id<'simCard'> | null): LimitUsage => {
+        const amount = used.get(counterKeyOf(rule.id, simCardId)) ?? 0;
+        return { rule, simCardId, ...window, used: amount, limit, exceeded: amount >= limit };
+      };
+      if (!rule.perSim) return [entry(null)];
+      // «На каждую карту»: названные карты партнёра — все, даже без счётчика; прочие
+      // — те, у кого счётчик в окне уже есть (разбор у администратора).
+      const named = sims
+        .filter((sim) => sim.partnerId === rule.partnerId)
+        .map((sim) => sim.simCardId);
+      const counted = counters
+        .filter((row) => row.ruleId === rule.id && row.simCardId !== null)
+        .map((row) => row.simCardId as Id<'simCard'>);
+      return [...new Set([...named, ...counted])].map(entry);
+    });
+  }
+}
+
+/**
+ * Согласованность полей правила — то же держат ограничения базы, здесь ради внятного
+ * отказа: «на каждую карту» — только у партнёра, счёт минут — только у минут, день
+ * обновления — только у месяца.
+ */
+function assertShape(rule: {
+  partnerId: Id<'partner'> | null;
+  window: LimitWindow;
+  metric: LimitMetric;
+  perSim: boolean;
+  rounding: LimitRounding;
+  periodStartDay: number | null;
+}): void {
+  if (rule.perSim && rule.partnerId === null) {
+    throw validationFailed('«На каждую карту» задаётся только партнёру');
+  }
+  if (rule.rounding !== 'second' && rule.metric !== 'minutes') {
+    throw validationFailed('Поминутный счёт бывает только у минут');
+  }
+  if (rule.periodStartDay !== null && rule.window !== 'month') {
+    throw validationFailed('День обновления задаётся только месячному окну');
   }
 }
 
@@ -265,5 +389,9 @@ function subjectOf(row: LimitRuleRow): Record<string, unknown> {
     window: row.window,
     metric: row.metric,
     value: row.value,
+    per_sim: row.perSim,
+    rounding: row.rounding,
+    period_start_day: row.periodStartDay,
+    set_by: row.setBy,
   };
 }

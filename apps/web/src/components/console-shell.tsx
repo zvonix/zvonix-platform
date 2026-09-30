@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isStaffRole, type Cabinet, type StaffRole, type UserRole } from '@zvonix/shared';
 import {
   Coins,
+  Gauge,
   Inbox,
   KeyRound,
   Plus,
@@ -187,6 +188,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
           Icon: Radio,
         },
         { href: '/partner/prices', label: 'Мои тарифы', short: 'Тарифы', Icon: ReceiptText },
+        { href: '/partner/limits', label: 'Лимиты', Icon: Gauge },
         { href: '/partner/money', label: 'Деньги', Icon: Wallet },
       ],
     },

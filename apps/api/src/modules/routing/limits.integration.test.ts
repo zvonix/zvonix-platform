@@ -188,6 +188,8 @@ async function limit(payload: Record<string, unknown>) {
 
 interface LimitUsageView {
   id: string;
+  usage_sim_card_id: string | null;
+  resets_at: string;
   used: number;
   limit: number;
   exceeded: boolean;
@@ -478,5 +480,111 @@ describe('ведение лимитов', () => {
       payload: { clientId: (await scenario()).client, window: 'day', metric: 'calls', value: 1 },
     });
     expect(created.statusCode).toBe(403);
+  }, 180_000);
+});
+
+/** Вторая карта того же партнёра — своим шлюзом, как у партнёров с несколькими GOIP. */
+async function addSim(partnerId: string, operatorId: string): Promise<string> {
+  const gateway = (
+    await post('/gateways', { partnerId, name: unique('Шлюз'), type: 'goip' })
+  ).json<{ gateway: { id: string } }>().gateway.id;
+  await post(`/gateways/${gateway}/status`, { status: 'active' });
+  await registerGateway(api(), nodeKey, gateway);
+  const port = (await post(`/gateways/${gateway}/ports`, { portNumber: 1 })).json<{
+    port: { id: string };
+  }>().port.id;
+  const sim = (await post('/sim-cards', { partnerId, operatorId, msisdn: nextMsisdn() })).json<{
+    sim: { id: string };
+  }>().sim.id;
+  await post(`/sim-cards/${sim}/status`, { status: 'active' });
+  await post(`/sim-cards/${sim}/concurrency`, { maxConcurrentCalls: 4 });
+  await post(`/gateway-ports/${port}/sim`, { simCardId: sim });
+  return sim;
+}
+
+describe('лимит «на каждую карту» (ADR-0057)', () => {
+  it('исчерпанная карта уходит из перебора, соседняя того же партнёра звонит дальше', async () => {
+    const env = await scenario();
+    const partner = await createPartner(env.operator);
+    const second = await addSim(partner.id, env.operator);
+    expect(
+      (
+        await limit({
+          partnerId: partner.id,
+          perSim: true,
+          window: 'day',
+          metric: 'calls',
+          value: 1,
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    const first = await route(env.channel, env.destination);
+    const next = await route(env.channel, env.destination);
+    expect(`${first.outcome}:${String(first.reason)}`).toBe('routed:null');
+    expect(`${next.outcome}:${String(next.reason)}`).toBe('routed:null');
+    // По звонку на каждую карту: одно правило, свой счётчик у каждой SIM.
+    expect(new Set([first.candidates[0]?.sim_card_id, next.candidates[0]?.sim_card_id])).toEqual(
+      new Set([partner.simId, second]),
+    );
+
+    const blocked = await route(env.channel, env.destination);
+    expect(blocked.reason).toBe('limit_exceeded');
+
+    const rows = await usage(`partnerId=${partner.id}`);
+    expect(rows.map((row) => row.usage_sim_card_id).sort()).toEqual([partner.simId, second].sort());
+    expect(rows.every((row) => row.used === 1 && row.exceeded)).toBe(true);
+  }, 180_000);
+
+  it('пакет минут поминутно: 61 секунда — две минуты пакета', async () => {
+    const env = await scenario();
+    const partner = await createPartner(env.operator);
+    expect(
+      (
+        await limit({
+          partnerId: partner.id,
+          perSim: true,
+          window: 'month',
+          periodStartDay: 15,
+          metric: 'minutes',
+          rounding: 'minute',
+          value: 100,
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    const call = await route(env.channel, env.destination);
+    expect((await sendCdr(call.callId, '61')).statusCode).toBe(200);
+
+    const [row] = await usage(`partnerId=${partner.id}`);
+    expect(row).toMatchObject({ usage_sim_card_id: partner.simId, used: 120, limit: 6000 });
+    // Окно обнуляется 15-го, а не первого числа.
+    expect(new Date(row?.resets_at ?? '').getUTCDate()).toBe(15);
+  }, 180_000);
+
+  it('несогласованное правило отвергается внятно, а не ошибкой базы', async () => {
+    const env = await scenario();
+    const partner = await createPartner(env.operator);
+    const refusals = await Promise.all([
+      limit({ clientId: env.client, perSim: true, window: 'day', metric: 'calls', value: 5 }),
+      limit({
+        partnerId: partner.id,
+        window: 'day',
+        metric: 'calls',
+        rounding: 'minute',
+        value: 5,
+      }),
+      limit({ partnerId: partner.id, window: 'day', metric: 'calls', periodStartDay: 3, value: 5 }),
+    ]);
+    expect(refusals.map((response) => response.statusCode)).toEqual([400, 400, 400]);
+  }, 180_000);
+
+  it('минутное окно ловит частые звонки с одной карты', async () => {
+    const env = await scenario();
+    const partner = await createPartner(env.operator);
+    await limit({ simCardId: partner.simId, window: 'minute', metric: 'calls', value: 1 });
+
+    expect((await route(env.channel, env.destination)).outcome).toBe('routed');
+    expect((await route(env.channel, env.destination)).reason).toBe('limit_exceeded');
   }, 180_000);
 });

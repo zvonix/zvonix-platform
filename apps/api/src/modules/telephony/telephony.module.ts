@@ -22,6 +22,7 @@ import { QualityService } from './quality.service.js';
 import { TelephonyController } from './telephony.controller.js';
 import { TelephonyRepository } from './telephony.repository.js';
 import { TelephonyService } from './telephony.service.js';
+import { PartnerLimitsController } from './partner-limits.controller.js';
 import { TestCallController } from './test-call.controller.js';
 import { TestCallRepository } from './test-call.repository.js';
 import { TestCallService } from './test-call.service.js';
@@ -40,6 +41,7 @@ import { TestCallService } from './test-call.service.js';
     PartnerReportController,
     PartnerEquipmentController,
     TestCallController,
+    PartnerLimitsController,
   ],
   providers: [
     TelephonyService,

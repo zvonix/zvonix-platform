@@ -877,6 +877,105 @@ describe('тарифы партнёра (ADR-0056)', () => {
   }, 60_000);
 });
 
+describe('лимиты партнёра (ADR-0057)', () => {
+  interface LimitsResponse {
+    limits: {
+      id: string;
+      per_sim: boolean;
+      set_by: string;
+      window: string;
+      metric: string;
+      value: number;
+      usage_sim_card_id: string | null;
+      resets_at: string;
+    }[];
+    sims: { id: string; msisdn: string }[];
+  }
+  const limitsOf = async (token: string) =>
+    (await get('/partner/limits', as(token))).json<LimitsResponse>();
+
+  it('партнёр заводит лимит «на каждую карту» и видит строку по каждой своей карте', async () => {
+    const created = await post(
+      '/partner/limits',
+      { scope: 'each_sim', window: 'minute', metric: 'calls', value: 2 },
+      as(mine.token),
+    );
+    expect(created.statusCode).toBe(201);
+    expect(created.json<{ limit: { per_sim: boolean; set_by: string } }>().limit).toMatchObject({
+      per_sim: true,
+      set_by: 'partner',
+    });
+
+    const body = await limitsOf(mine.token);
+    const rows = body.limits.filter((row) => row.per_sim && row.window === 'minute');
+    expect(rows.map((row) => row.usage_sim_card_id).sort()).toEqual(
+      body.sims.map((sim) => sim.id).sort(),
+    );
+    expect(rows.every((row) => new Date(row.resets_at).getTime() > Date.now())).toBe(true);
+  }, 60_000);
+
+  it('меняет и удаляет своё, а лимит площадки — только видит', async () => {
+    const own = (
+      await post(
+        '/partner/limits',
+        { scope: 'partner', window: 'day', metric: 'calls', value: 500 },
+        as(mine.token),
+      )
+    ).json<{ limit: { id: string } }>().limit.id;
+    const changed = await api().inject({
+      method: 'PATCH',
+      url: `/partner/limits/${own}`,
+      headers: as(mine.token),
+      payload: { value: 300 },
+    });
+    expect(changed.statusCode).toBe(200);
+
+    const platform = (
+      await post('/limits', { partnerId: mine.id, window: 'week', metric: 'calls', value: 9000 })
+    ).json<{ limit: { id: string } }>().limit.id;
+    expect((await limitsOf(mine.token)).limits.map((row) => row.id)).toContain(platform);
+    const refused = await api().inject({
+      method: 'DELETE',
+      url: `/partner/limits/${platform}`,
+      headers: as(mine.token),
+    });
+    expect(refused.statusCode).toBe(403);
+
+    const removed = await api().inject({
+      method: 'DELETE',
+      url: `/partner/limits/${own}`,
+      headers: as(mine.token),
+    });
+    expect(removed.statusCode).toBe(204);
+  }, 60_000);
+
+  it('чужой лимит и чужая карта для партнёра не существуют', async () => {
+    const theirs = (
+      await post(
+        '/partner/limits',
+        { scope: 'partner', window: 'hour', metric: 'calls', value: 50 },
+        as(neighbour.token),
+      )
+    ).json<{ limit: { id: string } }>().limit.id;
+    const foreign = await api().inject({
+      method: 'PATCH',
+      url: `/partner/limits/${theirs}`,
+      headers: as(mine.token),
+      payload: { value: 1 },
+    });
+    expect(foreign.statusCode).toBe(404);
+
+    const theirSim = (await limitsOf(neighbour.token)).sims[0]?.id;
+    expect(theirSim).toBeDefined();
+    const alien = await post(
+      '/partner/limits',
+      { scope: 'sim', simCardId: theirSim, window: 'day', metric: 'calls', value: 10 },
+      as(mine.token),
+    );
+    expect(alien.statusCode).toBe(404);
+  }, 60_000);
+});
+
 describe('границы контура', () => {
   it('клиента в партнёрский контур не пускают', async () => {
     for (const url of ['/partner/account', '/partner/equipment', '/partner/rates']) {
