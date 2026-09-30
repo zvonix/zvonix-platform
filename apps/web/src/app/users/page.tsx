@@ -261,7 +261,12 @@ function RowGroup({
         )}
       </TableCell>
       <TableCell>{user.full_name}</TableCell>
-      <TableCell>{role}</TableCell>
+      <TableCell>
+        {/* Название карточки бывает любой длины: без предела оно растягивало таблицу. */}
+        <span className="block max-w-[200px] truncate" title={role}>
+          {role}
+        </span>
+      </TableCell>
       <TableCell>
         <span className={`rounded-sm px-1.5 py-0.5 ${statusTone(user.status)}`}>
           {STATUS_NAME[user.status]}
