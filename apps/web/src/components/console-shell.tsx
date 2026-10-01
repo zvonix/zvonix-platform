@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isStaffRole, type Cabinet, type StaffRole, type UserRole } from '@zvonix/shared';
 import {
+  Activity,
   BarChart3,
   Coins,
   Gauge,
@@ -102,6 +103,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
         { href: '/nodes', label: 'Узлы АТС', Icon: Server },
         { href: '/operators', label: 'Операторы связи', Icon: SignalHigh },
         { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
+        { href: '/quality', label: 'Качество', Icon: Activity },
         { href: '/limits', label: 'Запреты и лимиты', Icon: ShieldBan },
       ],
     },
@@ -149,6 +151,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
         { href: '/nodes', label: 'Узлы АТС', Icon: Server },
         { href: '/operators', label: 'Операторы связи', Icon: SignalHigh },
         { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
+        { href: '/quality', label: 'Качество', Icon: Activity },
         { href: '/limits', label: 'Запреты и лимиты', Icon: ShieldBan },
       ],
     },

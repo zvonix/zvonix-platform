@@ -16,6 +16,7 @@ import {
   LimitsModule,
   MailModule,
   NodesModule,
+  NotificationsModule,
   RecordingsModule,
   SettingsModule,
   TelephonyModule,
@@ -40,6 +41,8 @@ import { BackgroundTasks } from './tasks.js';
     SettingsModule,
     // Допуск партнёров без администратора (partners.auto_approve).
     ApplicationsModule,
+    // Письмо клиенту о низком балансе (ADR-0060).
+    NotificationsModule,
   ],
   providers: [BackgroundTasks, SchedulerService],
 })

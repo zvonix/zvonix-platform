@@ -20,6 +20,7 @@ import {
   EXPIRY_SWEEP_LIMIT,
   IdentityService,
   LimitService,
+  LowBalanceService,
   MailService,
   NodesService,
   OperatorResolverService,
@@ -90,6 +91,14 @@ const SILENT_NODE_SWEEP_SECONDS = Math.round(NODE_HEARTBEAT_INTERVAL_MS / 2 / 10
  * дают запас почти на шестьдесят тысяч.
  */
 const RETENTION_SWEEP_SECONDS = 300;
+
+/**
+ * Как часто проверяются остатки клиентов для письма о низком балансе (ADR-0060).
+ *
+ * Пятнадцать минут: остаток тратится часами, а повтор письма ограничен тремя сутками,
+ * так что чаще проверять нет смысла. Задача ничего не делает, пока настройка выключена.
+ */
+const LOW_BALANCE_SECONDS = 900;
 
 /**
  * Как часто удаляются просроченные сессии.
@@ -176,6 +185,7 @@ export class BackgroundTasks {
     private readonly numberingPlan: NumberingPlanService,
     private readonly resolver: OperatorResolverService,
     private readonly applications: ApplicationsService,
+    private readonly lowBalance: LowBalanceService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -244,6 +254,11 @@ export class BackgroundTasks {
         name: 'applications.auto-approve-partners',
         everySeconds: AUTO_APPROVE_SECONDS,
         run: () => this.applications.autoApprove(),
+      },
+      {
+        name: 'notifications.low-balance',
+        everySeconds: LOW_BALANCE_SECONDS,
+        run: (now) => this.lowBalance.notify(now),
       },
       {
         name: 'auth-tokens.purge-expired',

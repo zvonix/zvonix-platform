@@ -19,7 +19,11 @@ const MAX_WINDOW_MINUTES = 44_640;
 
 interface QualityResponse {
   readonly subject_id: string;
+  /** Номер SIM или название шлюза. */
+  readonly subject_name: string;
+  readonly subject_status: string;
   readonly partner_id: string;
+  readonly partner_name: string;
   readonly attempts: number;
   readonly answered: number;
   readonly network_failures: number;
@@ -131,7 +135,10 @@ function since(windowMinutes: string | undefined): Date {
 function toQualityView(row: QualityView): QualityResponse {
   return {
     subject_id: row.subjectId,
+    subject_name: row.subjectName,
+    subject_status: row.subjectStatus,
     partner_id: row.partnerId,
+    partner_name: row.partnerName,
     attempts: row.attempts,
     answered: row.answered,
     network_failures: row.networkFailures,

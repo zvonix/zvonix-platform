@@ -460,9 +460,21 @@ describe('качество для человека', () => {
     await recordCall(env, 'failed');
 
     const rows = (await get(`/quality/sims?partnerId=${env.partner}&windowMinutes=60`)).json<{
-      sims: { subject_id: string; asr_basis_points: number; acd_seconds: number }[];
+      sims: {
+        subject_id: string;
+        subject_name: string;
+        subject_status: string;
+        partner_name: string;
+        asr_basis_points: number;
+        acd_seconds: number;
+      }[];
     }>().sims;
     const found = rows.find((row) => row.subject_id === env.sim);
+
+    // Экран качества опознаёт объекты по имени, а не по идентификатору.
+    expect(found?.subject_name).toMatch(/^7[0-9]{10}$/);
+    expect(found?.partner_name).not.toBe('');
+    expect(found?.subject_status).toBeTruthy();
 
     // Два отвеченных из четырёх попыток — половина; средняя длительность 90 секунд.
     expect(found).toMatchObject({

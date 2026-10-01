@@ -9,7 +9,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
-import { calls, failureThresholds, gateways, simCards } from '@zvonix/db/schema';
+import { calls, failureThresholds, gateways, partners, simCards } from '@zvonix/db/schema';
 import { newId, type FailureScope, type Id } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
@@ -18,7 +18,12 @@ export type FailureThresholdRow = typeof failureThresholds.$inferSelect;
 /** Качество одного объекта за окно. */
 export interface QualityRow {
   readonly subjectId: string;
+  /** Номер SIM или название шлюза — как человек опознаёт объект. */
+  readonly subjectName: string;
+  /** Состояние объекта: отключённый порогом виден прямо в разборе. */
+  readonly subjectStatus: string;
   readonly partnerId: Id<'partner'>;
+  readonly partnerName: string;
   /** Сколько вызовов вообще ушло на объект. */
   readonly attempts: number;
   /** Сколько из них было отвечено: разговор состоялся. */
@@ -67,7 +72,10 @@ export class QualityRepository {
     const rows = await this.db
       .select({
         subjectId: simCards.id,
+        subjectName: simCards.msisdn,
+        subjectStatus: simCards.status,
         partnerId: simCards.partnerId,
+        partnerName: partners.name,
         attempts: sql<number>`count(*)::int`,
         answered: sql<number>`count(*) filter (where ${calls.status} = 'completed')::int`,
         networkFailures: sql<number>`count(*) filter (where ${NETWORK_FAILURE})::int`,
@@ -75,12 +83,13 @@ export class QualityRepository {
       })
       .from(calls)
       .innerJoin(simCards, eq(simCards.id, calls.simCardId))
+      .innerJoin(partners, eq(partners.id, simCards.partnerId))
       .where(
         partnerId === undefined
           ? gte(calls.startedAt, since)
           : and(gte(calls.startedAt, since), eq(simCards.partnerId, partnerId)),
       )
-      .groupBy(simCards.id, simCards.partnerId)
+      .groupBy(simCards.id, simCards.msisdn, simCards.status, simCards.partnerId, partners.name)
       .orderBy(sql`count(*) filter (where ${NETWORK_FAILURE}) desc`)
       .limit(QUALITY_LIMIT);
 
@@ -92,7 +101,10 @@ export class QualityRepository {
     const rows = await this.db
       .select({
         subjectId: gateways.id,
+        subjectName: gateways.name,
+        subjectStatus: gateways.status,
         partnerId: gateways.partnerId,
+        partnerName: partners.name,
         attempts: sql<number>`count(*)::int`,
         answered: sql<number>`count(*) filter (where ${calls.status} = 'completed')::int`,
         networkFailures: sql<number>`count(*) filter (where ${NETWORK_FAILURE})::int`,
@@ -100,12 +112,13 @@ export class QualityRepository {
       })
       .from(calls)
       .innerJoin(gateways, eq(gateways.id, calls.gatewayId))
+      .innerJoin(partners, eq(partners.id, gateways.partnerId))
       .where(
         partnerId === undefined
           ? gte(calls.startedAt, since)
           : and(gte(calls.startedAt, since), eq(gateways.partnerId, partnerId)),
       )
-      .groupBy(gateways.id, gateways.partnerId)
+      .groupBy(gateways.id, gateways.name, gateways.status, gateways.partnerId, partners.name)
       .orderBy(sql`count(*) filter (where ${NETWORK_FAILURE}) desc`)
       .limit(QUALITY_LIMIT);
 

@@ -41,6 +41,8 @@ const LABELS: Record<string, string> = {
   'captcha.on_password_reset': 'При восстановлении пароля',
   'partners.auto_approve': 'Партнёры без проверки администратором',
   'clients.auto_approve': 'Клиенты без проверки администратором',
+  'notifications.low_balance_enabled': 'Писать клиенту, когда на счёте мало',
+  'notifications.low_balance_amount': 'Порог, ₽',
   'pricing.price_bands_enabled': 'Проверять коридоры цен',
   'cabinets.partner_may_add_client': 'Партнёр может стать клиентом',
   'cabinets.client_may_add_partner': 'Клиент может стать партнёром',

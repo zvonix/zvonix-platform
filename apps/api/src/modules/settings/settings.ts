@@ -91,6 +91,18 @@ export const SETTINGS = {
     fallback: 'false',
     hint: 'Кабинет сразу после подтверждения почты. Минус на счёте не разрешён',
   },
+
+  'notifications.low_balance_enabled': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Письмо клиенту, когда на счёте остаётся мало. Нужна настроенная почта',
+  },
+
+  'notifications.low_balance_amount': {
+    kind: 'number',
+    fallback: '100',
+    hint: 'Порог в рублях: письмо уходит, когда «можно потратить» становится меньше',
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof SETTINGS;
