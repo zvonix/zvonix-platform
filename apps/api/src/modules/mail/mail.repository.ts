@@ -78,6 +78,27 @@ export class MailRepository {
     return { count: row?.count ?? 0, retryAfterSeconds: Math.max(0, row?.retryAfterSeconds ?? 0) };
   }
 
+  /** Было ли письму этого вида на этот адрес поставлено в очередь не раньше `since`. */
+  async hasRecentOfKind(
+    kind: string,
+    recipient: string,
+    since: Date,
+    executor: Executor = this.db,
+  ): Promise<boolean> {
+    const [row] = await executor
+      .select({ id: outboxMessages.id })
+      .from(outboxMessages)
+      .where(
+        and(
+          eq(outboxMessages.kind, kind),
+          eq(outboxMessages.recipient, recipient),
+          gte(outboxMessages.createdAt, since),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
   /**
    * Забирает письма, которым пора уходить.
    *

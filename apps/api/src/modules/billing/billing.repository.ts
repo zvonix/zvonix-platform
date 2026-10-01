@@ -518,6 +518,26 @@ export class BillingRepository {
     return { clients: clientRows, partners: partnerRows };
   }
 
+  /**
+   * Работающие клиенты с владельцем — для рассылки по условию. Страницами по `id`, не больше
+   * `limit`: проход идёт порциями и не читает всю таблицу.
+   */
+  async listActiveClientOwners(
+    after: ClientId | undefined,
+    limit: number,
+  ): Promise<{ id: ClientId; name: string; ownerUserId: Id<'user'> }[]> {
+    return this.db
+      .select({ id: clients.id, name: clients.name, ownerUserId: clients.ownerUserId })
+      .from(clients)
+      .where(
+        after === undefined
+          ? eq(clients.status, 'active')
+          : and(eq(clients.status, 'active'), sql`${clients.id} > ${after}`),
+      )
+      .orderBy(asc(clients.id))
+      .limit(limit);
+  }
+
   async findPartnerAlias(partnerId: PartnerId): Promise<string | undefined> {
     const [row] = await this.db
       .select({ displayName: partnerAliases.displayName })

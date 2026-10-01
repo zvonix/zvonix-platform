@@ -66,7 +66,11 @@ SIM переводится в `throttled`, шлюз — в `suspended`. Оба �
 
 ## `GET /quality/sims?windowMinutes=1440&partnerId=…` — роли `admin`, `support`
 
-`200` → `{ "sims": [ { "subject_id", "partner_id", "attempts", "answered", "network_failures", "asr_basis_points", "acd_seconds" } ] }`
+`200` → `{ "sims": [ { "subject_id", "subject_name", "subject_status", "partner_id", "partner_name", "attempts", "answered", "network_failures", "asr_basis_points", "acd_seconds" } ] }`
+
+`subject_name` — номер SIM (у шлюзов — название), `subject_status` — состояние объекта
+(отключённый порогом виден сразу), `partner_name` — как человек опознаёт владельца. Экран
+«Качество» кабинета администратора и поддержки строится на этом ответе.
 
 Сверху — те, у кого больше отказов сети, не более двухсот строк: разбор читает человек,
 а не машина. `windowMinutes` по умолчанию сутки, предел — месяц. `asr_basis_points`

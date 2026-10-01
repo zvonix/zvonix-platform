@@ -132,6 +132,22 @@ export class SettingsService {
   }
 
   /**
+   * Письмо клиенту о низком балансе (владелец, 2026-10-01: «делай что рекомендуешь» —
+   * пункт 3 порядка разработки). Выключено по умолчанию: рассылку клиентам включает
+   * человек, у которого настроена почта.
+   */
+  async notifications(): Promise<{
+    readonly lowBalanceEnabled: boolean;
+    readonly lowBalanceAmount: number;
+  }> {
+    const values = await this.values();
+    return {
+      lowBalanceEnabled: this.flag(values, 'notifications.low_balance_enabled'),
+      lowBalanceAmount: this.number(values, 'notifications.low_balance_amount'),
+    };
+  }
+
+  /**
    * Допуск клиентов без проверки администратором (владелец, 2026-09-30: «настройка нужна,
    * чтобы клиенты регистрировались без проверки»). Клиент — не только служба такси, но и
    * человек, который звонит друзьям.
