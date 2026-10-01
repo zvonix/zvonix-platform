@@ -94,7 +94,7 @@ function SettingsForm() {
     { title: 'Проверка «я не робот»', prefix: 'captcha.' },
     { title: 'Регистрация', prefix: 'partners.' },
     { title: 'Регистрация клиентов', prefix: 'clients.' },
-    { title: 'Письма клиентам', prefix: 'notifications.' },
+    { title: 'Письма о событиях', prefix: 'notifications.' },
     { title: 'Цены партнёров', prefix: 'pricing.' },
     { title: 'Кабинеты', prefix: 'cabinets.' },
   ];

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { BarChart } from '@/components/bar-chart';
+import { ExportButton } from '@/components/export-button';
 import { LiveSwitch } from '@/components/live-switch';
 import {
   Table,
@@ -39,6 +40,29 @@ const percent = (value: number | undefined): string =>
 const talk = (seconds: number | undefined): string =>
   seconds === undefined ? '—' : duration(seconds);
 
+/** Заголовок таблицы выгрузки: те же столбцы, что на экране, суммы — по роли. */
+const tableHeader = (config: ReportConfig): string[] => [
+  'Вызовов',
+  'Состоялось',
+  'Доля состоявшихся, %',
+  'Секунд разговора',
+  ...config.money.map((entry) => entry.label),
+];
+
+/** Дробная часть через запятую: так Excel русской настройки читает число, а не дату. */
+const comma = (value: string): string => value.replace('.', ',');
+
+function tableCells(config: ReportConfig, row: ReportRow): (string | number)[] {
+  const share = asr(row);
+  return [
+    row.calls,
+    row.answered,
+    share === undefined ? '' : comma(share.toFixed(1)),
+    row.talk_seconds,
+    ...config.money.map((entry) => comma(row[entry.key] ?? '0')),
+  ];
+}
+
 /** Сутки `ГГГГ-ММ-ДД` → `дд.мм`. */
 const shortDay = (day: string): string => `${day.slice(8, 10)}.${day.slice(5, 7)}`;
 
@@ -53,6 +77,8 @@ export function Report({ config }: { config: ReportConfig }) {
 
   const overview = useOverview(config.base, days);
   const breakdown = useBreakdown(config.base, days, by);
+
+  const dimensionLabel = config.dimensions.find((entry) => entry.by === by)?.label ?? 'Кто';
 
   const moneyLabel = (key: MoneyKey): string =>
     config.money.find((entry) => entry.key === key)?.label ?? '';
@@ -79,7 +105,18 @@ export function Report({ config }: { config: ReportConfig }) {
             </button>
           ))}
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <ExportButton
+            name="сводка-по-дням"
+            load={() => {
+              const data = overview.data;
+              if (data === undefined) return Promise.reject(new Error('Сводка ещё не загружена'));
+              return Promise.resolve({
+                header: ['Сутки', ...tableHeader(config)],
+                rows: data.series.map((row) => [row.day, ...tableCells(config, row)]),
+              });
+            }}
+          />
           <LiveSwitch />
         </div>
       </div>
@@ -178,6 +215,23 @@ export function Report({ config }: { config: ReportConfig }) {
                 {dimension.label}
               </button>
             ))}
+          </div>
+          <div className="ml-auto">
+            <ExportButton
+              name={`сводка-${dimensionLabel.toLowerCase()}`}
+              load={() => {
+                const data = breakdown.data;
+                if (data === undefined) return Promise.reject(new Error('Разрез ещё не загружен'));
+                const label = dimensionLabel;
+                return Promise.resolve({
+                  header: [label, ...tableHeader(config)],
+                  rows: data.rows.map((row) => [
+                    row.name ?? 'не определено',
+                    ...tableCells(config, row),
+                  ]),
+                });
+              }}
+            />
           </div>
         </div>
 

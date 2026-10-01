@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CALL_STATUSES, type CallStatus, type ClientFailureReason } from '@zvonix/shared';
 import { Suspense } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
+import { ExportButton } from '@/components/export-button';
 import { FilterInput } from '@/components/filter-input';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
@@ -18,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
+import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
 import {
   CALL_STATUS_NAME,
@@ -163,6 +165,39 @@ function MyCalls() {
         />
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
+          <ExportButton
+            name="вызовы"
+            load={async () => {
+              const filters = new URLSearchParams(search);
+              filters.delete('offset');
+              const found = await loadAllCalls<Call>('/client/calls', filters);
+              return {
+                header: [
+                  'Когда',
+                  'Линия',
+                  'Куда',
+                  'Оператор',
+                  'Регион',
+                  'Итог',
+                  'Причина',
+                  'Секунд',
+                ],
+                rows: found.rows.map((call) => [
+                  moment(call.started_at),
+                  call.channel.name,
+                  call.destination,
+                  call.operator?.name,
+                  call.region,
+                  CALL_STATUS_NAME[call.status],
+                  call.failure_reason === null
+                    ? ''
+                    : CLIENT_FAILURE_REASON_NAME[call.failure_reason],
+                  call.duration_seconds,
+                ]),
+                truncated: found.truncated,
+              };
+            }}
+          />
           <LiveSwitch />
           <PageNav
             offset={offset}

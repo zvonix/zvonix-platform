@@ -103,6 +103,11 @@ export const SETTINGS = {
     fallback: '100',
     hint: 'Порог в рублях: письмо уходит, когда «можно потратить» становится меньше',
   },
+  'notifications.alerts_enabled': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Письмо администраторам, когда узел не на связи или объект почти не соединяет. Нужна настроенная почта',
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof SETTINGS;

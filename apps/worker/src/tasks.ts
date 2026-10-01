@@ -14,6 +14,7 @@
 
 import { Injectable } from '@nestjs/common';
 import {
+  AlertsService,
   ApplicationsService,
   CdrService,
   NumberingPlanService,
@@ -101,6 +102,15 @@ const RETENTION_SWEEP_SECONDS = 300;
 const LOW_BALANCE_SECONDS = 900;
 
 /**
+ * Как часто проверяются тревоги администраторам (ADR-0062).
+ *
+ * Пять минут: за столько узел, замолчавший ночью, уже виден, а повтор по одному объекту
+ * ограничен полусутками, так что чаще проверять незачем. Задача ничего не делает,
+ * пока настройка выключена.
+ */
+const ALERTS_SECONDS = 300;
+
+/**
  * Как часто удаляются просроченные сессии.
  *
  * Срочности нет: работающему доступу просроченная сессия не мешает — `authenticate`
@@ -186,6 +196,7 @@ export class BackgroundTasks {
     private readonly resolver: OperatorResolverService,
     private readonly applications: ApplicationsService,
     private readonly lowBalance: LowBalanceService,
+    private readonly alerts: AlertsService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -259,6 +270,11 @@ export class BackgroundTasks {
         name: 'notifications.low-balance',
         everySeconds: LOW_BALANCE_SECONDS,
         run: (now) => this.lowBalance.notify(now),
+      },
+      {
+        name: 'notifications.alerts',
+        everySeconds: ALERTS_SECONDS,
+        run: (now) => this.alerts.notify(now),
       },
       {
         name: 'auth-tokens.purge-expired',
