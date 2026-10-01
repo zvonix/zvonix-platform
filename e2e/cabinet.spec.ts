@@ -304,6 +304,17 @@ test.describe('кабинет клиента', () => {
     await page.getByLabel('Обновлять').selectOption('0');
   });
 
+  test('вызовы клиента скачиваются файлом CSV', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/calls');
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'Скачать таблицу' }).click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/^вызовы-\d{4}-\d{2}-\d{2}\.csv$/u);
+  });
+
   test('остаток счёта виден в шапке на любой странице кабинета', async ({ page }) => {
     await signIn(page, PEOPLE.client);
     await expect(page.getByRole('link', { name: /Можно потратить/u })).toBeVisible();

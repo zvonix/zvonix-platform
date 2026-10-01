@@ -62,6 +62,7 @@ export {
   RETENTION_SWEEP_LIMIT,
 } from './modules/recordings/recordings.service.js';
 export { NotificationsModule } from './modules/notifications/notifications.module.js';
+export { AlertsService } from './modules/notifications/alerts.service.js';
 export { LowBalanceService } from './modules/notifications/low-balance.service.js';
 export { ApplicationsModule } from './modules/applications/applications.module.js';
 export { ApplicationsService } from './modules/applications/applications.service.js';

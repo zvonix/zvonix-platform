@@ -5,6 +5,7 @@ import { CALL_STATUSES, type CallStatus } from '@zvonix/shared';
 import { Suspense } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
+import { ExportButton } from '@/components/export-button';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { useLiveInterval } from '@/lib/live';
@@ -18,6 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
+import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
 import { CALL_STATUS_NAME, callTone } from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
@@ -144,6 +146,33 @@ function PartnerCalls() {
         />
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
+          <ExportButton
+            name="вызовы-через-меня"
+            load={async () => {
+              const filters = new URLSearchParams(search);
+              filters.delete('offset');
+              const found = await loadAllCalls<PartnerCall>('/partner/calls', filters);
+              return {
+                header: ['Когда', 'Куда', 'Шлюз', 'SIM', 'Итог', 'Секунд'],
+                rows: found.rows.map((call) => {
+                  const sim = call.sim_card_id === null ? undefined : sims.get(call.sim_card_id);
+                  const where =
+                    call.gateway_id === null
+                      ? undefined
+                      : (gateways.get(call.gateway_id)?.name ?? trunks.get(call.gateway_id));
+                  return [
+                    moment(call.started_at),
+                    call.destination,
+                    where,
+                    sim?.msisdn,
+                    CALL_STATUS_NAME[call.status],
+                    call.duration_seconds,
+                  ];
+                }),
+                truncated: found.truncated,
+              };
+            }}
+          />
           <LiveSwitch />
           <PageNav
             offset={offset}

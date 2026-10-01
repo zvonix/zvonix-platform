@@ -139,11 +139,13 @@ export class SettingsService {
   async notifications(): Promise<{
     readonly lowBalanceEnabled: boolean;
     readonly lowBalanceAmount: number;
+    readonly alertsEnabled: boolean;
   }> {
     const values = await this.values();
     return {
       lowBalanceEnabled: this.flag(values, 'notifications.low_balance_enabled'),
       lowBalanceAmount: this.number(values, 'notifications.low_balance_amount'),
+      alertsEnabled: this.flag(values, 'notifications.alerts_enabled'),
     };
   }
 

@@ -5,6 +5,7 @@ import { CALL_FAILURE_REASONS, CALL_STATUSES } from '@zvonix/shared';
 import type { CallFailureReason, CallStatus } from '@zvonix/shared';
 import { Suspense, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
+import { ExportButton } from '@/components/export-button';
 import { FilterInput } from '@/components/filter-input';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
@@ -20,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
+import { loadAllCalls } from '@/lib/csv';
 import { useClients, usePartners } from '@/lib/dictionaries';
 import { duration, moment } from '@/lib/format';
 import { CALL_STATUS_NAME, callTone, FAILURE_REASON_FIX, FAILURE_REASON_NAME } from '@/lib/labels';
@@ -234,6 +236,43 @@ function CallsView() {
         />
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
+          <ExportButton
+            name="разбор-вызовов"
+            load={async () => {
+              const found = await loadAllCalls<Call>('/calls', new URLSearchParams(filterQuery));
+              return {
+                header: [
+                  'Когда',
+                  'Клиент',
+                  'Канал',
+                  'Куда',
+                  'Оператор',
+                  'Регион',
+                  'Партнёр',
+                  'Шлюз',
+                  'SIM',
+                  'Итог',
+                  'Причина',
+                  'Секунд',
+                ],
+                rows: found.rows.map((call) => [
+                  moment(call.started_at),
+                  call.client.name,
+                  call.channel.name,
+                  call.destination,
+                  call.operator?.name,
+                  call.region,
+                  call.partner?.name,
+                  call.gateway?.name,
+                  call.sim?.msisdn,
+                  CALL_STATUS_NAME[call.status],
+                  call.failure_reason === null ? '' : FAILURE_REASON_NAME[call.failure_reason],
+                  call.duration_seconds,
+                ]),
+                truncated: found.truncated,
+              };
+            }}
+          />
           <LiveSwitch />
           <PageNav
             offset={offset}
