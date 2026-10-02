@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CALL_FAILURE_REASONS, CALL_STATUSES } from '@zvonix/shared';
 import type { CallFailureReason, CallStatus } from '@zvonix/shared';
 import { Suspense, useState } from 'react';
+import { ListenButton, useListenable } from '@/components/call-recording';
 import { ConsoleShell } from '@/components/console-shell';
 import { ExportButton } from '@/components/export-button';
 import { FilterInput } from '@/components/filter-input';
@@ -96,6 +97,8 @@ function CallsView() {
     refetchInterval: live,
     queryFn: () => request<{ calls: Call[]; total: number }>(`/calls?${search.toString()}`),
   });
+
+  const recordings = useListenable((list.data?.calls ?? []).map((call) => call.id));
 
   return (
     <div className="flex flex-col gap-3">
@@ -330,6 +333,7 @@ function CallsView() {
               <CallRow
                 key={call.id}
                 call={call}
+                recordingId={recordings.get(call.id)}
                 onFilterClient={() => {
                   url.set({ clientId: call.client.id, offset: '' });
                 }}
@@ -342,7 +346,15 @@ function CallsView() {
   );
 }
 
-function CallRow({ call, onFilterClient }: { call: Call; onFilterClient: () => void }) {
+function CallRow({
+  call,
+  recordingId,
+  onFilterClient,
+}: {
+  call: Call;
+  recordingId: string | undefined;
+  onFilterClient: () => void;
+}) {
   return (
     <TableRow>
       <TableCell>
@@ -401,6 +413,7 @@ function CallRow({ call, onFilterClient }: { call: Call; onFilterClient: () => v
         ) : (
           duration(call.duration_seconds)
         )}
+        {recordingId !== undefined && <ListenButton recordingId={recordingId} />}
       </TableCell>
     </TableRow>
   );

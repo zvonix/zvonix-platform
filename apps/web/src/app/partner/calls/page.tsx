@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CALL_STATUSES, type CallStatus } from '@zvonix/shared';
 import { Suspense } from 'react';
+import { ListenButton, useListenable } from '@/components/call-recording';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ExportButton } from '@/components/export-button';
@@ -86,6 +87,8 @@ function PartnerCalls() {
     queryFn: () =>
       request<{ calls: PartnerCall[]; total: number }>(`/partner/calls?${search.toString()}`),
   });
+
+  const recordings = useListenable((list.data?.calls ?? []).map((call) => call.id));
 
   // Названия железа берутся из того же ответа, что и раздел «оборудование»: второй
   // список имён разъехался бы с первым, а идентификатор в таблице не говорит ничего.
@@ -256,6 +259,9 @@ function PartnerCalls() {
                       <span className="text-faint">—</span>
                     ) : (
                       duration(call.duration_seconds)
+                    )}
+                    {recordings.has(call.id) && (
+                      <ListenButton recordingId={recordings.get(call.id) ?? ''} />
                     )}
                   </TableCell>
 

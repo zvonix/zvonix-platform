@@ -14,6 +14,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
+  DomainError,
   isStaffRole,
   notFound,
   permissionDenied,
@@ -162,6 +163,35 @@ export class RecordingsService {
     });
 
     return { url, expiresAt: new Date(Date.now() + ttl * 1000) };
+  }
+
+  /**
+   * Какие из этих вызовов имеют запись, которую спрашивающий вправе послушать.
+   *
+   * Нужен списку вызовов в кабинете, чтобы показать кнопку «Прослушать» только там, где она
+   * сработает. Право то же, что при выдаче ссылки (`assertMayListen`): иначе кнопка
+   * обещала бы то, в чём откажет следующий запрос, а по разнице ответов проверялось бы
+   * существование чужих записей. Самого доступа это не даёт — ссылка по-прежнему выдаётся
+   * отдельно и с записью в журнал.
+   */
+  async listenableFor(
+    callIds: readonly Id<'call'>[],
+    requester: Requester,
+  ): Promise<RecordingRow[]> {
+    const found = await this.repository.findListenable(callIds);
+    if (isStaffRole(requester.role)) return found;
+
+    const allowed: RecordingRow[] = [];
+    for (const recording of found) {
+      try {
+        await this.assertMayListen(recording, requester);
+        allowed.push(recording);
+      } catch (cause) {
+        // Отказ здесь — штатный ответ «не ваша запись»; сбой базы идёт дальше.
+        if (!(cause instanceof DomainError)) throw cause;
+      }
+    }
+    return allowed;
   }
 
   /**

@@ -554,6 +554,103 @@ else
   echo "ВНИМАНИЕ: площадка не приняла пульс узла — узел останется «ставится» (journalctl -u zvonix-heartbeat)" >&2
 fi
 
+# --- Выгрузка записей разговоров (ADR-0063, docs/api/recordings.md) ----------
+# Диалплан пишет разговор в ${recordings_dir}/<вызов>.wav. Раз в 30 секунд закрытые файлы
+# уходят на площадку по подписанной ссылке: узел спрашивает ссылку (POST /node/recordings/upload-url),
+# кладёт файл, сообщает длительность и размер (POST /node/recordings/uploaded) и только
+# потом удаляет свой. Недоставленное лежит и уходит в следующий проход (догоняющая выгрузка).
+# Окончательный отказ площадки (4xx, кроме 408/429) переносит файл в rejected/ на неделю:
+# вечный повтор забил бы каждый проход одним и тем же файлом. Ключ узла — отдельным файлом
+# только для root; ключей хранилища у узла нет вообще — только ссылка на один объект.
+
+( umask 077 && printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" >"${NODE_ETC}/recordings.curl" )
+
+cat >/usr/local/sbin/zvonix-recordings <<RECORDINGS
+#!/bin/bash
+# Выгрузка записей разговоров Zvonix — порождается node/install.sh, правится там.
+set -u
+DIR="\$("${FS_CLI}" -x 'global_getvar recordings_dir' 2>/dev/null | head -1)"
+[ -n "\$DIR" ] && [ -d "\$DIR" ] || exit 0
+API="${CONTROL_PLANE}"
+CREDS="${NODE_ETC}/recordings.curl"
+REJECTED="\$DIR/rejected"
+NOW="\$(date +%s)"
+DONE=0
+
+for FILE in "\$DIR"/*.wav; do
+  [ -f "\$FILE" ] || continue
+  [ "\$DONE" -lt 20 ] || break
+  # Закрытый файл: 20 секунд без изменений. FreeSWITCH дописывает заголовок при закрытии.
+  [ \$((NOW - \$(stat -c %Y "\$FILE"))) -ge 20 ] || continue
+  ID="\$(basename "\$FILE" .wav)"
+  case "\$ID" in ????????-????-????-????-????????????) ;; *) continue ;; esac
+  SIZE="\$(stat -c %s "\$FILE")"
+  # Только заголовок — разговор не записался; площадке такой файл не нужен.
+  [ "\$SIZE" -gt 44 ] || { rm -f "\$FILE"; continue; }
+
+  RESPONSE="\$(curl -sS --max-time 20 -K "\$CREDS" -H 'Content-Type: application/json' \
+    -d "{\\"callId\\":\\"\$ID\\"}" -w '\n%{http_code}' "\$API/node/recordings/upload-url")" || continue
+  CODE="\${RESPONSE##*\$'\n'}"
+  BODY="\${RESPONSE%\$'\n'*}"
+  case "\$CODE" in
+    200) ;;
+    409) rm -f "\$FILE"; continue ;;
+    408|429) continue ;;
+    4??) mkdir -p "\$REJECTED"; mv -f "\$FILE" "\$REJECTED/"; echo "запись \$ID отклонена площадкой (\$CODE)" >&2; continue ;;
+    *) continue ;;
+  esac
+  URL="\$(printf '%s' "\$BODY" | sed -n 's/.*"upload_url":"\([^"]*\)".*/\1/p')"
+  [ -n "\$URL" ] || continue
+
+  curl -fsS --max-time 300 -T "\$FILE" -H 'Content-Type: audio/wav' "\$URL" >/dev/null || continue
+
+  # Длительность — по заголовку WAV: частота, каналы, разрядность.
+  RATE="\$(od -An -tu4 -j24 -N4 "\$FILE" | tr -d ' ')"
+  CHANNELS="\$(od -An -tu2 -j22 -N2 "\$FILE" | tr -d ' ')"
+  BITS="\$(od -An -tu2 -j34 -N2 "\$FILE" | tr -d ' ')"
+  PER_SECOND=\$((RATE * CHANNELS * BITS / 8))
+  SECONDS_LONG=0
+  [ "\$PER_SECOND" -gt 0 ] && SECONDS_LONG=\$(((SIZE - 44) / PER_SECOND))
+
+  curl -fsS --max-time 20 -K "\$CREDS" -H 'Content-Type: application/json' \
+    -d "{\\"callId\\":\\"\$ID\\",\\"durationSeconds\\":\$SECONDS_LONG,\\"sizeBytes\\":\$SIZE}" \
+    "\$API/node/recordings/uploaded" >/dev/null || continue
+  rm -f "\$FILE"
+  DONE=\$((DONE + 1))
+done
+
+[ -d "\$REJECTED" ] && find "\$REJECTED" -name '*.wav' -mtime +7 -delete
+exit 0
+RECORDINGS
+chmod 0700 /usr/local/sbin/zvonix-recordings
+
+cat >/etc/systemd/system/zvonix-recordings.service <<'UNIT'
+[Unit]
+Description=Выгрузка записей разговоров Zvonix на площадку
+After=network-online.target freeswitch.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zvonix-recordings
+UNIT
+
+cat >/etc/systemd/system/zvonix-recordings.timer <<'UNIT'
+[Unit]
+Description=Выгрузка записей Zvonix раз в 30 секунд
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now zvonix-recordings.timer >/dev/null 2>&1
+echo "Выгрузка записей настроена: раз в 30 секунд (journalctl -u zvonix-recordings)"
+
 # --- Команда обновления узла -------------------------------------------------
 # Узел на другой машине выкладка площадки не видит: его обновляют этой командой.
 # Скрипт скачивается целиком и только потом исполняется: в конвейере `curl | bash`

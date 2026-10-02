@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, gt, isNull, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
 import { recordingGrants, recordings } from '@zvonix/db/schema';
 import { newId, type Id } from '@zvonix/shared';
@@ -45,6 +45,21 @@ export class RecordingsRepository {
   async findByCall(callId: Id<'call'>): Promise<RecordingRow | undefined> {
     const [row] = await this.db.select().from(recordings).where(eq(recordings.callId, callId));
     return row;
+  }
+
+  /** Выгруженные и ещё не удалённые записи этих вызовов — то, что можно предложить послушать. */
+  async findListenable(callIds: readonly Id<'call'>[]): Promise<RecordingRow[]> {
+    if (callIds.length === 0) return [];
+    return this.db
+      .select()
+      .from(recordings)
+      .where(
+        and(
+          inArray(recordings.callId, [...callIds]),
+          isNotNull(recordings.uploadedAt),
+          isNull(recordings.deletedAt),
+        ),
+      );
   }
 
   /**

@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { CALL_STATUSES, type CallStatus, type ClientFailureReason } from '@zvonix/shared';
 import { Suspense } from 'react';
+import { ListenButton, useListenable } from '@/components/call-recording';
 import { ConsoleShell } from '@/components/console-shell';
 import { ExportButton } from '@/components/export-button';
 import { FilterInput } from '@/components/filter-input';
@@ -92,6 +93,8 @@ function MyCalls() {
     refetchInterval: live,
     queryFn: () => request<{ calls: Call[]; total: number }>(`/client/calls?${search.toString()}`),
   });
+
+  const recordings = useListenable((list.data?.calls ?? []).map((call) => call.id));
 
   return (
     <div className="flex flex-col gap-3">
@@ -288,6 +291,9 @@ function MyCalls() {
                     <span className="text-faint">—</span>
                   ) : (
                     duration(call.duration_seconds)
+                  )}
+                  {recordings.has(call.id) && (
+                    <ListenButton recordingId={recordings.get(call.id) ?? ''} />
                   )}
                 </TableCell>
               </TableRow>
