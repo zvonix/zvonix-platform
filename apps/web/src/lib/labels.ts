@@ -16,6 +16,7 @@ import type {
   NodeStatus,
   PartnerFacingSuspension,
   PartnerStatus,
+  PaymentStatus,
   Rounding,
   SimStatus,
   TerminationKind,
@@ -574,3 +575,19 @@ export function testCallFailureText(call: {
   }
   return `Звонок не прошёл: ${answer}.`;
 }
+
+/** Состояния заявки на пополнение (ADR-0064). */
+export const PAYMENT_STATUS_NAME: Record<PaymentStatus, string> = {
+  pending: 'Ждёт подтверждения',
+  succeeded: 'Зачислено',
+  rejected: 'Отклонена',
+  cancelled: 'Отозвана',
+};
+
+/** Цвет подписи состояния заявки: ждущая — внимание, зачисленная — хорошо, закрытая — спокойно. */
+export const PAYMENT_STATUS_TONE: Record<PaymentStatus, string> = {
+  pending: 'bg-warn-soft text-warn',
+  succeeded: 'bg-ok-soft text-ok',
+  rejected: 'bg-crit-soft text-crit',
+  cancelled: 'text-muted-foreground',
+};

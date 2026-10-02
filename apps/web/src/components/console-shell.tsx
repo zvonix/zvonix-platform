@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isStaffRole, type Cabinet, type StaffRole, type UserRole } from '@zvonix/shared';
 import {
   Activity,
+  Banknote,
   BarChart3,
   Coins,
   Gauge,
@@ -112,6 +113,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
+        { href: '/payments', label: 'Платежи', Icon: Banknote },
         { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
       ],
     },
@@ -160,6 +162,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
+        { href: '/payments', label: 'Платежи', Icon: Banknote },
         { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
       ],
     },

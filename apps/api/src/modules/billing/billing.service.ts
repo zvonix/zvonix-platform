@@ -225,6 +225,8 @@ export class BillingService {
     idempotencyKey: string;
     description: string;
     actorUserId: UserId;
+    /** Что выполнить той же транзакцией, если проводка создана (см. `TransactionDraft`). */
+    alsoInTransaction?: (executor: Executor) => Promise<void>;
   }): Promise<PostedTransaction> {
     if (Money.compare(input.amount, Money.ZERO) <= 0) {
       throw validationFailed('Сумма пополнения должна быть больше нуля');
@@ -243,6 +245,9 @@ export class BillingService {
       referenceType: 'client',
       referenceId: input.clientId,
       createdByUserId: input.actorUserId,
+      ...(input.alsoInTransaction === undefined
+        ? {}
+        : { alsoInTransaction: input.alsoInTransaction }),
       lines: [
         // Деньги входят в систему через шлюз платежей и оседают на счёте клиента.
         { accountId: settlement.id, amount: Money.negate(input.amount) },

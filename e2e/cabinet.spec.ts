@@ -321,6 +321,67 @@ test.describe('кабинет клиента', () => {
   });
 });
 
+test.describe('пополнение счёта (ADR-0064)', () => {
+  test('клиент подаёт заявку, администратор подтверждает, деньги видны клиенту', async ({
+    browser,
+  }) => {
+    // Реквизиты задаёт администратор: без них заявки не принимаются.
+    const adminContext = await browser.newContext();
+    const adminPage = await adminContext.newPage();
+    await signIn(adminPage, PEOPLE.admin);
+    const saved = await adminPage.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'payments.manual_instructions': 'Карта 1111 2222, Иванов И. И.' } },
+    });
+    expect(saved.ok()).toBe(true);
+
+    const clientContext = await browser.newContext();
+    const clientPage = await clientContext.newPage();
+    await signIn(clientPage, PEOPLE.client);
+    await clientPage.goto('/my/money');
+    await clientPage.getByRole('button', { name: 'Пополнить' }).click();
+    await clientPage.getByLabel('Сумма, ₽').fill('500');
+    await clientPage.getByRole('button', { name: /Создать заявку на/u }).click();
+    // Реквизиты и номер заявки показаны сразу: переводить нужно по ним.
+    await expect(clientPage.getByText('Карта 1111 2222')).toBeVisible();
+    await expect(clientPage.getByText('Ждёт подтверждения')).toBeVisible();
+
+    await adminPage.goto('/payments');
+    await adminPage.getByRole('button', { name: 'Подтвердить' }).first().click();
+    await adminPage.getByRole('button', { name: /Зачислить/u }).click();
+    await expect(adminPage.getByText('Заявок, ждущих решения, нет.')).toBeVisible();
+
+    await clientPage.reload();
+    await expect(clientPage.getByText('Зачислено').first()).toBeVisible();
+
+    await adminContext.close();
+    await clientContext.close();
+  });
+
+  test('поддержка заявку видит, но решать не может', async ({ browser }) => {
+    // Заявка, ждущая решения, должна быть: иначе отсутствие кнопок ничего не доказывает.
+    const clientContext = await browser.newContext();
+    const clientPage = await clientContext.newPage();
+    await signIn(clientPage, PEOPLE.client);
+    const created = await clientPage.request.post('/api/client/payments', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { amount: '200', comment: 'проверка поддержки' },
+    });
+    expect(created.ok()).toBe(true);
+
+    const supportContext = await browser.newContext();
+    const page = await supportContext.newPage();
+    await signIn(page, PEOPLE.support);
+    await page.goto('/payments');
+    await expect(page.getByText('проверка поддержки')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Подтвердить' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Отклонить' })).toHaveCount(0);
+
+    await clientContext.close();
+    await supportContext.close();
+  });
+});
+
 test.describe('ввод денег', () => {
   // Меняет состояние стенда — поэтому после проверок, которые только читают.
   test('копейки набираются запятой — той же, с какой кабинет их показывает', async ({ page }) => {

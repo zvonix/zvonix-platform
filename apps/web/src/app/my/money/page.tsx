@@ -5,6 +5,7 @@ import { ConsoleShell } from '@/components/console-shell';
 import { useClientAccount } from '@/lib/account';
 import { CLIENT_STATUS_MEANING, CLIENT_STATUS_NAME } from '@/lib/labels';
 import { isNegative, money } from '@/lib/money';
+import { TopUp } from './top-up';
 
 export default function MyMoneyPage() {
   return (
@@ -52,6 +53,8 @@ function MyMoney() {
           <Figure title="Разрешённый минус" value={funds.overdraft_limit} />
         </dl>
       </div>
+
+      <TopUp />
 
       <AccountLedger source="/client/entries" account="client" />
     </div>

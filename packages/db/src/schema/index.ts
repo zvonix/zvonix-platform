@@ -43,3 +43,4 @@ export { limitRules, limitCounters } from './limits.js';
 export { failureThresholds } from './quality.js';
 export { outboxMessages, authTokens } from './mail.js';
 export { applications } from './applications.js';
+export { payments } from './payments.js';
