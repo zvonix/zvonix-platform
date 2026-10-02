@@ -150,6 +150,16 @@ export class SettingsService {
   }
 
   /**
+   * Приём заявок на пополнение ([ADR-0064](../../../../../docs/adr/0064-platezhi-karkas.md)):
+   * реквизиты для перевода. Пусто — заявки не принимаются: заявка без реквизитов клиенту
+   * ничего не говорит, а администратору приносит перевод, которого он не ждал.
+   */
+  async payments(): Promise<{ readonly manualInstructions: string }> {
+    const values = await this.values();
+    return { manualInstructions: this.text(values, 'payments.manual_instructions').trim() };
+  }
+
+  /**
    * Допуск клиентов без проверки администратором (владелец, 2026-09-30: «настройка нужна,
    * чтобы клиенты регистрировались без проверки»). Клиент — не только служба такси, но и
    * человек, который звонит друзьям.

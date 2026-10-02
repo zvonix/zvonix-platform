@@ -56,6 +56,8 @@
   Обоснование — [ARCHITECTURE.md](../ARCHITECTURE.md) и [ADR-0010](../adr/0010-model-billinga.md).
 - [recordings.md](recordings.md) — записи разговоров: выгрузка узлом, подписанные ссылки,
   срок хранения. Основание — правило о персональных данных в [CLAUDE.md](../../CLAUDE.md).
+- [payments.md](payments.md) — пополнение счёта: заявка клиента, реквизиты, подтверждение или отказ
+  администратором; зачисление ровно один раз. Основание — [ADR-0064](../adr/0064-platezhi-karkas.md).
 - [node.md](node.md) — узел АТС → control plane: учётные записи SIP, запрос маршрута
   на каждый вызов, CDR, регистрация узла, heartbeat. Обоснование —
   [ADR-0009](../adr/0009-programmnaya-ats.md) и [ADR-0019](../adr/0019-dostup-mashin.md).

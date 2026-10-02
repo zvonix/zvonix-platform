@@ -108,6 +108,12 @@ export const SETTINGS = {
     fallback: 'false',
     hint: 'Письмо администраторам, когда узел не на связи или объект почти не соединяет. Нужна настроенная почта',
   },
+
+  'payments.manual_instructions': {
+    kind: 'string',
+    fallback: '',
+    hint: 'Реквизиты для пополнения переводом: клиент видит этот текст в заявке. Пусто — приём заявок закрыт',
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof SETTINGS;

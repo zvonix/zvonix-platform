@@ -19,6 +19,7 @@ import { RoutingModule } from './modules/routing/routing.module.js';
 import { SettingsHttpModule } from './modules/settings/settings-http.module.js';
 import { SettingsModule } from './modules/settings/settings.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
+import { PaymentsModule } from './modules/payments/payments.module.js';
 import { ReportsModule } from './modules/reports/reports.module.js';
 import { TelephonyModule } from './modules/telephony/telephony.module.js';
 
@@ -42,6 +43,7 @@ import { TelephonyModule } from './modules/telephony/telephony.module.js';
     BillingModule,
     ReportsModule,
     NotificationsModule,
+    PaymentsModule,
     ApplicationsModule,
     HealthModule,
   ],
