@@ -226,6 +226,84 @@ export class BillingController {
   }
 
   /**
+   * Выплата партнёру: перевод сделан вне системы, здесь он записывается, и «причитается»
+   * уменьшается. Больше причитающегося выплатить нельзя — `409`.
+   */
+  @Roles('admin')
+  @Post('partners/:id/payout')
+  @HttpCode(200)
+  async payoutPartner(
+    @Param('id') id: string,
+    @Body(zodBody(depositSchema)) body: z.infer<typeof depositSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ transaction_id: string; already_posted: boolean; balance: string }> {
+    const partnerId = parseId(id, 'partner');
+    const posted = await this.billing.payoutToPartner({
+      partnerId,
+      amount: body.amount,
+      idempotencyKey: body.idempotencyKey,
+      description: body.description,
+      actorUserId: actor.userId,
+    });
+
+    return {
+      transaction_id: posted.transaction.id,
+      already_posted: posted.alreadyPosted,
+      balance: Money.format(await this.billing.balanceOf('partner', partnerId)),
+    };
+  }
+
+  /** Ручное списание со счёта партнёра — исправление ошибочного начисления. */
+  @Roles('admin')
+  @Post('partners/:id/debit')
+  @HttpCode(200)
+  async debitPartner(
+    @Param('id') id: string,
+    @Body(zodBody(depositSchema)) body: z.infer<typeof depositSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ transaction_id: string; already_posted: boolean; balance: string }> {
+    const partnerId = parseId(id, 'partner');
+    const posted = await this.billing.debitPartner({
+      partnerId,
+      amount: body.amount,
+      idempotencyKey: body.idempotencyKey,
+      description: body.description,
+      actorUserId: actor.userId,
+    });
+
+    return {
+      transaction_id: posted.transaction.id,
+      already_posted: posted.alreadyPosted,
+      balance: Money.format(await this.billing.balanceOf('partner', partnerId)),
+    };
+  }
+
+  /** Ручное списание со счёта клиента — исправление ошибочного пополнения. */
+  @Roles('admin')
+  @Post('clients/:id/debit')
+  @HttpCode(200)
+  async debitClient(
+    @Param('id') id: string,
+    @Body(zodBody(depositSchema)) body: z.infer<typeof depositSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ transaction_id: string; already_posted: boolean; balance: string }> {
+    const clientId = parseId(id, 'client');
+    const posted = await this.billing.debitClient({
+      clientId,
+      amount: body.amount,
+      idempotencyKey: body.idempotencyKey,
+      description: body.description,
+      actorUserId: actor.userId,
+    });
+
+    return {
+      transaction_id: posted.transaction.id,
+      already_posted: posted.alreadyPosted,
+      balance: Money.format(await this.billing.balanceOf('client', clientId)),
+    };
+  }
+
+  /**
    * Движение денег по счёту клиента.
    *
    * Каждая проводка идёт вместе с тем, **что произошло**: вид операции и описание.

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { MoneyOperation } from '@/components/money-operation';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { isNegative, money, moneyFromInput, numberFromInput } from '@/lib/money';
@@ -174,6 +175,19 @@ export function DepositForm({ client, canChange }: { client: ClientRow; canChang
               </div>
             </DialogForm>
           </FormDialog>
+        )}
+        {canChange && (
+          <MoneyOperation
+            path={`/clients/${client.id}/debit`}
+            label="Списать"
+            title={`Списать со счёта «${client.name}»`}
+            description="Исправление ошибочного пополнения. Ниже разрешённого минуса списать нельзя."
+            reasonPlaceholder="Пополнено по ошибке"
+            balanceName="Остаток"
+            doneText="Списано"
+            variant="outline"
+            invalidate={['clients']}
+          />
         )}
       </div>
       {fundsError !== undefined && <ErrorNote error={fundsError} />}
