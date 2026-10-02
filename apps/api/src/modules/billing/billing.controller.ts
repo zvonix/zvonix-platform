@@ -196,6 +196,36 @@ export class BillingController {
   }
 
   /**
+   * Ручное пополнение счёта партнёра — добавляет к тому, что ему причитается.
+   *
+   * Зеркало пополнения клиента: тот же ключ идемпотентности и те же правила, вид проводки
+   * `correction`. Журнал — той же транзакцией.
+   */
+  @Roles('admin')
+  @Post('partners/:id/deposit')
+  @HttpCode(200)
+  async depositPartner(
+    @Param('id') id: string,
+    @Body(zodBody(depositSchema)) body: z.infer<typeof depositSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ transaction_id: string; already_posted: boolean; balance: string }> {
+    const partnerId = parseId(id, 'partner');
+    const posted = await this.billing.depositToPartner({
+      partnerId,
+      amount: body.amount,
+      idempotencyKey: body.idempotencyKey,
+      description: body.description,
+      actorUserId: actor.userId,
+    });
+
+    return {
+      transaction_id: posted.transaction.id,
+      already_posted: posted.alreadyPosted,
+      balance: Money.format(await this.billing.balanceOf('partner', partnerId)),
+    };
+  }
+
+  /**
    * Движение денег по счёту клиента.
    *
    * Каждая проводка идёт вместе с тем, **что произошло**: вид операции и описание.

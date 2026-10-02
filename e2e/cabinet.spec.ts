@@ -236,6 +236,37 @@ test.describe('поддержка видит, но не меняет', () => {
   });
 });
 
+test.describe('ручное пополнение партнёра', () => {
+  test('администратор пополняет партнёра из его карточки, поддержка кнопки не видит', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const page = await adminContext.newPage();
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/partners');
+    await page
+      .getByRole('link', { name: /Иванов Иван Иванович/u })
+      .first()
+      .click();
+
+    await page.getByRole('button', { name: 'Пополнить' }).click();
+    await page.getByLabel('Сумма, ₽').fill('250');
+    await page.getByLabel('Основание').fill('Премия за месяц');
+    await page.getByRole('button', { name: /Пополнить на/u }).click();
+    await expect(page.getByText(/Проведено\. Причитается:/u)).toBeVisible();
+
+    const supportContext = await browser.newContext();
+    const support = await supportContext.newPage();
+    await signIn(support, PEOPLE.support);
+    await support.goto(page.url());
+    await expect(support.getByText('Только чтение:')).toBeVisible();
+    await expect(support.getByRole('button', { name: 'Пополнить' })).toHaveCount(0);
+
+    await adminContext.close();
+    await supportContext.close();
+  });
+});
+
 test.describe('чужой раздел', () => {
   test('клиент, зайдя в админский раздел, видит объяснение, а не пустоту', async ({ page }) => {
     await signIn(page, PEOPLE.client);
