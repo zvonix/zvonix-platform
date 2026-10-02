@@ -19,6 +19,7 @@ import { moment } from '@/lib/format';
 import { PARTNER_STATUS_MEANING, PARTNER_STATUS_NAME, partnerStatusTone } from '@/lib/labels';
 import { isNegative, money } from '@/lib/money';
 import { atMost } from '@/lib/wait';
+import { PartnerDeposit } from '../partner-deposit';
 import { PartnerEquipment } from '../partner-equipment';
 import { PartnerRates } from '../partner-rates';
 import { findPartner, type PartnerRow } from '../partner-row';
@@ -185,6 +186,13 @@ function PartnerCard({ id }: { id: string }) {
             onStatus={(status) => setStatus.mutateAsync(status)}
           />
         </>
+      )}
+
+      {canChange && (
+        <section className="flex flex-col gap-2">
+          <h2 className="font-semibold">Деньги</h2>
+          <PartnerDeposit partnerId={partner.id} name={partner.name} />
+        </section>
       )}
 
       <PartnerEquipment

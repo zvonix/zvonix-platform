@@ -427,3 +427,105 @@ describe('партнёр скрыт от клиента', () => {
     );
   });
 });
+
+describe('ручное пополнение партнёра', () => {
+  async function createPartner(): Promise<string> {
+    const response = await api().inject({
+      method: 'POST',
+      url: '/partners',
+      headers: auth(),
+      payload: {
+        ownerUserId: await createUser('partner'),
+        name: `Партнёр ${String(Date.now())}-${String(Math.random()).slice(2, 8)}`,
+        displayName: `Псевдоним ${String(Math.random()).slice(2, 8)}`,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    return response.json<{ partner: { id: string } }>().partner.id;
+  }
+
+  const depositPartner = (partnerId: string, amount: string, key: string, headers = auth()) =>
+    api().inject({
+      method: 'POST',
+      url: `/partners/${partnerId}/deposit`,
+      headers,
+      payload: { amount, idempotencyKey: key, description: 'Премия' },
+    });
+
+  it('добавляет к причитающемуся, и деньги видны в проводках партнёра', async () => {
+    const partnerId = await createPartner();
+
+    const response = await depositPartner(partnerId, '320.75', `partner-deposit:${partnerId}:1`);
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ already_posted: false, balance: '320.75' });
+
+    const entries = await api().inject({
+      method: 'GET',
+      url: `/partners/${partnerId}/entries`,
+      headers: auth(),
+    });
+    expect(entries.statusCode).toBe(200);
+    expect(entries.body).toContain('320.75');
+  });
+
+  it('повтор и гонка с тем же ключом денег не добавляют', async () => {
+    const partnerId = await createPartner();
+    const key = `partner-deposit:${partnerId}:race`;
+
+    const results = await Promise.all([
+      depositPartner(partnerId, '100', key),
+      depositPartner(partnerId, '100', key),
+      depositPartner(partnerId, '100', key),
+    ]);
+    expect(results.every((response) => response.statusCode === 200)).toBe(true);
+    expect(
+      results.filter((r) => !r.json<{ already_posted: boolean }>().already_posted),
+    ).toHaveLength(1);
+
+    const again = await depositPartner(partnerId, '100', key);
+    expect(again.json()).toMatchObject({ already_posted: true, balance: '100' });
+  });
+
+  it('пополнение попадает в журнал действий той же транзакцией', async () => {
+    const partnerId = await createPartner();
+    await depositPartner(partnerId, '55', `partner-deposit:${partnerId}:journal`);
+
+    const logged = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select count(*)::int as n from audit_log
+             where action = 'billing.partner_deposited' and entity_id = ${partnerId}`,
+      );
+      return (result.rows[0] as { n: number }).n;
+    });
+    expect(logged).toBe(1);
+  });
+
+  it('нулевая и отрицательная суммы, несуществующий партнёр, чужая роль — отказы', async () => {
+    const partnerId = await createPartner();
+    expect((await depositPartner(partnerId, '0', 'partner-deposit:zero')).statusCode).toBe(400);
+    expect((await depositPartner(partnerId, '-5', 'partner-deposit:minus')).statusCode).toBe(400);
+    expect(
+      (await depositPartner(crypto.randomUUID(), '10', 'partner-deposit:nobody')).statusCode,
+    ).toBe(404);
+
+    // Партнёр сам себе деньги не добавит.
+    const ownerEmail = uniqueEmail();
+    const { IdentityService } = await import('../identity/identity.service.js');
+    await api().get(IdentityService).createByAdmin({
+      email: ownerEmail,
+      password: TEST_PASSWORD,
+      fullName: 'Сам себе',
+      role: 'member',
+      status: 'active',
+    });
+    const login = await api().inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: ownerEmail, password: TEST_PASSWORD },
+    });
+    const stranger = { authorization: `Bearer ${login.json<{ token: string }>().token}` };
+    expect(
+      (await depositPartner(partnerId, '10', 'partner-deposit:self', stranger)).statusCode,
+    ).toBe(403);
+  });
+});

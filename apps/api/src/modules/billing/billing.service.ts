@@ -268,6 +268,56 @@ export class BillingService {
   }
 
   /**
+   * Ручное пополнение счёта партнёра администратором: добавляет к тому, что ему причитается.
+   *
+   * Зеркало `depositToClient`: те же правила (сумма больше нуля, идемпотентность по ключу,
+   * журнал той же транзакцией), другая сторона. Вид проводки — `correction`: деньги партнёру
+   * приходят не извне, как у клиента, а решением площадки — премия, возмещение, исправление
+   * ошибки. Выплата партнёру (уменьшение долга) — отдельная операция, не эта.
+   */
+  async depositToPartner(input: {
+    partnerId: PartnerId;
+    amount: MoneyAmount;
+    idempotencyKey: string;
+    description: string;
+    actorUserId: UserId;
+  }): Promise<PostedTransaction> {
+    if (Money.compare(input.amount, Money.ZERO) <= 0) {
+      throw validationFailed('Сумма пополнения должна быть больше нуля');
+    }
+
+    const partner = await this.repository.findPartner(input.partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+
+    const partnerAccount = await this.accountOf('partner', input.partnerId);
+    const settlement = await this.accountOf('settlement', null);
+
+    return this.post({
+      kind: 'correction',
+      idempotencyKey: input.idempotencyKey,
+      description: input.description,
+      referenceType: 'partner',
+      referenceId: input.partnerId,
+      createdByUserId: input.actorUserId,
+      lines: [
+        { accountId: settlement.id, amount: Money.negate(input.amount) },
+        { accountId: partnerAccount.id, amount: input.amount },
+      ],
+      audit: (transaction) => ({
+        action: 'billing.partner_deposited',
+        entityType: 'partner',
+        entityId: input.partnerId,
+        actorUserId: input.actorUserId,
+        after: {
+          amount: Money.format(input.amount),
+          transaction_id: transaction.id,
+          idempotency_key: input.idempotencyKey,
+        },
+      }),
+    });
+  }
+
+  /**
    * Партнёр объявляет, слушает ли он записи своих вызовов
    * ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
    *
