@@ -528,4 +528,113 @@ describe('ручное пополнение партнёра', () => {
       (await depositPartner(partnerId, '10', 'partner-deposit:self', stranger)).statusCode,
     ).toBe(403);
   });
+
+  const withdraw = (partnerId: string, action: 'payout' | 'debit', amount: string, key: string) =>
+    api().inject({
+      method: 'POST',
+      url: `/partners/${partnerId}/${action}`,
+      headers: auth(),
+      payload: { amount, idempotencyKey: key, description: 'Перевод на карту' },
+    });
+
+  it('выплата уменьшает причитающееся, повтор с тем же ключом ничего не меняет', async () => {
+    const partnerId = await createPartner();
+    await depositPartner(partnerId, '500', `partner-payout:${partnerId}:in`);
+    const key = `partner-payout:${partnerId}:1`;
+
+    const first = await withdraw(partnerId, 'payout', '200.5', key);
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({ already_posted: false, balance: '299.5' });
+
+    const again = await withdraw(partnerId, 'payout', '200.5', key);
+    expect(again.json()).toMatchObject({ already_posted: true, balance: '299.5' });
+
+    const logged = await withdrawLogged(partnerId, 'billing.partner_paid_out');
+    expect(logged).toBe(1);
+  });
+
+  it('выплатить больше причитающегося нельзя, остаток не меняется', async () => {
+    const partnerId = await createPartner();
+    await depositPartner(partnerId, '100', `partner-payout:${partnerId}:in`);
+
+    const refused = await withdraw(
+      partnerId,
+      'payout',
+      '100.01',
+      `partner-payout:${partnerId}:big`,
+    );
+    expect(refused.statusCode).toBe(409);
+
+    // Две выплаты в гонке по 60 из 100: пройти может только одна.
+    const race = await Promise.all([
+      withdraw(partnerId, 'payout', '60', `partner-payout:${partnerId}:r1`),
+      withdraw(partnerId, 'payout', '60', `partner-payout:${partnerId}:r2`),
+    ]);
+    expect(race.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+
+    const rest = await withdraw(partnerId, 'payout', '40', `partner-payout:${partnerId}:rest`);
+    expect(rest.json()).toMatchObject({ balance: '0' });
+  });
+
+  it('ручное списание у партнёра — тоже не глубже нуля, и пишется в журнал', async () => {
+    const partnerId = await createPartner();
+    await depositPartner(partnerId, '70', `partner-debit:${partnerId}:in`);
+
+    const ok = await withdraw(partnerId, 'debit', '20', `partner-debit:${partnerId}:1`);
+    expect(ok.json()).toMatchObject({ balance: '50' });
+    expect(
+      (await withdraw(partnerId, 'debit', '51', `partner-debit:${partnerId}:2`)).statusCode,
+    ).toBe(409);
+    expect(await withdrawLogged(partnerId, 'billing.partner_debited')).toBe(1);
+    expect(
+      (await withdraw(partnerId, 'payout', '0', `partner-payout:${partnerId}:zero`)).statusCode,
+    ).toBe(400);
+  });
+
+  async function withdrawLogged(partnerId: string, action: string): Promise<number> {
+    return withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select count(*)::int as n from audit_log
+             where action = ${action} and entity_id = ${partnerId}`,
+      );
+      return (result.rows[0] as { n: number }).n;
+    });
+  }
+});
+
+describe('ручное списание у клиента', () => {
+  const debit = (clientId: string, amount: string, key: string) =>
+    api().inject({
+      method: 'POST',
+      url: `/clients/${clientId}/debit`,
+      headers: auth(),
+      payload: { amount, idempotencyKey: key, description: 'Пополнено по ошибке' },
+    });
+
+  it('уменьшает остаток и не уводит ниже разрешённого минуса', async () => {
+    const clientId = await createClient('10');
+    await deposit(clientId, '100', `debit:${clientId}:in`);
+
+    const ok = await debit(clientId, '60', `debit:${clientId}:1`);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ already_posted: false, balance: '40' });
+
+    expect((await debit(clientId, '60', `debit:${clientId}:1`)).json()).toMatchObject({
+      already_posted: true,
+      balance: '40',
+    });
+
+    // Остаток 40, минус разрешён до 10: можно списать 50, 50.01 — уже нет.
+    expect((await debit(clientId, '50.01', `debit:${clientId}:big`)).statusCode).toBe(409);
+    expect((await debit(clientId, '50', `debit:${clientId}:edge`)).json()).toMatchObject({
+      balance: '-10',
+    });
+    expect(await ledgerSum(clientId)).toBe(-10_000_000n);
+  });
+
+  it('ноль и несуществующий клиент — отказы', async () => {
+    const clientId = await createClient();
+    expect((await debit(clientId, '0', 'debit:zero')).statusCode).toBe(400);
+    expect((await debit(crypto.randomUUID(), '5', 'debit:nobody')).statusCode).toBe(404);
+  });
 });

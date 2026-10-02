@@ -252,8 +252,15 @@ test.describe('ручное пополнение партнёра', () => {
     await page.getByRole('button', { name: 'Пополнить' }).click();
     await page.getByLabel('Сумма, ₽').fill('250');
     await page.getByLabel('Основание').fill('Премия за месяц');
-    await page.getByRole('button', { name: /Пополнить на/u }).click();
+    await page.getByRole('button', { name: /Пополнить \d/u }).click();
     await expect(page.getByText(/Проведено\. Причитается:/u)).toBeVisible();
+
+    // Выплата уменьшает причитающееся и тоже подтверждается кнопкой с суммой.
+    await page.getByRole('button', { name: 'Выплатить', exact: true }).click();
+    await page.getByLabel('Сумма, ₽').fill('100');
+    await page.getByLabel('Основание').fill('Перевод на карту');
+    await page.getByRole('button', { name: /Выплатить \d/u }).click();
+    await expect(page.getByText(/Выплата записана\. Причитается:/u)).toBeVisible();
 
     const supportContext = await browser.newContext();
     const support = await supportContext.newPage();
@@ -261,6 +268,8 @@ test.describe('ручное пополнение партнёра', () => {
     await support.goto(page.url());
     await expect(support.getByText('Только чтение:')).toBeVisible();
     await expect(support.getByRole('button', { name: 'Пополнить' })).toHaveCount(0);
+    await expect(support.getByRole('button', { name: 'Выплатить' })).toHaveCount(0);
+    await expect(support.getByRole('button', { name: 'Списать' })).toHaveCount(0);
 
     await adminContext.close();
     await supportContext.close();

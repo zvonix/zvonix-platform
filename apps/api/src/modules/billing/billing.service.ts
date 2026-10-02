@@ -318,6 +318,143 @@ export class BillingService {
   }
 
   /**
+   * Выплата партнёру: площадка перевела ему деньги, и то, что ему причитается, уменьшается.
+   *
+   * Вид проводки `payout`. Сам перевод (на карту, по реквизитам) делает человек вне системы —
+   * здесь только запись о нём. Выплатить больше, чем причитается, нельзя: минус на счёте
+   * партнёра означал бы, что он должен площадке, а это разбор, а не штатное действие.
+   */
+  async payoutToPartner(input: {
+    partnerId: PartnerId;
+    amount: MoneyAmount;
+    idempotencyKey: string;
+    description: string;
+    actorUserId: UserId;
+  }): Promise<PostedTransaction> {
+    return this.withdrawFromPartner('payout', 'billing.partner_paid_out', input);
+  }
+
+  /**
+   * Ручное списание со счёта партнёра — исправление ошибочного начисления или пополнения.
+   * Обратная операция к `depositToPartner`, вид проводки `correction`.
+   */
+  async debitPartner(input: {
+    partnerId: PartnerId;
+    amount: MoneyAmount;
+    idempotencyKey: string;
+    description: string;
+    actorUserId: UserId;
+  }): Promise<PostedTransaction> {
+    return this.withdrawFromPartner('correction', 'billing.partner_debited', input);
+  }
+
+  /**
+   * Ручное списание со счёта клиента — исправление ошибочного пополнения.
+   * Предел минуса клиента действует как всегда: ниже разрешённого списать нельзя.
+   */
+  async debitClient(input: {
+    clientId: ClientId;
+    amount: MoneyAmount;
+    idempotencyKey: string;
+    description: string;
+    actorUserId: UserId;
+  }): Promise<PostedTransaction> {
+    if (Money.compare(input.amount, Money.ZERO) <= 0) {
+      throw validationFailed('Сумма списания должна быть больше нуля');
+    }
+
+    const client = await this.repository.findClient(input.clientId);
+    if (client === undefined) throw notFound('Клиент не найден');
+
+    const clientAccount = await this.accountOf('client', input.clientId);
+    const settlement = await this.accountOf('settlement', null);
+
+    return this.post({
+      kind: 'correction',
+      idempotencyKey: input.idempotencyKey,
+      description: input.description,
+      referenceType: 'client',
+      referenceId: input.clientId,
+      createdByUserId: input.actorUserId,
+      lines: [
+        { accountId: clientAccount.id, amount: Money.negate(input.amount) },
+        { accountId: settlement.id, amount: input.amount },
+      ],
+      audit: (transaction) => ({
+        action: 'billing.client_debited',
+        entityType: 'client',
+        entityId: input.clientId,
+        actorUserId: input.actorUserId,
+        after: {
+          amount: Money.format(input.amount),
+          transaction_id: transaction.id,
+          idempotency_key: input.idempotencyKey,
+        },
+      }),
+    });
+  }
+
+  /** Общая часть выплаты и ручного списания: деньги уходят со счёта партнёра. */
+  private async withdrawFromPartner(
+    kind: 'payout' | 'correction',
+    action: string,
+    input: {
+      partnerId: PartnerId;
+      amount: MoneyAmount;
+      idempotencyKey: string;
+      description: string;
+      actorUserId: UserId;
+    },
+  ): Promise<PostedTransaction> {
+    if (Money.compare(input.amount, Money.ZERO) <= 0) {
+      throw validationFailed('Сумма должна быть больше нуля');
+    }
+
+    const partner = await this.repository.findPartner(input.partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+
+    const partnerAccount = await this.accountOf('partner', input.partnerId);
+    const settlement = await this.accountOf('settlement', null);
+
+    return this.post({
+      kind,
+      idempotencyKey: input.idempotencyKey,
+      description: input.description,
+      referenceType: 'partner',
+      referenceId: input.partnerId,
+      createdByUserId: input.actorUserId,
+      lines: [
+        { accountId: partnerAccount.id, amount: Money.negate(input.amount) },
+        { accountId: settlement.id, amount: input.amount },
+      ],
+      // Остаток проверяется под запиранием счёта, после проводки: две выплаты подряд
+      // не пройдут вместе мимо проверки. Исключение откатывает всю транзакцию.
+      alsoInTransaction: async (tx) => {
+        const [locked] = await this.repository.lockAccounts([partnerAccount.id], tx);
+        if (locked !== undefined && Money.compare(locked.balance, Money.ZERO) < 0) {
+          throw conflict('Больше, чем причитается партнёру, списать нельзя', {
+            details: {
+              owed: Money.format(Money.add(locked.balance, input.amount)),
+              requested: Money.format(input.amount),
+            },
+          });
+        }
+      },
+      audit: (transaction) => ({
+        action,
+        entityType: 'partner',
+        entityId: input.partnerId,
+        actorUserId: input.actorUserId,
+        after: {
+          amount: Money.format(input.amount),
+          transaction_id: transaction.id,
+          idempotency_key: input.idempotencyKey,
+        },
+      }),
+    });
+  }
+
+  /**
    * Партнёр объявляет, слушает ли он записи своих вызовов
    * ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).
    *
