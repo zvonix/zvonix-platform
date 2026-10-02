@@ -38,6 +38,8 @@ let storageServer: Server | undefined;
 
 const STORAGE_PORT = 45_733;
 prepareEnvironment({
+  // Здесь проверяется S3-вариант хранилища; локальный — в `storage-files.integration.test.ts`.
+  RECORDINGS_STORAGE: 's3',
   S3_ENDPOINT: `http://127.0.0.1:${String(STORAGE_PORT)}`,
   S3_ACCESS_KEY: 'proverka',
   S3_SECRET_KEY: 'proverka-secret',
@@ -718,5 +720,66 @@ describe('разовый доступ по спорному вызову', () =>
       payload: { reason: 'Очень надо' },
     });
     expect(response.statusCode).toBe(403);
+  });
+});
+
+describe('какие записи можно послушать (список вызовов в кабинете)', () => {
+  const listable = (callIds: string[], token: string) =>
+    api().inject({
+      method: 'GET',
+      url: `/recordings/available?callIds=${callIds.join(',')}`,
+      headers: auth(token),
+    });
+
+  it('клиент видит только записи своих вызовов, сотрудник — все', async () => {
+    const person = await loginAs('client');
+    const mine = await uploadedRecording({ ownerUserId: person.userId });
+    const foreign = await uploadedRecording();
+    const ids = [mine.callId, foreign.callId];
+
+    const own = await listable(ids, person.token);
+    expect(own.statusCode).toBe(200);
+    expect(
+      own.json<{ recordings: { call_id: string; recording_id: string }[] }>().recordings,
+    ).toEqual([expect.objectContaining({ call_id: mine.callId, recording_id: mine.recordingId })]);
+
+    const staff = await listable(ids, adminToken);
+    expect(staff.json<{ recordings: unknown[] }>().recordings).toHaveLength(2);
+  });
+
+  it('невыгруженная запись не предлагается: файла ещё нет', async () => {
+    const call = await makeCall();
+    await post('/node/recordings/upload-url', { callId: call.callId }, asNode());
+
+    const response = await listable([call.callId], adminToken);
+    expect(response.json<{ recordings: unknown[] }>().recordings).toEqual([]);
+  });
+
+  it('партнёр без объявленного намерения записей не видит, с намерением — свои', async () => {
+    const partner = await partnerWithRecording();
+    const call = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select call_id from recordings where id = ${partner.recordingId}::uuid`,
+      );
+      return (result.rows[0] as { call_id: string }).call_id;
+    });
+
+    const before = await listable([call], partner.token);
+    expect(before.json<{ recordings: unknown[] }>().recordings).toEqual([]);
+
+    await api().inject({
+      method: 'PUT',
+      url: `/partners/${partner.partnerId}/recordings-access`,
+      headers: auth(partner.token),
+      payload: { listens: true },
+    });
+    const after = await listable([call], partner.token);
+    expect(after.json<{ recordings: unknown[] }>().recordings).toHaveLength(1);
+  });
+
+  it('без вызовов и с лишним числом вызовов — отказ проверки', async () => {
+    expect((await listable([], adminToken)).statusCode).toBe(400);
+    const many = Array.from({ length: 51 }, () => crypto.randomUUID());
+    expect((await listable(many, adminToken)).statusCode).toBe(400);
   });
 });

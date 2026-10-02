@@ -59,3 +59,6 @@ test-results/
 playwright-report/
 # Эталоны снимков экранов (`pnpm ui:screens`): зависят от шрифтов и системы, в git не идут.
 .ui-baseline/
+
+# Записи разговоров при RECORDINGS_STORAGE=local (ADR-0063)
+/data/

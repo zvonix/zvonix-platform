@@ -10,6 +10,11 @@ User=zvonix
 Group=zvonix
 WorkingDirectory=/opt/zvonix/current/apps/api
 EnvironmentFile=/etc/zvonix/zvonix.env
+# Записи разговоров (ADR-0063): каталог создаёт и отдаёт службе сам systemd, и он остаётся
+# записываемым при ProtectSystem=strict. Вне каталога выпуска — выкладка записи не стирает.
+StateDirectory=zvonix/recordings
+StateDirectoryMode=0750
+Environment=RECORDINGS_DIR=/var/lib/zvonix/recordings
 ExecStart=/usr/bin/node --enable-source-maps dist/main.js
 Restart=on-failure
 RestartSec=3

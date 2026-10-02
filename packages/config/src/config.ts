@@ -42,6 +42,8 @@ const PUBLIC_VARIABLES = new Set([
   'S3_ENDPOINT',
   'S3_BUCKET',
   'S3_REGION',
+  'RECORDINGS_STORAGE',
+  'RECORDINGS_DIR',
   'RECORDING_RETENTION_DAYS',
   'RECORDING_LINK_TTL_SECONDS',
   'LOG_LEVEL',
@@ -163,6 +165,14 @@ export const configSchema = z.object({
    * Записи не лежат ни в базе, ни на узле: объём растёт линейно и бесконечно,
    * а узел одноразов и заменяем (ARCHITECTURE.md).
    */
+  /**
+   * Где лежат записи: `local` — каталог на диске площадки, `s3` — объектное хранилище
+   * ([ADR-0063](../../../docs/adr/0063-hranilishche-zapisey-na-diske.md)). Остальные
+   * `S3_*` читаются только при `s3`.
+   */
+  RECORDINGS_STORAGE: z.enum(['local', 's3']).default('local'),
+  /** Каталог записей при `local`. На сервере — вне каталога выпуска, чтобы выкладка не стирала записи. */
+  RECORDINGS_DIR: z.string().min(1, 'не может быть пустым').default('./data/recordings'),
   S3_ENDPOINT: z.url('должен быть адресом').default('http://127.0.0.1:9000'),
   S3_BUCKET: z
     .string()

@@ -24,7 +24,7 @@
 - Рантайм: Node.js 22 LTS · TypeScript 5 в строгом режиме · pnpm
 - Бэкенд: NestJS · zod для схем, общих с фронтендом
 - Фронтенд: Next.js (App Router) · TanStack Query · shadcn/ui
-- Данные: PostgreSQL 16 · Drizzle ORM + drizzle-kit · Redis 7 · MinIO (записи)
+- Данные: PostgreSQL 16 · Drizzle ORM + drizzle-kit · Redis 7 · записи разговоров — файлы на диске площадки ([ADR-0063](docs/adr/0063-hranilishche-zapisey-na-diske.md))
 - Фоновые задачи: BullMQ
 - Телефония: FreeSWITCH ([ADR-0009](docs/adr/0009-programmnaya-ats.md)), `mod_xml_curl` за маршрутом, ESL для событий
 - Android-приложение партнёра: Kotlin

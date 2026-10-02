@@ -64,6 +64,18 @@ export async function buildApplication(): Promise<BuiltApplication> {
   // Формат нужен ровно одному обработчику: привязке `directory` для FreeSWITCH,
   // у которого другого формата нет (docs/api/node.md).
 
+  // Файл записи принимается потоком, а не разбирается как тело: Fastify отдаёт обработчику
+  // сам поток (ADR-0063). Без парсера для этих типов он ответил бы 415.
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .addContentTypeParser(
+      ['audio/wav', 'audio/x-wav', 'audio/wave', 'application/octet-stream'],
+      (_request, payload, done) => {
+        done(null, payload);
+      },
+    );
+
   // Без этого `onApplicationShutdown` не вызывается, и пул соединений остаётся
   // открытым после SIGTERM: оркестратор добьёт процесс по таймауту.
   app.enableShutdownHooks();

@@ -6,14 +6,14 @@
  * (правило из CLAUDE.md). Сам файл через control plane не проходит.
  */
 
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Cabinets, Roles } from '../../http/auth.guard.js';
-import { zodBody } from '../../http/zod.pipe.js';
+import { zodBody, zodQuery } from '../../http/zod.pipe.js';
 import { CurrentUser, Meta } from '../../http/request-context.js';
 import type { Principal, RequestMeta } from '../identity/identity.service.js';
-import { grantRecordingAccessSchema } from './schemas.js';
+import { availableQuerySchema, grantRecordingAccessSchema } from './schemas.js';
 import { RecordingsService } from './recordings.service.js';
 
 @Controller('recordings')
@@ -51,6 +51,35 @@ export class RecordingsController {
     );
 
     return { url: link.url, expires_at: link.expiresAt.toISOString() };
+  }
+
+  /**
+   * У каких вызовов есть запись, которую можно послушать.
+   *
+   * Для списков вызовов в кабинете: клиент видит свои, партнёр — по ADR-0036, сотрудники —
+   * все. Не названные в ответе вызовы записи не имеют или она не для вас — различить нельзя
+   * намеренно. До пятидесяти вызовов за раз — страница списка.
+   */
+  @Roles('admin', 'support')
+  @Cabinets('client', 'partner')
+  @Get('available')
+  async available(
+    @Query(zodQuery(availableQuerySchema)) query: z.infer<typeof availableQuerySchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{
+    recordings: { call_id: string; recording_id: string; duration_seconds: number | null }[];
+  }> {
+    const found = await this.recordings.listenableFor(
+      query.callIds.map((id) => parseId(id, 'call')),
+      { userId: actor.userId, role: actor.role },
+    );
+    return {
+      recordings: found.map((row) => ({
+        call_id: row.callId,
+        recording_id: row.id,
+        duration_seconds: row.durationSeconds,
+      })),
+    };
   }
 
   /**

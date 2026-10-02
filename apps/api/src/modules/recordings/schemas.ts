@@ -49,3 +49,16 @@ export const grantRecordingAccessSchema = z.object({
     .max(168, 'дольше недели')
     .default(24),
 });
+
+/** Идентификаторы вызовов через запятую: одна страница списка в кабинете. */
+export const availableQuerySchema = z.object({
+  callIds: z
+    .string()
+    .transform((raw) => raw.split(',').filter((part) => part !== ''))
+    .pipe(
+      z
+        .array(z.uuid('должны быть идентификаторами'))
+        .min(1, 'нужен хотя бы один вызов')
+        .max(50, 'не больше пятидесяти вызовов за раз'),
+    ),
+});
