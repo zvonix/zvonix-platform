@@ -45,6 +45,8 @@ const LABELS: Record<string, string> = {
   'notifications.low_balance_amount': 'Порог, ₽',
   'notifications.alerts_enabled':
     'Писать администраторам о неполадках и новых заявках на пополнение',
+  'retention.recordings_days': 'Срок хранения записей, суток',
+  'retention.metrics_days': 'Срок хранения истории нагрузки, суток',
   'payments.manual_instructions': 'Реквизиты для пополнения переводом',
   'pricing.price_bands_enabled': 'Проверять коридоры цен',
   'cabinets.partner_may_add_client': 'Партнёр может стать клиентом',

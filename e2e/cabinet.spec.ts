@@ -276,6 +276,28 @@ test.describe('ручное пополнение партнёра', () => {
   });
 });
 
+test.describe('серверы (ADR-0065)', () => {
+  test('администратор и поддержка видят нагрузку площадки и меняют период', async ({ browser }) => {
+    for (const person of [PEOPLE.admin, PEOPLE.support]) {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await signIn(page, person);
+      await page.goto('/servers');
+
+      await expect(page.getByRole('heading', { name: 'Площадка' })).toBeVisible();
+      await expect(page.getByRole('meter', { name: 'Процессор' })).toBeVisible();
+      await expect(page.getByRole('img', { name: /нагрузка процессора/u })).toBeVisible();
+
+      await page.getByRole('button', { name: 'Неделя' }).click();
+      await expect(page.getByRole('button', { name: 'Неделя' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await context.close();
+    }
+  });
+});
+
 test.describe('чужой раздел', () => {
   test('клиент, зайдя в админский раздел, видит объяснение, а не пустоту', async ({ page }) => {
     await signIn(page, PEOPLE.client);

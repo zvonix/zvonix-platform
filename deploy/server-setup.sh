@@ -266,8 +266,6 @@ TRUSTED_PROXIES=loopback
 SECRET_KEY=${SECRET_KEY}
 # Корневой сертификат Минцифры — в системном хранилище (ADR-0032).
 NODE_OPTIONS=--use-system-ca
-# Сколько суток хранятся записи разговоров (ADR-0063). Каталог записей задаёт служба.
-RECORDING_RETENTION_DAYS=30
 EOF
   )
   echo "записан ${ENV_FILE} — остальные настройки см. .env.example"

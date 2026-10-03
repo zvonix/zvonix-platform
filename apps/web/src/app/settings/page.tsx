@@ -96,6 +96,7 @@ function SettingsForm() {
     { title: 'Регистрация клиентов', prefix: 'clients.' },
     { title: 'Письма о событиях', prefix: 'notifications.' },
     { title: 'Пополнение счёта', prefix: 'payments.' },
+    { title: 'Хранение', prefix: 'retention.' },
     { title: 'Цены партнёров', prefix: 'pricing.' },
     { title: 'Кабинеты', prefix: 'cabinets.' },
   ];

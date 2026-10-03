@@ -506,6 +506,9 @@ FS_CLI="$(command -v fs_cli)" || die "fs_cli не найден — пульсу 
 install -d -m 0700 "$NODE_ETC"
 ( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/heartbeat"\n' \
   "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/heartbeat.curl" )
+# Замер нагрузки, памяти и диска (ADR-0065, POST /node/metrics): тот же ключ, другой адрес.
+( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/metrics"\n' \
+  "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/metrics.curl" )
 
 cat >/usr/local/sbin/zvonix-heartbeat <<HEARTBEAT
 #!/bin/sh
@@ -515,6 +518,18 @@ CALLS="\$("${FS_CLI}" -x 'show calls count' 2>/dev/null | sed -n 's/^\([0-9][0-9
 DEGRADED=false
 # FreeSWITCH не ответил — узел жив, но звонить не может: так и сообщаем.
 [ -n "\$CALLS" ] || { CALLS=0; DEGRADED=true; }
+# Замер сервера: нагрузка, память, диск. Не снялся — пульс всё равно идёт.
+LOAD="\$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)"
+CORES="\$(nproc 2>/dev/null)"
+MEMT="\$(awk '/^MemTotal:/ {print int(\$2/1024)}' /proc/meminfo 2>/dev/null)"
+MEMA="\$(awk '/^MemAvailable:/ {print int(\$2/1024)}' /proc/meminfo 2>/dev/null)"
+DISK="\$(df -Pm /var/lib 2>/dev/null | awk 'NR==2 {print \$2, \$4}')"
+if [ -n "\$LOAD" ] && [ -n "\$CORES" ] && [ -n "\$MEMT" ] && [ -n "\$MEMA" ] && [ -n "\$DISK" ]; then
+  printf '{"load1":%s,"cpuCores":%s,"memTotalMb":%s,"memAvailableMb":%s,"diskTotalMb":%s,"diskFreeMb":%s,"activeCalls":%s}' \\
+    "\$LOAD" "\$CORES" "\$MEMT" "\$MEMA" "\${DISK% *}" "\${DISK#* }" "\$CALLS" \\
+    | curl -fsS --max-time 10 -K "${NODE_ETC}/metrics.curl" \\
+        -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true
+fi
 "${FS_CLI}" -x 'sofia status' 2>/dev/null \\
   | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING' || DEGRADED=true
 printf '{"activeCalls":%s,"degraded":%s,"agentVersion":"heartbeat.sh"}' "\$CALLS" "\$DEGRADED" \\

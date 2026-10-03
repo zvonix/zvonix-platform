@@ -21,6 +21,7 @@ import { BillingService } from '../billing/billing.service.js';
 import { MailService } from '../mail/mail.service.js';
 import { NodesService } from '../nodes/nodes.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
+import { ServersService } from '../servers/servers.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { QualityService, type QualityView } from '../telephony/quality.service.js';
 
@@ -69,6 +70,7 @@ export class AlertsService {
     private readonly quality: QualityService,
     private readonly payments: PaymentsService,
     private readonly billing: BillingService,
+    private readonly servers: ServersService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('alerts');
@@ -151,6 +153,24 @@ export class AlertsService {
       alerts.push(...(await this.paymentAlerts(now)));
     } catch (cause) {
       this.logger.error('Тревоги: заявки на пополнение не прочитаны', cause);
+    }
+
+    try {
+      for (const disk of await this.servers.lowDisk(now)) {
+        const percent = Math.round((disk.freeMb / disk.totalMb) * 100);
+        alerts.push({
+          kind: `alert_disk:${disk.id ?? 'platform'}`,
+          subject: `Zvonix: на диске «${disk.name}» мало места`,
+          body: [
+            `На диске «${disk.name}» свободно ${String(percent)} % (${String(Math.round(disk.freeMb / 1024))} из ${String(Math.round(disk.totalMb / 1024))} ГБ).`,
+            '',
+            'Когда место кончится, записи разговоров перестанут сохраняться, а сервер может остановиться.',
+            'Очистите ненужное или уменьшите срок хранения записей в «Настройки площадки» → «Хранение».',
+          ].join('\n'),
+        });
+      }
+    } catch (cause) {
+      this.logger.error('Тревоги: диски не прочитаны', cause);
     }
 
     return alerts;
