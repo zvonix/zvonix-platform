@@ -63,6 +63,8 @@ export {
 } from './modules/recordings/recordings.service.js';
 export { NotificationsModule } from './modules/notifications/notifications.module.js';
 export { AlertsService } from './modules/notifications/alerts.service.js';
+export { PaymentNoticeService } from './modules/notifications/payment-notice.service.js';
+export { SuspensionNoticeService } from './modules/notifications/suspension-notice.service.js';
 export { ServersModule } from './modules/servers/servers.module.js';
 export { ServersService } from './modules/servers/servers.service.js';
 export { LowBalanceService } from './modules/notifications/low-balance.service.js';

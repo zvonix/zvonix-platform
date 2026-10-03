@@ -112,6 +112,17 @@ export const SETTINGS = {
     hint: 'Письмо администраторам, когда узел не на связи или объект почти не соединяет. Нужна настроенная почта',
   },
 
+  'notifications.payment_decision_enabled': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Письмо клиенту, когда его заявку на пополнение подтвердили или отклонили. Нужна настроенная почта',
+  },
+  'notifications.partner_suspension_enabled': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Письмо партнёру, когда его SIM или шлюз отключились из-за отказов сети. Нужна настроенная почта',
+  },
+
   'retention.recordings_days': {
     kind: 'number',
     fallback: '30',

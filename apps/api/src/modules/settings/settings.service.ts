@@ -141,12 +141,16 @@ export class SettingsService {
     readonly lowBalanceEnabled: boolean;
     readonly lowBalanceAmount: number;
     readonly alertsEnabled: boolean;
+    readonly paymentDecisionEnabled: boolean;
+    readonly partnerSuspensionEnabled: boolean;
   }> {
     const values = await this.values();
     return {
       lowBalanceEnabled: this.flag(values, 'notifications.low_balance_enabled'),
       lowBalanceAmount: this.number(values, 'notifications.low_balance_amount'),
       alertsEnabled: this.flag(values, 'notifications.alerts_enabled'),
+      paymentDecisionEnabled: this.flag(values, 'notifications.payment_decision_enabled'),
+      partnerSuspensionEnabled: this.flag(values, 'notifications.partner_suspension_enabled'),
     };
   }
 

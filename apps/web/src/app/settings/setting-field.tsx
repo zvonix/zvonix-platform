@@ -45,6 +45,9 @@ const LABELS: Record<string, string> = {
   'notifications.low_balance_amount': 'Порог, ₽',
   'notifications.alerts_enabled':
     'Писать администраторам о неполадках и новых заявках на пополнение',
+  'notifications.payment_decision_enabled': 'Писать клиенту о решении по заявке на пополнение',
+  'notifications.partner_suspension_enabled':
+    'Писать партнёру, когда его SIM или шлюз отключились из-за отказов',
   'retention.recordings_days': 'Срок хранения записей, суток',
   'retention.metrics_days': 'Срок хранения истории нагрузки, суток',
   'payments.manual_instructions': 'Реквизиты для пополнения переводом',

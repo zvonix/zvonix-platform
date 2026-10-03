@@ -91,6 +91,11 @@ export class PaymentsService {
     return payment;
   }
 
+  /** Решённые заявки (подтверждённые и отклонённые) за период — для письма клиенту. */
+  resolvedSince(since: Date, limit: number): Promise<PaymentRow[]> {
+    return this.repository.listResolvedSince(since, limit);
+  }
+
   list(filter: PaymentFilter): Promise<{ rows: PaymentRow[]; total: number }> {
     return this.repository.list(filter);
   }

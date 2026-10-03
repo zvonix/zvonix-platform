@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, count, desc, eq, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, type SQL } from 'drizzle-orm';
 import { toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import { payments } from '@zvonix/db/schema';
 import {
@@ -54,6 +54,18 @@ export class PaymentsRepository {
   async findById(id: Id<'payment'>, executor: Executor = this.db): Promise<PaymentRow | undefined> {
     const [row] = await executor.select().from(payments).where(eq(payments.id, id));
     return row;
+  }
+
+  /** Заявки, решённые не раньше `since`: подтверждённые и отклонённые (отзыв клиента не в счёт). */
+  async listResolvedSince(since: Date, limit: number): Promise<PaymentRow[]> {
+    return this.db
+      .select()
+      .from(payments)
+      .where(
+        and(inArray(payments.status, ['succeeded', 'rejected']), gte(payments.resolvedAt, since)),
+      )
+      .orderBy(desc(payments.resolvedAt))
+      .limit(limit);
   }
 
   async countPending(clientId: Id<'client'>): Promise<number> {
