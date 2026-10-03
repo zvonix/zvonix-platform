@@ -15,6 +15,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   AlertsService,
+  ServersService,
   ApplicationsService,
   CdrService,
   NumberingPlanService,
@@ -181,6 +182,9 @@ const MAIL_CLEANUP_SECONDS = 3600;
  */
 const AUTO_APPROVE_SECONDS = 60;
 
+/** Замер нагрузки площадки — раз в минуту, как и замеры узлов (ADR-0065). */
+const SERVER_SAMPLE_SECONDS = 60;
+
 @Injectable()
 export class BackgroundTasks {
   constructor(
@@ -197,6 +201,7 @@ export class BackgroundTasks {
     private readonly applications: ApplicationsService,
     private readonly lowBalance: LowBalanceService,
     private readonly alerts: AlertsService,
+    private readonly servers: ServersService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -275,6 +280,16 @@ export class BackgroundTasks {
         name: 'notifications.alerts',
         everySeconds: ALERTS_SECONDS,
         run: (now) => this.alerts.notify(now),
+      },
+      {
+        name: 'servers.sample',
+        everySeconds: SERVER_SAMPLE_SECONDS,
+        run: (now) => this.servers.samplePlatform(now),
+      },
+      {
+        name: 'servers.purge-history',
+        everySeconds: MAIL_CLEANUP_SECONDS,
+        run: (now) => this.servers.purge(now),
       },
       {
         name: 'auth-tokens.purge-expired',

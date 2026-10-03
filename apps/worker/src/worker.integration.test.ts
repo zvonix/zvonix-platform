@@ -96,6 +96,8 @@ describe('реестр фоновых задач', () => {
       'applications.auto-approve-partners',
       'notifications.low-balance',
       'notifications.alerts',
+      'servers.sample',
+      'servers.purge-history',
       'auth-tokens.purge-expired',
     ]);
   });

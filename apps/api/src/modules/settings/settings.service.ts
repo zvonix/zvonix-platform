@@ -16,6 +16,7 @@ import {
   serializeSetting,
   SETTING_KEYS,
   SETTINGS,
+  type SettingDefinition,
   type SettingKey,
 } from './settings.js';
 
@@ -150,6 +151,23 @@ export class SettingsService {
   }
 
   /**
+   * Сроки хранения ([ADR-0065](../../../../../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)).
+   * Значение вне допустимых пределов не принимается кабинетом, но если оно всё же оказалось
+   * в базе, пределы применяются здесь: срок хранения персональных данных не должен
+   * зависеть от опечатки.
+   */
+  async retention(): Promise<{
+    readonly recordingsDays: number;
+    readonly metricsDays: number;
+  }> {
+    const values = await this.values();
+    return {
+      recordingsDays: clampDays(this.number(values, 'retention.recordings_days'), 1, 3650, 30),
+      metricsDays: clampDays(this.number(values, 'retention.metrics_days'), 1, 90, 14),
+    };
+  }
+
+  /**
    * Приём заявок на пополнение ([ADR-0064](../../../../../docs/adr/0064-platezhi-karkas.md)):
    * реквизиты для перевода. Пусто — заявки не принимаются: заявка без реквизитов клиенту
    * ничего не говорит, а администратору приносит перевод, которого он не ждал.
@@ -207,6 +225,18 @@ export class SettingsService {
       if (serialized === undefined) {
         throw validationFailed(
           `Значение не подходит настройке «${key}»: ожидался ${SETTINGS[key].kind}`,
+        );
+      }
+
+      const definition: SettingDefinition = SETTINGS[key];
+      const number = Number(serialized);
+      if (
+        definition.kind === 'number' &&
+        ((definition.min !== undefined && number < definition.min) ||
+          (definition.max !== undefined && number > definition.max))
+      ) {
+        throw validationFailed(
+          `Значение настройки «${key}» должно быть от ${String(definition.min ?? '−∞')} до ${String(definition.max ?? '∞')}`,
         );
       }
 
@@ -350,4 +380,10 @@ function shownValue(key: SettingKey, raw: string): unknown {
  */
 function previousShown(key: SettingKey, raw: string | undefined): unknown {
   return raw === undefined ? null : shownValue(key, raw);
+}
+
+/** Целые сутки в пределах; нечисло и выход за предел заменяются границей или умолчанием. */
+function clampDays(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }

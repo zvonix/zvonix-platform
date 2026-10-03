@@ -15,6 +15,9 @@ export interface SettingDefinition {
   /** Секрет шифруется в базе и наружу не отдаётся никогда — ни в API, ни в журнале. */
   readonly secret?: true;
   readonly fallback: string;
+  /** Пределы числа: за ними значение не принимается. Только у числовых настроек. */
+  readonly min?: number;
+  readonly max?: number;
   /** Для чего это: попадает в ответ администратору, чтобы поле не требовало догадок. */
   readonly hint: string;
 }
@@ -107,6 +110,21 @@ export const SETTINGS = {
     kind: 'boolean',
     fallback: 'false',
     hint: 'Письмо администраторам, когда узел не на связи или объект почти не соединяет. Нужна настроенная почта',
+  },
+
+  'retention.recordings_days': {
+    kind: 'number',
+    fallback: '30',
+    min: 1,
+    max: 3650,
+    hint: 'Сколько суток хранится запись разговора, от 1 до 3650. Действует на записи, принятые после изменения',
+  },
+  'retention.metrics_days': {
+    kind: 'number',
+    fallback: '14',
+    min: 1,
+    max: 90,
+    hint: 'Сколько суток хранится история нагрузки серверов, от 1 до 90',
   },
 
   'payments.manual_instructions': {

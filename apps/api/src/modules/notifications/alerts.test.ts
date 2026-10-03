@@ -23,6 +23,7 @@ interface Setup {
   gateways?: Record<string, unknown>[];
   alreadySent?: (kind: string, recipient: string) => boolean;
   nodesFail?: boolean;
+  lowDisk?: { id: string | null; name: string; freeMb: number; totalMb: number }[];
   payments?: {
     id: string;
     clientId: string;
@@ -58,6 +59,7 @@ function build(setup: Setup) {
     } as never,
     { list: () => Promise.resolve({ rows: setup.payments ?? [], total: 0 }) } as never,
     { clientWithBalance: () => Promise.resolve({ name: 'Такси Ромашка' }) } as never,
+    { lowDisk: () => Promise.resolve(setup.lowDisk ?? []) } as never,
     logger(),
   );
   return { service, enqueue };
@@ -163,6 +165,18 @@ describe('тревоги администраторам', () => {
     expect(sent.subject).toContain('1500');
     expect(sent.body).toContain('Такси Ромашка');
     expect(sent.body).toContain('платёжка 17');
+  });
+
+  it('мало места на диске — письмо, повтор по источнику', async () => {
+    const { service, enqueue } = build({
+      admins: [confirmed],
+      lowDisk: [{ id: null, name: 'Площадка', freeMb: 4096, totalMb: 81920 }],
+    });
+
+    expect(await service.notify(NOW)).toBe(1);
+    const sent = (enqueue.mock.calls[0] as unknown as [{ kind: string; body: string }])[0];
+    expect(sent.kind).toBe('alert_disk:platform');
+    expect(sent.body).toContain('5 %');
   });
 
   it('сбой чтения узлов не гасит тревогу о качестве', async () => {

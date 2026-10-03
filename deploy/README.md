@@ -95,7 +95,7 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
 |---|---|
 | `/opt/zvonix/releases/<метка>-<время>` | выпуски, хранятся пять последних |
 | `/opt/zvonix/current`, `/opt/zvonix/previous` | ссылки на работающий и предыдущий |
-| `/var/lib/zvonix/recordings` | записи разговоров ([ADR-0063](../docs/adr/0063-hranilishche-zapisey-na-diske.md)): создаёт systemd (`StateDirectory`), выкладка не стирает, **копий нет**; срок хранения — `RECORDING_RETENTION_DAYS` (30) в `zvonix.env` |
+| `/var/lib/zvonix/recordings` | записи разговоров ([ADR-0063](../docs/adr/0063-hranilishche-zapisey-na-diske.md)): создаёт systemd (`StateDirectory`), выкладка не стирает, **копий нет**; срок хранения — настройка «Срок хранения записей» (30 суток) в кабинете ([ADR-0065](../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)) |
 | `/var/backups/zvonix/<метка>-<время>.dump` | копия базы перед миграциями каждой выкладки, пять последних; `postgres 0700` |
 | `/etc/zvonix/zvonix.env` | окружение площадки, `root:zvonix 0640`; выкладкой не переписывается |
 | `/etc/zvonix/secrets.env` | пароль базы и `SECRET_KEY`, только root |

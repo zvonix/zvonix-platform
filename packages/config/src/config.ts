@@ -44,7 +44,6 @@ const PUBLIC_VARIABLES = new Set([
   'S3_REGION',
   'RECORDINGS_STORAGE',
   'RECORDINGS_DIR',
-  'RECORDING_RETENTION_DAYS',
   'RECORDING_LINK_TTL_SECONDS',
   'LOG_LEVEL',
   'LOG_FORMAT',
@@ -183,20 +182,6 @@ export const configSchema = z.object({
   S3_REGION: z.string().min(1, 'не может быть пустым').default('us-east-1'),
   S3_ACCESS_KEY: z.string().min(1, 'не может быть пустым').default(''),
   S3_SECRET_KEY: z.string().min(1, 'не может быть пустым').default(''),
-
-  /**
-   * Сколько хранится запись разговора, в сутках.
-   *
-   * Записи — персональные данные абонента, и «навсегда» здесь не нейтральное значение,
-   * а решение хранить чужие разговоры бессрочно. Срок задаётся явно и по истечении
-   * запись удаляется вместе с объектом в хранилище.
-   */
-  RECORDING_RETENTION_DAYS: z.coerce
-    .number()
-    .int('должно быть целым числом')
-    .min(1, 'должно быть больше нуля')
-    .max(3650, 'слишком долгий срок хранения персональных данных')
-    .default(90),
 
   /**
    * Срок жизни подписанной ссылки на запись, в секундах.

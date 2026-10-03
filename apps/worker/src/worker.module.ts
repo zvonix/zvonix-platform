@@ -18,6 +18,7 @@ import {
   NodesModule,
   NotificationsModule,
   RecordingsModule,
+  ServersModule,
   SettingsModule,
   TelephonyModule,
 } from '@zvonix/api';
@@ -43,6 +44,8 @@ import { BackgroundTasks } from './tasks.js';
     ApplicationsModule,
     // Письмо клиенту о низком балансе (ADR-0060).
     NotificationsModule,
+    // Замеры нагрузки площадки и уборка их истории (ADR-0065).
+    ServersModule,
   ],
   providers: [BackgroundTasks, SchedulerService],
 })

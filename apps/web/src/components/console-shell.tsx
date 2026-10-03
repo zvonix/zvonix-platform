@@ -8,6 +8,7 @@ import {
   BarChart3,
   Coins,
   Gauge,
+  HardDrive,
   Inbox,
   KeyRound,
   Plus,
@@ -102,6 +103,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/partners', label: 'Партнёры и оборудование', Icon: Radio },
         { href: '/nodes', label: 'Узлы АТС', Icon: Server },
+        { href: '/servers', label: 'Серверы', Icon: HardDrive },
         { href: '/operators', label: 'Операторы связи', Icon: SignalHigh },
         { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
         { href: '/quality', label: 'Качество', Icon: Activity },
@@ -151,6 +153,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/partners', label: 'Партнёры и оборудование', Icon: Radio },
         { href: '/nodes', label: 'Узлы АТС', Icon: Server },
+        { href: '/servers', label: 'Серверы', Icon: HardDrive },
         { href: '/operators', label: 'Операторы связи', Icon: SignalHigh },
         { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
         { href: '/quality', label: 'Качество', Icon: Activity },

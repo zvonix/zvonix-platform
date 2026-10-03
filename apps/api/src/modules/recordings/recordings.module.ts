@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { BillingModule } from '../billing/billing.module.js';
+import { SettingsModule } from '../settings/settings.module.js';
 import { TelephonyModule } from '../telephony/telephony.module.js';
 import { LocalObjectStorage } from './local-storage.js';
 import { NodeRecordingsController } from './node-recordings.controller.js';
@@ -12,7 +13,7 @@ import { RecordingsService } from './recordings.service.js';
 import { StorageFilesController } from './storage-files.controller.js';
 
 @Module({
-  imports: [AuditModule, BillingModule, TelephonyModule],
+  imports: [AuditModule, BillingModule, SettingsModule, TelephonyModule],
   controllers: [RecordingsController, NodeRecordingsController, StorageFilesController],
   providers: [
     RecordingsService,

@@ -22,6 +22,7 @@ import {
   type UserRole,
 } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingRepository, type PartnerRow } from '../billing/billing.repository.js';
 import { CallRepository } from '../telephony/call.repository.js';
@@ -62,6 +63,7 @@ export class RecordingsService {
     private readonly telephony: TelephonyRepository,
     private readonly billing: BillingRepository,
     private readonly audit: AuditService,
+    private readonly settings: SettingsService,
     @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
@@ -94,12 +96,12 @@ export class RecordingsService {
     }
 
     const objectKey = recordingObjectKey(callId, call.startedAt);
+    // Срок берётся из настроек при создании записи и дальше у неё свой (ADR-0065).
+    const { recordingsDays } = await this.settings.retention();
     const created = await this.repository.insert({
       callId,
       objectKey,
-      expiresAt: new Date(
-        call.startedAt.getTime() + this.config.RECORDING_RETENTION_DAYS * 24 * 60 * 60 * 1000,
-      ),
+      expiresAt: new Date(call.startedAt.getTime() + recordingsDays * 24 * 60 * 60 * 1000),
     });
     return this.signUpload(created);
   }

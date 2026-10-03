@@ -179,6 +179,17 @@ async function main(): Promise<void> {
         actor,
       );
 
+    // История нагрузки площадки (ADR-0065): без неё страница «Серверы» показывала бы
+    // пустые графики, а снимок — «нет данных». Сутки с шагом пять минут, последний замер — сейчас.
+    await app.get(DatabaseService).db.execute(sql`
+      insert into server_metrics
+        (id, node_id, taken_at, load1_centi, cpu_cores, mem_total_mb, mem_available_mb, disk_total_mb, disk_free_mb)
+      select gen_random_uuid(), null, now() - (n * interval '5 minutes'),
+             (80 + 60 * sin(n / 12.0) + 40 * random())::int, 4, 8192,
+             (4200 + 1200 * cos(n / 20.0))::int, 102400, (61000 - n)::int
+        from generate_series(0, 287) as n
+    `);
+
     // Очередь заявок (ADR-0052): партнёр с подтверждённой почтой — его можно одобрить,
     // служба такси без подтверждения — одобрение ей закрыто, и экран обязан это сказать.
     const database = app.get(DatabaseService);
