@@ -486,6 +486,15 @@ Cookie снимается всегда, в том числе когда вошл
 из устройства, за которым он только что сменил пароль, — способ научить его пароли
 не менять.
 
+### Обязательный второй фактор администраторам ([ADR-0067](../adr/0067-vtoroy-faktor-administratoram.md))
+
+Настройка `security.admin_second_factor_required` (по умолчанию выключена). Пока она включена,
+администратор без подтверждённого фактора после входа получает `403` с
+`error.details.reason = "second_factor_required"` на **всё**, кроме `GET /auth/me`,
+`POST /auth/logout`, `POST /auth/totp`, `POST /auth/totp/confirm`. `GET /auth/me` в ответе о
+самом человеке отдаёт `totp_enabled` и `second_factor_required` — по ним кабинет ведёт на страницу
+«Безопасность». Другие роли политика не затрагивает.
+
 ### `POST /auth/totp`
 
 `200` → `{ "secret": "JBSWY3DPEHPK3PXP", "otpauth_uri": "otpauth://totp/Zvonix:…" }`

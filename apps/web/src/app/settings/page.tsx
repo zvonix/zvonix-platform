@@ -97,6 +97,7 @@ function SettingsForm() {
     { title: 'Письма о событиях', prefix: 'notifications.' },
     { title: 'Пополнение счёта', prefix: 'payments.' },
     { title: 'Хранение', prefix: 'retention.' },
+    { title: 'Вход', prefix: 'security.' },
     { title: 'Цены партнёров', prefix: 'pricing.' },
     { title: 'Кабинеты', prefix: 'cabinets.' },
   ];

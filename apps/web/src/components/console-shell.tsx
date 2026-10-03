@@ -22,6 +22,7 @@ import {
   Server,
   Settings2,
   ShieldBan,
+  ShieldCheck,
   SignalHigh,
   Users,
   Wallet,
@@ -126,6 +127,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/audit', label: 'Журнал действий', Icon: ScrollText },
         { href: '/settings', label: 'Настройки площадки', Icon: Settings2 },
+        { href: '/security', label: 'Безопасность', Icon: ShieldCheck },
       ],
     },
   ],
@@ -174,7 +176,10 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
     },
     {
       title: 'Служебное',
-      items: [{ href: '/audit', label: 'Журнал действий', Icon: ScrollText }],
+      items: [
+        { href: '/audit', label: 'Журнал действий', Icon: ScrollText },
+        { href: '/security', label: 'Безопасность', Icon: ShieldCheck },
+      ],
     },
   ],
 };
@@ -298,6 +303,13 @@ export function ConsoleShell({
   }, [ownsPageCabinet, pageCabinet]);
 
   const denied = session.error instanceof ApiError && session.error.needsLogin;
+  // Администратору, обязанному подключить второй фактор, остальное закрыто (ADR-0067):
+  // вместо стены отказов его ведут туда, где это делается.
+  const mustSecure = session.data?.second_factor_required === true && pathname !== '/security';
+
+  useEffect(() => {
+    if (mustSecure) router.replace('/security');
+  }, [mustSecure, router]);
 
   useEffect(() => {
     if (denied) router.replace('/login');
@@ -314,7 +326,7 @@ export function ConsoleShell({
   });
 
   const staff = session.data !== undefined && isStaffRole(session.data.role);
-  if (session.isPending || denied || (!staff && cabinets.isPending)) {
+  if (session.isPending || denied || mustSecure || (!staff && cabinets.isPending)) {
     return <ShellSkeleton title={title} />;
   }
 

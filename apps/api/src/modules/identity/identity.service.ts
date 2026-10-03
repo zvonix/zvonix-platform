@@ -22,6 +22,7 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { AuditService } from '../audit/audit.service.js';
 import { RateLimitService, type LimitRule } from '../limits/rate-limit.service.js';
 import { MailService } from '../mail/mail.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { CaptchaService } from './captcha.service.js';
 import {
   IdentityRepository,
@@ -163,6 +164,11 @@ export interface Principal {
   readonly role: UserRole;
   readonly email: string;
   readonly fullName: string;
+  /**
+   * Политика требует второй фактор, а у администратора его нет: доступно только подключение
+   * ([ADR-0067](../../../../../docs/adr/0067-vtoroy-faktor-administratoram.md)).
+   */
+  readonly secondFactorRequired: boolean;
 }
 
 /** Вид учётной записи, который безопасно отдавать наружу. */
@@ -254,6 +260,7 @@ export class IdentityService {
     private readonly limits: RateLimitService,
     private readonly mail: MailService,
     private readonly captcha: CaptchaService,
+    private readonly settings: SettingsService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -1035,7 +1042,17 @@ export class IdentityService {
       role: found.user.role,
       email: found.user.email,
       fullName: found.user.fullName,
+      secondFactorRequired:
+        found.user.role === 'admin' &&
+        found.user.totpConfirmedAt === null &&
+        (await this.settings.security()).adminSecondFactorRequired,
     };
+  }
+
+  /** Состояние второго фактора у самого человека: подключён ли и обязан ли он его подключить. */
+  async secondFactorState(principal: Principal): Promise<{ enabled: boolean; required: boolean }> {
+    const user = await this.repository.findById(principal.userId);
+    return { enabled: user?.totpConfirmedAt != null, required: principal.secondFactorRequired };
   }
 
   async logout(principal: Principal, meta: RequestMeta): Promise<void> {

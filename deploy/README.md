@@ -243,6 +243,26 @@ sudo -u zvonix env ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" s
 unset ADMIN_PASSWORD
 ```
 
+## Потерян второй фактор единственного администратора
+
+Другие администраторы сбрасывают фактор в «Учётные записи» (`DELETE /users/:id/totp`). Если
+администратор один и потерял телефон, вход закрыт, и фактор снимается на сервере
+([ADR-0067](../docs/adr/0067-vtoroy-faktor-administratoram.md)):
+
+```sh
+sudo sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; exec psql "$DATABASE_URL"'
+```
+
+и в нём:
+
+```sql
+update users set totp_secret = null, totp_confirmed_at = null, totp_last_step = null
+ where email = 'admin@example.com' and role = 'admin';
+```
+
+Затем войти одним паролем и подключить фактор заново. Перед включением обязательности завести
+второго администратора.
+
 ## SIP-домен площадки
 
 `SIP_REALM` в `/etc/zvonix/zvonix.env` — общий SIP-домен площадки, например `sip.zvonix.com`.

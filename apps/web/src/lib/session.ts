@@ -12,6 +12,10 @@ export interface CurrentUser {
   readonly role: UserRole;
   readonly status: UserStatus;
   readonly email_confirmed_at: string | null;
+  /** Подключён ли второй фактор. */
+  readonly totp_enabled?: boolean;
+  /** Политика требует подключить второй фактор: до этого доступна только страница «Безопасность». */
+  readonly second_factor_required?: boolean;
 }
 
 const SESSION_QUERY_KEY = ['auth', 'me'] as const;
