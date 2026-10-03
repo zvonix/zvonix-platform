@@ -638,3 +638,115 @@ describe('ручное списание у клиента', () => {
     expect((await debit(crypto.randomUUID(), '5', 'debit:nobody')).statusCode).toBe(404);
   });
 });
+
+describe('выплата партнёрам списком', () => {
+  async function newPartner(): Promise<string> {
+    const response = await api().inject({
+      method: 'POST',
+      url: '/partners',
+      headers: auth(),
+      payload: {
+        ownerUserId: await createUser('partner'),
+        name: `Партнёр ${String(Date.now())}-${String(Math.random()).slice(2, 8)}`,
+        displayName: `Псевдоним ${String(Math.random()).slice(2, 8)}`,
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    return response.json<{ partner: { id: string } }>().partner.id;
+  }
+
+  const credit = (partnerId: string, amount: string) =>
+    api().inject({
+      method: 'POST',
+      url: `/partners/${partnerId}/deposit`,
+      headers: auth(),
+      payload: { amount, idempotencyKey: `batch-in:${partnerId}`, description: 'Начислено' },
+    });
+
+  const batch = (batchKey: string, items: { partnerId: string; amount: string }[]) =>
+    api().inject({
+      method: 'POST',
+      url: '/partners/payouts',
+      headers: auth(),
+      payload: { batchKey, description: 'Выплата за месяц', items },
+    });
+
+  interface Result {
+    partner_id: string;
+    outcome: string;
+    balance: string | null;
+    reason: string | null;
+  }
+
+  it('платит всем, отказ одной строки не откатывает остальные, повтор ничего не меняет', async () => {
+    const [a, b, c] = [await newPartner(), await newPartner(), await newPartner()] as [
+      string,
+      string,
+      string,
+    ];
+    await credit(a, '500');
+    await credit(b, '300');
+    await credit(c, '50');
+    const key = `batch-${String(Date.now())}`;
+    const items = [
+      { partnerId: a, amount: '500' },
+      { partnerId: b, amount: '100.5' },
+      { partnerId: c, amount: '80' },
+    ];
+
+    const first = await batch(key, items);
+    expect(first.statusCode).toBe(200);
+    const results = first.json<{ results: Result[] }>().results;
+    expect(results.map((row) => row.outcome)).toEqual(['paid', 'paid', 'refused']);
+    expect(results[0]).toMatchObject({ partner_id: a, balance: '0' });
+    expect(results[1]).toMatchObject({ partner_id: b, balance: '199.5' });
+    expect(results[2]?.reason).toContain('причитается');
+
+    const again = (await batch(key, items)).json<{ results: Result[] }>().results;
+    expect(again.map((row) => row.outcome)).toEqual(['already_paid', 'already_paid', 'refused']);
+    expect(again[1]?.balance).toBe('199.5');
+  });
+
+  it('список «кому должны» отдаёт только положительный остаток, крупные первыми', async () => {
+    const small = await newPartner();
+    const large = await newPartner();
+    const nothing = await newPartner();
+    await credit(small, '10');
+    await credit(large, '9000');
+
+    const response = await api().inject({
+      method: 'GET',
+      url: '/partners?owed=true&limit=200',
+      headers: auth(),
+    });
+    expect(response.statusCode).toBe(200);
+    const ids = response.json<{ partners: { id: string }[] }>().partners.map((row) => row.id);
+    expect(ids).toContain(small);
+    expect(ids).toContain(large);
+    expect(ids).not.toContain(nothing);
+    expect(ids.indexOf(large)).toBeLessThan(ids.indexOf(small));
+    expect(response.json<{ total: number }>().total).toBe(ids.length);
+  });
+
+  it('пустая партия, дубль партнёра и чужая роль — отказы', async () => {
+    const partnerId = await newPartner();
+    expect((await batch('batch-empty-1', [])).statusCode).toBe(400);
+    expect(
+      (
+        await batch('batch-dup-1', [
+          { partnerId, amount: '1' },
+          { partnerId, amount: '2' },
+        ])
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await api().inject({
+          method: 'POST',
+          url: '/partners/payouts',
+          payload: { batchKey: 'batch-anon-1', description: 'x1', items: [] },
+        })
+      ).statusCode,
+    ).toBe(401);
+  });
+});

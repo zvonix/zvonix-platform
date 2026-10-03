@@ -132,6 +132,12 @@ async function populate(apiUrl) {
     percentBasisPoints: 1500,
     effectiveFrom: '2020-01-01T00:00:00.000Z',
   });
+  // Партнёру причитается: без этого страница «Выплаты партнёрам» на снимке пуста.
+  await call('POST', `/partners/${partnerId}/deposit`, {
+    amount: '2480.75',
+    idempotencyKey: 'ui-screens-partner-deposit',
+    description: 'Начислено под проверку интерфейса',
+  });
   await call('POST', `/clients/${clientId}/deposit`, {
     amount: '1500.5',
     idempotencyKey: 'ui-screens-deposit',

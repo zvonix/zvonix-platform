@@ -276,6 +276,32 @@ test.describe('ручное пополнение партнёра', () => {
   });
 });
 
+test.describe('выплата партнёрам списком', () => {
+  test('причитающееся видно списком, выплата записывается одним действием', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    const found = await page.request.get('/api/partners?name=Иванов', {
+      headers: { 'X-Zvonix-Web': '1' },
+    });
+    const listed = (await found.json()) as { partners: { id: string }[] };
+    const partnerId = listed.partners[0]?.id ?? '';
+    const credited = await page.request.post(`/api/partners/${partnerId}/deposit`, {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: {
+        amount: '400',
+        idempotencyKey: `e2e-payout-in-${String(Date.now())}`,
+        description: 'Начислено',
+      },
+    });
+    expect(credited.ok()).toBe(true);
+
+    await page.goto('/payouts');
+    await expect(page.getByText('Иванов Иван Иванович')).toBeVisible();
+    await page.getByRole('button', { name: /Записать выплаты/u }).click();
+    await page.getByRole('button', { name: /Записать на/u }).click();
+    await expect(page.getByText(/выплата записана, причитается/u)).toBeVisible();
+  });
+});
+
 test.describe('серверы (ADR-0065)', () => {
   test('администратор и поддержка видят нагрузку площадки и меняют период', async ({ browser }) => {
     for (const person of [PEOPLE.admin, PEOPLE.support]) {

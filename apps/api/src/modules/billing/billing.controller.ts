@@ -34,6 +34,7 @@ import {
   createClientSchema,
   createPartnerSchema,
   depositSchema,
+  payoutBatchSchema,
   overdraftSchema,
   partnerAliasSchema,
   partnerListQuerySchema,
@@ -253,6 +254,44 @@ export class BillingController {
     };
   }
 
+  /**
+   * Выплата нескольким партнёрам сразу. Каждая строка — отдельная выплата; отказ одной не
+   * откатывает остальные и приходит в её итоге (`refused` с причиной). Повтор партии с тем же
+   * ключом уже записанное не трогает (`already_paid`).
+   */
+  @Roles('admin')
+  @Post('partners/payouts')
+  @HttpCode(200)
+  async payoutBatch(
+    @Body(zodBody(payoutBatchSchema)) body: z.infer<typeof payoutBatchSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{
+    results: {
+      partner_id: string;
+      outcome: 'paid' | 'already_paid' | 'refused';
+      balance: string | null;
+      reason: string | null;
+    }[];
+  }> {
+    const results = await this.billing.payoutBatch({
+      batchKey: body.batchKey,
+      description: body.description,
+      actorUserId: actor.userId,
+      items: body.items.map((item) => ({
+        partnerId: parseId(item.partnerId, 'partner'),
+        amount: item.amount,
+      })),
+    });
+    return {
+      results: results.map((result) => ({
+        partner_id: result.partnerId,
+        outcome: result.outcome,
+        balance: result.balance === null ? null : Money.format(result.balance),
+        reason: result.reason,
+      })),
+    };
+  }
+
   /** Ручное списание со счёта партнёра — исправление ошибочного начисления. */
   @Roles('admin')
   @Post('partners/:id/debit')
@@ -385,6 +424,7 @@ export class BillingController {
     const found = await this.billing.listPartners({
       ...(query.status === undefined ? {} : { status: query.status }),
       ...(query.name === undefined ? {} : { name: query.name }),
+      ...(query.owed === undefined ? {} : { owed: true }),
       limit: query.limit,
       offset: query.offset,
     });

@@ -15,6 +15,8 @@
 import { Injectable } from '@nestjs/common';
 import {
   AlertsService,
+  PaymentNoticeService,
+  SuspensionNoticeService,
   ServersService,
   ApplicationsService,
   CdrService,
@@ -185,6 +187,15 @@ const AUTO_APPROVE_SECONDS = 60;
 /** Замер нагрузки площадки — раз в минуту, как и замеры узлов (ADR-0065). */
 const SERVER_SAMPLE_SECONDS = 60;
 
+/**
+ * Письмо клиенту о решении по заявке — раз в минуту: человек перевёл деньги и ждёт, а выключенная
+ * настройка стоит одного чтения из кэша.
+ */
+const PAYMENT_NOTICE_SECONDS = 60;
+
+/** Письмо партнёру об отключении оборудования — раз в 5 минут, как и остальные тревоги. */
+const SUSPENSION_NOTICE_SECONDS = 300;
+
 @Injectable()
 export class BackgroundTasks {
   constructor(
@@ -202,6 +213,8 @@ export class BackgroundTasks {
     private readonly lowBalance: LowBalanceService,
     private readonly alerts: AlertsService,
     private readonly servers: ServersService,
+    private readonly paymentNotice: PaymentNoticeService,
+    private readonly suspensionNotice: SuspensionNoticeService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -280,6 +293,16 @@ export class BackgroundTasks {
         name: 'notifications.alerts',
         everySeconds: ALERTS_SECONDS,
         run: (now) => this.alerts.notify(now),
+      },
+      {
+        name: 'notifications.payment-decisions',
+        everySeconds: PAYMENT_NOTICE_SECONDS,
+        run: (now) => this.paymentNotice.notify(now),
+      },
+      {
+        name: 'notifications.partner-suspension',
+        everySeconds: SUSPENSION_NOTICE_SECONDS,
+        run: (now) => this.suspensionNotice.notify(now),
       },
       {
         name: 'servers.sample',

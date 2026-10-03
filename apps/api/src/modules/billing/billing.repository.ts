@@ -95,6 +95,8 @@ export interface PartnerFilter {
   readonly status?: PartnerStatus;
   /** Часть настоящего имени либо псевдонима. Регистр не важен. */
   readonly name?: string;
+  /** Только те, кому площадка должна: остаток на счёте больше нуля (список к выплате). */
+  readonly owed?: boolean;
   readonly limit: number;
   readonly offset: number;
 }
@@ -148,6 +150,7 @@ function partnerFilterCondition(filter: PartnerFilter): SQL | undefined {
     );
     if (found !== undefined) parts.push(found);
   }
+  if (filter.owed === true) parts.push(sql`coalesce(${accounts.balance}, 0) > 0`);
   return parts.length === 0 ? undefined : and(...parts);
 }
 
@@ -295,7 +298,11 @@ export class BillingRepository {
       .leftJoin(partnerAliases, eq(partnerAliases.partnerId, partners.id))
       .leftJoin(accounts, account)
       .where(where)
-      .orderBy(orderByText(partners.name), asc(partners.id))
+      .orderBy(
+        ...(filter.owed === true ? [desc(sql`coalesce(${accounts.balance}, 0)`)] : []),
+        orderByText(partners.name),
+        asc(partners.id),
+      )
       .limit(filter.limit)
       .offset(filter.offset);
 
@@ -305,6 +312,7 @@ export class BillingRepository {
       .select({ total: count() })
       .from(partners)
       .leftJoin(partnerAliases, eq(partnerAliases.partnerId, partners.id))
+      .leftJoin(accounts, account)
       .where(where);
 
     return {

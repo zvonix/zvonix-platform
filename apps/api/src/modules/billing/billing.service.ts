@@ -10,6 +10,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   conflict,
+  isDomainError,
   Money,
   newId,
   notFound,
@@ -332,6 +333,55 @@ export class BillingService {
     actorUserId: UserId;
   }): Promise<PostedTransaction> {
     return this.withdrawFromPartner('payout', 'billing.partner_paid_out', input);
+  }
+
+  /**
+   * Выплата нескольким партнёрам сразу: каждая — отдельная выплата со своим ключом
+   * (`<ключ партии>:<партнёр>`) в своей транзакции. Партия не атомарна: отказ одной строки
+   * (больше причитающегося, партнёра нет) не откатывает остальные и возвращается в её итоге,
+   * а повтор той же партии догоняет недоделанное и уже записанное не трогает.
+   */
+  async payoutBatch(input: {
+    batchKey: string;
+    description: string;
+    actorUserId: UserId;
+    items: readonly { partnerId: PartnerId; amount: MoneyAmount }[];
+  }): Promise<
+    {
+      partnerId: PartnerId;
+      outcome: 'paid' | 'already_paid' | 'refused';
+      balance: MoneyAmount | null;
+      reason: string | null;
+    }[]
+  > {
+    const results = [];
+    for (const item of input.items) {
+      try {
+        const posted = await this.payoutToPartner({
+          partnerId: item.partnerId,
+          amount: item.amount,
+          idempotencyKey: `${input.batchKey}:${item.partnerId}`,
+          description: input.description,
+          actorUserId: input.actorUserId,
+        });
+        results.push({
+          partnerId: item.partnerId,
+          outcome: posted.alreadyPosted ? ('already_paid' as const) : ('paid' as const),
+          balance: await this.balanceOf('partner', item.partnerId),
+          reason: null,
+        });
+      } catch (cause) {
+        // Отказ по существу — в итог строки; сбой инфраструктуры уходит выше, как обычно.
+        if (!isDomainError(cause) || cause.code === 'internal') throw cause;
+        results.push({
+          partnerId: item.partnerId,
+          outcome: 'refused' as const,
+          balance: null,
+          reason: cause.message,
+        });
+      }
+    }
+    return results;
   }
 
   /**

@@ -32,6 +32,20 @@ export const amount = z
     }
   });
 
+/** Выплата нескольким партнёрам сразу: один ключ партии, у каждой строки свой партнёр и сумма. */
+export const payoutBatchSchema = z.object({
+  /** Ключ идемпотентности партии: повтор того же запроса выплат не удваивает. */
+  batchKey: z.string().trim().min(8, 'слишком короткий').max(120, 'слишком длинный'),
+  description: z.string().trim().min(2, 'слишком короткое').max(500, 'слишком длинное'),
+  items: z
+    .array(z.object({ partnerId: z.uuid('должен быть идентификатором'), amount }))
+    .min(1, 'нужна хотя бы одна выплата')
+    .max(100, 'не больше ста выплат за раз')
+    .refine((items) => new Set(items.map((item) => item.partnerId)).size === items.length, {
+      message: 'один партнёр дважды в партии',
+    }),
+});
+
 export const createClientSchema = z.object({
   /** Учётная запись владельца. Она уже должна существовать и иметь роль `client`. */
   ownerUserId: z.uuid('должен быть идентификатором'),
@@ -99,6 +113,8 @@ export const partnerListQuerySchema = z.object({
   status: optionalParameter.pipe(z.enum(PARTNER_STATUSES).optional()),
   /** Ищет и по настоящему имени, и по псевдониму: администратор помнит одно из двух. */
   name: optionalParameter.pipe(z.string().trim().max(200, 'слишком длинное').optional()),
+  /** `true` — только те, кому площадка должна: список к выплате. */
+  owed: optionalParameter.pipe(z.enum(['true']).optional()),
   limit: z
     .string()
     .optional()
