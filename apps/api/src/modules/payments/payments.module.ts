@@ -12,5 +12,6 @@ import { PaymentsService } from './payments.service.js';
   imports: [AuditModule, BillingModule, SettingsModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, PaymentsRepository, ManualPaymentProvider],
+  exports: [PaymentsService],
 })
 export class PaymentsModule {}
