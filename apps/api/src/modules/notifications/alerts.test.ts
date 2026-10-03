@@ -23,6 +23,13 @@ interface Setup {
   gateways?: Record<string, unknown>[];
   alreadySent?: (kind: string, recipient: string) => boolean;
   nodesFail?: boolean;
+  payments?: {
+    id: string;
+    clientId: string;
+    amount: bigint;
+    comment: string | null;
+    createdAt: Date;
+  }[];
 }
 
 function build(setup: Setup) {
@@ -49,6 +56,8 @@ function build(setup: Setup) {
       sims: () => Promise.resolve(setup.sims ?? []),
       gateways: () => Promise.resolve(setup.gateways ?? []),
     } as never,
+    { list: () => Promise.resolve({ rows: setup.payments ?? [], total: 0 }) } as never,
+    { clientWithBalance: () => Promise.resolve({ name: 'Такси Ромашка' }) } as never,
     logger(),
   );
   return { service, enqueue };
@@ -129,6 +138,31 @@ describe('тревоги администраторам', () => {
     expect(await service.notify(NOW)).toBe(2);
     const kinds = enqueue.mock.calls.map((call) => (call as unknown as [{ kind: string }])[0].kind);
     expect(kinds).toEqual(['alert_quality:sim:bad', 'alert_quality:gateway:gw']);
+  });
+
+  it('заявка на пополнение ждёт решения дольше пяти минут — письмо, свежая — нет', async () => {
+    const { service, enqueue } = build({
+      admins: [confirmed],
+      payments: [
+        {
+          id: 'old',
+          clientId: 'c1',
+          amount: 1_500_000_000n,
+          comment: 'платёжка 17',
+          createdAt: new Date(NOW.getTime() - 6 * 60_000),
+        },
+        { id: 'fresh', clientId: 'c1', amount: 100_000_000n, comment: null, createdAt: NOW },
+      ],
+    });
+
+    expect(await service.notify(NOW)).toBe(1);
+    const sent = (
+      enqueue.mock.calls[0] as unknown as [{ kind: string; subject: string; body: string }]
+    )[0];
+    expect(sent.kind).toBe('alert_payment:old');
+    expect(sent.subject).toContain('1500');
+    expect(sent.body).toContain('Такси Ромашка');
+    expect(sent.body).toContain('платёжка 17');
   });
 
   it('сбой чтения узлов не гасит тревогу о качестве', async () => {

@@ -12,11 +12,15 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
+import { Money } from '@zvonix/shared';
 import type { PublicUser } from '../identity/identity.service.js';
 import { IdentityService } from '../identity/identity.service.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import type { ClientId } from '../billing/billing.repository.js';
+import { BillingService } from '../billing/billing.service.js';
 import { MailService } from '../mail/mail.service.js';
 import { NodesService } from '../nodes/nodes.service.js';
+import { PaymentsService } from '../payments/payments.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { QualityService, type QualityView } from '../telephony/quality.service.js';
 
@@ -37,6 +41,15 @@ const ADMINS_PAGE = 100;
 
 const HOUR_MS = 3_600_000;
 
+/**
+ * Заявка на пополнение ждёт решения дольше этого — пора напомнить. Не мгновенно: человек,
+ * который сам в кабинете, увидит её и так, а письмо нужно тому, кто туда не смотрит.
+ */
+const PAYMENT_WAIT_MINUTES = 5;
+
+/** Заявок в одном письме-проходе — с запасом: открытых на клиента не больше пяти. */
+const PAYMENTS_PAGE = 100;
+
 interface Alert {
   /** Вид письма в очереди: объект входит в него, поэтому повтор считается по каждому объекту. */
   readonly kind: string;
@@ -54,6 +67,8 @@ export class AlertsService {
     private readonly settings: SettingsService,
     private readonly nodes: NodesService,
     private readonly quality: QualityService,
+    private readonly payments: PaymentsService,
+    private readonly billing: BillingService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('alerts');
@@ -132,7 +147,51 @@ export class AlertsService {
       this.logger.error('Тревоги: качество не прочитано', cause);
     }
 
+    try {
+      alerts.push(...(await this.paymentAlerts(now)));
+    } catch (cause) {
+      this.logger.error('Тревоги: заявки на пополнение не прочитаны', cause);
+    }
+
     return alerts;
+  }
+
+  /** Заявки на пополнение, которые ждут решения администратора дольше `PAYMENT_WAIT_MINUTES`. */
+  private async paymentAlerts(now: Date): Promise<Alert[]> {
+    const border = now.getTime() - PAYMENT_WAIT_MINUTES * 60_000;
+    const { rows } = await this.payments.list({
+      status: 'pending',
+      limit: PAYMENTS_PAGE,
+      offset: 0,
+    });
+
+    const alerts: Alert[] = [];
+    for (const payment of rows) {
+      if (payment.createdAt.getTime() > border) continue;
+      const name = await this.clientName(payment.clientId);
+      const amount = Money.format(payment.amount);
+      alerts.push({
+        kind: `alert_payment:${payment.id}`,
+        subject: `Zvonix: заявка на пополнение ${amount} ₽ ждёт решения`,
+        body: [
+          `Клиент ${name} просит пополнить счёт на ${amount} ₽ и ждёт решения.`,
+          ...(payment.comment === null ? [] : [`Комментарий клиента: ${payment.comment}`]),
+          '',
+          'Сверьте поступление и подтвердите или отклоните заявку в разделе «Платежи».',
+        ].join('\n'),
+      });
+    }
+    return alerts;
+  }
+
+  /** Имя клиента для письма; не нашлось — письмо всё равно уходит. */
+  private async clientName(clientId: ClientId): Promise<string> {
+    try {
+      const client = await this.billing.clientWithBalance(clientId);
+      return `«${client.name}»`;
+    } catch {
+      return 'без названия';
+    }
   }
 
   private async send(admin: PublicUser, alert: Alert, since: Date): Promise<boolean> {

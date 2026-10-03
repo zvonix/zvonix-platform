@@ -43,7 +43,8 @@ const LABELS: Record<string, string> = {
   'clients.auto_approve': 'Клиенты без проверки администратором',
   'notifications.low_balance_enabled': 'Писать клиенту, когда на счёте мало',
   'notifications.low_balance_amount': 'Порог, ₽',
-  'notifications.alerts_enabled': 'Писать администраторам о неполадках',
+  'notifications.alerts_enabled':
+    'Писать администраторам о неполадках и новых заявках на пополнение',
   'payments.manual_instructions': 'Реквизиты для пополнения переводом',
   'pricing.price_bands_enabled': 'Проверять коридоры цен',
   'cabinets.partner_may_add_client': 'Партнёр может стать клиентом',
