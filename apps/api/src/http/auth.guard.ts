@@ -50,9 +50,18 @@ const CABINETS_KEY = 'zvonix:cabinets';
 const CABINET_GENITIVE: Record<Cabinet, string> = { client: 'клиента', partner: 'партнёра' };
 export const MACHINE_KEY = 'zvonix:machine';
 export const UNMETERED_KEY = 'zvonix:unmetered';
+const WITHOUT_SECOND_FACTOR_KEY = 'zvonix:without-second-factor';
 
 /** Обработчик доступен без входа: регистрация, вход, проверка живости. */
 export const Public = (): MethodDecorator & ClassDecorator => SetMetadata(PUBLIC_KEY, true);
+
+/**
+ * Обработчик открыт администратору, которому политика требует второй фактор, а он ещё не
+ * подключён ([ADR-0067](../../../../docs/adr/0067-vtoroy-faktor-administratoram.md)): только то, без чего
+ * подключить его нельзя — узнать себя, подключить, выйти. Остальное закрыто.
+ */
+export const AllowWithoutSecondFactor = (): MethodDecorator & ClassDecorator =>
+  SetMetadata(WITHOUT_SECOND_FACTOR_KEY, true);
 
 /** Обработчик доступен только перечисленным ролям. */
 export const Roles = (...roles: UserRole[]): MethodDecorator & ClassDecorator =>
@@ -133,6 +142,15 @@ export class AuthGuard implements CanActivate {
     request.principal = principal;
 
     const targets = [context.getHandler(), context.getClass()];
+    if (
+      principal.secondFactorRequired &&
+      this.reflector.getAllAndOverride<boolean | undefined>(WITHOUT_SECOND_FACTOR_KEY, targets) !==
+        true
+    ) {
+      throw permissionDenied('Администратору нужно подключить второй фактор', {
+        details: { reason: 'second_factor_required' },
+      });
+    }
     const roles =
       this.reflector.getAllAndOverride<UserRole[] | undefined>(ROLES_KEY, targets) ?? [];
     const cabinets =

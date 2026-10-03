@@ -302,6 +302,19 @@ test.describe('выплата партнёрам списком', () => {
   });
 });
 
+test.describe('второй фактор (ADR-0067)', () => {
+  test('страница «Безопасность» показывает ключ для приложения и просит код', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/security');
+
+    await expect(page.getByRole('heading', { name: 'Второй фактор не подключён' })).toBeVisible();
+    await page.getByRole('button', { name: 'Подключить' }).click();
+    await expect(page.getByTestId('totp-secret')).toBeVisible();
+    // Подтверждение не нажимаем: фактор у общей учётной записи стенда сломал бы вход другим сценариям.
+    await expect(page.getByRole('button', { name: 'Подтвердить и включить' })).toBeDisabled();
+  });
+});
+
 test.describe('серверы (ADR-0065)', () => {
   test('администратор и поддержка видят нагрузку площадки и меняют период', async ({ browser }) => {
     for (const person of [PEOPLE.admin, PEOPLE.support]) {

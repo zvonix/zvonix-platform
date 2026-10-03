@@ -30,6 +30,10 @@ export interface UserResponse {
   /** Подтверждён ли адрес: заявитель видит на своём экране, что осталось сделать ему. */
   readonly email_confirmed_at: string | null;
   readonly created_at: string;
+  /** Подключён ли у самого человека второй фактор (только в его собственном ответе). */
+  readonly totp_enabled?: boolean;
+  /** Политика требует подключить второй фактор: пока не подключён, доступны только настройки входа. */
+  readonly second_factor_required?: boolean;
 }
 
 /**

@@ -21,7 +21,7 @@ import {
 import { parseId, type UserStatus } from '@zvonix/shared';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { Public, Roles, Unmetered } from '../../http/auth.guard.js';
+import { AllowWithoutSecondFactor, Public, Roles, Unmetered } from '../../http/auth.guard.js';
 import { CurrentUser, Meta } from '../../http/request-context.js';
 import {
   buildSessionCookie,
@@ -234,6 +234,7 @@ export class IdentityController {
    * машине безвреден, а забытая cookie после выхода — это невыполненное обещание.
    */
   @Unmetered()
+  @AllowWithoutSecondFactor()
   @Post('auth/logout')
   @HttpCode(204)
   async logout(
@@ -245,9 +246,17 @@ export class IdentityController {
     void reply.header('set-cookie', clearSessionCookie(this.secure));
   }
 
+  @AllowWithoutSecondFactor()
   @Get('auth/me')
   async me(@CurrentUser() principal: Principal): Promise<{ user: UserResponse }> {
-    return { user: toUserResponse(await this.identity.findPublicUser(principal.userId)) };
+    const state = await this.identity.secondFactorState(principal);
+    return {
+      user: {
+        ...toUserResponse(await this.identity.findPublicUser(principal.userId)),
+        totp_enabled: state.enabled,
+        second_factor_required: state.required,
+      },
+    };
   }
 
   @Get('auth/sessions')
@@ -297,6 +306,7 @@ export class IdentityController {
    * Секрет отдаётся **один раз** и только здесь: восстановить его неоткуда — в базе он
    * лежит зашифрованным. До подтверждения кодом фактор не действует.
    */
+  @AllowWithoutSecondFactor()
   @Post('auth/totp')
   @HttpCode(200)
   async startTotp(
@@ -307,6 +317,7 @@ export class IdentityController {
   }
 
   /** Подтверждает подключение кодом: без этого второй фактор не включается. */
+  @AllowWithoutSecondFactor()
   @Post('auth/totp/confirm')
   @HttpCode(204)
   async confirmTotp(

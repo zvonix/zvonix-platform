@@ -154,6 +154,14 @@ export class SettingsService {
     };
   }
 
+  /** Политика входа ([ADR-0067](../../../../../docs/adr/0067-vtoroy-faktor-administratoram.md)). */
+  async security(): Promise<{ readonly adminSecondFactorRequired: boolean }> {
+    const values = await this.values();
+    return {
+      adminSecondFactorRequired: this.flag(values, 'security.admin_second_factor_required'),
+    };
+  }
+
   /**
    * Сроки хранения ([ADR-0065](../../../../../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)).
    * Значение вне допустимых пределов не принимается кабинетом, но если оно всё же оказалось

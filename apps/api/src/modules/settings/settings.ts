@@ -112,6 +112,12 @@ export const SETTINGS = {
     hint: 'Письмо администраторам, когда узел не на связи или объект почти не соединяет. Нужна настроенная почта',
   },
 
+  'security.admin_second_factor_required': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Администратор без второго фактора после входа может только подключить его. Включайте, когда у всех администраторов есть приложение с кодами',
+  },
+
   'notifications.payment_decision_enabled': {
     kind: 'boolean',
     fallback: 'false',
