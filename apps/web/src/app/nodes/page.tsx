@@ -25,7 +25,7 @@ import { NODE_STATUS_MEANING, NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
 import { AllowedIpsField, parseAddresses } from './allowed-ips';
 import { NewNodeForm, type NodeDraft } from './new-node-form';
 
-const COLUMNS = 7;
+const COLUMNS = 8;
 
 interface Node {
   readonly id: string;
@@ -34,6 +34,8 @@ interface Node {
   readonly sip_address: string | null;
   readonly status: NodeStatus;
   readonly agent_version: string | null;
+  /** Версия набора на узле (ADR-0068); пусто — узел её не присылает. */
+  readonly set_version: string | null;
   readonly active_calls: number;
   readonly last_heartbeat_at: string | null;
   readonly created_at: string;
@@ -69,7 +71,7 @@ function NodesView() {
 
   const list = useQuery({
     queryKey: ['nodes'],
-    queryFn: () => request<{ nodes: Node[] }>('/nodes'),
+    queryFn: () => request<{ nodes: Node[]; current_set_version: string }>('/nodes'),
   });
 
   const refresh = async () => {
@@ -191,6 +193,7 @@ function NodesView() {
               <TableHead className="h-8 text-right">Вызовов</TableHead>
               <TableHead className="h-8">Последний отклик</TableHead>
               <TableHead className="h-8">Агент</TableHead>
+              <TableHead className="h-8">Набор</TableHead>
               <TableHead className="h-8"> </TableHead>
             </TableRow>
           </TableHeader>
@@ -216,6 +219,7 @@ function NodesView() {
               <NodeRows
                 key={node.id}
                 node={node}
+                currentSet={list.data.current_set_version}
                 busy={busy}
                 canChange={canChange}
                 onReissue={(allowedIps) => reissue.mutateAsync({ id: node.id, allowedIps })}
@@ -231,12 +235,14 @@ function NodesView() {
 
 function NodeRows({
   node,
+  currentSet,
   busy,
   canChange,
   onReissue,
   onDecommission,
 }: {
   node: Node;
+  currentSet: string;
   busy: boolean;
   canChange: boolean;
   onReissue: (allowedIps: string[]) => Promise<unknown>;
@@ -283,6 +289,33 @@ function NodeRows({
           <span className="text-faint">—</span>
         ) : (
           <span className="num">{node.agent_version}</span>
+        )}
+      </TableCell>
+
+      <TableCell>
+        {/*
+          Набор на узле против набора площадки (ADR-0068): отстающий узел работает со старой
+          конфигурацией FreeSWITCH. Узел без версии — старый скрипт пульса: его обновляют
+          вручную один раз, дальше он присылает версию сам.
+        */}
+        {closed ? (
+          <span className="text-faint">—</span>
+        ) : node.set_version === null ? (
+          <span
+            className="text-muted-foreground"
+            title="Узел версию набора не присылает: обновите его командой zvonix-node-update"
+          >
+            не сообщает
+          </span>
+        ) : node.set_version === currentSet ? (
+          <span className="text-ok">актуален</span>
+        ) : (
+          <span
+            className="text-warn"
+            title={`На узле ${node.set_version}, на площадке ${currentSet}`}
+          >
+            отстаёт
+          </span>
         )}
       </TableCell>
 

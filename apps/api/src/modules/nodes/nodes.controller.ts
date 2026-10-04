@@ -9,6 +9,7 @@ import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
+import { NodeSetService } from './node-set.service.js';
 import type { NodeRow } from './nodes.repository.js';
 import { NodesService, type ProvisionedNode } from './nodes.service.js';
 import { provisionNodeSchema, reissueInstallSchema } from './schemas.js';
@@ -20,6 +21,8 @@ interface NodeView {
   readonly sip_address: string | null;
   readonly status: string;
   readonly agent_version: string | null;
+  /** Версия набора на узле (ADR-0068); пусто — узел её не присылает. */
+  readonly set_version: string | null;
   readonly active_calls: number;
   readonly last_heartbeat_at: string | null;
   readonly created_at: string;
@@ -38,7 +41,10 @@ interface InstallView {
 
 @Controller('nodes')
 export class NodesController {
-  constructor(private readonly nodes: NodesService) {}
+  constructor(
+    private readonly nodes: NodesService,
+    private readonly nodeSet: NodeSetService,
+  ) {}
 
   /**
    * Заводит узел и сразу выдаёт команду установки.
@@ -86,9 +92,10 @@ export class NodesController {
 
   @Roles('admin', 'support')
   @Get()
-  async list(): Promise<{ nodes: NodeView[] }> {
+  async list(): Promise<{ nodes: NodeView[]; current_set_version: string }> {
     const rows = await this.nodes.list();
-    return { nodes: rows.map(toNodeView) };
+    // Версия набора площадки: по ней кабинет отличает актуальный узел от отставшего (ADR-0068).
+    return { nodes: rows.map(toNodeView), current_set_version: await this.nodeSet.version() };
   }
 
   @Roles('admin', 'support')
@@ -135,6 +142,7 @@ function toNodeView(row: NodeRow): NodeView {
     sip_address: row.sipAddress,
     status: row.status,
     agent_version: row.agentVersion,
+    set_version: row.setVersion,
     active_calls: row.activeCalls,
     last_heartbeat_at: row.lastHeartbeatAt?.toISOString() ?? null,
     created_at: row.createdAt.toISOString(),

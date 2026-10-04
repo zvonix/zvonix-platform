@@ -54,7 +54,7 @@
 ```json
 {
   "node": { "id", "name", "hostname", "sip_address", "status", "agent_version",
-            "active_calls", "last_heartbeat_at", "created_at" },
+            "active_calls", "last_heartbeat_at", "created_at", "set_version" },
   "install": { "command": "curl -fsSL https://…/install.sh | sudo bash -s -- zvx_enroll_…",
                "token_expires_at": "…" }
 }
@@ -143,10 +143,14 @@ Control plane подставляет свой адрес и параметры �
 ## `POST /node/heartbeat` — ключ узла
 
 ```json
-{ "activeCalls": 3, "degraded": false, "agentVersion": "1.0.1" }
+{ "activeCalls": 3, "degraded": false, "agentVersion": "1.0.1", "setVersion": "a1b2c3d4e5f6" }
 ```
 
-`200` → `{ "status": "online", "next_heartbeat_in_ms": 30000 }`
+`setVersion` необязательна — версия набора на узле ([ADR-0068](../adr/0068-avtoobnovlenie-uzlov.md)); нет — узел старый, и прежняя запись стирается. Не похожая на версию (не 6–64 знака `0-9a-f`) — `400`.
+
+`200` → `{ "status": "online", "next_heartbeat_in_ms": 30000, "set_version": "a1b2c3d4e5f6", "auto_update": false }`
+
+`set_version` — нужная версия набора (отпечаток скрипта установки этой площадки); `auto_update` — разрешено ли узлу обновляться самому (настройка `nodes.auto_update`). Узел с отстающей версией при `auto_update: true` запускает `zvonix-node-update` сам, не чаще раза в 30 минут.
 
 Интервал приходит **от control plane**: иначе изменение порога требовало бы раскатки
 конфигурации на все узлы.
@@ -156,7 +160,9 @@ Control plane подставляет свой адрес и параметры �
 
 ## `GET /nodes` · `GET /nodes/:id` — роли `admin`, `support`
 
-`200` → `{ "nodes": [ … ] }`
+`200` → `{ "nodes": [ … ], "current_set_version": "a1b2c3d4e5f6" }`
+
+`set_version` у узла — версия набора, с которой он работает (`null` — не присылает); `current_set_version` — версия площадки. Отличаются — узел отстаёт ([ADR-0068](../adr/0068-avtoobnovlenie-uzlov.md)).
 
 Список заодно снимает с маршрутизации замолчавшие узлы: пока нет фоновой задачи,
 иначе в панели висел бы `online` у машины, выключенной неделю назад.

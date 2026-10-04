@@ -87,7 +87,13 @@ export class NodesRepository {
 
   async recordHeartbeat(
     id: NodeId,
-    beat: { status: NodeStatus; activeCalls: number; agentVersion: string | null; at: Date },
+    beat: {
+      status: NodeStatus;
+      activeCalls: number;
+      agentVersion: string | null;
+      setVersion: string | null;
+      at: Date;
+    },
   ): Promise<NodeRow | undefined> {
     const [row] = await this.db
       .update(nodes)
@@ -95,6 +101,7 @@ export class NodesRepository {
         status: beat.status,
         activeCalls: beat.activeCalls,
         agentVersion: beat.agentVersion,
+        setVersion: beat.setVersion,
         lastHeartbeatAt: beat.at,
       })
       .where(eq(nodes.id, id))

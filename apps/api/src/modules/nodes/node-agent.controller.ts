@@ -13,12 +13,18 @@ import { Machine } from '../../http/auth.guard.js';
 import { CurrentMachine } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
+import { SettingsService } from '../settings/settings.service.js';
+import { NodeSetService } from './node-set.service.js';
 import { NodesService } from './nodes.service.js';
 import { enrollNodeSchema, eslSchema, heartbeatSchema } from './schemas.js';
 
 @Controller('node')
 export class NodeAgentController {
-  constructor(private readonly nodes: NodesService) {}
+  constructor(
+    private readonly nodes: NodesService,
+    private readonly nodeSet: NodeSetService,
+    private readonly settings: SettingsService,
+  ) {}
 
   /**
    * Обмен одноразового токена установки на постоянный ключ.
@@ -87,13 +93,26 @@ export class NodeAgentController {
   async heartbeat(
     @Body(zodBody(heartbeatSchema)) body: z.infer<typeof heartbeatSchema>,
     @CurrentMachine() machine: MachinePrincipal,
-  ): Promise<{ status: string; next_heartbeat_in_ms: number }> {
+  ): Promise<{
+    status: string;
+    next_heartbeat_in_ms: number;
+    set_version: string;
+    auto_update: boolean;
+  }> {
     const node = await this.nodes.heartbeat(machine, {
       activeCalls: body.activeCalls,
       agentVersion: body.agentVersion ?? null,
+      setVersion: body.setVersion ?? null,
       degraded: body.degraded,
     });
 
-    return { status: node.status, next_heartbeat_in_ms: NODE_HEARTBEAT_INTERVAL_MS };
+    return {
+      status: node.status,
+      next_heartbeat_in_ms: NODE_HEARTBEAT_INTERVAL_MS,
+      // Какой набор нужен узлу и разрешено ли ему обновляться самому (ADR-0068):
+      // агент не хранит этого в своей конфигурации, иначе смена политики требовала бы раскатки.
+      set_version: await this.nodeSet.version(),
+      auto_update: (await this.settings.nodes()).autoUpdate,
+    };
   }
 }

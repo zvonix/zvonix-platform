@@ -44,6 +44,9 @@ PACKAGE_REPO="${ZVONIX_PACKAGE_REPO:-@@PACKAGE_REPO@@}"
 PACKAGE_SUITE="${ZVONIX_PACKAGE_SUITE:-@@PACKAGE_SUITE@@}"
 PACKAGE_KEY_FINGERPRINT="${ZVONIX_PACKAGE_KEY_FINGERPRINT:-@@PACKAGE_KEY_FINGERPRINT@@}"
 CONF_DIR="${ZVONIX_CONF_DIR:-}"
+# Версия этого набора: отпечаток скрипта, подставляет площадка (ADR-0068). Пишется на узел, когда набор
+# применён целиком, и уходит в пульсе — по ней площадка видит, что узел отстаёт.
+NODE_SET_VERSION="${ZVONIX_SET_VERSION:-@@SET_VERSION@@}"
 STATE_DIR="${ZVONIX_STATE_DIR:-/var/lib/zvonix}"
 KEYRING="/usr/share/keyrings/zvonix-packages.gpg"
 # Что узел знает о себе: ключ и каталог конфигурации. Отсюда их берёт обновление.
@@ -532,9 +535,33 @@ if [ -n "\$LOAD" ] && [ -n "\$CORES" ] && [ -n "\$MEMT" ] && [ -n "\$MEMA" ] && 
 fi
 "${FS_CLI}" -x 'sofia status' 2>/dev/null \\
   | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING' || DEGRADED=true
-printf '{"activeCalls":%s,"degraded":%s,"agentVersion":"heartbeat.sh"}' "\$CALLS" "\$DEGRADED" \\
-  | curl -fsS --max-time 10 -K "${NODE_ETC}/heartbeat.curl" \\
-      -H 'Content-Type: application/json' --data-binary @- >/dev/null
+# Версия набора на узле — ею площадка видит, отстаёт ли узел (ADR-0068). Файл пишет
+# обновление, когда набор применён целиком; нет файла — узел версию не сообщает.
+HAVE="\$(head -c 64 "${NODE_ETC}/set-version" 2>/dev/null | tr -cd '0-9a-f')"
+if [ -n "\$HAVE" ]; then
+  BODY="\$(printf '{"activeCalls":%s,"degraded":%s,"agentVersion":"heartbeat.sh","setVersion":"%s"}' "\$CALLS" "\$DEGRADED" "\$HAVE")"
+else
+  BODY="\$(printf '{"activeCalls":%s,"degraded":%s,"agentVersion":"heartbeat.sh"}' "\$CALLS" "\$DEGRADED")"
+fi
+REPLY="\$(printf '%s' "\$BODY" | curl -fsS --max-time 10 -K "${NODE_ETC}/heartbeat.curl" \\
+  -H 'Content-Type: application/json' --data-binary @-)" || exit 1
+# Автообновление (ADR-0068): площадка в ответе называет нужную версию набора и говорит, можно ли
+# обновляться самому. Не чаще раза в полчаса; само обновление ждёт конца звонков и откладывается,
+# если они не кончаются. Запускается отдельной единицей systemd, а не из пульса: пульс не ждёт.
+if printf '%s' "\$REPLY" | grep -q '"auto_update":true'; then
+  WANT="\$(printf '%s' "\$REPLY" | sed -n 's/.*"set_version":"\([0-9a-f]*\)".*/\1/p')"
+  if [ -n "\$WANT" ] && [ "\$WANT" != "\$HAVE" ]; then
+    STAMP="${NODE_ETC}/auto-update.stamp"
+    NOW_TS="\$(date +%s)"
+    LAST_TS="\$(cat "\$STAMP" 2>/dev/null || echo 0)"
+    if [ \$((NOW_TS - LAST_TS)) -ge 1800 ]; then
+      echo "\$NOW_TS" >"\$STAMP"
+      systemd-run --quiet --no-block --collect --unit=zvonix-node-autoupdate \\
+        /usr/local/sbin/zvonix-node-update >/dev/null 2>&1 || true
+    fi
+  fi
+fi
+exit 0
 HEARTBEAT
 chmod 0700 /usr/local/sbin/zvonix-heartbeat
 
@@ -678,11 +705,17 @@ set -eu
 SCRIPT="\$(mktemp)"
 trap 'rm -f "\$SCRIPT"' EXIT
 curl -fsSL --max-time 60 -o "\$SCRIPT" "${CONTROL_PLANE}/install.sh"
-exec bash "\$SCRIPT" --update
+# Один запуск за раз: автообновление из пульса и ручной вызов не должны идти вдвоём.
+exec flock -n /run/zvonix-node-update.lock bash "\$SCRIPT" --update
 UPDATE
 chmod 0700 /usr/local/sbin/zvonix-node-update
 
 echo
+# Версия набора записывается, только когда он применён целиком: отложенная конфигурация
+# (звонки не кончились) оставляет прежнюю версию, и автообновление повторит попытку.
+if [ "$CONF_POSTPONED" != yes ] && [ -n "$NODE_SET_VERSION" ]; then
+  ( umask 077 && echo "$NODE_SET_VERSION" >"${NODE_ETC}/set-version" )
+fi
 if [ "$MODE" = update ]; then
   if [ "$CONF_POSTPONED" = yes ]; then
     echo "Узел обновлён частично: правила блокировки и пульс — да, конфигурация FreeSWITCH — отложена."

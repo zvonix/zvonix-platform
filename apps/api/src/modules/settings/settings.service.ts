@@ -154,6 +154,12 @@ export class SettingsService {
     };
   }
 
+  /** Автообновление узлов ([ADR-0068](../../../../../docs/adr/0068-avtoobnovlenie-uzlov.md)). */
+  async nodes(): Promise<{ readonly autoUpdate: boolean }> {
+    const values = await this.values();
+    return { autoUpdate: this.flag(values, 'nodes.auto_update') };
+  }
+
   /** Политика входа ([ADR-0067](../../../../../docs/adr/0067-vtoroy-faktor-administratoram.md)). */
   async security(): Promise<{ readonly adminSecondFactorRequired: boolean }> {
     const values = await this.values();
