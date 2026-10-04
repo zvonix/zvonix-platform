@@ -11,7 +11,7 @@
  */
 
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { parseId } from '@zvonix/shared';
+import { Money, parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Cabinets } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
@@ -101,7 +101,7 @@ export class ClientReportController {
   async listCalls(
     @CurrentUser() actor: Principal,
     @Query(zodQuery(clientCallsQuerySchema)) query: z.infer<typeof clientCallsQuerySchema>,
-  ): Promise<{ calls: ClientCallView[]; total: number }> {
+  ): Promise<{ calls: (ClientCallView & { cost: string | null })[]; total: number }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
 
     const found = await this.calls.list({
@@ -115,6 +115,14 @@ export class ClientReportController {
       offset: query.offset,
     });
 
-    return { total: found.total, calls: found.rows.map(toClientCallView) };
+    // Стоимость — из проводок вызова одним запросом на страницу; нет проводки — стоимость пуста.
+    const charged = await this.billing.chargesForCalls(found.rows.map((row) => row.call.id));
+    return {
+      total: found.total,
+      calls: found.rows.map((row) => {
+        const cost = charged.get(row.call.id)?.client;
+        return { ...toClientCallView(row), cost: cost === undefined ? null : Money.format(cost) };
+      }),
+    };
   }
 }

@@ -270,6 +270,50 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
   });
 });
 
+describe('запись всех разговоров (ADR-0070)', () => {
+  async function dialplan() {
+    const env = await scenario({ registrationMode: 'port' });
+    return api().inject({
+      method: 'POST',
+      url: '/node/dialplan',
+      headers: {
+        authorization: `Bearer ${nodeKey}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      payload: new URLSearchParams({
+        section: 'dialplan',
+        'Unique-ID': unique('call'),
+        variable_zvonix_channel: env.channel,
+        'Caller-Destination-Number': env.destination,
+      }).toString(),
+    });
+  }
+
+  const setRecordAll = (enabled: boolean) =>
+    api().inject({
+      method: 'PUT',
+      url: '/settings',
+      headers: auth(),
+      payload: { settings: { 'recordings.record_all': enabled } },
+    });
+
+  it('по умолчанию пишется и линия, у которой запись не отмечена обязательной', async () => {
+    const response = await dialplan();
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('record_session');
+  });
+
+  it('площадка выключила «писать всё» — пишутся только линии с обязательной записью', async () => {
+    expect((await setRecordAll(false)).statusCode).toBe(200);
+    try {
+      expect((await dialplan()).body).not.toContain('record_session');
+    } finally {
+      expect((await setRecordAll(true)).statusCode).toBe(200);
+    }
+    expect((await dialplan()).body).toContain('record_session');
+  });
+});
+
 describe('успешный маршрут', () => {
   it('выдаёт кандидата, создаёт вызов и придерживает деньги', async () => {
     const env = await scenario();

@@ -22,6 +22,7 @@ import {
 import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
+import { money } from '@/lib/money';
 import { CALL_STATUS_NAME, callTone } from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
 import {
@@ -33,7 +34,7 @@ import {
 } from '../equipment/equipment';
 
 const PAGE_SIZE = 50;
-const COLUMNS = 6;
+const COLUMNS = 7;
 
 /**
  * Вызов так, как его видит партнёр.
@@ -49,6 +50,8 @@ interface PartnerCall {
   readonly gateway_id: string | null;
   readonly operator_id: string | null;
   readonly duration_seconds: number | null;
+  /** Начислено партнёру за вызов, ₽; пусто — начисления не было. */
+  readonly earned: string | null;
   readonly started_at: string;
 }
 
@@ -156,7 +159,7 @@ function PartnerCalls() {
               filters.delete('offset');
               const found = await loadAllCalls<PartnerCall>('/partner/calls', filters);
               return {
-                header: ['Когда', 'Куда', 'Шлюз', 'SIM', 'Итог', 'Секунд'],
+                header: ['Когда', 'Куда', 'Шлюз', 'SIM', 'Итог', 'Секунд', 'Начислено, ₽'],
                 rows: found.rows.map((call) => {
                   const sim = call.sim_card_id === null ? undefined : sims.get(call.sim_card_id);
                   const where =
@@ -170,6 +173,7 @@ function PartnerCalls() {
                     sim?.msisdn,
                     CALL_STATUS_NAME[call.status],
                     call.duration_seconds,
+                    call.earned,
                   ];
                 }),
                 truncated: found.truncated,
@@ -202,6 +206,7 @@ function PartnerCalls() {
               <TableHead className="h-8">Куда</TableHead>
               <TableHead className="h-8">Через что</TableHead>
               <TableHead className="h-8">Итог</TableHead>
+              <TableHead className="h-8 text-right">Начислено</TableHead>
               <TableHead className="h-8 text-right">Длительность</TableHead>
               <TableHead className="h-8" />
             </TableRow>
@@ -252,6 +257,14 @@ function PartnerCalls() {
                     <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
                       {CALL_STATUS_NAME[call.status]}
                     </span>
+                  </TableCell>
+
+                  <TableCell className="num text-right">
+                    {call.earned === null ? (
+                      <span className="text-faint">—</span>
+                    ) : (
+                      money(call.earned)
+                    )}
                   </TableCell>
 
                   <TableCell className="num text-right">

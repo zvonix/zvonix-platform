@@ -22,6 +22,7 @@ import {
 import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
+import { money } from '@/lib/money';
 import {
   CALL_STATUS_NAME,
   callTone,
@@ -31,7 +32,7 @@ import {
 import { useUrlState } from '@/lib/url-state';
 
 const PAGE_SIZE = 50;
-const COLUMNS = 5;
+const COLUMNS = 6;
 
 /** Сколько цифр должно быть набрано, чтобы номер имело смысл искать. */
 const MSISDN_DIGITS = 10;
@@ -47,6 +48,8 @@ interface Call {
   readonly status: CallStatus;
   readonly failure_reason: ClientFailureReason | null;
   readonly duration_seconds: number | null;
+  /** Списано за вызов, ₽; пусто — списания не было (отказ или ноль секунд). */
+  readonly cost: string | null;
   readonly started_at: string;
   readonly region: string | null;
   readonly channel: { id: string; name: string };
@@ -184,6 +187,7 @@ function MyCalls() {
                   'Итог',
                   'Причина',
                   'Секунд',
+                  'Стоимость, ₽',
                 ],
                 rows: found.rows.map((call) => [
                   moment(call.started_at),
@@ -196,6 +200,7 @@ function MyCalls() {
                     ? ''
                     : CLIENT_FAILURE_REASON_NAME[call.failure_reason],
                   call.duration_seconds,
+                  call.cost,
                 ]),
                 truncated: found.truncated,
               };
@@ -233,6 +238,7 @@ function MyCalls() {
               <TableHead className="h-8">Линия</TableHead>
               <TableHead className="h-8">Куда</TableHead>
               <TableHead className="h-8">Итог</TableHead>
+              <TableHead className="h-8 text-right">Стоимость</TableHead>
               <TableHead className="h-8 text-right">Длительность</TableHead>
             </TableRow>
           </TableHeader>
@@ -287,13 +293,26 @@ function MyCalls() {
                 </TableCell>
 
                 <TableCell className="num text-right">
+                  {call.cost === null ? <span className="text-faint">—</span> : money(call.cost)}
+                </TableCell>
+
+                <TableCell className="num text-right">
                   {call.duration_seconds === null ? (
                     <span className="text-faint">—</span>
                   ) : (
                     duration(call.duration_seconds)
                   )}
-                  {recordings.has(call.id) && (
+                  {recordings.has(call.id) ? (
                     <ListenButton recordingId={recordings.get(call.id) ?? ''} />
+                  ) : (
+                    call.status === 'completed' && (
+                      <span
+                        className="block text-faint"
+                        title="Запись появляется через минуту после разговора"
+                      >
+                        записи нет
+                      </span>
+                    )
                   )}
                 </TableCell>
               </TableRow>

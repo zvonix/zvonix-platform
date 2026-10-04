@@ -3,11 +3,12 @@
  */
 
 import { Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
-import { parseId } from '@zvonix/shared';
+import { Money, parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodQuery } from '../../http/zod.pipe.js';
+import { BillingService } from '../billing/billing.service.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { CallRow } from './call.repository.js';
 import { PartnerReportService } from './partner-report.service.js';
@@ -34,7 +35,10 @@ interface PartnerCallView {
 
 @Controller()
 export class PartnerReportController {
-  constructor(private readonly reports: PartnerReportService) {}
+  constructor(
+    private readonly reports: PartnerReportService,
+    private readonly billing: BillingService,
+  ) {}
 
   /**
    * Вызовы партнёра страницами: по ним он сверяется со счётом своего оператора.
@@ -49,7 +53,7 @@ export class PartnerReportController {
   async listCalls(
     @CurrentUser() actor: Principal,
     @Query(zodQuery(partnerCallsQuerySchema)) query: z.infer<typeof partnerCallsQuerySchema>,
-  ): Promise<{ calls: PartnerCallView[]; total: number }> {
+  ): Promise<{ calls: (PartnerCallView & { earned: string | null })[]; total: number }> {
     const found = await this.reports.listCalls(
       { userId: actor.userId, role: actor.role },
       {
@@ -63,7 +67,18 @@ export class PartnerReportController {
         offset: query.offset,
       },
     );
-    return { total: found.total, calls: found.rows.map(toPartnerCallView) };
+    // Заработок по вызову — из его проводки (долю партнёра), одним запросом на страницу.
+    const charges = await this.billing.chargesForCalls(found.rows.map((row) => row.id));
+    return {
+      total: found.total,
+      calls: found.rows.map((row) => {
+        const charge = charges.get(row.id);
+        return {
+          ...toPartnerCallView(row),
+          earned: charge === undefined ? null : Money.format(charge.partner),
+        };
+      }),
+    };
   }
 
   /**

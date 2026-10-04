@@ -160,6 +160,15 @@ export class SettingsService {
     return { autoUpdate: this.flag(values, 'nodes.auto_update') };
   }
 
+  /**
+   * Записывать ли разговоры по всем линиям ([ADR-0070](../../../../../docs/adr/0070-zapis-vseh-razgovorov.md)).
+   * Включено по умолчанию: записи нет только там, где её явно выключили.
+   */
+  async recordings(): Promise<{ readonly recordAll: boolean }> {
+    const values = await this.values();
+    return { recordAll: this.flag(values, 'recordings.record_all') };
+  }
+
   /** Политика входа ([ADR-0067](../../../../../docs/adr/0067-vtoroy-faktor-administratoram.md)). */
   async security(): Promise<{ readonly adminSecondFactorRequired: boolean }> {
     const values = await this.values();
