@@ -412,6 +412,91 @@ describe('сводки (ADR-0059)', () => {
   }, 120_000);
 });
 
+describe('акт и выписка за месяц (ADR-0069)', () => {
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const lastMonth = (() => {
+    const date = new Date();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() - 1);
+    return date.toISOString().slice(0, 7);
+  })();
+
+  interface Statement {
+    month: string;
+    partial: boolean;
+    totals: Record<string, unknown>;
+    series: { day: string; calls: number }[];
+    breakdowns: Record<string, { name: string | null }[]>;
+    opening_balance: string;
+    closing_balance: string;
+    charged: string;
+    movements: { kind: string; amount: string; description: string }[];
+  }
+
+  it('акт клиента: итоги, остаток сходится с движением, партнёра в нём нет', async () => {
+    const response = await get(`/client/statement?month=${thisMonth}&offset=0`, as(rich.token));
+    expect(response.statusCode).toBe(200);
+    const statement = response.json<Statement>();
+
+    expect(statement.partial).toBe(true);
+    expect(statement.totals).toMatchObject({ calls: 1, answered: 1, spent: '11.5' });
+    expect(statement.series).toHaveLength(1);
+    expect(Object.keys(statement.breakdowns).sort()).toEqual(['channel', 'operator']);
+    expect(statement.charged).toBe('11.5');
+
+    // Пополнение — в движении, списание за вызов — только цифрой «списано».
+    expect(statement.movements.map((row) => row.kind)).toEqual(['deposit']);
+
+    // Начало + движение − списано = конец: акт обязан сходиться с книгой.
+    const moved = statement.movements.reduce((sum, row) => sum + Number(row.amount), 0);
+    expect(Number(statement.opening_balance) + moved - Number(statement.charged)).toBeCloseTo(
+      Number(statement.closing_balance),
+      6,
+    );
+    const account = (await get('/client/account', as(rich.token))).json<Account>();
+    expect(statement.closing_balance).toBe(account.funds.balance);
+
+    // Партнёр, его доля и маржа в клиентский документ не попадают (ADR-0014).
+    expect(JSON.stringify(statement)).not.toMatch(/partner|margin|revenue/u);
+  }, 120_000);
+
+  it('акт за прошлый месяц пуст, остаток на конец — нулевой, месяц закончен', async () => {
+    const statement = (
+      await get(`/client/statement?month=${lastMonth}&offset=0`, as(rich.token))
+    ).json<Statement>();
+    expect(statement.partial).toBe(false);
+    expect(statement.totals).toMatchObject({ calls: 0, spent: '0' });
+    expect(statement.series).toEqual([]);
+    expect(statement.closing_balance).toBe('0');
+    expect(statement.movements).toEqual([]);
+  }, 120_000);
+
+  it('выписка партнёра: начислено, разрезы по оператору, шлюзу и SIM, клиента нет', async () => {
+    const partnerToken = await login(partnerEmail);
+    const statement = (
+      await get(`/partner/statement?month=${thisMonth}&offset=0`, as(partnerToken))
+    ).json<Statement>();
+    expect(statement.totals).toMatchObject({ answered: 1, earned: '10' });
+    expect(Object.keys(statement.breakdowns).sort()).toEqual(['gateway', 'operator', 'sim']);
+    expect(statement.charged).toBe('10');
+    expect(JSON.stringify(statement)).not.toMatch(/client|spent|margin/u);
+  }, 120_000);
+
+  it('будущий месяц, негодный месяц и чужая роль — отказы', async () => {
+    const nextYear = String(new Date().getUTCFullYear() + 1);
+    expect(
+      (await get(`/client/statement?month=${nextYear}-01&offset=0`, as(rich.token))).statusCode,
+    ).toBe(400);
+    expect((await get('/client/statement?month=2026-13', as(rich.token))).statusCode).toBe(400);
+    expect((await get('/client/statement', as(rich.token))).statusCode).toBe(400);
+    // Клиент партнёрской выписки не читает, сотрудник — клиентского акта.
+    expect((await get(`/partner/statement?month=${thisMonth}`, as(rich.token))).statusCode).toBe(
+      403,
+    );
+    expect((await get(`/client/statement?month=${thisMonth}`)).statusCode).toBe(403);
+  }, 120_000);
+});
+
 describe('свои линии', () => {
   it('перечисляются — до этого обработчика взять их идентификаторы было неоткуда', async () => {
     const response = await get('/client/channels', as(rich.token));

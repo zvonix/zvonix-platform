@@ -74,7 +74,7 @@ export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; foote
       aria-label="Разделы"
       // Свёрнутое не прокручивается: подсказка выходит за правый край колонки, а прокрутка
       // по одной оси обрезает и другую. Двенадцать значков в высоту экрана помещаются.
-      className={`sticky top-0 hidden h-dvh flex-col gap-3 bg-rail py-3 text-rail-ink md:flex ${
+      className={`sticky top-0 hidden h-dvh flex-col gap-3 bg-rail py-3 text-rail-ink md:flex print:hidden ${
         collapsed ? 'w-16 px-2' : 'w-[232px] overflow-y-auto px-2'
       }`}
     >
@@ -253,7 +253,7 @@ export function MobileTabs({ groups, footer }: { groups: readonly NavGroup[]; fo
   return (
     <nav
       aria-label="Главные разделы"
-      className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] md:hidden print:hidden"
     >
       {main.map((item) => {
         const current = isCurrent(pathname, item.href);
