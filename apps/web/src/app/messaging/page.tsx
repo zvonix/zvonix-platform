@@ -20,12 +20,24 @@ import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import {
+  MESSAGE_FAILURE_NAME,
+  MESSAGE_STATUS_NAME,
   MESSENGER_ACCOUNT_STATUS_MEANING,
   MESSENGER_ACCOUNT_STATUS_NAME,
+  messageTone,
   messengerAccountTone,
 } from '@/lib/labels';
 import { money } from '@/lib/money';
 import type { PartnerRow } from '../partners/partner-row';
+
+interface StaffMessage {
+  readonly id: string;
+  readonly to: string;
+  readonly status: string;
+  readonly failure_reason: string | null;
+  readonly created_at: string;
+  readonly money: { client: string; partner: string; margin: string };
+}
 
 interface Account {
   readonly id: string;
@@ -90,6 +102,7 @@ function MessagingView() {
         </div>
       )}
 
+      <h2 className="font-semibold">Аккаунты партнёров</h2>
       <div className="rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
@@ -175,7 +188,73 @@ function MessagingView() {
           </TableBody>
         </Table>
       </div>
+
+      <RecentMessages />
     </div>
+  );
+}
+
+/** Последние сообщения всех клиентов: статус и деньги по трём счетам; текст сотруднику не показывается. */
+function RecentMessages() {
+  const list = useQuery({
+    queryKey: ['messages', 'recent'],
+    queryFn: ({ signal }) =>
+      request<{ messages: StaffMessage[]; total: number }>('/messages?limit=50', { signal }),
+    refetchInterval: 15_000,
+  });
+  const error = list.error instanceof ApiError ? list.error : undefined;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="font-semibold">Последние сообщения</h2>
+      {error !== undefined && <ErrorNote error={error} />}
+      <div className="rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className="h-8">Когда</TableHead>
+              <TableHead className="h-8">Кому</TableHead>
+              <TableHead className="h-8">Итог</TableHead>
+              <TableHead className="h-8 text-right">Клиент</TableHead>
+              <TableHead className="h-8 text-right">Партнёру</TableHead>
+              <TableHead className="h-8 text-right">Площадке</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.data?.messages.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="text-muted-foreground">
+                  Сообщений пока нет.
+                </TableCell>
+              </TableRow>
+            )}
+            {list.data?.messages.map((message) => (
+              <TableRow key={message.id}>
+                <TableCell>
+                  <span className="num text-muted-foreground">{moment(message.created_at)}</span>
+                </TableCell>
+                <TableCell>
+                  <span className="num">{message.to}</span>
+                </TableCell>
+                <TableCell className="whitespace-normal">
+                  <span className={`rounded-md px-2 py-0.5 ${messageTone(message.status)}`}>
+                    {MESSAGE_STATUS_NAME[message.status] ?? message.status}
+                  </span>
+                  {message.failure_reason !== null && (
+                    <span className="block pt-0.5 text-muted-foreground">
+                      {MESSAGE_FAILURE_NAME[message.failure_reason] ?? message.failure_reason}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className="num text-right">{money(message.money.client)}</TableCell>
+                <TableCell className="num text-right">{money(message.money.partner)}</TableCell>
+                <TableCell className="num text-right">{money(message.money.margin)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
   );
 }
 

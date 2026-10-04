@@ -1,4 +1,6 @@
+import { MESSAGE_MAX_LENGTH, MESSAGE_STATUSES } from '@zvonix/shared';
 import { z } from 'zod';
+import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 import { amount } from '../billing/schemas.js';
 
 const label = z.string().trim().min(2, 'слишком короткое').max(60, 'слишком длинное');
@@ -32,4 +34,40 @@ export const registerAccountSchema = z.object({
   instanceId: z.string().trim().min(1, 'не может быть пустым').max(40, 'слишком длинный'),
   token: z.string().trim().min(1, 'не может быть пустым').max(200, 'слишком длинный'),
   apiUrl: z.url('должен быть адресом').max(200, 'слишком длинный'),
+});
+
+/** Пустое значение параметра — «любое»: форма отбора шлёт все свои поля. */
+const optional = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === '' ? undefined : value), schema.optional());
+
+/** Отправка сообщения: кому, что и (необязательно) ключ, по которому повтор узнаётся. */
+export const sendMessageSchema = z.object({
+  to: z.string().trim().min(5, 'слишком короткий').max(30, 'слишком длинный'),
+  text: z.string().min(1, 'не может быть пустым').max(MESSAGE_MAX_LENGTH, 'слишком длинное'),
+  /** Ключ идемпотентности клиента: тот же ключ — то же сообщение, деньги не списываются дважды. */
+  externalId: z
+    .string()
+    .trim()
+    .min(1, 'не может быть пустым')
+    .max(100, 'слишком длинный')
+    .optional(),
+});
+
+export const messagesQuerySchema = z.object({
+  status: optional(z.enum(MESSAGE_STATUSES)),
+  limit: z
+    .string()
+    .optional()
+    .transform((raw) => boundedLimit(raw, 200)),
+  offset: z.string().optional().transform(boundedOffset),
+});
+
+/** Уведомление провайдера: берём только нужное, остальное игнорируем (состав полей у него меняется). */
+export const providerWebhookSchema = z.looseObject({
+  typeWebhook: z.string().optional(),
+  idMessage: z.string().optional(),
+  status: z.string().optional(),
+  instanceData: z
+    .looseObject({ idInstance: z.union([z.string(), z.number()]).optional() })
+    .optional(),
 });

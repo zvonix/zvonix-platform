@@ -5,6 +5,14 @@ import { BillingModule } from '../billing/billing.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { GreenApiMessageProvider } from './green-api.provider.js';
+import {
+  ClientApiMessagesController,
+  ClientMessagesController,
+  MessengerWebhookController,
+  StaffMessagesController,
+} from './messages.controller.js';
+import { MessagesRepository } from './messages.repository.js';
+import { MessagesService } from './messages.service.js';
 import { MessagingController } from './messaging.controller.js';
 import { MessagingRepository } from './messaging.repository.js';
 import { MessagingService } from './messaging.service.js';
@@ -18,10 +26,18 @@ import { SimulatedMessageProvider } from './simulated.provider.js';
  */
 @Module({
   imports: [AuditModule, BillingModule, SettingsModule],
-  controllers: [MessagingController],
+  controllers: [
+    MessagingController,
+    ClientMessagesController,
+    ClientApiMessagesController,
+    StaffMessagesController,
+    MessengerWebhookController,
+  ],
   providers: [
     MessagingService,
     MessagingRepository,
+    MessagesService,
+    MessagesRepository,
     {
       provide: MESSAGE_PROVIDER,
       inject: [APP_CONFIG, APP_LOGGER, SettingsService],
@@ -31,6 +47,6 @@ import { SimulatedMessageProvider } from './simulated.provider.js';
           : new GreenApiMessageProvider(settings, logger),
     },
   ],
-  exports: [MessagingService],
+  exports: [MessagingService, MessagesService],
 })
 export class MessagingModule {}

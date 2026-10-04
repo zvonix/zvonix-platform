@@ -168,7 +168,14 @@ export class ReportsRepository {
     owner: AccountOwner,
     from: Date,
     to: Date,
-  ): Promise<{ rows: MovementRow[]; charges: string }> {
+  ): Promise<{
+    rows: MovementRow[];
+    charges: string;
+    messageCharges: string;
+    messageRefunds: string;
+  }> {
+    // Списания за сообщения MAX (`message:*`) и возвраты по ним (`message_refund:*`) идут отдельными
+    // итогами, а не строками: у отправляющего клиента их тысячи (ADR-0071).
     const found = await this.db.execute<{
       at: Date;
       kind: string;
@@ -181,19 +188,29 @@ export class ReportsRepository {
         join accounts a on a.id = e.account_id
        where a.kind = ${owner.kind} and a.owner_id = ${owner.id}::text
          and t.occurred_at >= ${from} and t.occurred_at < ${to} and t.kind <> 'charge'
+         and t.idempotency_key not like 'message_refund:%'
        order by t.occurred_at, e.seq
     `);
-    const charged = await this.db.execute<{ charges: string }>(sql`
-      select coalesce(sum(e.amount), 0)::text as charges
+    const totals = await this.db.execute<{
+      charges: string;
+      message_charges: string;
+      message_refunds: string;
+    }>(sql`
+      select coalesce(sum(e.amount) filter (where t.idempotency_key like 'charge:%'), 0)::text as charges,
+             coalesce(sum(e.amount) filter (where t.idempotency_key like 'message:%'), 0)::text as message_charges,
+             coalesce(sum(e.amount) filter (where t.idempotency_key like 'message_refund:%'), 0)::text as message_refunds
         from ledger_entries e
         join ledger_transactions t on t.id = e.transaction_id
         join accounts a on a.id = e.account_id
        where a.kind = ${owner.kind} and a.owner_id = ${owner.id}::text
-         and t.occurred_at >= ${from} and t.occurred_at < ${to} and t.kind = 'charge'
+         and t.occurred_at >= ${from} and t.occurred_at < ${to}
     `);
+    const row = totals.rows[0];
     return {
-      rows: found.rows.map((row) => ({ ...row, at: new Date(row.at) })),
-      charges: charged.rows[0]?.charges ?? '0',
+      rows: found.rows.map((entry) => ({ ...entry, at: new Date(entry.at) })),
+      charges: row?.charges ?? '0',
+      messageCharges: row?.message_charges ?? '0',
+      messageRefunds: row?.message_refunds ?? '0',
     };
   }
 

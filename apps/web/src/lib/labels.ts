@@ -614,3 +614,27 @@ export function messengerAccountTone(status: string): string {
   if (status === 'pending') return 'bg-warn-soft text-warn';
   return 'bg-crit-soft text-crit';
 }
+
+/** Состояние сообщения MAX (ADR-0071). */
+export const MESSAGE_STATUS_NAME: Record<string, string> = {
+  queued: 'В очереди',
+  sending: 'Отправляется',
+  sent: 'Отправлено',
+  delivered: 'Доставлено',
+  read: 'Прочитано',
+  failed: 'Не отправлено',
+};
+
+/** Почему не отправлено — нашими словами; деньги в таких случаях возвращаются. */
+export const MESSAGE_FAILURE_NAME: Record<string, string> = {
+  recipient_not_in_max: 'У получателя нет MAX',
+  account_unavailable: 'Аккаунт отправки недоступен',
+  wait_expired: 'Не ушло за отведённое время',
+  platform: 'Сбой на нашей стороне',
+};
+
+export function messageTone(status: string): string {
+  if (status === 'delivered' || status === 'read') return 'bg-ok-soft text-ok';
+  if (status === 'failed') return 'bg-crit-soft text-crit';
+  return 'bg-warn-soft text-warn';
+}

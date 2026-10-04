@@ -10,6 +10,7 @@ const CONFIG: StatementConfig = {
   moneyLabel: 'Потрачено',
   balanceLabel: 'Остаток',
   chargedLabel: 'Списано за вызовы',
+  messageLabel: 'Списано за сообщения MAX',
   dimensions: [
     { by: 'operator', label: 'Операторы' },
     { by: 'channel', label: 'Линии' },

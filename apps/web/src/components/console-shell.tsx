@@ -243,6 +243,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
       items: [
         { href: '/my/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/my/act', label: 'Акт за месяц', Icon: FileText },
+        { href: '/my/messages', label: 'Сообщения MAX', short: 'Сообщения', Icon: MessageSquare },
         { href: '/my/calls', label: 'Вызовы', Icon: PhoneCall },
         { href: '/my/channels', label: 'Мои линии', Icon: Route },
         { href: '/my/prices', label: 'Мои цены', Icon: ReceiptText },

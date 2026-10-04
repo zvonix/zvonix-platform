@@ -346,6 +346,36 @@ test.describe('сообщения MAX (ADR-0071)', () => {
   });
 });
 
+test.describe('сообщения MAX у клиента (ADR-0071)', () => {
+  test('клиент видит форму и журнал; без рабочего аккаунта сказано, что отправлять некуда', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const admin = await adminContext.newPage();
+    await signIn(admin, PEOPLE.admin);
+    const enabled = await admin.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'messaging.enabled': true } },
+    });
+    expect(enabled.ok()).toBe(true);
+
+    const clientContext = await browser.newContext();
+    const page = await clientContext.newPage();
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/messages');
+
+    await expect(page.getByText(/нет доступных аккаунтов/u)).toBeVisible();
+    await expect(page.getByLabel('Номер получателя')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Отправить' })).toBeDisabled();
+    await expect(page.getByText('Сообщений пока нет.')).toBeVisible();
+    // Провайдер нигде не назван.
+    await expect(page.getByText(/green/iu)).toHaveCount(0);
+
+    await adminContext.close();
+    await clientContext.close();
+  });
+});
+
 test.describe('шрифты со своего адреса', () => {
   test('IBM Plex загружается с площадки, а не с чужого сервера', async ({ page }) => {
     const foreign: string[] = [];

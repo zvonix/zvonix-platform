@@ -22,6 +22,7 @@ import {
   type MoneyAmount,
   type UserRole,
 } from '@zvonix/shared';
+import { createHmac } from 'node:crypto';
 import { decryptSecret, encryptSecret, MESSENGER_TOKEN_PURPOSE } from '../../infra/secret-box.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -84,12 +85,51 @@ export class MessagingService {
     this.logger = logger.child('messaging');
   }
 
-  private refOf(row: MessengerAccountRow): ProviderAccountRef {
+  /** Данные инстанса для вызова провайдера; ключ расшифровывается здесь и дальше не хранится. */
+  refOf(row: MessengerAccountRow): ProviderAccountRef {
     return {
       instanceId: row.providerInstanceId,
       token: decryptSecret(row.providerToken, this.config.SECRET_KEY, MESSENGER_TOKEN_PURPOSE),
       apiUrl: row.providerApiUrl,
     };
+  }
+
+  /**
+   * Секретная часть адреса приёма статусов доставки. Выводится из `SECRET_KEY`: хранить нечего,
+   * а подобрать адрес без ключа нельзя; смена `SECRET_KEY` меняет и адрес (инстансы настраиваются заново).
+   */
+  webhookSecret(): string {
+    return createHmac('sha256', this.config.SECRET_KEY)
+      .update('zvonix:messenger-webhook:v1')
+      .digest('hex')
+      .slice(0, 32);
+  }
+
+  private webhookUrl(): string {
+    return `${this.config.WEB_BASE_URL.replace(/\/+$/u, '')}/api/webhooks/messenger/${this.webhookSecret()}`;
+  }
+
+  /** Говорит инстансу, куда слать статусы. Не вышло — не страшно: сверка состояния и повтор есть. */
+  private async configureWebhook(row: MessengerAccountRow): Promise<void> {
+    try {
+      await this.provider.configureWebhook(this.refOf(row), this.webhookUrl());
+    } catch (cause) {
+      this.logger.warn('Адрес статусов доставки у провайдера не задан', {
+        account_id: row.id,
+        reason: cause instanceof Error ? cause.name : 'unknown',
+      });
+    }
+  }
+
+  async isEnabled(): Promise<boolean> {
+    return (await this.settings.messaging()).enabled;
+  }
+
+  /** Уведомление провайдера о смене состояния: сверяем аккаунт сразу, не дожидаясь минуты. */
+  async refreshByInstance(instanceId: string): Promise<void> {
+    const account = await this.repository.findByInstance(this.provider.id, instanceId);
+    if (account === undefined || account.status === 'retired') return;
+    await this.refreshOne(account).catch(() => undefined);
   }
 
   /** Продукт включает владелец (`messaging.enabled`): до этого раздел закрыт. */
@@ -143,7 +183,9 @@ export class MessagingService {
     }
 
     const ref = await this.provider.createAccount();
-    return this.store(actor, partner.id, label, ref);
+    const row = await this.store(actor, partner.id, label, ref);
+    await this.configureWebhook(row);
+    return row;
   }
 
   /**
@@ -166,6 +208,7 @@ export class MessagingService {
       token: input.token,
       apiUrl: input.apiUrl.replace(/\/+$/u, ''),
     });
+    await this.configureWebhook(row);
     // Сверка сразу: данные могли оказаться негодными, и узнать об этом лучше на заведении.
     return this.refreshOne(row).catch(() => row);
   }

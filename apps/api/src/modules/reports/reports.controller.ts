@@ -86,6 +86,10 @@ function statementOf<T extends object>(
     // Списания за вызовы по проводкам периода: может отличаться от суммы по вызовам на вызовы
     // на границе месяца (ADR-0069, п. 4).
     charged: rubles(String(BigInt(statement.charges) * sign)),
+    // Сообщения MAX отдельными итогами: списано (клиенту — потрачено, партнёру — начислено) и возвращено
+    // за неотправленные. Остаток сходится: начало + движение − за вызовы − за сообщения + возвраты = конец.
+    message_charged: rubles(String(BigInt(statement.messageCharges) * sign)),
+    message_refunded: rubles(String(BigInt(statement.messageRefunds) * -sign)),
     movements: statement.movements.map((row) => ({
       at: row.at.toISOString(),
       kind: row.kind,
