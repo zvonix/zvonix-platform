@@ -200,8 +200,8 @@
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 3px);
 
-  --font-sans: var(--font-plex-sans), system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, Menlo, monospace;
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
   /* Плотность оператора: тринадцать пикселей — базовый размер прототипа. */
   --text-base: 13px;

@@ -1,28 +1,8 @@
 import type { Metadata, Viewport } from 'next';
-import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import { THEME_BOOTSTRAP_SCRIPT } from '@/lib/theme';
+import './fonts.css';
 import './globals.css';
 import { Providers } from './providers';
-
-/**
- * Шрифты забираются при сборке и раздаются со своего адреса.
- *
- * Не ссылкой на чужой сервер: панелью пользуются из корпоративной сети, и запрос
- * к постороннему хосту на каждой странице — и утечка адреса, и лишняя точка отказа.
- */
-const sans = IBM_Plex_Sans({
-  subsets: ['latin', 'cyrillic'],
-  weight: ['400', '500', '600', '700'],
-  variable: '--font-plex-sans',
-  display: 'swap',
-});
-
-const mono = IBM_Plex_Mono({
-  subsets: ['latin', 'cyrillic'],
-  weight: ['400', '500', '600'],
-  variable: '--font-plex-mono',
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   title: 'Консоль Zvonix',
@@ -38,7 +18,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html lang="ru" suppressHydrationWarning>
       <head>
         {/*
          * Тема выставляется до первой отрисовки: React монтируется уже после того,
