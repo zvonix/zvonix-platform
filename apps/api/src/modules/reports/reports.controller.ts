@@ -15,11 +15,12 @@ import { zodQuery } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { BreakdownRow, Dimension, Metrics } from './reports.repository.js';
-import { ReportsService, rubles, type Overview } from './reports.service.js';
-import { breakdownQuerySchema, overviewQuerySchema } from './schemas.js';
+import { ReportsService, rubles, type Overview, type Statement } from './reports.service.js';
+import { breakdownQuerySchema, overviewQuerySchema, statementQuerySchema } from './schemas.js';
 
 type OverviewQuery = z.infer<typeof overviewQuerySchema>;
 type BreakdownQuery = z.infer<typeof breakdownQuerySchema>;
+type StatementQuery = z.infer<typeof statementQuerySchema>;
 
 /** Общая часть каждого вида: вызовы, состоявшиеся, минуты разговора. */
 const common = (metrics: Metrics) => ({
@@ -56,6 +57,43 @@ function overviewOf<T extends object>(overview: Overview, view: (metrics: Metric
 const breakdownOf = <T extends object>(rows: BreakdownRow[], view: (metrics: Metrics) => T) => ({
   rows: rows.map((row) => ({ key: row.key, name: row.name, ...view(row) })),
 });
+
+/**
+ * Вид акта или выписки. `sign` — знак книги для суммы списаний: у клиента списание отрицательно
+ * (оно уменьшает остаток), у партнёра начисление положительно; в документе оно всегда показано
+ * положительной суммой «потрачено» или «начислено».
+ */
+function statementOf<T extends object>(
+  statement: Statement,
+  view: (metrics: Metrics) => T,
+  sign: 1n | -1n,
+) {
+  return {
+    month: statement.month,
+    from: statement.from.toISOString(),
+    to: statement.to.toISOString(),
+    partial: statement.partial,
+    totals: view(statement.totals),
+    series: statement.series.map((row) => ({ day: row.day, ...view(row) })),
+    breakdowns: Object.fromEntries(
+      Object.entries(statement.breakdowns).map(([by, rows]) => [
+        by,
+        rows.map((row) => ({ key: row.key, name: row.name, ...view(row) })),
+      ]),
+    ),
+    opening_balance: rubles(statement.openingBalance),
+    closing_balance: rubles(statement.closingBalance),
+    // Списания за вызовы по проводкам периода: может отличаться от суммы по вызовам на вызовы
+    // на границе месяца (ADR-0069, п. 4).
+    charged: rubles(String(BigInt(statement.charges) * sign)),
+    movements: statement.movements.map((row) => ({
+      at: row.at.toISOString(),
+      kind: row.kind,
+      description: row.description,
+      amount: rubles(row.amount),
+    })),
+  };
+}
 
 /** Разрез, недоступный роли, — отказ проверки, а не пустой ответ. */
 function allow(by: Dimension, allowed: readonly Dimension[]): void {
@@ -113,6 +151,38 @@ export class ReportsController {
       query.by,
     );
     return breakdownOf(rows, clientView);
+  }
+
+  /** Акт клиента за месяц ([ADR-0069](../../../../../docs/adr/0069-akt-i-vypiska-za-mesyac.md)). */
+  @Cabinets('client')
+  @Get('client/statement')
+  async clientStatement(
+    @CurrentUser() actor: Principal,
+    @Query(zodQuery(statementQuerySchema)) query: StatementQuery,
+  ) {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    const statement = await this.reports.statement(
+      { kind: 'client', clientId: client.id },
+      query.month,
+      query.offset,
+    );
+    return { client: { name: client.name }, ...statementOf(statement, clientView, -1n) };
+  }
+
+  /** Выписка партнёра за месяц. */
+  @Cabinets('partner')
+  @Get('partner/statement')
+  async partnerStatement(
+    @CurrentUser() actor: Principal,
+    @Query(zodQuery(statementQuerySchema)) query: StatementQuery,
+  ) {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const statement = await this.reports.statement(
+      { kind: 'partner', partnerId: partner.id },
+      query.month,
+      query.offset,
+    );
+    return { partner: { name: partner.name }, ...statementOf(statement, partnerView, 1n) };
   }
 
   @Cabinets('partner')

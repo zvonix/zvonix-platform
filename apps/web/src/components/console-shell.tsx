@@ -7,6 +7,7 @@ import {
   Banknote,
   BarChart3,
   Coins,
+  FileText,
   Gauge,
   HandCoins,
   HardDrive,
@@ -203,6 +204,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
       title: 'Мой кабинет',
       items: [
         { href: '/partner/reports', label: 'Сводка', Icon: BarChart3 },
+        { href: '/partner/statement', label: 'Выписка за месяц', Icon: FileText },
         { href: '/partner/calls', label: 'Вызовы через меня', short: 'Вызовы', Icon: PhoneCall },
         {
           href: '/partner/equipment',
@@ -231,6 +233,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
       title: 'Мой кабинет',
       items: [
         { href: '/my/reports', label: 'Сводка', Icon: BarChart3 },
+        { href: '/my/act', label: 'Акт за месяц', Icon: FileText },
         { href: '/my/calls', label: 'Вызовы', Icon: PhoneCall },
         { href: '/my/channels', label: 'Мои линии', Icon: Route },
         { href: '/my/prices', label: 'Мои цены', Icon: ReceiptText },
@@ -381,7 +384,7 @@ export function ConsoleShell({
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Переносится, а не выдавливает: на телефоне переключатель кабинетов с темой
             и выходом в одну строку с заголовком не помещаются. */}
-        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-4 py-2.5">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-4 py-2.5 print:hidden">
           {!tabs && <MobileMenuButton groups={groups} footer={footer} />}
           <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">

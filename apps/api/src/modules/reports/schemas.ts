@@ -17,6 +17,12 @@ const offset = z
   .transform((raw) => Number(raw ?? '0'))
   .pipe(z.number().int().min(-720).max(840));
 
+/** Месяц акта: `ГГГГ-ММ`, не старше 2020 года — раньше площадки не было. */
+export const statementQuerySchema = z.object({
+  month: z.string().regex(/^20[2-9]\d-(0[1-9]|1[0-2])$/u, 'ожидается месяц вида 2026-09'),
+  offset,
+});
+
 export const overviewQuerySchema = z.object({ days, offset });
 
 export const breakdownQuerySchema = z.object({

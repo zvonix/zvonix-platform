@@ -64,6 +64,20 @@ const toMetrics = (row: MetricsRow): Metrics => ({
   margin: row.margin,
 });
 
+/** Строка движения по счёту: что произошло, а не только сумма. */
+export interface MovementRow {
+  readonly at: Date;
+  readonly kind: string;
+  readonly description: string;
+  /** Знак книги: на счёте клиента пополнение положительное, на счёте партнёра выплата отрицательная. */
+  readonly amount: string;
+}
+
+/** Чей счёт: клиент или партнёр (владелец хранится текстом — он указывает на разные таблицы). */
+export type AccountOwner =
+  | { readonly kind: 'client'; readonly id: Id<'client'> }
+  | { readonly kind: 'partner'; readonly id: Id<'partner'> };
+
 /** Лимит строк разреза: читает человек, полная выгрузка — отдельная задача. */
 const BREAKDOWN_LIMIT = 50;
 
@@ -132,6 +146,55 @@ export class ReportsRepository {
     `,
     );
     return result.rows.map((row) => ({ key: row.key, name: row.name, ...toMetrics(row) }));
+  }
+
+  /** Остаток счёта на момент `at`: сумма проводок, проведённых раньше. Микроединицы строкой. */
+  async balanceAt(owner: AccountOwner, at: Date): Promise<string> {
+    const result = await this.db.execute<{ balance: string }>(sql`
+      select coalesce(sum(e.amount), 0)::text as balance
+        from ledger_entries e
+        join ledger_transactions t on t.id = e.transaction_id
+        join accounts a on a.id = e.account_id
+       where a.kind = ${owner.kind} and a.owner_id = ${owner.id}::text and t.occurred_at < ${at}
+    `);
+    return result.rows[0]?.balance ?? '0';
+  }
+
+  /**
+   * Движение по счёту за период: всё, кроме списаний за вызовы, построчно, и сумма самих списаний
+   * одной цифрой — вызовы в акте идут своим разделом.
+   */
+  async movements(
+    owner: AccountOwner,
+    from: Date,
+    to: Date,
+  ): Promise<{ rows: MovementRow[]; charges: string }> {
+    const found = await this.db.execute<{
+      at: Date;
+      kind: string;
+      description: string;
+      amount: string;
+    }>(sql`
+      select t.occurred_at as at, t.kind, t.description, e.amount::text as amount
+        from ledger_entries e
+        join ledger_transactions t on t.id = e.transaction_id
+        join accounts a on a.id = e.account_id
+       where a.kind = ${owner.kind} and a.owner_id = ${owner.id}::text
+         and t.occurred_at >= ${from} and t.occurred_at < ${to} and t.kind <> 'charge'
+       order by t.occurred_at, e.seq
+    `);
+    const charged = await this.db.execute<{ charges: string }>(sql`
+      select coalesce(sum(e.amount), 0)::text as charges
+        from ledger_entries e
+        join ledger_transactions t on t.id = e.transaction_id
+        join accounts a on a.id = e.account_id
+       where a.kind = ${owner.kind} and a.owner_id = ${owner.id}::text
+         and t.occurred_at >= ${from} and t.occurred_at < ${to} and t.kind = 'charge'
+    `);
+    return {
+      rows: found.rows.map((row) => ({ ...row, at: new Date(row.at) })),
+      charges: charged.rows[0]?.charges ?? '0',
+    };
   }
 
   /** Список метрик группы — общий для суток и разрезов. */

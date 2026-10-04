@@ -302,6 +302,31 @@ test.describe('выплата партнёрам списком', () => {
   });
 });
 
+test.describe('акт и выписка за месяц (ADR-0069)', () => {
+  test('клиент видит акт, при печати меню скрыто, а лист остаётся', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/act');
+
+    await expect(page.getByRole('heading', { name: /Акт об оказанных услугах за/u })).toBeVisible();
+    await expect(page.getByText('Движение по счёту')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Печать / PDF' })).toBeEnabled();
+
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.getByRole('button', { name: 'Печать / PDF' })).toBeHidden();
+    await expect(page.getByRole('navigation')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: /Акт об оказанных услугах за/u })).toBeVisible();
+  });
+
+  test('партнёр видит выписку: остаток на начало месяца и итог', async ({ page }) => {
+    await signIn(page, PEOPLE.partner);
+    await page.goto('/partner/statement');
+
+    await expect(page.getByRole('heading', { name: /Выписка по начислениям за/u })).toBeVisible();
+    await expect(page.getByText('Причитается на начало месяца')).toBeVisible();
+    await expect(page.getByText('За этот месяц вызовов не было.')).toBeVisible();
+  });
+});
+
 test.describe('второй фактор (ADR-0067)', () => {
   test('страница «Безопасность» показывает ключ для приложения и просит код', async ({ page }) => {
     await signIn(page, PEOPLE.admin);
