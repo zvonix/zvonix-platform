@@ -438,6 +438,89 @@ describe('обновление узла', () => {
     expect(result.output).toContain('ключ узла на машине не найден');
   });
 
+  /**
+   * Пульс узла, как его породит установщик, с подменёнными curl и systemd-run: что он отвечает
+   * на ответ площадки о версии набора и автообновлении (ADR-0068).
+   */
+  function heartbeat(options: { reply: string; have?: string; stamp?: number; runs?: number }) {
+    const root = slash(mkdtempSync(path.join(tmpdir(), 'zvonix-beat-')));
+    const etc = `${root}/etc`;
+    const bin = `${root}/bin`;
+    mkdirSync(etc, { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    const stub = (name: string, body: string): void => {
+      writeFileSync(`${bin}/${name}`, `#!/bin/sh\n${body}\n`, { encoding: 'utf8', mode: 0o755 });
+    };
+    stub('fs_cli', 'echo "0 total."');
+    stub(
+      'curl',
+      `echo "curl $*" >>"${root}/calls.log"\ncat >/dev/null\nprintf '%s' '${options.reply}'`,
+    );
+    stub('systemd-run', `echo "systemd-run $*" >>"${root}/calls.log"`);
+    writeFileSync(`${etc}/heartbeat.curl`, 'url = "https://cp/node/heartbeat"\n', 'utf8');
+    if (options.have !== undefined)
+      writeFileSync(`${etc}/set-version`, `${options.have}\n`, 'utf8');
+    if (options.stamp !== undefined)
+      writeFileSync(`${etc}/auto-update.stamp`, `${String(options.stamp)}\n`, 'utf8');
+
+    const generator = slice(
+      'cat >/usr/local/sbin/zvonix-heartbeat <<HEARTBEAT',
+      'chmod 0700 /usr/local/sbin/zvonix-heartbeat',
+    ).replace('/usr/local/sbin/zvonix-heartbeat', `${root}/heartbeat.sh`);
+    writeFileSync(
+      `${root}/generate.sh`,
+      [`FS_CLI='${bin}/fs_cli'`, `NODE_ETC='${etc}'`, generator].join('\n'),
+      'utf8',
+    );
+    expect(run(`${root}/generate.sh`).status).toBe(0);
+
+    let last = { status: -1, output: '' };
+    for (let i = 0; i < (options.runs ?? 1); i += 1) {
+      last = run(`${root}/heartbeat.sh`, [], {
+        PATH: `${bin}:${process.env['PATH'] ?? ''}`,
+      });
+    }
+    const calls = existsSync(`${root}/calls.log`) ? readFileSync(`${root}/calls.log`, 'utf8') : '';
+    return { ...last, calls };
+  }
+
+  const REPLY_NEW =
+    '{"status":"online","next_heartbeat_in_ms":30000,"set_version":"aaaaaaaaaaaa","auto_update":true}';
+
+  it('пульс: версия отстаёт и автообновление разрешено — запускает обновление отдельной единицей', () => {
+    const result = heartbeat({ reply: REPLY_NEW, have: 'bbbbbbbbbbbb' });
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain('systemd-run');
+    expect(result.calls).toContain('zvonix-node-autoupdate');
+    expect(result.calls).toContain('zvonix-node-update');
+  });
+
+  it('пульс: версия совпала, автообновление выключено или обновление уже пробовали недавно — не запускает', () => {
+    expect(heartbeat({ reply: REPLY_NEW, have: 'aaaaaaaaaaaa' }).calls).not.toContain(
+      'systemd-run',
+    );
+    expect(
+      heartbeat({
+        reply: REPLY_NEW.replace('"auto_update":true', '"auto_update":false'),
+        have: 'bbbbbbbbbbbb',
+      }).calls,
+    ).not.toContain('systemd-run');
+    // Попытка была минуту назад: повтор не раньше чем через полчаса.
+    const recent = Math.floor(Date.now() / 1000) - 60;
+    expect(
+      heartbeat({ reply: REPLY_NEW, have: 'bbbbbbbbbbbb', stamp: recent }).calls,
+    ).not.toContain('systemd-run');
+  });
+
+  it('пульс: узел без версии (старый набор) при разрешённом автообновлении обновляется', () => {
+    expect(heartbeat({ reply: REPLY_NEW }).calls).toContain('systemd-run');
+  });
+
+  it('пульс: пустой ответ площадки — обновление не запускается', () => {
+    const result = heartbeat({ reply: '' });
+    expect(result.calls).not.toContain('systemd-run');
+  });
+
   it('выкладка площадки обновляет узел на той же машине и не падает из-за него', () => {
     const deploy = readFileSync(
       path.join(import.meta.dirname, '..', '..', '..', '..', '..', 'deploy', 'deploy.sh'),

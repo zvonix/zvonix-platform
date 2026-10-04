@@ -439,3 +439,60 @@ describe('установщик без репозитория пакетов', ()
     expect(response.json<{ error: { code: string } }>().error.code).toBe('unauthenticated');
   });
 });
+
+describe('версия набора и автообновление (ADR-0068)', () => {
+  const beat = (presented: string, payload: Record<string, unknown>) =>
+    api().inject({
+      method: 'POST',
+      url: '/node/heartbeat',
+      headers: bearer(presented),
+      payload: { activeCalls: 0, degraded: false, ...payload },
+    });
+
+  const setAutoUpdate = (enabled: boolean) =>
+    api().inject({
+      method: 'PUT',
+      url: '/settings',
+      headers: auth(),
+      payload: { settings: { 'nodes.auto_update': enabled } },
+    });
+
+  it('пульс отвечает версией набора площадки, она же вшита в скрипт установки', async () => {
+    const { presented } = await enrolledNode();
+
+    const reply = (await beat(presented, {})).json<{ set_version: string; auto_update: boolean }>();
+    expect(reply.set_version).toMatch(/^[0-9a-f]{12}$/u);
+    expect(reply.auto_update).toBe(false);
+
+    const script = await api().inject({ method: 'GET', url: '/install.sh' });
+    expect(script.body).toContain(`ZVONIX_SET_VERSION:-${reply.set_version}}`);
+    // Версия не плавает между запросами: узел не должен обновляться «впустую».
+    const again = (await beat(presented, {})).json<{ set_version: string }>();
+    expect(again.set_version).toBe(reply.set_version);
+  });
+
+  it('версия узла запоминается и видна в списке; негодная версия отвергается', async () => {
+    const { nodeId, presented } = await enrolledNode();
+
+    expect((await beat(presented, { setVersion: 'abc123def456' })).statusCode).toBe(200);
+    const list = await api().inject({ method: 'GET', url: '/nodes', headers: auth() });
+    const node = list
+      .json<{ nodes: { id: string; set_version: string | null }[] }>()
+      .nodes.find((row) => row.id === nodeId);
+    expect(node?.set_version).toBe('abc123def456');
+
+    expect((await beat(presented, { setVersion: 'не версия' })).statusCode).toBe(400);
+    // Старый узел версию не присылает: прежняя запись стирается, а не остаётся ложно «актуальной».
+    await beat(presented, {});
+    const after = await api().inject({ method: 'GET', url: `/nodes/${nodeId}`, headers: auth() });
+    expect(after.json<{ node: { set_version: string | null } }>().node.set_version).toBeNull();
+  });
+
+  it('автообновление включается настройкой, пульс сообщает об этом', async () => {
+    const { presented } = await enrolledNode();
+    expect((await setAutoUpdate(true)).statusCode).toBe(200);
+    expect((await beat(presented, {})).json<{ auto_update: boolean }>().auto_update).toBe(true);
+    expect((await setAutoUpdate(false)).statusCode).toBe(200);
+    expect((await beat(presented, {})).json<{ auto_update: boolean }>().auto_update).toBe(false);
+  });
+});

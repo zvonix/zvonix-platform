@@ -112,6 +112,12 @@ export const SETTINGS = {
     hint: 'Письмо администраторам, когда узел не на связи или объект почти не соединяет. Нужна настроенная почта',
   },
 
+  'nodes.auto_update': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Узлы сами обновляются до набора площадки, когда он изменился: ждут конца звонков, не чаще раза в полчаса. Выключено — обновление командой zvonix-node-update',
+  },
+
   'security.admin_second_factor_required': {
     kind: 'boolean',
     fallback: 'false',

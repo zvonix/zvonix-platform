@@ -56,6 +56,7 @@ function isLoopback(ip: string | undefined): boolean {
 export interface HeartbeatInput {
   readonly activeCalls: number;
   readonly agentVersion: string | null;
+  readonly setVersion: string | null;
   readonly degraded: boolean;
 }
 
@@ -223,6 +224,7 @@ export class NodesService {
       status,
       activeCalls: input.activeCalls,
       agentVersion: input.agentVersion,
+      setVersion: input.setVersion,
       at: new Date(),
     });
     if (updated === undefined) throw notFound('Узел не найден');

@@ -45,6 +45,7 @@ const LABELS: Record<string, string> = {
   'notifications.low_balance_amount': 'Порог, ₽',
   'notifications.alerts_enabled':
     'Писать администраторам о неполадках и новых заявках на пополнение',
+  'nodes.auto_update': 'Узлы обновляются сами',
   'security.admin_second_factor_required': 'Второй фактор обязателен администраторам',
   'notifications.payment_decision_enabled': 'Писать клиенту о решении по заявке на пополнение',
   'notifications.partner_suspension_enabled':

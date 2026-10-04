@@ -66,4 +66,11 @@ export const heartbeatSchema = z.object({
   degraded: z.boolean().default(false),
 
   agentVersion: z.string().trim().max(50, 'слишком длинная').optional(),
+
+  /** Версия набора, установленного на узле (ADR-0068): шестнадцатеричная строка. */
+  setVersion: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-f]{6,64}$/u, 'не похожа на версию набора')
+    .optional(),
 });
