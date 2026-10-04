@@ -28,6 +28,7 @@ import {
   BillingRepository,
   type AccountId,
   type AccountRow,
+  type CallCharges,
   type ClientFilter,
   type ClientId,
   type ClientRow,
@@ -333,6 +334,11 @@ export class BillingService {
     actorUserId: UserId;
   }): Promise<PostedTransaction> {
     return this.withdrawFromPartner('payout', 'billing.partner_paid_out', input);
+  }
+
+  /** Деньги вызовов по их проводкам — для столбца со стоимостью в списках вызовов. */
+  chargesForCalls(callIds: readonly string[]): Promise<Map<string, CallCharges>> {
+    return this.repository.chargesForCalls(callIds);
   }
 
   /**

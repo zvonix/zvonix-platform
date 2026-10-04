@@ -16,6 +16,7 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { zodBody } from '../../http/zod.pipe.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
 import { simDialTarget, type SimDialTarget } from '../telephony/sim-dial.js';
+import { SettingsService } from '../settings/settings.service.js';
 import type { TerminationCandidate } from '../telephony/telephony.repository.js';
 import { rejectDocument, routeDocument, sipResponseFor } from './dialplan-xml.js';
 import { dialplanRequestSchema, previewSchema } from './schemas.js';
@@ -37,6 +38,7 @@ export class RoutingController {
 
   constructor(
     private readonly routing: RoutingService,
+    private readonly settings: SettingsService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -87,9 +89,11 @@ export class RoutingController {
       destination: decision.call.destination,
       realm: this.config.SIP_REALM,
       callerId: decision.callerId,
-      recordingPath: decision.recordingRequired
-        ? `$\${recordings_dir}/${decision.call.id}.wav`
-        : null,
+      // Запись нужна, если её требует линия либо площадка пишет всё (ADR-0070).
+      recordingPath:
+        decision.recordingRequired || (await this.settings.recordings()).recordAll
+          ? `$\${recordings_dir}/${decision.call.id}.wav`
+          : null,
       candidates: decision.candidates.map((candidate) => ({
         kind: terminationKindOf(candidate.gateway.type),
         ...dialTargetOf(candidate),

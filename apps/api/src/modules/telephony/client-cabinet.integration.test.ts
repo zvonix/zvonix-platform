@@ -366,6 +366,45 @@ describe('сводки (ADR-0059)', () => {
     expect(other.totals).toMatchObject({ calls: 1, answered: 0, spent: '0' });
   }, 120_000);
 
+  it('в списке вызовов клиента видна стоимость: у состоявшегося — сумма, у отказа — пусто', async () => {
+    const calls = (await get('/client/calls?limit=50', as(rich.token))).json<{
+      calls: { status: string; cost: string | null }[];
+    }>().calls;
+    const answered = calls.find((call) => call.status === 'completed');
+    expect(answered?.cost).toBe('11.5');
+    expect(
+      calls.filter((call) => call.status !== 'completed').every((call) => call.cost === null),
+    ).toBe(true);
+
+    // Чужого клиента в стоимости нет: у него свой отбор по счёту.
+    const other = (await get('/client/calls?limit=50', as(poor.token))).json<{
+      calls: { cost: string | null }[];
+    }>().calls;
+    expect(other.every((call) => call.cost === null)).toBe(true);
+  }, 120_000);
+
+  it('сотруднику в списке вызовов видны все три суммы, партнёру — только его заработок', async () => {
+    const staff = (await get('/calls?limit=50')).json<{
+      calls: {
+        status: string;
+        money: { client: string; partner: string; margin: string } | null;
+      }[];
+    }>().calls;
+    expect(staff.find((call) => call.status === 'completed')?.money).toEqual({
+      client: '11.5',
+      partner: '10',
+      margin: '1.5',
+    });
+
+    const partnerToken = await login(partnerEmail);
+    const own = (await get('/partner/calls?limit=50', as(partnerToken))).json<{
+      calls: Record<string, unknown>[];
+    }>().calls;
+    expect(own.find((call) => call['status'] === 'completed')?.['earned']).toBe('10');
+    // Клиентской цены и маржи в ответе партнёру нет (ADR-0014).
+    expect(JSON.stringify(own)).not.toMatch(/11\.5|margin|"client"/u);
+  }, 120_000);
+
   it('клиенту закрыт разрез по партнёру и SIM, открыт по оператору', async () => {
     expect((await get('/client/reports/breakdown?days=7&by=sim', as(rich.token))).statusCode).toBe(
       400,

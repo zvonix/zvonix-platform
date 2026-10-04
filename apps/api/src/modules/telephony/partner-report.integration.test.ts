@@ -412,6 +412,7 @@ describe('вызовы партнёра страницами', () => {
     expect(Object.keys(listed.calls[0] ?? {}).sort()).toEqual([
       'destination',
       'duration_seconds',
+      'earned',
       'gateway_id',
       'id',
       'operator_id',

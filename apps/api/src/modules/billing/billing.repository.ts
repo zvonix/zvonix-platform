@@ -49,6 +49,13 @@ export type AccountRow = typeof accounts.$inferSelect;
 export type ClientRow = typeof clients.$inferSelect;
 export type PartnerRow = typeof partners.$inferSelect;
 export type PartnerAliasRow = typeof partnerAliases.$inferSelect;
+/** Деньги одного вызова по трём счетам его проводки. */
+export interface CallCharges {
+  readonly client: MoneyAmount;
+  readonly partner: MoneyAmount;
+  readonly revenue: MoneyAmount;
+}
+
 export type LedgerEntryRow = typeof ledgerEntries.$inferSelect;
 export type LedgerTransactionRow = typeof ledgerTransactions.$inferSelect;
 
@@ -544,6 +551,43 @@ export class BillingRepository {
       )
       .orderBy(asc(clients.id))
       .limit(limit);
+  }
+
+  /**
+   * Деньги каждого вызова по его проводке `charge:<вызов>`: сколько списано с клиента (в знаке
+   * «потрачено», положительно), сколько начислено партнёру и сколько осталось площадке. Вызова
+   * без проводки — отказ, ноль секунд — в ответе нет. Какую часть показать, решает вызывающий:
+   * клиенту — свою, партнёру — свою, сотруднику — все (ADR-0014).
+   */
+  async chargesForCalls(callIds: readonly string[]): Promise<Map<string, CallCharges>> {
+    if (callIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        key: ledgerTransactions.idempotencyKey,
+        client: sql<string>`-coalesce(sum(${ledgerEntries.amount}) filter (where ${accounts.kind} = 'client'), 0)`,
+        partner: sql<string>`coalesce(sum(${ledgerEntries.amount}) filter (where ${accounts.kind} = 'partner'), 0)`,
+        revenue: sql<string>`coalesce(sum(${ledgerEntries.amount}) filter (where ${accounts.kind} = 'revenue'), 0)`,
+      })
+      .from(ledgerTransactions)
+      .innerJoin(ledgerEntries, eq(ledgerEntries.transactionId, ledgerTransactions.id))
+      .innerJoin(accounts, eq(accounts.id, ledgerEntries.accountId))
+      .where(
+        inArray(
+          ledgerTransactions.idempotencyKey,
+          callIds.map((id) => `charge:${id}`),
+        ),
+      )
+      .groupBy(ledgerTransactions.idempotencyKey);
+    return new Map(
+      rows.map((row) => [
+        row.key.slice('charge:'.length),
+        {
+          client: BigInt(row.client) as MoneyAmount,
+          partner: BigInt(row.partner) as MoneyAmount,
+          revenue: BigInt(row.revenue) as MoneyAmount,
+        },
+      ]),
+    );
   }
 
   async findPartnerAlias(partnerId: PartnerId): Promise<string | undefined> {

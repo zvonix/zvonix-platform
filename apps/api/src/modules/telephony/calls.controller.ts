@@ -9,10 +9,11 @@
  */
 
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { parseId } from '@zvonix/shared';
+import { Money, parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { boundedLimit } from '../../http/pagination.js';
+import { BillingService } from '../billing/billing.service.js';
 import { CallsService, type CallDetails } from './calls.service.js';
 import { callsQuerySchema, callsSummaryQuerySchema } from './schemas.js';
 import { zodQuery } from '../../http/zod.pipe.js';
@@ -51,9 +52,19 @@ interface SummaryView {
   readonly by_reason: readonly { reason: string; count: number }[];
 }
 
+/** Деньги вызова для сотрудника: списано с клиента, начислено партнёру, осталось площадке. */
+interface CallMoneyView {
+  readonly client: string;
+  readonly partner: string;
+  readonly margin: string;
+}
+
 @Controller()
 export class CallsController {
-  constructor(private readonly calls: CallsService) {}
+  constructor(
+    private readonly calls: CallsService,
+    private readonly billing: BillingService,
+  ) {}
 
   /**
    * Вызовы по отбору, свежие сверху.
@@ -65,13 +76,31 @@ export class CallsController {
   @Get('calls')
   async list(
     @Query(zodQuery(callsQuerySchema)) query: z.infer<typeof callsQuerySchema>,
-  ): Promise<{ calls: CallView[]; total: number }> {
+  ): Promise<{ calls: (CallView & { money: CallMoneyView | null })[]; total: number }> {
     const found = await this.calls.list({
       ...filterOf(query),
       limit: query.limit,
       offset: query.offset,
     });
-    return { total: found.total, calls: found.rows.map(toCallView) };
+    // Деньги вызова — из его проводки одним запросом на страницу; нет проводки — пусто.
+    const charges = await this.billing.chargesForCalls(found.rows.map((row) => row.call.id));
+    return {
+      total: found.total,
+      calls: found.rows.map((row) => {
+        const charge = charges.get(row.call.id);
+        return {
+          ...toCallView(row),
+          money:
+            charge === undefined
+              ? null
+              : {
+                  client: Money.format(charge.client),
+                  partner: Money.format(charge.partner),
+                  margin: Money.format(charge.revenue),
+                },
+        };
+      }),
+    };
   }
 
   /**

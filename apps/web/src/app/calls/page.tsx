@@ -25,13 +25,14 @@ import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { useClients, usePartners } from '@/lib/dictionaries';
 import { duration, moment } from '@/lib/format';
+import { money } from '@/lib/money';
 import { CALL_STATUS_NAME, callTone, FAILURE_REASON_FIX, FAILURE_REASON_NAME } from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
 import { CallSummary } from './call-summary';
 import { RoutePreview } from './route-preview';
 
 const PAGE_SIZE = 50;
-const COLUMNS = 6;
+const COLUMNS = 7;
 
 /** Сколько цифр должно быть набрано, чтобы номер вообще имело смысл искать. */
 const MSISDN_DIGITS = 10;
@@ -43,6 +44,8 @@ interface Call {
   readonly status: CallStatus;
   readonly failure_reason: CallFailureReason | null;
   readonly duration_seconds: number | null;
+  /** Деньги вызова по его проводке; пусто — проводки нет (отказ, ноль секунд). */
+  readonly money: { client: string; partner: string; margin: string } | null;
   readonly started_at: string;
   readonly answered_at: string | null;
   readonly ended_at: string | null;
@@ -257,6 +260,9 @@ function CallsView() {
                   'Итог',
                   'Причина',
                   'Секунд',
+                  'Списано с клиента, ₽',
+                  'Партнёру, ₽',
+                  'Площадке, ₽',
                 ],
                 rows: found.rows.map((call) => [
                   moment(call.started_at),
@@ -271,6 +277,9 @@ function CallsView() {
                   CALL_STATUS_NAME[call.status],
                   call.failure_reason === null ? '' : FAILURE_REASON_NAME[call.failure_reason],
                   call.duration_seconds,
+                  call.money?.client,
+                  call.money?.partner,
+                  call.money?.margin,
                 ]),
                 truncated: found.truncated,
               };
@@ -309,6 +318,7 @@ function CallsView() {
               <TableHead className="h-8">Куда</TableHead>
               <TableHead className="h-8">Через кого</TableHead>
               <TableHead className="h-8">Итог</TableHead>
+              <TableHead className="h-8 text-right">Деньги</TableHead>
               <TableHead className="h-8 text-right">Длительность</TableHead>
             </TableRow>
           </TableHeader>
@@ -404,6 +414,22 @@ function CallRow({
           <span className="block pt-0.5" title={FAILURE_REASON_FIX[call.failure_reason]}>
             {FAILURE_REASON_NAME[call.failure_reason]}
           </span>
+        )}
+      </TableCell>
+
+      <TableCell className="num text-right">
+        {call.money === null ? (
+          <span className="text-faint">—</span>
+        ) : (
+          <>
+            {money(call.money.client)}
+            <span
+              className="block text-faint"
+              title="Списано с клиента; начислено партнёру; осталось площадке"
+            >
+              партнёру {money(call.money.partner)} · площадке {money(call.money.margin)}
+            </span>
+          </>
         )}
       </TableCell>
 
