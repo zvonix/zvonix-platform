@@ -288,6 +288,13 @@
       "when": 1791094019555,
       "tag": "0040_versiya_nabora_uzla",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791123942628,
+      "tag": "0041_akkaunty_max",
+      "breakpoints": true
     }
   ]
 }

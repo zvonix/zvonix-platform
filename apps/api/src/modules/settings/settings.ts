@@ -112,6 +112,30 @@ export const SETTINGS = {
     hint: 'Письмо администраторам, когда узел не на связи или объект почти не соединяет. Нужна настроенная почта',
   },
 
+  'messaging.enabled': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Продукт «Сообщения MAX»: партнёры заводят аккаунты, клиенты отправляют. Выключено — раздел для партнёров и клиентов закрыт',
+  },
+  'messaging.provider_partner_url': {
+    kind: 'string',
+    fallback: 'https://api.green-api.com',
+    hint: 'Адрес партнёрского доступа провайдера мессенджера: по нему площадка сама заводит аккаунты MAX партнёрам',
+  },
+  'messaging.provider_partner_token': {
+    kind: 'string',
+    secret: true,
+    fallback: '',
+    hint: 'Ключ партнёрского доступа провайдера (выдаёт его поддержка). Пусто — аккаунты заводит администратор вручную',
+  },
+  'messages.markup_percent': {
+    kind: 'number',
+    fallback: '20',
+    min: 0,
+    max: 1000,
+    hint: 'Ваша наценка на цену партнёра за сообщение, в процентах. Фиксируется на сообщении при приёме',
+  },
+
   'nodes.auto_update': {
     kind: 'boolean',
     fallback: 'false',

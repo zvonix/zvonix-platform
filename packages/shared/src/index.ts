@@ -15,4 +15,5 @@ export * from './nodes.js';
 export * from './telephony.js';
 export * from './call.js';
 export * from './tariff.js';
+export * from './messaging.js';
 export * from './payments.js';

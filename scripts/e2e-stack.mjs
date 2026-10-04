@@ -62,6 +62,8 @@ export const STACK_ENV = {
   // которых заведены оба предела (ADR-0041).
   AUTH_RATE_LIMIT_ENABLED: 'false',
   WRITE_RATE_LIMIT_PER_MINUTE: '0',
+  // Мессенджер без внешних вызовов (ADR-0071).
+  MESSENGER_PROVIDER: 'simulated',
   OPERATOR_LOOKUP_ENABLED: 'false',
   OPERATOR_LOOKUP_URL: 'http://num.example.test/get/',
   NUMBERING_PLAN_ENABLED: 'false',

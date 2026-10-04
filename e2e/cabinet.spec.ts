@@ -302,6 +302,50 @@ test.describe('выплата партнёрам списком', () => {
   });
 });
 
+test.describe('сообщения MAX (ADR-0071)', () => {
+  test('партнёр заводит аккаунт, видит QR-код, задаёт цену; администратор видит его у себя', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const admin = await adminContext.newPage();
+    await signIn(admin, PEOPLE.admin);
+    const enabled = await admin.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'messaging.enabled': true } },
+    });
+    expect(enabled.ok()).toBe(true);
+
+    const partnerContext = await browser.newContext();
+    const partner = await partnerContext.newPage();
+    await signIn(partner, PEOPLE.partner);
+    await partner.goto('/partner/messages');
+    await partner.getByRole('button', { name: 'Добавить аккаунт' }).click();
+    await partner.getByLabel('Название').fill('Основной');
+    await partner.getByRole('button', { name: 'Добавить', exact: true }).click();
+
+    // После заведения сразу открывается вход по QR-коду.
+    await expect(partner.getByRole('dialog', { name: /Вход в MAX/u })).toBeVisible();
+    await expect(partner.getByAltText('QR-код для входа в MAX')).toBeVisible();
+    await partner.keyboard.press('Escape');
+
+    const row = partner.getByRole('row', { name: /Основной/u });
+    await expect(row.getByText('Ждёт входа')).toBeVisible();
+    await row.getByRole('button', { name: 'Условия' }).click();
+    await partner.getByLabel('Цена за сообщение, ₽').fill('0,45');
+    await partner.getByRole('button', { name: 'Сохранить' }).click();
+    await expect(row.getByText(/0,45/u)).toBeVisible();
+
+    await admin.goto('/messaging');
+    await expect(admin.getByRole('row', { name: /Основной/u })).toBeVisible();
+    // Названия провайдера нет ни в кабинете партнёра, ни в кабинете администратора.
+    await expect(partner.getByText(/green/iu)).toHaveCount(0);
+    await expect(admin.getByText(/green/iu)).toHaveCount(0);
+
+    await adminContext.close();
+    await partnerContext.close();
+  });
+});
+
 test.describe('шрифты со своего адреса', () => {
   test('IBM Plex загружается с площадки, а не с чужого сервера', async ({ page }) => {
     const foreign: string[] = [];

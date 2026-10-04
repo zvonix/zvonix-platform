@@ -138,6 +138,15 @@ async function populate(apiUrl) {
     idempotencyKey: 'ui-screens-partner-deposit',
     description: 'Начислено под проверку интерфейса',
   });
+  // Продукт «Сообщения MAX» включён и у партнёра есть аккаунт: иначе страницы пусты (ADR-0071).
+  await call('PUT', '/settings', { settings: { 'messaging.enabled': true } });
+  await call('POST', '/messenger/accounts', {
+    partnerId,
+    label: 'Основной аккаунт',
+    instanceId: 'stand-1',
+    token: 'stand-token',
+    apiUrl: 'https://provider.invalid',
+  });
   await call('POST', `/clients/${clientId}/deposit`, {
     amount: '1500.5',
     idempotencyKey: 'ui-screens-deposit',

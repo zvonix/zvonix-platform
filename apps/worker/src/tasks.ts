@@ -26,6 +26,7 @@ import {
   LimitService,
   LowBalanceService,
   MailService,
+  MessagingService,
   NodesService,
   OperatorResolverService,
   QualityService,
@@ -187,6 +188,9 @@ const AUTO_APPROVE_SECONDS = 60;
 /** Замер нагрузки площадки — раз в минуту, как и замеры узлов (ADR-0065). */
 const SERVER_SAMPLE_SECONDS = 60;
 
+/** Сверка состояния аккаунтов MAX — раз в минуту: вышедший из мессенджера не должен принимать сообщения (ADR-0071). */
+const MESSENGER_CHECK_SECONDS = 60;
+
 /**
  * Письмо клиенту о решении по заявке — раз в минуту: человек перевёл деньги и ждёт, а выключенная
  * настройка стоит одного чтения из кэша.
@@ -215,6 +219,7 @@ export class BackgroundTasks {
     private readonly servers: ServersService,
     private readonly paymentNotice: PaymentNoticeService,
     private readonly suspensionNotice: SuspensionNoticeService,
+    private readonly messaging: MessagingService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -303,6 +308,11 @@ export class BackgroundTasks {
         name: 'notifications.partner-suspension',
         everySeconds: SUSPENSION_NOTICE_SECONDS,
         run: (now) => this.suspensionNotice.notify(now),
+      },
+      {
+        name: 'messaging.refresh-accounts',
+        everySeconds: MESSENGER_CHECK_SECONDS,
+        run: (now) => this.messaging.refreshDue(now),
       },
       {
         name: 'servers.sample',

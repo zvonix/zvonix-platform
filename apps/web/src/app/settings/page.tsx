@@ -97,6 +97,8 @@ function SettingsForm() {
     { title: 'Письма о событиях', prefix: 'notifications.' },
     { title: 'Пополнение счёта', prefix: 'payments.' },
     { title: 'Хранение', prefix: 'retention.' },
+    { title: 'Сообщения MAX', prefix: 'messaging.' },
+    { title: 'Сообщения: цена', prefix: 'messages.' },
     { title: 'Узлы', prefix: 'nodes.' },
     { title: 'Вход', prefix: 'security.' },
     { title: 'Цены партнёров', prefix: 'pricing.' },
