@@ -13,13 +13,13 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream, type ReadStream } from 'node:fs';
-import { mkdir, rename, stat, unlink } from 'node:fs/promises';
+import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform, type Readable } from 'node:stream';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { dependencyUnavailable, validationFailed } from '@zvonix/shared';
-import { APP_CONFIG, type Config } from '../../infra/tokens.js';
+import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import type { ObjectStorage } from './object-storage.js';
 
 export type LinkOperation = 'get' | 'put';
@@ -40,16 +40,49 @@ export interface ReadHandle {
 }
 
 @Injectable()
-export class LocalObjectStorage implements ObjectStorage {
+export class LocalObjectStorage implements ObjectStorage, OnModuleInit {
+  private readonly logger: Logger;
   private readonly root: string;
   private readonly baseUrl: string;
   private readonly signingKey: Buffer;
 
-  constructor(@Inject(APP_CONFIG) config: Config) {
+  constructor(@Inject(APP_CONFIG) config: Config, @Inject(APP_LOGGER) logger: Logger) {
+    this.logger = logger.child('recordings-storage');
     this.root = resolve(config.RECORDINGS_DIR);
     // Кабинет и API за одним адресом, API — под `/api/` (ADR-0037, deploy/nginx).
     this.baseUrl = `${config.WEB_BASE_URL.replace(/\/+$/u, '')}/api/storage/recordings`;
     this.signingKey = createHmac('sha256', config.SECRET_KEY).update(KEY_PURPOSE).digest();
+  }
+
+  /**
+   * Каталог записей должен принимать запись. Проверяется при запуске, а не при первой выгрузке:
+   * 2026-10-04 запись молча не шла сутки — служба не могла войти в каталог (он лежал внутри
+   * каталога другого пользователя), а узел только получал `500` и копил файлы. Не получилось —
+   * громкая ошибка в журнале с названием каталога; процесс при этом не падает: площадка без записей
+   * важнее остановленной площадки.
+   */
+  async onModuleInit(): Promise<void> {
+    const problem = await this.checkWritable();
+    if (problem !== undefined) {
+      this.logger.error(
+        'Каталог записей недоступен для записи — разговоры сохраняться не будут',
+        problem,
+        { directory: this.root },
+      );
+    }
+  }
+
+  /** `undefined` — каталог принимает файлы; иначе — причина. */
+  async checkWritable(): Promise<Error | undefined> {
+    const probe = resolve(this.root, `.probe-${String(process.pid)}`);
+    try {
+      await mkdir(this.root, { recursive: true });
+      await writeFile(probe, 'ok');
+      await unlink(probe);
+      return undefined;
+    } catch (cause) {
+      return cause as Error;
+    }
   }
 
   presignUpload(objectKey: string, ttlSeconds: number): Promise<string> {
