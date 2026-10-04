@@ -36,6 +36,22 @@ export class MessagingRepository {
     }
   }
 
+  async findByInstance(
+    provider: MessengerAccountRow['provider'],
+    instanceId: string,
+  ): Promise<MessengerAccountRow | undefined> {
+    const [row] = await this.database.db
+      .select()
+      .from(messengerAccounts)
+      .where(
+        and(
+          eq(messengerAccounts.provider, provider),
+          eq(messengerAccounts.providerInstanceId, instanceId),
+        ),
+      );
+    return row;
+  }
+
   async findById(id: MessengerAccountId): Promise<MessengerAccountRow | undefined> {
     const [row] = await this.database.db
       .select()

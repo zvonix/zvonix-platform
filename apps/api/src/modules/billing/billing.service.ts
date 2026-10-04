@@ -621,6 +621,86 @@ export class BillingService {
     });
   }
 
+  /**
+   * Списание за сообщение MAX ([ADR-0071](../../../../../docs/adr/0071-soobscheniya-max.md)): клиент
+   * платит, партнёр зарабатывает, площадка получает наценку — три проводки, сумма ноль, как у вызова.
+   * Ключ `message:<сообщение>`: повтор не спишет вторых денег. Деньги списываются **при приёме**;
+   * недостаток средств отказывает здесь же (тот же запас и минус, что у вызовов), а сообщение,
+   * которое `alsoInTransaction` кладёт в очередь, в этом случае не появляется вовсе.
+   */
+  async chargeMessage(input: {
+    messageId: string;
+    clientId: ClientId;
+    partnerId: PartnerId;
+    clientAmount: MoneyAmount;
+    partnerAmount: MoneyAmount;
+    commissionAmount: MoneyAmount;
+    alsoInTransaction: (executor: Executor) => Promise<void>;
+  }): Promise<PostedTransaction> {
+    if (
+      Money.compare(Money.add(input.partnerAmount, input.commissionAmount), input.clientAmount) !==
+      0
+    ) {
+      throw validationFailed('Доля партнёра и наценка не складываются в сумму для клиента');
+    }
+    const clientAccount = await this.accountOf('client', input.clientId);
+    const partnerAccount = await this.accountOf('partner', input.partnerId);
+    const revenue = await this.accountOf('revenue', null);
+
+    const lines: PostingLine[] = [
+      { accountId: clientAccount.id, amount: Money.negate(input.clientAmount) },
+      { accountId: partnerAccount.id, amount: input.partnerAmount },
+    ];
+    if (!Money.isZero(input.commissionAmount)) {
+      lines.push({ accountId: revenue.id, amount: input.commissionAmount });
+    }
+    return this.post({
+      kind: 'charge',
+      idempotencyKey: `message:${input.messageId}`,
+      description: 'Сообщение MAX',
+      referenceType: 'message',
+      referenceId: input.messageId,
+      lines,
+      alsoInTransaction: input.alsoInTransaction,
+    });
+  }
+
+  /**
+   * Возврат за сообщение, которое не ушло: обратная проводка `message_refund:<сообщение>`. Идемпотентен.
+   * `alsoInTransaction` отмечает сообщение неотправленным той же транзакцией — состояние и деньги не
+   * расходятся.
+   */
+  async refundMessage(input: {
+    messageId: string;
+    clientId: ClientId;
+    partnerId: PartnerId;
+    clientAmount: MoneyAmount;
+    partnerAmount: MoneyAmount;
+    commissionAmount: MoneyAmount;
+    alsoInTransaction: (executor: Executor) => Promise<void>;
+  }): Promise<PostedTransaction> {
+    const clientAccount = await this.accountOf('client', input.clientId);
+    const partnerAccount = await this.accountOf('partner', input.partnerId);
+    const revenue = await this.accountOf('revenue', null);
+
+    const lines: PostingLine[] = [
+      { accountId: clientAccount.id, amount: input.clientAmount },
+      { accountId: partnerAccount.id, amount: Money.negate(input.partnerAmount) },
+    ];
+    if (!Money.isZero(input.commissionAmount)) {
+      lines.push({ accountId: revenue.id, amount: Money.negate(input.commissionAmount) });
+    }
+    return this.post({
+      kind: 'correction',
+      idempotencyKey: `message_refund:${input.messageId}`,
+      description: 'Возврат за неотправленное сообщение MAX',
+      referenceType: 'message',
+      referenceId: input.messageId,
+      lines,
+      alsoInTransaction: input.alsoInTransaction,
+    });
+  }
+
   /** Счёт участника или системный. Заводится при первом обращении. */
   async accountOf(kind: AccountKind, ownerId: string | null): Promise<AccountRow> {
     return this.repository.ensureAccount(kind, ownerId, DEFAULT_CURRENCY);

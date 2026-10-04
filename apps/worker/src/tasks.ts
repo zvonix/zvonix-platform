@@ -26,6 +26,7 @@ import {
   LimitService,
   LowBalanceService,
   MailService,
+  MessagesService,
   MessagingService,
   NodesService,
   OperatorResolverService,
@@ -191,6 +192,9 @@ const SERVER_SAMPLE_SECONDS = 60;
 /** Сверка состояния аккаунтов MAX — раз в минуту: вышедший из мессенджера не должен принимать сообщения (ADR-0071). */
 const MESSENGER_CHECK_SECONDS = 60;
 
+/** Отправка сообщений MAX из очереди — раз в 5 секунд: пауза между сообщениями аккаунта задаётся настройкой (ADR-0071). */
+const MESSAGE_DISPATCH_SECONDS = 5;
+
 /**
  * Письмо клиенту о решении по заявке — раз в минуту: человек перевёл деньги и ждёт, а выключенная
  * настройка стоит одного чтения из кэша.
@@ -220,6 +224,7 @@ export class BackgroundTasks {
     private readonly paymentNotice: PaymentNoticeService,
     private readonly suspensionNotice: SuspensionNoticeService,
     private readonly messaging: MessagingService,
+    private readonly messageService: MessagesService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -308,6 +313,21 @@ export class BackgroundTasks {
         name: 'notifications.partner-suspension',
         everySeconds: SUSPENSION_NOTICE_SECONDS,
         run: (now) => this.suspensionNotice.notify(now),
+      },
+      {
+        name: 'messages.dispatch',
+        everySeconds: MESSAGE_DISPATCH_SECONDS,
+        run: (now) => this.messageService.dispatchDue(now),
+      },
+      {
+        name: 'messages.expire-waiting',
+        everySeconds: MESSENGER_CHECK_SECONDS,
+        run: (now) => this.messageService.expireWaiting(now),
+      },
+      {
+        name: 'messages.purge-texts',
+        everySeconds: MAIL_CLEANUP_SECONDS,
+        run: (now) => this.messageService.purgeTexts(now),
       },
       {
         name: 'messaging.refresh-accounts',

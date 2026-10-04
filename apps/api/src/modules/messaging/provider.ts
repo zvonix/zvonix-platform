@@ -24,6 +24,11 @@ export type QrResult =
   | { readonly kind: 'authorized' }
   | { readonly kind: 'unavailable' };
 
+/** У номера нет аккаунта MAX (или получатель недоступен навсегда): повторять бессмысленно, деньги возвращаются. */
+export class RecipientRejectedError extends Error {
+  override readonly name = 'RecipientRejectedError';
+}
+
 export interface MessageProvider {
   readonly id: MessengerProviderId;
 
@@ -38,6 +43,22 @@ export interface MessageProvider {
 
   /** Удаляет инстанс у провайдера: платить за него перестаёт площадка. */
   deleteAccount(ref: ProviderAccountRef): Promise<void>;
+
+  /**
+   * Отправляет текст получателю (`recipient` — номер из одиннадцати цифр с семёрки). Возвращает
+   * идентификатор сообщения у провайдера — по нему придёт статус доставки.
+   *
+   * `RecipientRejectedError` — получателя нет в MAX, повтор не поможет. Любой другой сбой —
+   * временный (`dependencyUnavailable`): сообщение остаётся в очереди и будет отправлено повторно.
+   */
+  sendText(
+    ref: ProviderAccountRef,
+    recipient: string,
+    text: string,
+  ): Promise<{ messageId: string }>;
+
+  /** Сообщает инстансу адрес, на который слать статусы доставки и смену состояния. */
+  configureWebhook(ref: ProviderAccountRef, url: string): Promise<void>;
 }
 
 export const MESSAGE_PROVIDER = Symbol('MESSAGE_PROVIDER');

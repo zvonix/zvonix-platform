@@ -43,6 +43,9 @@ export interface Statement {
   readonly movements: MovementRow[];
   /** Сумма проводок-списаний за вызовы за период, в знаке книги. */
   readonly charges: string;
+  /** Сообщения MAX: списано и возвращено, в знаке книги ([ADR-0071](../../../../../docs/adr/0071-soobscheniya-max.md)). */
+  readonly messageCharges: string;
+  readonly messageRefunds: string;
 }
 
 const EMPTY: Metrics = {
@@ -139,6 +142,8 @@ export class ReportsService {
       closingBalance,
       movements: moved.rows,
       charges: moved.charges,
+      messageCharges: moved.messageCharges,
+      messageRefunds: moved.messageRefunds,
     };
   }
 

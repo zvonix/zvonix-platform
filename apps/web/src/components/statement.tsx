@@ -37,6 +37,8 @@ interface StatementData {
   readonly opening_balance: string;
   readonly closing_balance: string;
   readonly charged: string;
+  readonly message_charged: string;
+  readonly message_refunded: string;
   readonly movements: readonly {
     readonly at: string;
     readonly kind: string;
@@ -59,6 +61,8 @@ export interface StatementConfig {
   readonly balanceLabel: string;
   /** Подпись суммы списаний/начислений по проводкам. */
   readonly chargedLabel: string;
+  /** Строка итога по сообщениям MAX: «Списано за сообщения MAX» / «Начислено за сообщения MAX». */
+  readonly messageLabel: string;
   readonly dimensions: readonly { readonly by: string; readonly label: string }[];
 }
 
@@ -231,6 +235,18 @@ export function Statement({ config }: { config: StatementConfig }) {
                   <td className="py-1">{config.chargedLabel}</td>
                   <td className="num py-1 text-right">{money(data.charged)}</td>
                 </tr>
+                {data.message_charged !== '0' && (
+                  <tr>
+                    <td className="py-1">{config.messageLabel}</td>
+                    <td className="num py-1 text-right">{money(data.message_charged)}</td>
+                  </tr>
+                )}
+                {data.message_refunded !== '0' && (
+                  <tr>
+                    <td className="py-1">Возвращено за неотправленные сообщения</td>
+                    <td className="num py-1 text-right">{money(data.message_refunded)}</td>
+                  </tr>
+                )}
                 <tr className="border-t border-neutral-300 font-semibold">
                   <td className="py-1">
                     {config.balanceLabel} на {data.partial ? 'сегодня' : 'конец месяца'}

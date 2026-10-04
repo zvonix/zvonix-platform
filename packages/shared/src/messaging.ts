@@ -36,3 +36,39 @@ export const MESSENGER_LIMIT_MAX = 1_000_000;
 
 /** Аккаунтов MAX у одного партнёра — столько же, сколько у него шлюзов по умолчанию. */
 export const MESSENGER_ACCOUNTS_PER_PARTNER_MAX = 20;
+
+/**
+ * Состояние сообщения.
+ *
+ * `queued`    — принято, деньги списаны, ждёт отправки (лимиты, пауза);
+ * `sending`   — взято в работу воркером;
+ * `sent`      — ушло в мессенджер;
+ * `delivered` — доставлено получателю;
+ * `read`      — прочитано;
+ * `failed`    — окончательно не отправлено, деньги возвращены.
+ */
+export const MESSAGE_STATUSES = [
+  'queued',
+  'sending',
+  'sent',
+  'delivered',
+  'read',
+  'failed',
+] as const;
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
+
+/**
+ * Почему сообщение не отправлено — **наши** причины, не слова провайдера (ADR-0071):
+ * `recipient_not_in_max` — у номера нет аккаунта MAX; `account_unavailable` — аккаунт вышел из MAX или
+ * не отвечал; `wait_expired` — ждало отправки дольше допустимого; `platform` — наша сторона.
+ */
+export const MESSAGE_FAILURE_REASONS = [
+  'recipient_not_in_max',
+  'account_unavailable',
+  'wait_expired',
+  'platform',
+] as const;
+export type MessageFailureReason = (typeof MESSAGE_FAILURE_REASONS)[number];
+
+/** Сколько раз пробуем отправить при временных сбоях, прежде чем вернуть деньги. */
+export const MESSAGE_MAX_ATTEMPTS = 5;

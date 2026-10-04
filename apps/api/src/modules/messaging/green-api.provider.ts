@@ -12,7 +12,13 @@ import { Inject, Injectable } from '@nestjs/common';
 import { dependencyUnavailable, type MessengerProviderId } from '@zvonix/shared';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { SettingsService } from '../settings/settings.service.js';
-import type { MessageProvider, ProviderAccountRef, ProviderState, QrResult } from './provider.js';
+import {
+  RecipientRejectedError,
+  type MessageProvider,
+  type ProviderAccountRef,
+  type ProviderState,
+  type QrResult,
+} from './provider.js';
 
 const TIMEOUT_MS = 10_000;
 
@@ -108,33 +114,80 @@ export class GreenApiMessageProvider implements MessageProvider {
     );
   }
 
+  async sendText(
+    ref: ProviderAccountRef,
+    recipient: string,
+    text: string,
+  ): Promise<{ messageId: string }> {
+    try {
+      const body = await this.request<{ idMessage?: string }>(
+        'POST',
+        `${this.base(ref)}/sendMessage/${encodeURIComponent(ref.token)}`,
+        { chatId: `${recipient}@c.us`, message: text },
+      );
+      if (typeof body.idMessage !== 'string' || body.idMessage === '') {
+        this.logger.warn('Провайдер не вернул идентификатор сообщения', { reason: 'shape' });
+        throw dependencyUnavailable(UNAVAILABLE);
+      }
+      return { messageId: body.idMessage };
+    } catch (cause) {
+      // 400/404/422 — получатель негоден (нет аккаунта в MAX): повтор не поможет. 403 (аккаунт
+      // ограничен), 429 (частота) и всё прочее — временное: сообщение остаётся в очереди.
+      if (cause instanceof ProviderHttpError && [400, 404, 422].includes(cause.status)) {
+        throw new RecipientRejectedError(`ответ ${String(cause.status)}`);
+      }
+      throw this.unavailable(cause);
+    }
+  }
+
+  async configureWebhook(ref: ProviderAccountRef, url: string): Promise<void> {
+    await this.call('POST', `${this.base(ref)}/setSettings/${encodeURIComponent(ref.token)}`, {
+      webhookUrl: url,
+      outgoingMessageWebhook: 'yes',
+      stateWebhook: 'yes',
+      incomingWebhook: 'no',
+    });
+  }
+
   private base(ref: ProviderAccountRef): string {
     return `${ref.apiUrl}/waInstance${encodeURIComponent(ref.instanceId)}`;
   }
 
-  /** Один вызов провайдера. Любой сбой — наш отказ без подробностей, подробности — в журнал. */
+  /** Один вызов провайдера: сбой превращается в наш отказ без подробностей, подробности — в журнал. */
   private async call<T>(method: 'GET' | 'POST', url: string, body?: unknown): Promise<T> {
     try {
-      const response = await fetch(url, {
-        method,
-        headers: body === undefined ? {} : { 'content-type': 'application/json' },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-      if (!response.ok) {
-        this.logger.warn('Провайдер мессенджера ответил отказом', {
-          status: response.status,
-          path: new URL(url).pathname.replace(/\/[^/]*$/u, '/…'),
-        });
-        throw dependencyUnavailable(UNAVAILABLE);
-      }
-      return (await response.json()) as T;
+      return await this.request<T>(method, url, body);
     } catch (cause) {
-      if (cause instanceof Error && cause.name === 'DomainError') throw cause;
-      this.logger.warn('Провайдер мессенджера недоступен', {
-        reason: cause instanceof Error ? cause.name : 'unknown',
-      });
-      throw dependencyUnavailable(UNAVAILABLE);
+      throw this.unavailable(cause);
     }
+  }
+
+  private unavailable(cause: unknown): Error {
+    if (cause instanceof Error && cause.name === 'DomainError') return cause;
+    this.logger.warn('Провайдер мессенджера недоступен или ответил отказом', {
+      reason: cause instanceof Error ? cause.name : 'unknown',
+      ...(cause instanceof ProviderHttpError ? { status: cause.status } : {}),
+    });
+    return dependencyUnavailable(UNAVAILABLE);
+  }
+
+  /** Низкий уровень: код ответа не прячется, чтобы отправка могла отличить «получатель негоден» от сбоя. */
+  private async request<T>(method: 'GET' | 'POST', url: string, body?: unknown): Promise<T> {
+    const response = await fetch(url, {
+      method,
+      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) throw new ProviderHttpError(response.status);
+    return (await response.json()) as T;
+  }
+}
+
+/** Ответ провайдера с кодом отказа. Только внутри этого файла: наружу уходят наши ошибки. */
+class ProviderHttpError extends Error {
+  override readonly name = 'ProviderHttpError';
+  constructor(readonly status: number) {
+    super(`HTTP ${String(status)}`);
   }
 }

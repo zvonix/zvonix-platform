@@ -10,13 +10,17 @@
 import { sql } from 'drizzle-orm';
 import { check, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import {
+  MESSAGE_FAILURE_REASONS,
+  MESSAGE_STATUSES,
   MESSENGER_ACCOUNT_STATUSES,
   MESSENGER_PROVIDERS,
+  type MessageFailureReason,
+  type MessageStatus,
   type MessengerAccountStatus,
   type MessengerProviderId,
 } from '@zvonix/shared';
 import { createdAt, idRef, money, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
-import { partners } from './billing.js';
+import { clients, partners } from './billing.js';
 
 export const messengerAccounts = pgTable(
   'messenger_accounts',
@@ -80,5 +84,91 @@ export const messengerAccounts = pgTable(
     index('messenger_accounts_live_idx')
       .on(t.status)
       .where(sql`${t.status} <> 'retired'`),
+  ],
+);
+
+/**
+ * Сообщения MAX ([ADR-0071](../../../../docs/adr/0071-soobscheniya-max.md)).
+ *
+ * Строка — и очередь отправки, и журнал. Деньги фиксируются **при приёме** (цена партнёра, наценка и
+ * сумма клиента): смена цены или наценки идущие и отправленные сообщения не затрагивает. Сами деньги —
+ * проводка `message:<id>` (возврат — `message_refund:<id>`), здесь только суммы для разбора.
+ */
+export const messages = pgTable(
+  'messages',
+  {
+    id: primaryId<'message'>(),
+
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+
+    /** Ключ клиента: повторный запрос того же сообщения возвращает прежнее, а не заводит второе. */
+    externalId: text(),
+
+    /** Получатель в каноническом виде: одиннадцать цифр с семёрки. */
+    recipient: text().notNull(),
+
+    /**
+     * Текст. Персональные данные: после срока хранения (`retention.messages_days`) стирается, а строка
+     * остаётся — на ней держатся деньги и разбор.
+     */
+    text: text().notNull(),
+
+    status: text().$type<MessageStatus>().notNull().default('queued'),
+    failureReason: text().$type<MessageFailureReason>(),
+
+    /** Аккаунт и партнёр выбираются при приёме (по цене) и дальше не меняются. */
+    accountId: idRef<'messengerAccount'>()
+      .notNull()
+      .references(() => messengerAccounts.id, { onDelete: 'restrict' }),
+    partnerId: idRef<'partner'>()
+      .notNull()
+      .references(() => partners.id, { onDelete: 'restrict' }),
+
+    /** Идентификатор сообщения у провайдера; по нему приходят статусы доставки. */
+    providerMessageId: text(),
+
+    /** Деньги, зафиксированные при приёме: клиент платит = партнёру + наценка площадки. */
+    clientAmount: money().notNull(),
+    partnerAmount: money().notNull(),
+    commissionAmount: money().notNull(),
+
+    attempts: integer().notNull().default(0),
+    /** Не раньше этого момента воркер берёт сообщение (пауза, повтор после сбоя). */
+    nextAttemptAt: timestamptz().notNull().defaultNow(),
+
+    createdAt: createdAt(),
+    sentAt: timestamptz(),
+    deliveredAt: timestamptz(),
+    readAt: timestamptz(),
+    failedAt: timestamptz(),
+  },
+  (t) => [
+    check('messages_status_check', oneOf(t.status, MESSAGE_STATUSES)),
+    check(
+      'messages_failure_reason_check',
+      sql`${t.failureReason} is null or ${oneOf(t.failureReason, MESSAGE_FAILURE_REASONS)}`,
+    ),
+    check(
+      'messages_failure_matches_status',
+      sql`(${t.status} = 'failed') = (${t.failureReason} is not null)`,
+    ),
+    check(
+      'messages_amounts_check',
+      sql`${t.partnerAmount} > 0 and ${t.commissionAmount} >= 0 and ${t.clientAmount} = ${t.partnerAmount} + ${t.commissionAmount}`,
+    ),
+    uniqueIndex('messages_client_external_key')
+      .on(t.clientId, t.externalId)
+      .where(sql`${t.externalId} is not null`),
+    uniqueIndex('messages_provider_key')
+      .on(t.accountId, t.providerMessageId)
+      .where(sql`${t.providerMessageId} is not null`),
+    index('messages_client_idx').on(t.clientId, t.createdAt),
+    index('messages_account_sent_idx').on(t.accountId, t.sentAt),
+    // Очередь воркера: что ждёт отправки.
+    index('messages_queue_idx')
+      .on(t.nextAttemptAt)
+      .where(sql`${t.status} in ('queued', 'sending')`),
   ],
 );
