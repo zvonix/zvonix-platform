@@ -154,6 +154,25 @@ export class SettingsService {
     };
   }
 
+  /**
+   * Сообщения MAX ([ADR-0071](../../../../../docs/adr/0071-soobscheniya-max.md)): включён ли продукт,
+   * партнёрский доступ провайдера и наценка владельца.
+   */
+  async messaging(): Promise<{
+    readonly enabled: boolean;
+    readonly partnerUrl: string;
+    readonly partnerToken: string;
+    readonly markupPercent: number;
+  }> {
+    const values = await this.values();
+    return {
+      enabled: this.flag(values, 'messaging.enabled'),
+      partnerUrl: this.text(values, 'messaging.provider_partner_url').replace(/\/+$/u, ''),
+      partnerToken: this.text(values, 'messaging.provider_partner_token'),
+      markupPercent: this.number(values, 'messages.markup_percent'),
+    };
+  }
+
   /** Автообновление узлов ([ADR-0068](../../../../../docs/adr/0068-avtoobnovlenie-uzlov.md)). */
   async nodes(): Promise<{ readonly autoUpdate: boolean }> {
     const values = await this.values();

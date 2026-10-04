@@ -42,6 +42,7 @@ const PUBLIC_VARIABLES = new Set([
   'S3_ENDPOINT',
   'S3_BUCKET',
   'S3_REGION',
+  'MESSENGER_PROVIDER',
   'RECORDINGS_STORAGE',
   'RECORDINGS_DIR',
   'RECORDING_LINK_TTL_SECONDS',
@@ -169,6 +170,11 @@ export const configSchema = z.object({
    * ([ADR-0063](../../../docs/adr/0063-hranilishche-zapisey-na-diske.md)). Остальные
    * `S3_*` читаются только при `s3`.
    */
+  /**
+   * Через кого ходит доступ к мессенджеру (ADR-0071). `simulated` — без внешних вызовов: для
+   * разработки и проверок; на боевой площадке остаётся `green_api`.
+   */
+  MESSENGER_PROVIDER: z.enum(['green_api', 'simulated']).default('green_api'),
   RECORDINGS_STORAGE: z.enum(['local', 's3']).default('local'),
   /** Каталог записей при `local`. На сервере — вне каталога выпуска, чтобы выкладка не стирала записи. */
   RECORDINGS_DIR: z.string().min(1, 'не может быть пустым').default('./data/recordings'),

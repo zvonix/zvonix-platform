@@ -591,3 +591,26 @@ export const PAYMENT_STATUS_TONE: Record<PaymentStatus, string> = {
   rejected: 'bg-crit-soft text-crit',
   cancelled: 'text-muted-foreground',
 };
+
+/** Состояние аккаунта MAX у партнёра (ADR-0071). */
+export const MESSENGER_ACCOUNT_STATUS_NAME: Record<string, string> = {
+  pending: 'Ждёт входа',
+  active: 'Работает',
+  unavailable: 'Недоступен',
+  retired: 'Списан',
+};
+
+export const MESSENGER_ACCOUNT_STATUS_MEANING: Record<string, string> = {
+  pending: 'Аккаунт заведён, QR-код ещё не отсканирован: сообщения отправлять нечем.',
+  active: 'Аккаунт вошёл в MAX и принимает сообщения.',
+  unavailable:
+    'Аккаунт вышел из MAX или нет связи: сообщения не отправляются. Войдите по QR-коду заново.',
+  retired: 'Аккаунт списан.',
+};
+
+/** Цвет состояния аккаунта MAX: работает — зелёный, ждёт входа — жёлтый, недоступен — красный. */
+export function messengerAccountTone(status: string): string {
+  if (status === 'active') return 'bg-ok-soft text-ok';
+  if (status === 'pending') return 'bg-warn-soft text-warn';
+  return 'bg-crit-soft text-crit';
+}

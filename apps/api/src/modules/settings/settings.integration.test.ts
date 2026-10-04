@@ -130,6 +130,7 @@ describe('чтение', () => {
     expect(settings.filter((row) => row.secret).map((row) => row.key)).toEqual([
       'mail.password',
       'captcha.server_key',
+      'messaging.provider_partner_token',
     ]);
   });
 });

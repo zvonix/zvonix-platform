@@ -98,6 +98,7 @@ describe('реестр фоновых задач', () => {
       'notifications.alerts',
       'notifications.payment-decisions',
       'notifications.partner-suspension',
+      'messaging.refresh-accounts',
       'servers.sample',
       'servers.purge-history',
       'auth-tokens.purge-expired',

@@ -15,6 +15,7 @@ import {
   InfraModule,
   LimitsModule,
   MailModule,
+  MessagingModule,
   NodesModule,
   NotificationsModule,
   RecordingsModule,
@@ -36,6 +37,8 @@ import { BackgroundTasks } from './tasks.js';
     IdentityModule,
     LimitsModule,
     MailModule,
+    // Сверка состояния аккаунтов MAX (ADR-0071).
+    MessagingModule,
     NodesModule,
     RecordingsModule,
     // Почта берёт узел, порт и пароль отсюда (ADR-0031).
