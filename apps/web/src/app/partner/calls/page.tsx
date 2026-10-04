@@ -274,7 +274,12 @@ function PartnerCalls() {
                       duration(call.duration_seconds)
                     )}
                     {recordings.has(call.id) && (
-                      <ListenButton recordingId={recordings.get(call.id) ?? ''} />
+                      <span className="block pt-1">
+                        <ListenButton
+                          recordingId={recordings.get(call.id) ?? ''}
+                          subtitle={`${call.destination} · ${moment(call.started_at)}`}
+                        />
+                      </span>
                     )}
                   </TableCell>
 

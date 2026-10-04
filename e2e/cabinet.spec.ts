@@ -302,6 +302,58 @@ test.describe('выплата партнёрам списком', () => {
   });
 });
 
+test.describe('прослушивание записи', () => {
+  test('«Прослушать» открывает окно с плеером, закрытие его убирает', async ({ page }) => {
+    const callId = '01a00000-0000-7000-8000-000000000001';
+    await signIn(page, PEOPLE.client);
+    // Ответы подменены: на стенде нет ни вызовов, ни записей, а проверяется поведение окна.
+    await page.route('**/api/client/calls*', (route) =>
+      route.fulfill({
+        json: {
+          total: 1,
+          calls: [
+            {
+              id: callId,
+              destination: '79230189196',
+              status: 'completed',
+              failure_reason: null,
+              duration_seconds: 32,
+              cost: '0.709',
+              started_at: new Date().toISOString(),
+              answered_at: null,
+              ended_at: null,
+              region: null,
+              channel: { id: 'c1', name: 'тест' },
+              operator: null,
+            },
+          ],
+        },
+      }),
+    );
+    await page.route('**/api/recordings/available*', (route) =>
+      route.fulfill({ json: { recordings: [{ call_id: callId, recording_id: 'r1' }] } }),
+    );
+    await page.route('**/api/recordings/r1/link', (route) =>
+      route.fulfill({
+        json: {
+          url: 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=',
+        },
+      }),
+    );
+
+    await page.goto('/my/calls');
+    await page.getByRole('button', { name: 'Прослушать' }).click();
+
+    const dialog = page.getByRole('dialog', { name: 'Запись разговора' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/79230189196/u)).toBeVisible();
+    await expect(dialog.locator('audio')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
+});
+
 test.describe('акт и выписка за месяц (ADR-0069)', () => {
   test('клиент видит акт, при печати меню скрыто, а лист остаётся', async ({ page }) => {
     await signIn(page, PEOPLE.client);

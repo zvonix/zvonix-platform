@@ -439,7 +439,14 @@ function CallRow({
         ) : (
           duration(call.duration_seconds)
         )}
-        {recordingId !== undefined && <ListenButton recordingId={recordingId} />}
+        {recordingId !== undefined && (
+          <span className="block pt-1">
+            <ListenButton
+              recordingId={recordingId}
+              subtitle={`${call.destination} · ${moment(call.started_at)}`}
+            />
+          </span>
+        )}
       </TableCell>
     </TableRow>
   );
