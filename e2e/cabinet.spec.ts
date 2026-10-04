@@ -302,6 +302,23 @@ test.describe('выплата партнёрам списком', () => {
   });
 });
 
+test.describe('шрифты со своего адреса', () => {
+  test('IBM Plex загружается с площадки, а не с чужого сервера', async ({ page }) => {
+    const foreign: string[] = [];
+    page.on('request', (request) => {
+      const host = new URL(request.url()).host;
+      if (host.includes('googleapis') || host.includes('gstatic')) foreign.push(request.url());
+    });
+    await page.goto('/login');
+    const loaded = await page.evaluate(async () => {
+      await document.fonts.load('16px "IBM Plex Sans"', 'Привет');
+      return document.fonts.check('16px "IBM Plex Sans"', 'Привет');
+    });
+    expect(loaded).toBe(true);
+    expect(foreign).toEqual([]);
+  });
+});
+
 test.describe('прослушивание записи', () => {
   test('«Прослушать» открывает окно с плеером, закрытие его убирает', async ({ page }) => {
     const callId = '01a00000-0000-7000-8000-000000000001';
