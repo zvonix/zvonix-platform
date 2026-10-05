@@ -63,8 +63,8 @@ export function PriceBands() {
   const listError = asApiError(list.error);
 
   return (
-    <section className="flex flex-col gap-2">
-      <div className="flex items-baseline gap-3">
+    <section className="flex max-w-[960px] flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <h2 className="font-semibold">Коридоры цен</h2>
         <span className="text-muted-foreground">
           границы — стоимость вызова в 60 секунд, а не цена за минуту
@@ -75,7 +75,6 @@ export function PriceBands() {
             title="Новый коридор цен"
             description="Границы — стоимость вызова в 60 секунд, а не цена за минуту."
             variant="outline"
-            className="ml-auto"
             open={open}
             onOpenChange={setOpen}
           >
@@ -90,7 +89,7 @@ export function PriceBands() {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="max-w-[760px] overflow-x-auto rounded-md border border-border bg-card">
+      <div className="overflow-x-auto rounded-md border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">

@@ -12,6 +12,7 @@ import {
   HandCoins,
   HardDrive,
   Inbox,
+  LayoutDashboard,
   MessageSquare,
   KeyRound,
   Plus,
@@ -32,6 +33,7 @@ import {
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { CommandPalette } from '@/components/command-palette';
 import { MobileMenuButton, MobileTabs, SideNav, type NavGroup } from '@/components/shell-nav';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { Button } from '@/components/ui/button';
@@ -96,6 +98,10 @@ function ReleaseVersion() {
 const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
   admin: [
     {
+      title: 'Главное',
+      items: [{ href: '/overview', label: 'Обзор', Icon: LayoutDashboard }],
+    },
+    {
       title: 'Участники',
       items: [
         { href: '/applications', label: 'Заявки', Icon: Inbox },
@@ -148,6 +154,10 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
    * чтения помечен `@Roles('admin')`, так что раздел открывался бы пустым отказом.
    */
   support: [
+    {
+      title: 'Главное',
+      items: [{ href: '/overview', label: 'Обзор', Icon: LayoutDashboard }],
+    },
     {
       title: 'Участники',
       items: [
@@ -404,6 +414,7 @@ export function ConsoleShell({
             {owned !== undefined && current !== undefined ? (
               <CabinetSwitch owned={owned} current={current} />
             ) : null}
+            <CommandPalette groups={groups} />
             <ThemeSwitch />
             <button
               type="button"
@@ -411,10 +422,11 @@ export function ConsoleShell({
                 logout.mutate();
               }}
               disabled={logout.isPending}
-              className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+              aria-label="Выйти"
+              className="flex min-h-8 min-w-8 items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
               <LogOut size={13} strokeWidth={2} aria-hidden />
-              Выйти
+              <span className="hidden sm:inline">Выйти</span>
             </button>
           </div>
         </header>

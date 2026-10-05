@@ -68,8 +68,8 @@ test.describe('вход', () => {
 
 test.describe('разводка по ролям', () => {
   const homes: [keyof typeof PEOPLE, RegExp][] = [
-    ['admin', /\/calls$/u],
-    ['support', /\/calls$/u],
+    ['admin', /\/overview$/u],
+    ['support', /\/overview$/u],
     ['client', /\/my\/calls$/u],
     ['partner', /\/partner\/calls$/u],
   ];
@@ -351,9 +351,31 @@ test.describe('проверка ключа провайдера сообщени
     page,
   }) => {
     await signIn(page, PEOPLE.admin);
-    await page.goto('/settings');
+    await page.goto('/settings?section=messaging');
     await page.getByRole('button', { name: 'Проверить ключ' }).click();
     await expect(page.getByText(/Ключ принят/u)).toBeVisible();
+  });
+});
+
+test.describe('настройки площадки по разделам', () => {
+  test('раздел выбирается слева и хранится в адресе; несохранённое помечено и не теряется при переходе', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/settings');
+    const nav = page.getByRole('navigation', { name: 'Разделы настроек' });
+    await expect(page.getByRole('heading', { name: 'Почта' })).toBeVisible();
+    // Другой раздел на экран не выводится: страница не растёт с каждой новой настройкой.
+    await expect(page.getByRole('heading', { name: 'Хранение' })).toHaveCount(0);
+
+    await page.getByLabel('Узел SMTP').fill('smtp.example.test');
+    await nav.getByRole('button', { name: 'Хранение' }).click();
+    await expect(page).toHaveURL(/section=retention/u);
+    await expect(page.getByRole('heading', { name: 'Хранение' })).toBeVisible();
+    await expect(nav.getByRole('img', { name: 'несохранённых: 1' })).toBeVisible();
+
+    await nav.getByRole('button', { name: 'Почта' }).click();
+    await expect(page.getByLabel('Узел SMTP')).toHaveValue('smtp.example.test');
   });
 });
 
@@ -463,6 +485,63 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
 
     await adminContext.close();
     await clientContext.close();
+  });
+});
+
+test.describe('обзор для сотрудников', () => {
+  test('администратор после входа попадает в «Обзор»: дела, показатели, графики; числа ведут дальше', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/overview$/u);
+    await expect(page.getByRole('heading', { name: 'Вызовы по дням' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Требует внимания' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Доля состоявшихся/u })).toBeVisible();
+
+    await page.getByRole('link', { name: /Заявки на рассмотрении/u }).click();
+    await expect(page).toHaveURL(/\/applications/u);
+  });
+});
+
+test.describe('меню и поиск по разделам', () => {
+  test('Ctrl+K открывает поиск, по запросу находит раздел и переходит в него', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/users');
+    // Страница должна ожить: обработчик клавиши вешается после загрузки кабинета.
+    await expect(page.getByRole('button', { name: 'Поиск по разделам' })).toBeVisible();
+    // Горячая клавиша слушается и на русской раскладке: она привязана к коду клавиши.
+    await page.keyboard.press('Control+KeyK');
+    const dialog = page.getByRole('dialog', { name: 'Поиск по разделам' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('combobox').fill('настрой пло');
+    await expect(dialog.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/settings$/u);
+
+    // Недавние: после перехода прежний раздел предлагается без ввода.
+    await page.keyboard.press('Control+KeyK');
+    await expect(page.getByRole('option', { name: /Учётные записи/u })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+  });
+
+  test('группа меню сворачивается, запоминается и разворачивается вновь', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/users');
+    const group = page.getByRole('button', { name: 'Деньги', exact: true });
+    const link = page.getByRole('link', { name: 'Платежи', exact: true });
+    await expect(link).toBeVisible();
+
+    await group.click();
+    await expect(group).toHaveAttribute('aria-expanded', 'false');
+    await expect(link).toBeHidden();
+
+    await page.reload();
+    await expect(link).toBeHidden();
+
+    await page.getByRole('button', { name: 'Деньги', exact: true }).click();
+    await expect(link).toBeVisible();
   });
 });
 

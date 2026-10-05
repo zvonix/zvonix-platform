@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
+import { useUrlState } from '@/lib/url-state';
 import { useSession } from '@/lib/session';
 import { SettingField, labelOf, type DraftValue, type SettingView } from './setting-field';
 
@@ -39,6 +40,7 @@ function SettingsForm() {
   const [draft, setDraft] = useState<Record<string, DraftValue>>({});
   const [invalid, setInvalid] = useState<ReadonlySet<string>>(new Set());
   const [savedAt, setSavedAt] = useState<string | undefined>(undefined);
+  const url = useUrlState();
 
   const settings = useQuery({
     queryKey: SETTINGS_QUERY_KEY,
@@ -110,6 +112,20 @@ function SettingsForm() {
   );
 
   const changed = Object.keys(draft);
+  const sections = [
+    ...groups.map((group) => ({
+      key: (group.prefixes[0] ?? '').replace('.', ''),
+      title: group.title,
+      settings: settings.data.settings.filter((setting) =>
+        group.prefixes.some((prefix) => setting.key.startsWith(prefix)),
+      ),
+      prefix: group.prefixes[0] ?? '',
+    })),
+    ...(rest.length > 0 ? [{ key: 'other', title: 'Прочее', settings: rest, prefix: '' }] : []),
+  ];
+  const section = sections.find((candidate) => candidate.key === url.get('section')) ?? sections[0];
+  const unsaved = (keys: readonly string[]): number =>
+    changed.filter((key) => keys.includes(key)).length;
   const secrets = new Set(
     settings.data.settings.filter((setting) => setting.secret).map((setting) => setting.key),
   );
@@ -135,32 +151,67 @@ function SettingsForm() {
 
   return (
     <div className="flex max-w-[1100px] flex-col gap-4">
-      <div className="grid gap-4 lg:grid-cols-2">
-        {groups.map((group) => (
-          <section
-            key={group.prefixes.join()}
-            className="rounded-lg border border-border bg-card p-4"
+      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+        {/* Разделы: на телефоне — список выбора, на компьютере — колонка слева. Выбранный раздел в адресе. */}
+        <label className="flex flex-col gap-1 lg:hidden">
+          <span className="text-muted-foreground">Раздел</span>
+          <select
+            value={section?.key}
+            onChange={(event) => {
+              url.set({ section: event.target.value });
+            }}
+            className="h-9 rounded-md border border-input bg-transparent px-2"
           >
-            <h2 className="pb-2 font-semibold">{group.title}</h2>
-            <div className="divide-y divide-border-soft">
-              {settings.data.settings
-                .filter((setting) =>
-                  group.prefixes.some((prefix) => setting.key.startsWith(prefix)),
-                )
-                .map(field)}
-            </div>
-            {group.prefixes[0] === 'mail.' && <TestLetter />}
-            {group.prefixes[0] === 'captcha.' && <CaptchaWarning />}
-            {group.prefixes[0] === 'messaging.' && <TestProviderKey />}
-          </section>
-        ))}
+            {sections.map((item) => (
+              <option key={item.key} value={item.key}>
+                {item.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <nav
+          aria-label="Разделы настроек"
+          className="sticky top-4 hidden h-fit flex-col gap-0.5 lg:flex"
+        >
+          {sections.map((item) => {
+            const marks = unsaved(item.settings.map((setting) => setting.key));
+            const current = item.key === section?.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                aria-current={current ? 'page' : undefined}
+                onClick={() => {
+                  url.set({ section: item.key });
+                }}
+                className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
+                  current
+                    ? 'bg-muted font-semibold'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+              >
+                {item.title}
+                {marks > 0 && (
+                  <span
+                    role="img"
+                    aria-label={`несохранённых: ${String(marks)}`}
+                    className="ml-auto size-2 rounded-full bg-warn"
+                  />
+                )}
+              </button>
+            );
+          })}
+        </nav>
 
-        {rest.length > 0 && (
-          <section className="rounded-lg border border-border bg-card p-4">
-            {/* Настройка, для которой здесь ещё нет группы. Лучше показать под ключом,
-                чем не показать вовсе: иначе новое поле пропадает молча. */}
-            <h2 className="pb-2 font-semibold">Прочее</h2>
-            <div className="divide-y divide-border-soft">{rest.map(field)}</div>
+        {section !== undefined && (
+          <section className="max-w-[760px] rounded-lg border border-border bg-card p-4">
+            <h2 className="pb-2 font-semibold">{section.title}</h2>
+            {/* Настройка, для которой ещё нет раздела, живёт в «Прочем»: лучше показать под ключом,
+                чем не показать вовсе — иначе новое поле пропадает молча. */}
+            <div className="divide-y divide-border-soft">{section.settings.map(field)}</div>
+            {section.prefix === 'mail.' && <TestLetter />}
+            {section.prefix === 'captcha.' && <CaptchaWarning />}
+            {section.prefix === 'messaging.' && <TestProviderKey />}
           </section>
         )}
       </div>
