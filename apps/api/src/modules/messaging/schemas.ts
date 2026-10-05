@@ -46,6 +46,20 @@ export const updateSmppSchema = z
     message: 'Нечего менять',
   });
 
+/** Обзор для сотрудников: число суток и смещение часового пояса браузера (минуты к востоку от UTC). */
+export const messagesOverviewQuerySchema = z.object({
+  days: z
+    .string()
+    .optional()
+    .transform((raw) => Number(raw ?? '14'))
+    .pipe(z.number().int().min(1).max(90)),
+  offset: z
+    .string()
+    .optional()
+    .transform((raw) => Number(raw ?? '0'))
+    .pipe(z.number().int().min(-720).max(840)),
+});
+
 /** Пустое значение параметра — «любое»: форма отбора шлёт все свои поля. */
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === '' ? undefined : value), schema.optional());

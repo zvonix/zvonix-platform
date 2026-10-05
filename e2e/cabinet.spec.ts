@@ -504,6 +504,36 @@ test.describe('обзор для сотрудников', () => {
   });
 });
 
+test.describe('сообщения в «Обзоре»', () => {
+  test('блок появляется, когда сообщения были: показатели за 7 суток и график; без них блока нет', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/overview');
+    await expect(page.getByRole('heading', { name: 'Вызовы по дням' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Сообщения MAX' })).toHaveCount(0);
+
+    // Ответ подменён: на стенде сообщений нет, а проверяется поведение блока.
+    const series = Array.from({ length: 14 }, (_unused, index) => ({
+      day: `2026-10-${String(index + 1).padStart(2, '0')}`,
+      messages: index >= 7 ? 10 : 5,
+      delivered: index >= 7 ? 8 : 5,
+      failed: index >= 7 ? 2 : 0,
+      revenue: index >= 7 ? '5.4' : '2.7',
+      margin: index >= 7 ? '0.9' : '0.45',
+    }));
+    await page.route('**/api/messages/overview*', (route) =>
+      route.fulfill({ json: { days: 14, series } }),
+    );
+    await page.reload();
+    const block = page.getByRole('region', { name: 'Сообщения MAX' });
+    await expect(block).toBeVisible();
+    await expect(block.getByRole('link', { name: /Сообщений/u })).toContainText('70');
+    await expect(block.getByRole('link', { name: /Не отправлено/u })).toContainText('14');
+    await expect(block.getByRole('img', { name: 'Сообщения по дням' })).toBeVisible();
+  });
+});
+
 test.describe('меню и поиск по разделам', () => {
   test('Ctrl+K открывает поиск, по запросу находит раздел и переходит в него', async ({ page }) => {
     await signIn(page, PEOPLE.admin);

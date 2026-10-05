@@ -179,6 +179,8 @@ function Overview() {
         </section>
       </div>
 
+      <MessagesBlock />
+
       <p className="text-muted-foreground">
         Подробнее — в{' '}
         <Link href="/reports" className="underline underline-offset-2 hover:text-foreground">
@@ -197,6 +199,7 @@ function Kpi({
   value,
   delta,
   points = false,
+  inverse = false,
 }: {
   href: string;
   label: string;
@@ -204,6 +207,8 @@ function Kpi({
   /** Изменение к предыдущим суткам; для долей — в процентных пунктах. */
   delta: number | undefined;
   points?: boolean;
+  /** Рост — плохо (например, «не отправлено»): цвет меняется местами. */
+  inverse?: boolean;
 }) {
   const sign = delta === undefined ? '' : delta > 0 ? '+' : '';
   return (
@@ -217,7 +222,7 @@ function Kpi({
         className={`text-xs ${
           delta === undefined || Math.abs(delta) < 0.05
             ? 'text-faint'
-            : delta > 0
+            : delta > 0 !== inverse
               ? 'text-ok'
               : 'text-crit'
         }`}
@@ -266,5 +271,103 @@ function Attention({
         {count !== undefined && !busy && <span className="text-muted-foreground">{calm}</span>}
       </span>
     </Link>
+  );
+}
+
+interface MessagesDay {
+  readonly day: string;
+  readonly messages: number;
+  readonly delivered: number;
+  readonly failed: number;
+  readonly revenue: string;
+  readonly margin: string;
+}
+
+/**
+ * Сообщения MAX: те же 7 суток к предыдущим 7 и график по дням. Блока нет, пока сообщений не было вовсе:
+ * пустые плитки у выключенного продукта только шумят.
+ */
+function MessagesBlock() {
+  const live = useLiveInterval();
+  const overview = useQuery({
+    queryKey: ['overview', 'messages'],
+    queryFn: () =>
+      request<{ series: MessagesDay[] }>(
+        `/messages/overview?days=${String(SPAN * 2)}&offset=${String(-new Date().getTimezoneOffset())}`,
+      ),
+    refetchInterval: live,
+  });
+
+  const series = overview.data?.series ?? [];
+  if (series.every((row) => row.messages === 0)) return null;
+
+  const total = (rows: readonly MessagesDay[]) =>
+    rows.reduce(
+      (all, row) => ({
+        messages: all.messages + row.messages,
+        delivered: all.delivered + row.delivered,
+        failed: all.failed + row.failed,
+        revenue: all.revenue + asNumber(row.revenue),
+        margin: all.margin + asNumber(row.margin),
+      }),
+      { messages: 0, delivered: 0, failed: 0, revenue: 0, margin: 0 },
+    );
+  const now = total(series.slice(-SPAN));
+  const before = total(series.slice(-SPAN * 2, -SPAN));
+  const delivery = now.messages === 0 ? undefined : (now.delivered / now.messages) * 100;
+  const deliveryBefore =
+    before.messages === 0 ? undefined : (before.delivered / before.messages) * 100;
+
+  return (
+    <section aria-label="Сообщения MAX" className="flex flex-col gap-2">
+      <h2 className="font-semibold">Сообщения MAX за {String(SPAN)} суток</h2>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Kpi
+          href="/messaging"
+          label="Сообщений"
+          value={String(now.messages)}
+          delta={change(now.messages, before.messages)}
+        />
+        <Kpi
+          href="/messaging"
+          label="Доставлено"
+          value={delivery === undefined ? '—' : `${delivery.toFixed(1).replace('.', ',')} %`}
+          delta={
+            delivery === undefined || deliveryBefore === undefined
+              ? undefined
+              : delivery - deliveryBefore
+          }
+          points
+        />
+        <Kpi
+          href="/messaging"
+          label="Не отправлено"
+          value={String(now.failed)}
+          delta={change(now.failed, before.failed)}
+          inverse
+        />
+        <Kpi
+          href="/messaging"
+          label="Списано с клиентов"
+          value={rubles(now.revenue)}
+          delta={change(now.revenue, before.revenue)}
+        />
+        <Kpi
+          href="/messaging"
+          label="Наш доход"
+          value={rubles(now.margin)}
+          delta={change(now.margin, before.margin)}
+        />
+      </div>
+      <BarChart
+        bars={series.map((row) => ({
+          label: shortDay(row.day),
+          value: row.messages,
+          title: `${shortDay(row.day)}: ${String(row.messages)} ${plural(row.messages, ['сообщение', 'сообщения', 'сообщений'])}`,
+        }))}
+        peak={`За ${String(SPAN * 2)} суток: ${String(now.messages + before.messages)} ${plural(now.messages + before.messages, ['сообщение', 'сообщения', 'сообщений'])}`}
+        summary="Сообщения по дням"
+      />
+    </section>
   );
 }

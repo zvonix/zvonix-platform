@@ -19,7 +19,12 @@ import type { MachinePrincipal } from '../machine/machine.service.js';
 import type { MessageRow } from './messages.repository.js';
 import { MessagesService } from './messages.service.js';
 import { MessagingService } from './messaging.service.js';
-import { messagesQuerySchema, providerWebhookSchema, sendMessageSchema } from './schemas.js';
+import {
+  messagesOverviewQuerySchema,
+  messagesQuerySchema,
+  providerWebhookSchema,
+  sendMessageSchema,
+} from './schemas.js';
 
 const withoutText = ({
   text: _text,
@@ -179,6 +184,27 @@ const clientOf = (machine: MachinePrincipal): Id<'client'> => parseId(machine.ow
 @Controller()
 export class StaffMessagesController {
   constructor(private readonly messages: MessagesService) {}
+
+  /** Показатели по суткам для «Обзора»: принято, доставлено, не отправлено, деньги без возвращённых. */
+  @Roles('admin', 'support')
+  @Get('messages/overview')
+  async overview(
+    @Query(zodQuery(messagesOverviewQuerySchema))
+    query: z.infer<typeof messagesOverviewQuerySchema>,
+  ) {
+    const series = await this.messages.overview(query.days, query.offset);
+    return {
+      days: query.days,
+      series: series.map((row) => ({
+        day: row.day,
+        messages: row.messages,
+        delivered: row.delivered,
+        failed: row.failed,
+        revenue: Money.format(row.revenue),
+        margin: Money.format(row.margin),
+      })),
+    };
+  }
 
   @Roles('admin', 'support')
   @Get('messages')

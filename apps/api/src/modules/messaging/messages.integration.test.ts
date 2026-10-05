@@ -565,3 +565,40 @@ describe('наценка правилами (ADR-0073)', () => {
     expect((await addRule({ product: 'другое', percentBasisPoints: 1 })).statusCode).toBe(400);
   });
 });
+
+describe('обзор для сотрудников', () => {
+  it('сутки с нулями, принято/доставлено/не отправлено; деньги без возвращённых; клиенту закрыто', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    await send(client.token, { to: '79005550011', text: 'раз' });
+    await send(client.token, { to: '79005550000', text: 'нет MAX' });
+    await api().get(MessagesService).dispatchDue(new Date());
+
+    const overview = await api().inject({
+      method: 'GET',
+      url: '/messages/overview?days=3&offset=0',
+      headers: bearer(adminToken),
+    });
+    expect(overview.statusCode).toBe(200);
+    const body = overview.json<{
+      series: {
+        day: string;
+        messages: number;
+        failed: number;
+        revenue: string;
+        margin: string;
+      }[];
+    }>();
+    expect(body.series).toHaveLength(3);
+    const today = body.series.at(-1);
+    expect(today).toMatchObject({ messages: 2, failed: 1, revenue: '0.54', margin: '0.09' });
+    expect(body.series[0]).toMatchObject({ messages: 0, revenue: '0' });
+
+    const denied = await api().inject({
+      method: 'GET',
+      url: '/messages/overview',
+      headers: bearer(client.token),
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+});

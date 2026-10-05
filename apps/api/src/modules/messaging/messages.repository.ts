@@ -329,6 +329,46 @@ export class MessagesRepository {
       .where(and(eq(messages.id, id), isNull(messages.receiptSentAt)));
   }
 
+  /**
+   * Сообщения по суткам с `since`: сколько принято, доставлено, не отправлено и деньги (без возвращённых).
+   * Сутки считаются по часам человека (`offsetMinutes` — к востоку от UTC), как в сводке звонков.
+   */
+  async dailyCounts(
+    since: Date,
+    offsetMinutes: number,
+  ): Promise<
+    {
+      day: string;
+      messages: number;
+      delivered: number;
+      failed: number;
+      revenue: bigint;
+      margin: bigint;
+    }[]
+  > {
+    const result = await this.database.db.execute(sql`
+      select to_char(created_at + make_interval(mins => ${offsetMinutes}), 'YYYY-MM-DD') as day,
+             count(*)::int as messages,
+             (count(*) filter (where status in ('delivered', 'read')))::int as delivered,
+             (count(*) filter (where status = 'failed'))::int as failed,
+             coalesce(sum(client_amount) filter (where status <> 'failed'), 0)::text as revenue,
+             coalesce(sum(commission_amount) filter (where status <> 'failed'), 0)::text as margin
+        from messages
+       where created_at >= ${since}
+       group by 1
+       order by 1`);
+    return (
+      result.rows as {
+        day: string;
+        messages: number;
+        delivered: number;
+        failed: number;
+        revenue: string;
+        margin: string;
+      }[]
+    ).map((row) => ({ ...row, revenue: BigInt(row.revenue), margin: BigInt(row.margin) }));
+  }
+
   /** Стирает текст сообщений старше срока; строка с суммами остаётся. Возвращает, сколько стёрто. */
   async purgeTexts(before: Date): Promise<number> {
     const erased = await this.database.db
