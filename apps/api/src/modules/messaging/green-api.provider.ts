@@ -14,6 +14,7 @@ import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { SettingsService } from '../settings/settings.service.js';
 import {
   RecipientRejectedError,
+  type AccessCheck,
   type MessageProvider,
   type ProviderAccountRef,
   type ProviderState,
@@ -44,6 +45,23 @@ export class GreenApiMessageProvider implements MessageProvider {
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('messenger-provider');
+  }
+
+  async checkAccess(): Promise<AccessCheck> {
+    const { partnerUrl, partnerToken } = await this.settings.messaging();
+    if (partnerToken === '') return { state: 'no_key' };
+    try {
+      const body = await this.request<unknown>(
+        'GET',
+        `${partnerUrl}/partner/getInstances/${encodeURIComponent(partnerToken)}`,
+      );
+      return { state: 'ok', instances: Array.isArray(body) ? body.length : 0 };
+    } catch (cause) {
+      this.unavailable(cause);
+      const refused =
+        cause instanceof ProviderHttpError && cause.status >= 400 && cause.status < 500;
+      return { state: refused ? 'rejected' : 'unreachable' };
+    }
   }
 
   async createAccount(): Promise<ProviderAccountRef> {

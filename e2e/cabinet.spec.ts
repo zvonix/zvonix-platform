@@ -346,6 +346,17 @@ test.describe('сообщения MAX (ADR-0071)', () => {
   });
 });
 
+test.describe('проверка ключа провайдера сообщений', () => {
+  test('кнопка «Проверить ключ» в настройках отвечает по-русски и без имени провайдера', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/settings');
+    await page.getByRole('button', { name: 'Проверить ключ' }).click();
+    await expect(page.getByText(/Ключ принят/u)).toBeVisible();
+  });
+});
+
 test.describe('сообщения MAX у клиента (ADR-0071)', () => {
   test('клиент видит форму и журнал; без рабочего аккаунта сказано, что отправлять некуда', async ({
     browser,

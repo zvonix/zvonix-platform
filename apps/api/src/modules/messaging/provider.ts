@@ -29,8 +29,19 @@ export class RecipientRejectedError extends Error {
   override readonly name = 'RecipientRejectedError';
 }
 
+/**
+ * Результат проверки партнёрского ключа: `ok` — ключ принят (`instances` — сколько аккаунтов уже заведено),
+ * `no_key` — ключ не задан, `rejected` — провайдер ключ не принял, `unreachable` — нет связи с провайдером.
+ */
+export type AccessCheck =
+  | { readonly state: 'ok'; readonly instances: number }
+  | { readonly state: 'no_key' | 'rejected' | 'unreachable' };
+
 export interface MessageProvider {
   readonly id: MessengerProviderId;
+
+  /** Проверяет сохранённый партнёрский ключ, ничего не создавая и не тратя денег. */
+  checkAccess(): Promise<AccessCheck>;
 
   /** Заводит инстанс у провайдера (оплачивает площадка). Без партнёрского ключа — отказ. */
   createAccount(): Promise<ProviderAccountRef>;
