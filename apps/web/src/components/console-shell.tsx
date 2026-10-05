@@ -32,6 +32,7 @@ import {
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { CommandPalette } from '@/components/command-palette';
 import { MobileMenuButton, MobileTabs, SideNav, type NavGroup } from '@/components/shell-nav';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { Button } from '@/components/ui/button';
@@ -404,6 +405,7 @@ export function ConsoleShell({
             {owned !== undefined && current !== undefined ? (
               <CabinetSwitch owned={owned} current={current} />
             ) : null}
+            <CommandPalette groups={groups} />
             <ThemeSwitch />
             <button
               type="button"
@@ -411,10 +413,11 @@ export function ConsoleShell({
                 logout.mutate();
               }}
               disabled={logout.isPending}
-              className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+              aria-label="Выйти"
+              className="flex min-h-8 min-w-8 items-center justify-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
               <LogOut size={13} strokeWidth={2} aria-hidden />
-              Выйти
+              <span className="hidden sm:inline">Выйти</span>
             </button>
           </div>
         </header>

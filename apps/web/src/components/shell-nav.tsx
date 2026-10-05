@@ -1,6 +1,6 @@
 'use client';
 
-import { Menu, PanelLeftClose, PanelLeftOpen, X, type LucideIcon } from 'lucide-react';
+import { ChevronDown, Menu, PanelLeftClose, PanelLeftOpen, X, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -60,21 +60,71 @@ function useCollapsed(): [boolean, (next: boolean) => void] {
 }
 
 /** Раздел открыт: сам адрес или страница внутри него, например карточка `/partners/<id>`. */
-function isCurrent(pathname: string, href: string): boolean {
+export function isCurrent(pathname: string, href: string): boolean {
   const path = href.split('?')[0] ?? href;
   return pathname === path || pathname.startsWith(`${path}/`);
+}
+
+const CLOSED_GROUPS_KEY = 'zvonix.nav.closed';
+
+/**
+ * Какие группы меню свёрнуты. Как и свёрнутость колонки, это удобство одного человека на одной машине:
+ * хранится в браузере, а при закрытом хранилище группы просто остаются развёрнутыми.
+ */
+function useClosedGroups(): [ReadonlySet<string>, (title: string, closed: boolean) => void] {
+  const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(CLOSED_GROUPS_KEY);
+      const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        setClosed(new Set(parsed.filter((title): title is string => typeof title === 'string')));
+      }
+    } catch {
+      // Хранилище закрыто или в нём мусор — все группы развёрнуты.
+    }
+  }, []);
+
+  const change = (title: string, shut: boolean): void => {
+    setClosed((previous) => {
+      const next = new Set(previous);
+      if (shut) next.add(title);
+      else next.delete(title);
+      try {
+        window.localStorage.setItem(CLOSED_GROUPS_KEY, JSON.stringify([...next]));
+      } catch {
+        // Не запомнится между заходами — группа всё равно свернётся сейчас.
+      }
+      return next;
+    });
+  };
+
+  return [closed, change];
 }
 
 export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; footer: ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useCollapsed();
+  const [closedGroups, setGroupClosed] = useClosedGroups();
+
+  // Переход в раздел свёрнутой группы разворачивает её: человек должен видеть, где он.
+  useEffect(() => {
+    for (const group of groups) {
+      if (group.items.some((item) => isCurrent(pathname, item.href))) {
+        setGroupClosed(group.title, false);
+      }
+    }
+    // Только смена адреса: иначе группа не сворачивалась бы вручную, пока открыта её страница.
+  }, [pathname]);
 
   return (
     <nav
       aria-label="Разделы"
       // Свёрнутое не прокручивается: подсказка выходит за правый край колонки, а прокрутка
       // по одной оси обрезает и другую. Двенадцать значков в высоту экрана помещаются.
-      className={`sticky top-0 hidden h-dvh flex-col gap-3 bg-rail py-3 text-rail-ink md:flex print:hidden ${
+      // Ширина меняется плавно; у тех, кто просил меньше движения, — сразу.
+      className={`sticky top-0 hidden h-dvh flex-col gap-2 bg-rail py-3 text-rail-ink transition-[width] duration-150 ease-out motion-reduce:transition-none md:flex print:hidden ${
         collapsed ? 'w-16 px-2' : 'w-[232px] overflow-y-auto px-2'
       }`}
     >
@@ -89,7 +139,7 @@ export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; foote
           }}
           aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
           aria-expanded={!collapsed}
-          className={`flex size-8 items-center justify-center rounded-md text-rail-ink-dim hover:bg-rail-active hover:text-white focus-visible:outline-2 focus-visible:outline-ring ${
+          className={`flex size-8 items-center justify-center rounded-md text-rail-ink-dim transition-colors hover:bg-rail-active hover:text-white focus-visible:outline-2 focus-visible:outline-ring ${
             collapsed ? '' : 'ml-auto'
           }`}
         >
@@ -101,46 +151,85 @@ export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; foote
         </button>
       </div>
 
-      {groups.map((group, index) => (
-        <div
-          key={group.title}
-          className={`flex flex-col gap-0.5 ${
-            collapsed && index > 0 ? 'border-t border-rail-active pt-3' : ''
-          }`}
-        >
-          {!collapsed && (
-            <div className="px-2 pb-1 text-[10px] font-semibold tracking-widest text-rail-ink-dim uppercase">
-              {group.title}
-            </div>
-          )}
-          {group.items.map((item) => {
-            const current = isCurrent(pathname, item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={current ? 'page' : undefined}
-                aria-label={collapsed ? item.label : undefined}
-                className={`group relative flex items-center gap-2 rounded-md py-1.5 focus-visible:outline-2 focus-visible:outline-ring ${
-                  collapsed ? 'justify-center px-0' : 'px-2'
-                } ${current ? 'bg-rail-active text-white' : 'hover:bg-rail-active hover:text-white'}`}
+      {groups.map((group, index) => {
+        // На узкой колонке значков группы не сворачиваются: там и так по одному значку на раздел.
+        const open = collapsed || !closedGroups.has(group.title);
+        const hasCurrent = group.items.some((item) => isCurrent(pathname, item.href));
+        const listId = `nav-group-${String(index)}`;
+        return (
+          <div
+            key={group.title}
+            className={`flex flex-col gap-0.5 ${
+              collapsed && index > 0 ? 'border-t border-rail-active pt-3' : ''
+            }`}
+          >
+            {!collapsed && (
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={listId}
+                onClick={() => {
+                  setGroupClosed(group.title, open);
+                }}
+                className="flex items-center gap-1 rounded-md px-2 pt-1.5 pb-1 text-left text-[10px] font-semibold tracking-widest text-rail-ink-dim uppercase transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-ring"
               >
-                <item.Icon size={collapsed ? 17 : 14} strokeWidth={2} aria-hidden />
-                {collapsed ? (
+                <ChevronDown
+                  size={11}
+                  aria-hidden
+                  className={`transition-transform duration-150 motion-reduce:transition-none ${
+                    open ? '' : '-rotate-90'
+                  }`}
+                />
+                {group.title}
+                {!open && hasCurrent && (
                   <span
-                    aria-hidden
-                    className="pointer-events-none absolute top-1/2 left-full z-40 ml-2 hidden -translate-y-1/2 rounded-md border border-border bg-card px-2 py-1 whitespace-nowrap text-card-foreground shadow-md group-hover:block group-focus-visible:block"
-                  >
-                    {item.label}
-                  </span>
-                ) : (
-                  item.label
+                    role="img"
+                    aria-label="здесь открытый раздел"
+                    className="ml-auto size-1.5 rounded-full bg-primary"
+                  />
                 )}
-              </Link>
-            );
-          })}
-        </div>
-      ))}
+              </button>
+            )}
+            <div
+              id={listId}
+              // Свёрнутая группа не получает фокус с клавиатуры: `inert` убирает её из обхода.
+              inert={!open}
+              className={`grid transition-[grid-template-rows,visibility] duration-150 ease-out motion-reduce:transition-none ${
+                open ? 'grid-rows-[1fr]' : 'invisible grid-rows-[0fr]'
+              }`}
+            >
+              <div className={`flex flex-col gap-0.5 ${collapsed ? '' : 'overflow-hidden'}`}>
+                {group.items.map((item) => {
+                  const current = isCurrent(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      aria-current={current ? 'page' : undefined}
+                      aria-label={collapsed ? item.label : undefined}
+                      className={`group relative flex items-center gap-2 rounded-md py-1.5 transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
+                        collapsed ? 'justify-center px-0' : 'px-2'
+                      } ${current ? 'bg-rail-active text-white' : 'hover:bg-rail-active hover:text-white'}`}
+                    >
+                      <item.Icon size={collapsed ? 17 : 14} strokeWidth={2} aria-hidden />
+                      {collapsed ? (
+                        <span
+                          aria-hidden
+                          className="pointer-events-none absolute top-1/2 left-full z-40 ml-2 hidden -translate-y-1/2 rounded-md border border-border bg-card px-2 py-1 whitespace-nowrap text-card-foreground shadow-md group-hover:block group-focus-visible:block"
+                        >
+                          {item.label}
+                        </span>
+                      ) : (
+                        item.label
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })}
 
       {!collapsed && (
         <div className="mt-auto px-2 pt-2 text-[11px] text-rail-ink-dim">{footer}</div>
@@ -171,8 +260,14 @@ function AllSections({
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-foreground/40" />
-        <DialogPrimitive.Content className="fixed inset-x-0 bottom-0 z-50 flex max-h-[80dvh] flex-col gap-3 overflow-y-auto rounded-t-2xl border-t border-border bg-card px-4 pt-3 pb-6 text-card-foreground shadow-lg">
+        <DialogPrimitive.Overlay
+          data-slot="sheet-overlay"
+          className="fixed inset-0 z-50 bg-foreground/40"
+        />
+        <DialogPrimitive.Content
+          data-slot="sheet-content"
+          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[80dvh] flex-col gap-3 overflow-y-auto rounded-t-2xl border-t border-border bg-card px-4 pt-3 pb-6 text-card-foreground shadow-lg"
+        >
           <div className="flex items-center">
             <DialogPrimitive.Title className="text-base font-semibold">
               Все разделы

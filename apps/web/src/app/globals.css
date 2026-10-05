@@ -247,3 +247,51 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
+
+/*
+ * Движение — лёгкое и служебное (DESIGN.md, «Чем достигается ощущение серьёзности»): окна и подложки
+ * появляются за 150 мс, нижний лист телефона выезжает. Свойства `scale` и `translate` не пересекаются
+ * с `transform`, которым окна центруются. «Уменьшить движение» в системе убирает всё.
+ */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    translate: 0 24px;
+  }
+}
+
+[data-slot$='-overlay'][data-state='open'] {
+  animation: overlay-in 150ms ease-out;
+}
+
+[data-slot$='-content'][data-state='open']:not([data-slot='sheet-content']) {
+  animation: pop-in 150ms ease-out;
+}
+
+[data-slot='sheet-content'][data-state='open'] {
+  animation: sheet-in 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
