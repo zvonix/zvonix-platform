@@ -245,6 +245,8 @@ sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'zvonix'" 
 
 step "Окружение площадки"
 ADDRESS_CHANGED=no
+# Порт SMPP для клиентов (ADR-0072). Своё значение — SMPP_PORT=… в вызове; 0 — выключить.
+SMPP_PORT="${SMPP_PORT:-2775}"
 if [ ! -s "$ENV_FILE" ]; then
   (
     umask 027
@@ -264,6 +266,8 @@ REDIS_URL=redis://127.0.0.1:6379
 # nginx стоит на этой же машине: X-Forwarded-For принимается только от него.
 TRUSTED_PROXIES=loopback
 SECRET_KEY=${SECRET_KEY}
+# SMPP для клиентов (ADR-0072): порт слушает API, 0 — выключено. Шифрованный порт — SMPP_TLS_*.
+SMPP_PORT=${SMPP_PORT}
 # Корневой сертификат Минцифры — в системном хранилище (ADR-0032).
 NODE_OPTIONS=--use-system-ca
 EOF
@@ -286,6 +290,12 @@ else
     echo "адрес кабинета: ${current} → ${WEB_ADDRESS}"
     ADDRESS_CHANGED=yes
   fi
+fi
+# Готовое окружение без порта SMPP получает его, а заданное не меняется: повтор подготовки
+# не должен перебивать то, что владелец поставил руками.
+if ! grep -q '^SMPP_PORT=' "$ENV_FILE"; then
+  printf '# SMPP для клиентов (ADR-0072): порт слушает API, 0 — выключено.\nSMPP_PORT=%s\n' "$SMPP_PORT" >>"$ENV_FILE"
+  echo "дописан SMPP_PORT=${SMPP_PORT}"
 fi
 chown root:zvonix "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
@@ -353,6 +363,11 @@ ufw allow "${RTP_START}:${RTP_END}/udp" comment 'RTP' >/dev/null
 if [ "$PUBLIC_SITE" = yes ]; then
   ufw allow 80/tcp comment 'сайт' >/dev/null
   ufw allow 443/tcp comment 'сайт' >/dev/null
+  # Порт SMPP: тот, что записан в окружении (владелец мог поменять его руками); 0 — не открываем.
+  smpp_port="$(sed -n 's/^SMPP_PORT=//p' "$ENV_FILE" | tail -1)"
+  if [[ "${smpp_port:-0}" =~ ^[0-9]+$ ]] && [ "${smpp_port:-0}" -gt 0 ]; then
+    ufw allow "${smpp_port}/tcp" comment 'SMPP' >/dev/null
+  fi
 fi
 ufw --force enable >/dev/null
 ufw status verbose
