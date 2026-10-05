@@ -133,6 +133,33 @@ export class MessagingController {
   }
 
   /** Ручное заведение: данные готового инстанса. Ключа в ответе нет. */
+  /**
+   * Проверка сохранённого партнёрского ключа провайдера: что ключ принят и сколько аккаунтов заведено.
+   * Ничего не создаёт и денег не тратит; провайдер в ответе не называется.
+   */
+  @Roles('admin')
+  @HttpCode(200)
+  @Post('messenger/provider/test')
+  async testProvider(): Promise<{ ok: boolean; message: string }> {
+    const result = await this.messaging.checkProvider();
+    switch (result.state) {
+      case 'ok':
+        return {
+          ok: true,
+          message: `Ключ принят. Аккаунтов у провайдера уже заведено: ${String(result.instances)}.`,
+        };
+      case 'no_key':
+        return { ok: false, message: 'Ключ не задан: впишите его и сохраните настройки.' };
+      case 'rejected':
+        return {
+          ok: false,
+          message: 'Провайдер ключ не принял. Проверьте ключ и адрес, сохраните настройки.',
+        };
+      case 'unreachable':
+        return { ok: false, message: 'Нет связи с провайдером. Повторите позже.' };
+    }
+  }
+
   @Roles('admin')
   @Post('messenger/accounts')
   async register(

@@ -9,6 +9,7 @@ import { Injectable } from '@nestjs/common';
 import type { MessengerProviderId } from '@zvonix/shared';
 import {
   RecipientRejectedError,
+  type AccessCheck,
   type MessageProvider,
   type ProviderAccountRef,
   type ProviderState,
@@ -42,6 +43,10 @@ const TEMPORARY_FAILURE = /9999$/u;
 @Injectable()
 export class SimulatedMessageProvider implements MessageProvider {
   readonly id: MessengerProviderId = 'simulated';
+
+  checkAccess(): Promise<AccessCheck> {
+    return Promise.resolve({ state: 'ok', instances: states.size });
+  }
 
   createAccount(): Promise<ProviderAccountRef> {
     const instanceId = `sim-${randomUUID().slice(0, 8)}`;

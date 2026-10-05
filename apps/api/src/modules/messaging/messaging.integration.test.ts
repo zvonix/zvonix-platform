@@ -120,6 +120,27 @@ afterAll(async () => {
   await app?.close();
 });
 
+describe('проверка ключа провайдера', () => {
+  it('администратор получает ответ о ключе, остальные роли — 403, провайдер не называется', async () => {
+    const ok = await api().inject({
+      method: 'POST',
+      url: '/messenger/provider/test',
+      headers: bearer(adminToken),
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ ok: true });
+    expect(ok.body).not.toMatch(/green/iu);
+
+    const partner = await verifiedPartner();
+    const denied = await api().inject({
+      method: 'POST',
+      url: '/messenger/provider/test',
+      headers: bearer(partner.token),
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+});
+
 describe('заведение аккаунта', () => {
   it('пока продукт выключен, аккаунт не заводится и раздел сообщает об этом', async () => {
     const partner = await verifiedPartner();

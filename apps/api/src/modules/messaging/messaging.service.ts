@@ -31,6 +31,7 @@ import { SettingsService } from '../settings/settings.service.js';
 import { MessagingRepository, type MessengerAccountRow } from './messaging.repository.js';
 import {
   MESSAGE_PROVIDER,
+  type AccessCheck,
   type MessageProvider,
   type ProviderAccountRef,
   type ProviderState,
@@ -119,6 +120,11 @@ export class MessagingService {
         reason: cause instanceof Error ? cause.name : 'unknown',
       });
     }
+  }
+
+  /** Проверка партнёрского ключа провайдера (кнопка в настройках). Ничего не создаёт. */
+  checkProvider(): Promise<AccessCheck> {
+    return this.provider.checkAccess();
   }
 
   async isEnabled(): Promise<boolean> {

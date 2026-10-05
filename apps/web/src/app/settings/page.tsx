@@ -147,6 +147,7 @@ function SettingsForm() {
             </div>
             {group.prefix === 'mail.' && <TestLetter />}
             {group.prefix === 'captcha.' && <CaptchaWarning />}
+            {group.prefix === 'messaging.' && <TestProviderKey />}
           </section>
         ))}
 
@@ -287,6 +288,42 @@ function TestLetter() {
       {send.data?.delivered === false && (
         <p role="alert" className="text-crit">
           Сервер отказал: {send.data.error}
+        </p>
+      )}
+      {failure !== undefined && <ErrorNote error={failure} />}
+    </div>
+  );
+}
+
+/**
+ * Проверка партнёрского ключа провайдера сообщений: ключ принят или нет и сколько аккаунтов заведено.
+ * Проверяется сохранённое, а не набранное в полях, как и пробное письмо.
+ */
+function TestProviderKey() {
+  const check = useMutation({
+    mutationFn: () =>
+      request<{ ok: boolean; message: string }>('/messenger/provider/test', { method: 'POST' }),
+  });
+  const failure = asApiError(check.error);
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-border-soft pt-3">
+      <div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={check.isPending}
+          onClick={() => {
+            check.mutate();
+          }}
+        >
+          {check.isPending ? 'Проверяем…' : 'Проверить ключ'}
+        </Button>
+      </div>
+      {check.data?.ok === true && <p className="text-ok">{check.data.message}</p>}
+      {check.data?.ok === false && (
+        <p role="alert" className="text-crit">
+          {check.data.message}
         </p>
       )}
       {failure !== undefined && <ErrorNote error={failure} />}
