@@ -80,5 +80,18 @@ export const MESSAGE_MAX_ATTEMPTS = 5;
 export const MESSAGE_CHANNELS = ['api', 'smpp'] as const;
 export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
 
+/**
+ * Что наценяют правила `commission_rules` ([ADR-0073](../../../docs/adr/0073-nacenka-na-soobscheniya-pravilami.md)):
+ * вызовы или сообщения MAX. Правила одни и те же, различается единица («за вызов» / «за сообщение»).
+ */
+export const COMMISSION_PRODUCTS = ['call', 'message'] as const;
+export type CommissionProduct = (typeof COMMISSION_PRODUCTS)[number];
+
+/** Предел доли наценки в десятитысячных: у вызовов 100 %, у сообщений 1000 %. */
+export const COMMISSION_MAX_BASIS_POINTS: Record<CommissionProduct, number> = {
+  call: 10_000,
+  message: 100_000,
+};
+
 /** Сколько адресов можно разрешить учётной записи SMPP: больше — это уже «любые». */
 export const SMPP_ALLOWED_IPS_MAX = 20;

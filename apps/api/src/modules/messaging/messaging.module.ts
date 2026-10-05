@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { BillingModule } from '../billing/billing.module.js';
+import { CatalogModule } from '../catalog/catalog.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { GreenApiMessageProvider } from './green-api.provider.js';
@@ -29,7 +30,7 @@ import { SmppService } from './smpp/smpp.service.js';
  * Провайдер выбирается здесь и только здесь: единственное место, где он назван поимённо.
  */
 @Module({
-  imports: [AuditModule, BillingModule, SettingsModule],
+  imports: [AuditModule, BillingModule, CatalogModule, SettingsModule],
   controllers: [
     MessagingController,
     ClientMessagesController,

@@ -15,6 +15,7 @@ import {
   regionKeyOf,
   regionKeysOf,
   type BasisPoints,
+  type CommissionProduct,
   type Id,
   type MoneyAmount,
   type Rounding,
@@ -494,6 +495,7 @@ export class TariffRepository {
   async insertCommissionRule(
     draft: {
       clientId: Id<'client'> | null;
+      product: CommissionProduct;
       fixedFee: MoneyAmount;
       percentBasisPoints: BasisPoints;
       effectiveFrom: Date;
@@ -521,12 +523,14 @@ export class TariffRepository {
   async findCommissionRule(
     clientId: Id<'client'>,
     at: Date,
+    product: CommissionProduct,
   ): Promise<CommissionRuleRow | undefined> {
     const [row] = await this.db
       .select()
       .from(commissionRules)
       .where(
         and(
+          eq(commissionRules.product, product),
           lte(commissionRules.effectiveFrom, at),
           or(isNull(commissionRules.clientId), eq(commissionRules.clientId, clientId)),
         ),
@@ -540,8 +544,12 @@ export class TariffRepository {
     return row;
   }
 
-  async listCommissionRules(): Promise<CommissionRuleRow[]> {
-    return this.db.select().from(commissionRules).orderBy(desc(commissionRules.effectiveFrom));
+  async listCommissionRules(product: CommissionProduct): Promise<CommissionRuleRow[]> {
+    return this.db
+      .select()
+      .from(commissionRules)
+      .where(eq(commissionRules.product, product))
+      .orderBy(desc(commissionRules.effectiveFrom));
   }
 }
 

@@ -357,16 +357,30 @@ test.describe('проверка ключа провайдера сообщени
   });
 });
 
-test.describe('наценка на сообщения MAX', () => {
-  test('лежит на странице «Тарифы и наценка», а в настройках площадки её нет', async ({ page }) => {
+test.describe('наценка на сообщения MAX (ADR-0073)', () => {
+  test('те же правила, что у звонков: доля и фикс за сообщение; в настройках площадки наценки нет', async ({
+    page,
+  }) => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/tariffs');
-    const field = page.getByLabel('Процент к цене партнёра за сообщение');
-    await field.fill('25');
-    await page.getByRole('button', { name: 'Сохранить' }).click();
-    await expect(page.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
-    await page.reload();
-    await expect(page.getByLabel('Процент к цене партнёра за сообщение')).toHaveValue('25');
+    await expect(page.getByRole('heading', { name: 'Наценка на звонки' })).toBeVisible();
+    const section = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Наценка на сообщения MAX' }) });
+    // Общее правило заведено миграцией: 20 %.
+    await expect(section.getByText('20 %')).toBeVisible();
+
+    await section.getByRole('button', { name: 'Добавить правило' }).click();
+    await page.getByLabel('Доля, %').fill('250');
+    await page.getByLabel('Фикс за сообщение, ₽').fill('0,05');
+    await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('за сообщение');
+    await dialog.getByRole('button', { name: 'Добавить правило' }).click();
+    await expect(dialog).toHaveCount(0);
+
+    await expect(section.getByText('250 %')).toBeVisible();
+    await expect(section.getByText(/0,05/u)).toBeVisible();
 
     await page.goto('/settings');
     await expect(page.getByText('Наценка на сообщение, %')).toHaveCount(0);
@@ -733,7 +747,7 @@ test.describe('ввод денег', () => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/tariffs');
 
-    await page.getByRole('button', { name: 'Добавить правило' }).click();
+    await page.getByRole('button', { name: 'Добавить правило' }).first().click();
     await page.getByLabel('Доля, %').fill('5');
     await page.getByLabel('Фикс за вызов, ₽').fill('0,1');
     await page.getByRole('button', { name: 'Добавить', exact: true }).click();

@@ -75,6 +75,10 @@ beforeEach(async () => {
   await withDatabase(async (execute) => {
     await execute(sql`delete from messages`);
     await execute(sql`delete from messenger_accounts`);
+    // Правила наценки, заведённые проверками; общее правило из миграции (2000 год) остаётся.
+    await execute(
+      sql`delete from commission_rules where product = 'message' and effective_from > timestamptz '2001-01-01'`,
+    );
   });
 });
 
@@ -480,5 +484,84 @@ describe('текст — персональные данные', () => {
       .purgeTexts(new Date(Date.now() + 40 * 24 * 60 * MINUTE));
     expect(erased).toBeGreaterThanOrEqual(1);
     expect(await messageOf(client.token, id)).toMatchObject({ text: '', cost: '0.54' });
+  });
+});
+
+describe('наценка правилами (ADR-0073)', () => {
+  const addRule = (body: Record<string, unknown>) =>
+    api().inject({
+      method: 'POST',
+      url: '/commission-rules',
+      headers: bearer(adminToken),
+      payload: body,
+    });
+
+  it('фикс за сообщение и доля применяются вместе: 0,45 + 10 % + 0,05 = 0,545', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const created = await addRule({
+      product: 'message',
+      fixedFee: '0.05',
+      percentBasisPoints: 1000,
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json<{ rule: { product: string } }>().rule.product).toBe('message');
+
+    const sent = (await send(client.token, { to: '79001234567', text: 'Привет' })).json<{
+      message: MessageView;
+    }>().message;
+    expect(sent.cost).toBe('0.545');
+    expect(await balance(client.token)).toBe('9.455');
+  });
+
+  it('правило клиента перебивает общее, а цена в кабинете считается по нему', async () => {
+    await partnerWithAccount('0.45');
+    const own = await clientWithMoney('10');
+    const other = await clientWithMoney('10');
+    expect((await addRule({ product: 'message', percentBasisPoints: 5000 })).statusCode).toBe(201);
+    expect(
+      (await addRule({ product: 'message', clientId: own.clientId, percentBasisPoints: 0 }))
+        .statusCode,
+    ).toBe(201);
+
+    const price = (token: string) =>
+      api().inject({ method: 'GET', url: '/client/messages/price', headers: bearer(token) });
+    expect((await price(own.token)).json()).toMatchObject({ price: '0.45' });
+    expect((await price(other.token)).json()).toMatchObject({ price: '0.675' });
+  });
+
+  it('новое правило уже принятое сообщение не переоценивает', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const sent = (await send(client.token, { to: '79001234567', text: 'Привет' })).json<{
+      message: MessageView;
+    }>().message;
+    expect(sent.cost).toBe('0.54');
+
+    await addRule({ product: 'message', percentBasisPoints: 9000 });
+    expect((await messageOf(client.token, sent.id))?.cost).toBe('0.54');
+  });
+
+  it('правила звонков и сообщений не смешиваются в списках; предел: 1000 % у сообщений, 100 % у звонков', async () => {
+    const list = async (product: string) =>
+      (
+        await api().inject({
+          method: 'GET',
+          url: `/commission-rules?product=${product}`,
+          headers: bearer(adminToken),
+        })
+      ).json<{ rules: { product: string }[] }>().rules;
+    expect((await list('message')).every((rule) => rule.product === 'message')).toBe(true);
+    expect((await list('call')).every((rule) => rule.product === 'call')).toBe(true);
+    expect((await list('message')).length).toBeGreaterThanOrEqual(1);
+
+    expect((await addRule({ product: 'message', percentBasisPoints: 100_000 })).statusCode).toBe(
+      201,
+    );
+    expect((await addRule({ product: 'message', percentBasisPoints: 100_001 })).statusCode).toBe(
+      400,
+    );
+    expect((await addRule({ product: 'call', percentBasisPoints: 10_001 })).statusCode).toBe(400);
+    expect((await addRule({ product: 'другое', percentBasisPoints: 1 })).statusCode).toBe(400);
   });
 });

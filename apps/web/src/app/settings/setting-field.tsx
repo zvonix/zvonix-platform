@@ -48,7 +48,6 @@ const LABELS: Record<string, string> = {
   'messaging.enabled': 'Продукт «Сообщения MAX» включён',
   'messaging.provider_partner_url': 'Адрес партнёрского доступа провайдера',
   'messaging.provider_partner_token': 'Ключ партнёрского доступа провайдера',
-  'messages.markup_percent': 'Наценка на сообщение, %',
   'messages.pace_seconds': 'Пауза между сообщениями аккаунта, секунд',
   'messages.max_wait_minutes': 'Сколько сообщение ждёт отправки, минут',
   'retention.messages_days': 'Срок хранения текста сообщений, суток',

@@ -309,6 +309,13 @@
       "when": 1791161923633,
       "tag": "0043_smpp",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1791206098748,
+      "tag": "0044_nacenka_soobscheniy",
+      "breakpoints": true
     }
   ]
 }

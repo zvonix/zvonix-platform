@@ -128,14 +128,6 @@ export const SETTINGS = {
     fallback: '',
     hint: 'Ключ партнёрского доступа провайдера (выдаёт его поддержка). Пусто — аккаунты заводит администратор вручную',
   },
-  'messages.markup_percent': {
-    kind: 'number',
-    fallback: '20',
-    min: 0,
-    max: 1000,
-    hint: 'Ваша наценка на цену партнёра за сообщение, в процентах. Фиксируется на сообщении при приёме',
-  },
-
   'messages.pace_seconds': {
     kind: 'number',
     fallback: '3',
