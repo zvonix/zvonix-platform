@@ -167,7 +167,8 @@ MAX либо нет связи; `retired` — списан (в списках е
 
 `messaging.enabled`, `messaging.provider_partner_url`, `messaging.provider_partner_token` (секрет),
 `messages.markup_percent`, `messages.pace_seconds`, `messages.max_wait_minutes`, `retention.messages_days` —
-[settings.md](settings.md).
+[settings.md](settings.md). Наценка `messages.markup_percent` в кабинете правится на странице «Тарифы и наценка» (рядом с наценкой на звонки),
+в «Настройках площадки» её нет; в API она по-прежнему одна из настроек.
 
 ## Сверка с документацией провайдера (2026-10-05)
 

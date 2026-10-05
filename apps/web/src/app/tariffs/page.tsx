@@ -3,6 +3,7 @@
 import { ConsoleShell } from '@/components/console-shell';
 import { BandViolations } from './band-violations';
 import { CommissionRules } from './commission-rules';
+import { MessageMarkup } from './message-markup';
 import { PriceBands } from './price-bands';
 
 /**
@@ -30,6 +31,7 @@ export default function TariffsPage() {
         <div className="flex flex-col gap-6">
           <BandViolations />
           <CommissionRules />
+          <MessageMarkup />
           <PriceBands />
         </div>
       )}
