@@ -20,6 +20,7 @@ import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { MESSAGE_FAILURE_NAME, MESSAGE_STATUS_NAME, messageTone } from '@/lib/labels';
 import { money } from '@/lib/money';
+import { SmppConnection } from './smpp-connection';
 
 interface Message {
   readonly id: string;
@@ -155,6 +156,8 @@ function Messages() {
           </form>
         </section>
       )}
+
+      <SmppConnection />
 
       {listError !== undefined && <ErrorNote error={listError} />}
 

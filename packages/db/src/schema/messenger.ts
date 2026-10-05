@@ -8,12 +8,14 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { check, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import {
+  MESSAGE_CHANNELS,
   MESSAGE_FAILURE_REASONS,
   MESSAGE_STATUSES,
   MESSENGER_ACCOUNT_STATUSES,
   MESSENGER_PROVIDERS,
+  type MessageChannel,
   type MessageFailureReason,
   type MessageStatus,
   type MessengerAccountStatus,
@@ -134,6 +136,11 @@ export const messages = pgTable(
     partnerAmount: money().notNull(),
     commissionAmount: money().notNull(),
 
+    /** Путь приёма: по `smpp` клиенту отдаётся отчёт о доставке (ADR-0072). */
+    channel: text().$type<MessageChannel>().notNull().default('api'),
+    /** Когда отчёт о доставке принят клиентом SMPP; пусто — ещё не отдан. */
+    receiptSentAt: timestamptz(),
+
     attempts: integer().notNull().default(0),
     /** Не раньше этого момента воркер берёт сообщение (пауза, повтор после сбоя). */
     nextAttemptAt: timestamptz().notNull().defaultNow(),
@@ -146,6 +153,7 @@ export const messages = pgTable(
   },
   (t) => [
     check('messages_status_check', oneOf(t.status, MESSAGE_STATUSES)),
+    check('messages_channel_check', oneOf(t.channel, MESSAGE_CHANNELS)),
     check(
       'messages_failure_reason_check',
       sql`${t.failureReason} is null or ${oneOf(t.failureReason, MESSAGE_FAILURE_REASONS)}`,
@@ -165,10 +173,45 @@ export const messages = pgTable(
       .on(t.accountId, t.providerMessageId)
       .where(sql`${t.providerMessageId} is not null`),
     index('messages_client_idx').on(t.clientId, t.createdAt),
+    // Отчёты SMPP, которые ещё предстоит отдать: опрос читает только их.
+    index('messages_receipt_idx')
+      .on(t.clientId, t.createdAt)
+      .where(sql`${t.channel} = 'smpp' and ${t.receiptSentAt} is null`),
     index('messages_account_sent_idx').on(t.accountId, t.sentAt),
     // Очередь воркера: что ждёт отправки.
     index('messages_queue_idx')
       .on(t.nextAttemptAt)
       .where(sql`${t.status} in ('queued', 'sending')`),
+  ],
+);
+
+/**
+ * Учётная запись SMPP клиента ([ADR-0072](../../../docs/adr/0072-smpp-dlya-soobscheniy.md)): одна на
+ * клиента. Пароль выдаётся один раз и хранится только как хеш (SHA-256 с солью `system_id`).
+ */
+export const smppAccounts = pgTable(
+  'smpp_accounts',
+  {
+    id: primaryId<'smppAccount'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    /** Имя для входа, выдаёт площадка. Уникально среди всех клиентов. */
+    systemId: text().notNull(),
+    passwordHash: text().notNull(),
+    /** Разрешённые адреса клиента; пусто — любые. */
+    allowedIps: text()
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    enabled: boolean().notNull().default(true),
+    /** Последний удачный вход: поддержке и клиенту видно, подключался ли он вообще. */
+    lastBindAt: timestamptz(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('smpp_accounts_client_key').on(t.clientId),
+    uniqueIndex('smpp_accounts_system_id_key').on(t.systemId),
   ],
 );

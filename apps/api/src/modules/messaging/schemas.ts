@@ -36,6 +36,16 @@ export const registerAccountSchema = z.object({
   apiUrl: z.url('должен быть адресом').max(200, 'слишком длинный'),
 });
 
+/** Что клиент меняет в подключении SMPP: включить/отключить и список разрешённых адресов. */
+export const updateSmppSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    allowedIps: z.array(z.string().trim().min(1).max(45)).max(20, 'слишком много').optional(),
+  })
+  .refine((body) => body.enabled !== undefined || body.allowedIps !== undefined, {
+    message: 'Нечего менять',
+  });
+
 /** Пустое значение параметра — «любое»: форма отбора шлёт все свои поля. */
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === '' ? undefined : value), schema.optional());

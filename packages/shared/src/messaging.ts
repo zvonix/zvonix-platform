@@ -72,3 +72,13 @@ export type MessageFailureReason = (typeof MESSAGE_FAILURE_REASONS)[number];
 
 /** Сколько раз пробуем отправить при временных сбоях, прежде чем вернуть деньги. */
 export const MESSAGE_MAX_ATTEMPTS = 5;
+
+/**
+ * Каким путём сообщение принято ([ADR-0072](../../../docs/adr/0072-smpp-dlya-soobscheniy.md)).
+ * От пути зависит только одно: по `smpp` клиенту отдаётся отчёт о доставке (`deliver_sm`).
+ */
+export const MESSAGE_CHANNELS = ['api', 'smpp'] as const;
+export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
+
+/** Сколько адресов можно разрешить учётной записи SMPP: больше — это уже «любые». */
+export const SMPP_ALLOWED_IPS_MAX = 20;

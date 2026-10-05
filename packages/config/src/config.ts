@@ -43,6 +43,11 @@ const PUBLIC_VARIABLES = new Set([
   'S3_BUCKET',
   'S3_REGION',
   'MESSENGER_PROVIDER',
+  'SMPP_HOST',
+  'SMPP_PORT',
+  'SMPP_TLS_PORT',
+  'SMPP_TLS_CERT_FILE',
+  'SMPP_TLS_KEY_FILE',
   'RECORDINGS_STORAGE',
   'RECORDINGS_DIR',
   'RECORDING_LINK_TTL_SECONDS',
@@ -175,6 +180,25 @@ export const configSchema = z.object({
    * разработки и проверок; на боевой площадке остаётся `green_api`.
    */
   MESSENGER_PROVIDER: z.enum(['green_api', 'simulated']).default('green_api'),
+  /**
+   * Сервер SMPP для сообщений MAX (ADR-0072). Порт `0` — слушатель выключен: выкладка порт наружу
+   * не открывает, это решение владельца. TLS — второй слушатель, нужны оба файла.
+   */
+  SMPP_HOST: z.string().min(1, 'не может быть пустым').default('0.0.0.0'),
+  SMPP_PORT: z.coerce
+    .number()
+    .int('должен быть целым числом')
+    .min(0, 'не меньше нуля')
+    .max(65535, 'должен быть не больше 65535')
+    .default(0),
+  SMPP_TLS_PORT: z.coerce
+    .number()
+    .int('должен быть целым числом')
+    .min(0, 'не меньше нуля')
+    .max(65535, 'должен быть не больше 65535')
+    .default(0),
+  SMPP_TLS_CERT_FILE: z.string().default(''),
+  SMPP_TLS_KEY_FILE: z.string().default(''),
   RECORDINGS_STORAGE: z.enum(['local', 's3']).default('local'),
   /** Каталог записей при `local`. На сервере — вне каталога выпуска, чтобы выкладка не стирала записи. */
   RECORDINGS_DIR: z.string().min(1, 'не может быть пустым').default('./data/recordings'),

@@ -376,6 +376,54 @@ test.describe('сообщения MAX у клиента (ADR-0071)', () => {
   });
 });
 
+test.describe('подключение по SMPP (ADR-0072)', () => {
+  test('клиент создаёт подключение, видит пароль один раз, выпускает новый и отключает', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const admin = await adminContext.newPage();
+    await signIn(admin, PEOPLE.admin);
+    const enabled = await admin.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'messaging.enabled': true } },
+    });
+    expect(enabled.ok()).toBe(true);
+
+    const clientContext = await browser.newContext();
+    const page = await clientContext.newPage();
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/messages');
+
+    await page.getByRole('button', { name: 'Создать подключение' }).click();
+    const secret = page.getByRole('region', { name: 'Пароль SMPP' });
+    await expect(secret).toBeVisible();
+    await expect(secret.getByText(/^zx[a-z0-9]{8}$/u)).toBeVisible();
+    await secret.getByRole('button', { name: 'Записал, закрыть' }).click();
+    await expect(secret).toHaveCount(0);
+
+    // Пароль после закрытия нигде не показывается; имя и сервер остаются.
+    await expect(page.getByText('Был на связи')).toBeVisible();
+
+    await page.getByLabel(/Разрешённые адреса/u).fill('203.0.113.5');
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    await expect(page.getByLabel(/Разрешённые адреса/u)).toHaveValue('203.0.113.5');
+
+    await page.getByRole('button', { name: 'Новый пароль' }).click();
+    await page.getByRole('button', { name: 'Выпустить' }).click();
+    await expect(page.getByRole('region', { name: 'Пароль SMPP' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Отключить', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Отключить' }).click();
+    await expect(page.getByText('Отключено')).toBeVisible();
+
+    // Провайдер нигде не назван.
+    await expect(page.getByText(/green/iu)).toHaveCount(0);
+
+    await adminContext.close();
+    await clientContext.close();
+  });
+});
+
 test.describe('шрифты со своего адреса', () => {
   test('IBM Plex загружается с площадки, а не с чужого сервера', async ({ page }) => {
     const foreign: string[] = [];

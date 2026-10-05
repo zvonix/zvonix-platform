@@ -213,7 +213,12 @@ function startProxy({ port, apiPort, webPort, api, web }) {
  * проверок.
  */
 export async function startStack() {
-  const [apiPort, webPort, port] = await Promise.all([freePort(), freePort(), freePort()]);
+  const [apiPort, webPort, port, smppPort] = await Promise.all([
+    freePort(),
+    freePort(),
+    freePort(),
+    freePort(),
+  ]);
   const output = [];
   const collect = (chunk) => output.push(String(chunk));
 
@@ -226,6 +231,9 @@ export async function startStack() {
       APP_HOST: '127.0.0.1',
       APP_PORT: String(apiPort),
       PUBLIC_BASE_URL: `http://127.0.0.1:${String(port)}`,
+      // Сервер SMPP включён: без порта кабинет не показал бы кнопку «Создать подключение» (ADR-0072).
+      SMPP_HOST: '127.0.0.1',
+      SMPP_PORT: String(smppPort),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
