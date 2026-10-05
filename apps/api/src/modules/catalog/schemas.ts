@@ -2,7 +2,14 @@
  * Схемы входных данных справочника операторов и тарифов.
  */
 
-import { Money, ROUNDING_MODES, TERMINATION_KINDS, type MoneyAmount } from '@zvonix/shared';
+import {
+  COMMISSION_MAX_BASIS_POINTS,
+  COMMISSION_PRODUCTS,
+  Money,
+  ROUNDING_MODES,
+  TERMINATION_KINDS,
+  type MoneyAmount,
+} from '@zvonix/shared';
 import { z } from 'zod';
 
 const name = z.string().trim().min(2, 'слишком короткое').max(200, 'слишком длинное');
@@ -221,24 +228,41 @@ export const addPriceBandSchema = z
     path: ['maxPrice'],
   });
 
-export const addCommissionRuleSchema = z.object({
-  /** Клиент, к которому относится правило. Пусто — правило платформы по умолчанию. */
-  clientId: z.uuid('должен быть идентификатором').optional(),
-  fixedFee: tariffAmount.optional(),
-
-  /**
-   * Доля от стоимости партнёра в десятитысячных: 15% = 1500. Выше 100% — опечатка
-   * в разрядах, а не коммерческое решение, поэтому отвергается.
-   */
-  percentBasisPoints: z.coerce
-    .number()
-    .int('должно быть целым числом')
-    .min(0, 'не может быть отрицательной')
-    .max(10_000, 'наценка выше 100% — это опечатка в разрядах')
-    .default(0),
-
-  effectiveFrom: z.iso.datetime({ error: 'должен быть датой в формате ISO' }).optional(),
+const commissionProductSchema = z.enum(COMMISSION_PRODUCTS, {
+  error: 'должно быть «call» или «message»',
 });
+
+/** Что наценяет правило; не названо — вызовы (так было до сообщений, ADR-0073). */
+export const commissionRulesQuerySchema = z.object({
+  product: commissionProductSchema.default('call'),
+});
+
+export const addCommissionRuleSchema = z
+  .object({
+    /** Что наценяет правило: вызовы (по умолчанию) или сообщения MAX (ADR-0073). */
+    product: commissionProductSchema.default('call'),
+    /** Клиент, к которому относится правило. Пусто — правило платформы по умолчанию. */
+    clientId: z.uuid('должен быть идентификатором').optional(),
+    fixedFee: tariffAmount.optional(),
+
+    /**
+     * Доля от стоимости партнёра в десятитысячных: 15% = 1500. Выше 100% — опечатка
+     * в разрядах, а не коммерческое решение, поэтому отвергается.
+     */
+    percentBasisPoints: z.coerce
+      .number()
+      .int('должно быть целым числом')
+      .min(0, 'не может быть отрицательной')
+      .max(100_000, 'наценка выше 1000% — это опечатка в разрядах')
+      .default(0),
+
+    effectiveFrom: z.iso.datetime({ error: 'должен быть датой в формате ISO' }).optional(),
+  })
+  .refine((value) => value.percentBasisPoints <= COMMISSION_MAX_BASIS_POINTS[value.product], {
+    // У вызовов предел 100 %, у сообщений 1000 %: выше — опечатка в разрядах.
+    message: 'наценка выше допустимой — это опечатка в разрядах',
+    path: ['percentBasisPoints'],
+  });
 
 export const priceCallSchema = z.object({
   partnerId: z.uuid('должен быть идентификатором'),

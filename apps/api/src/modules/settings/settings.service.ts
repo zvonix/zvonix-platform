@@ -162,7 +162,6 @@ export class SettingsService {
     readonly enabled: boolean;
     readonly partnerUrl: string;
     readonly partnerToken: string;
-    readonly markupPercent: number;
     readonly paceSeconds: number;
     readonly maxWaitMinutes: number;
     readonly textDays: number;
@@ -172,7 +171,6 @@ export class SettingsService {
       enabled: this.flag(values, 'messaging.enabled'),
       partnerUrl: this.text(values, 'messaging.provider_partner_url').replace(/\/+$/u, ''),
       partnerToken: this.text(values, 'messaging.provider_partner_token'),
-      markupPercent: this.number(values, 'messages.markup_percent'),
       paceSeconds: this.number(values, 'messages.pace_seconds'),
       maxWaitMinutes: this.number(values, 'messages.max_wait_minutes'),
       textDays: this.number(values, 'retention.messages_days'),

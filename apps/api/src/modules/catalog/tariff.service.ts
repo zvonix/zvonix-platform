@@ -22,6 +22,7 @@ import {
   REFERENCE_CALL_SECONDS,
   validationFailed,
   type CallCharge,
+  type CommissionProduct,
   type CommissionRule,
   type Id,
   type MoneyAmount,
@@ -207,7 +208,7 @@ export class TariffService {
       });
     }
 
-    const commission = await this.repository.findCommissionRule(clientId, at);
+    const commission = await this.repository.findCommissionRule(clientId, at, 'call');
     if (commission === undefined) {
       // Без наценки платформа работала бы в ноль и не знала бы об этом.
       throw notFound('Нет действующего правила наценки', { details: { client_id: clientId } });
@@ -286,7 +287,7 @@ export class TariffService {
     if (rate === undefined) {
       throw notFound('Строка цены вызова не найдена', { details: { partner_rate_id: rateId } });
     }
-    const commission = await this.repository.findCommissionRule(clientId, at);
+    const commission = await this.repository.findCommissionRule(clientId, at, 'call');
     if (commission === undefined) {
       throw notFound('Нет действующего правила наценки', { details: { client_id: clientId } });
     }
@@ -317,7 +318,7 @@ export class TariffService {
     seconds: number,
     at: Date,
   ): Promise<OfferPrice[]> {
-    const commission = await this.repository.findCommissionRule(clientId, at);
+    const commission = await this.repository.findCommissionRule(clientId, at, 'call');
     if (commission === undefined) {
       // Без наценки цены нет вовсе: платформа не знает, во что вызов обойдётся клиенту.
       throw notFound('Нет действующего правила наценки', { details: { client_id: clientId } });
@@ -383,7 +384,7 @@ export class TariffService {
     operatorId: Id<'operator'> | undefined,
     at: Date,
   ): Promise<ClientTariff[]> {
-    const commission = await this.repository.findCommissionRule(clientId, at);
+    const commission = await this.repository.findCommissionRule(clientId, at, 'call');
     if (commission === undefined) {
       throw notFound('Нет действующего правила наценки', { details: { client_id: clientId } });
     }
@@ -651,6 +652,7 @@ export class TariffService {
           actorRole,
           after: {
             client_id: row.clientId,
+            product: row.product,
             fixed_fee: row.fixedFee.toString(),
             percent_basis_points: row.percentBasisPoints.toString(),
             effective_from: row.effectiveFrom.toISOString(),
@@ -819,8 +821,14 @@ export class TariffService {
     return this.repository.listPartnerRates(partnerId);
   }
 
-  async listCommissionRules(): Promise<CommissionRuleRow[]> {
-    return this.repository.listCommissionRules();
+  async listCommissionRules(product: CommissionProduct = 'call'): Promise<CommissionRuleRow[]> {
+    return this.repository.listCommissionRules(product);
+  }
+
+  /** Наценка на сообщение для клиента сейчас: правило клиента, иначе общее; `undefined` — правил нет. */
+  async messageCommission(clientId: Id<'client'>, at: Date): Promise<CommissionRule | undefined> {
+    const row = await this.repository.findCommissionRule(clientId, at, 'message');
+    return row === undefined ? undefined : toCommissionRule(row);
   }
 }
 

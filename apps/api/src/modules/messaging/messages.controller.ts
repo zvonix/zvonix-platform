@@ -93,9 +93,12 @@ export class ClientMessagesController {
   /** Включён ли продукт и сколько стоит одно сообщение сейчас (`null` — принять некуда). */
   @Cabinets('client')
   @Get('client/messages/price')
-  async price(): Promise<{ enabled: boolean; price: string | null }> {
+  async price(
+    @CurrentUser() actor: Principal,
+  ): Promise<{ enabled: boolean; price: string | null }> {
     const enabled = await this.messaging.isEnabled();
-    const quote = enabled ? await this.messages.quote() : undefined;
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    const quote = enabled ? await this.messages.quote(client.id) : undefined;
     return { enabled, price: quote === undefined ? null : Money.format(quote.clientAmount) };
   }
 

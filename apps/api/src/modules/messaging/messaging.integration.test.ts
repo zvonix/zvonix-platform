@@ -398,11 +398,3 @@ describe('для сотрудников', () => {
     ).toBe(403);
   });
 });
-
-describe('наценка владельца', () => {
-  it('настройка в пределах 0–1000 %, за пределами отвергается', async () => {
-    expect((await setSetting('messages.markup_percent', 25)).statusCode).toBe(200);
-    expect((await setSetting('messages.markup_percent', -1)).statusCode).toBe(400);
-    expect((await setSetting('messages.markup_percent', 1001)).statusCode).toBe(400);
-  });
-});

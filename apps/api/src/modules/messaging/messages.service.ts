@@ -17,6 +17,7 @@ import {
   Money,
   normalizeMsisdn,
   validationFailed,
+  type CommissionRule,
   type Id,
   type MessageChannel,
   type MessageFailureReason,
@@ -24,6 +25,7 @@ import {
 } from '@zvonix/shared';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { BillingService } from '../billing/billing.service.js';
+import { TariffService } from '../catalog/tariff.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
 import { MessagingService } from './messaging.service.js';
@@ -46,14 +48,15 @@ export interface Quote {
   readonly clientAmount: MoneyAmount;
 }
 
-/** Наценка в процентах (может быть дробной) → сотые доли процента, целым. */
-const basisPointsOf = (percent: number): bigint => BigInt(Math.round(percent * 100));
-
-/** Наценка от цены партнёра, округлённая **вверх** до микроединицы (ADR-0010: округляем один раз и в пользу площадки). */
-function commissionOf(partnerAmount: MoneyAmount, percent: number): MoneyAmount {
-  const raw = Money.toMicros(partnerAmount) * basisPointsOf(percent);
-  const rounded = (raw + 9_999n) / 10_000n;
-  return Money.fromMicros(rounded);
+/**
+ * Наценка на сообщение: фикс плюс доля от цены партнёра, вместе (ADR-0073). Долю округляем **вверх** до
+ * микроединицы (ADR-0010: округляем один раз и в пользу площадки). Правил нет — наценка нулевая.
+ */
+function commissionOf(partnerAmount: MoneyAmount, rule: CommissionRule | undefined): MoneyAmount {
+  if (rule === undefined) return Money.ZERO;
+  const raw = Money.toMicros(partnerAmount) * rule.percentBasisPoints;
+  const share = Money.fromMicros((raw + 9_999n) / 10_000n);
+  return Money.add(rule.fixedFee, share);
 }
 
 @Injectable()
@@ -65,6 +68,7 @@ export class MessagesService {
     private readonly messaging: MessagingService,
     private readonly billing: BillingService,
     private readonly settings: SettingsService,
+    private readonly tariffs: TariffService,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -85,10 +89,10 @@ export class MessagesService {
     return undefined;
   }
 
-  private async quoteFor(account: MessengerAccountRow): Promise<Quote> {
-    const { markupPercent } = await this.settings.messaging();
+  private async quoteFor(account: MessengerAccountRow, clientId: Id<'client'>): Promise<Quote> {
+    const rule = await this.tariffs.messageCommission(clientId, new Date());
     const partnerAmount = account.price ?? Money.ZERO;
-    const commissionAmount = commissionOf(partnerAmount, markupPercent);
+    const commissionAmount = commissionOf(partnerAmount, rule);
     return {
       partnerAmount,
       commissionAmount,
@@ -96,10 +100,10 @@ export class MessagesService {
     };
   }
 
-  /** Сколько стоит одно сообщение клиенту сейчас; `undefined` — принять некуда. */
-  async quote(): Promise<Quote | undefined> {
+  /** Сколько стоит одно сообщение этому клиенту сейчас; `undefined` — принять некуда. */
+  async quote(clientId: Id<'client'>): Promise<Quote | undefined> {
     const account = await this.pickAccount();
-    return account === undefined ? undefined : this.quoteFor(account);
+    return account === undefined ? undefined : this.quoteFor(account, clientId);
   }
 
   /**
@@ -136,7 +140,7 @@ export class MessagesService {
     if (account === undefined) {
       throw dependencyUnavailable('Сейчас нет доступных аккаунтов для отправки — повторите позже');
     }
-    const quote = await this.quoteFor(account);
+    const quote = await this.quoteFor(account, clientId);
 
     const id = this.repository.newId();
     try {

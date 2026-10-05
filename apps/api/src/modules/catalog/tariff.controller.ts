@@ -10,10 +10,11 @@ import { Money, parseId, REFERENCE_CALL_SECONDS } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
-import { zodBody } from '../../http/zod.pipe.js';
+import { zodBody, zodQuery } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import {
   addCommissionRuleSchema,
+  commissionRulesQuerySchema,
   addPartnerRateSchema,
   addPriceBandSchema,
   priceCallSchema,
@@ -36,6 +37,7 @@ interface PriceBandView {
 interface CommissionRuleView {
   readonly id: string;
   readonly client_id: string | null;
+  readonly product: string;
   readonly fixed_fee: string;
   readonly percent_basis_points: string;
   readonly effective_from: string;
@@ -203,6 +205,7 @@ export class TariffController {
     const row = await this.tariffs.addCommissionRule(
       {
         clientId: body.clientId === undefined ? null : parseId(body.clientId, 'client'),
+        product: body.product,
         fixedFee: body.fixedFee ?? Money.ZERO,
         percentBasisPoints: BigInt(body.percentBasisPoints),
         effectiveFrom: body.effectiveFrom === undefined ? new Date() : new Date(body.effectiveFrom),
@@ -215,8 +218,10 @@ export class TariffController {
 
   @Roles('admin', 'support')
   @Get('commission-rules')
-  async listCommissionRules(): Promise<{ rules: CommissionRuleView[] }> {
-    const rows = await this.tariffs.listCommissionRules();
+  async listCommissionRules(
+    @Query(zodQuery(commissionRulesQuerySchema)) query: z.infer<typeof commissionRulesQuerySchema>,
+  ): Promise<{ rules: CommissionRuleView[] }> {
+    const rows = await this.tariffs.listCommissionRules(query.product);
     return { rules: rows.map(toCommissionView) };
   }
 
@@ -287,6 +292,7 @@ function toCommissionView(row: CommissionRuleRow): CommissionRuleView {
   return {
     id: row.id,
     client_id: row.clientId,
+    product: row.product,
     fixed_fee: Money.format(row.fixedFee),
     percent_basis_points: row.percentBasisPoints.toString(),
     effective_from: row.effectiveFrom.toISOString(),

@@ -29,8 +29,10 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import {
+  COMMISSION_PRODUCTS,
   ROUNDING_MODES,
   TERMINATION_KINDS,
+  type CommissionProduct,
   type Rounding,
   type TerminationKind,
 } from '@zvonix/shared';
@@ -252,7 +254,14 @@ export const commissionRules = pgTable(
      */
     clientId: idRef<'client'>().references(() => clients.id, { onDelete: 'cascade' }),
 
-    /** Фиксированная часть за вызов. */
+    /**
+     * Что наценяет правило: вызовы или сообщения MAX
+     * ([ADR-0073](../../../docs/adr/0073-nacenka-na-soobscheniya-pravilami.md)). Правила одни и те же,
+     * ищутся и действуют порознь.
+     */
+    product: text().$type<CommissionProduct>().notNull().default('call'),
+
+    /** Фиксированная часть за вызов (для сообщений — за сообщение). */
     fixedFee: money()
       .notNull()
       .default(sql`0`),
@@ -274,7 +283,12 @@ export const commissionRules = pgTable(
     check('commission_rules_fixed_fee_non_negative', sql`${t.fixedFee} >= 0`),
     // Верхняя граница намеренная: наценка выше 100% означает опечатку в разрядах,
     // а не коммерческое решение. Такую опечатку лучше поймать вставкой, чем счётом.
-    check('commission_rules_percent_range', sql`${t.percentBasisPoints} between 0 and 10000`),
-    index('commission_rules_lookup_idx').on(t.clientId, t.effectiveFrom),
+    check('commission_rules_product_check', oneOf(t.product, COMMISSION_PRODUCTS)),
+    // У сообщений предел выше: цена партнёра за сообщение копеечная, наценка в сотни процентов — обычное дело.
+    check(
+      'commission_rules_percent_range',
+      sql`${t.percentBasisPoints} >= 0 and ${t.percentBasisPoints} <= case when ${t.product} = 'message' then 100000 else 10000 end`,
+    ),
+    index('commission_rules_lookup_idx').on(t.product, t.clientId, t.effectiveFrom),
   ],
 );

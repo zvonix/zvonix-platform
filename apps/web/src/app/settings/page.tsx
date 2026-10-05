@@ -14,9 +14,6 @@ import { SettingField, labelOf, type DraftValue, type SettingView } from './sett
 
 const SETTINGS_QUERY_KEY = ['settings'] as const;
 
-/** Настройки, живущие на других страницах: здесь не показываются. */
-const MOVED_KEYS: ReadonlySet<string> = new Set(['messages.markup_percent']);
-
 interface SettingsResponse {
   readonly settings: SettingView[];
 }
@@ -108,9 +105,7 @@ function SettingsForm() {
     { title: 'Кабинеты', prefixes: ['cabinets.'] },
   ];
   const known = new Set(groups.flatMap((group) => group.prefixes));
-  // Наценка на сообщения лежит на странице «Тарифы и наценка» — рядом с наценкой на звонки.
-  const shown = settings.data.settings.filter((setting) => !MOVED_KEYS.has(setting.key));
-  const rest = shown.filter(
+  const rest = settings.data.settings.filter(
     (setting) => ![...known].some((prefix) => setting.key.startsWith(prefix)),
   );
 
@@ -148,7 +143,7 @@ function SettingsForm() {
           >
             <h2 className="pb-2 font-semibold">{group.title}</h2>
             <div className="divide-y divide-border-soft">
-              {shown
+              {settings.data.settings
                 .filter((setting) =>
                   group.prefixes.some((prefix) => setting.key.startsWith(prefix)),
                 )
