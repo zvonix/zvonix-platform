@@ -414,7 +414,7 @@ export function ConsoleShell({
             {owned !== undefined && current !== undefined ? (
               <CabinetSwitch owned={owned} current={current} />
             ) : null}
-            <CommandPalette groups={groups} />
+            <CommandPalette groups={groups} objects={isStaffRole(user.role)} />
             <ThemeSwitch />
             <button
               type="button"

@@ -1,10 +1,11 @@
 'use client';
 
-import { Search } from 'lucide-react';
+import { Radio, Search, Wallet } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { isCurrent, type NavGroup } from '@/components/shell-nav';
+import { request } from '@/lib/api';
 
 /**
  * Поиск по разделам — Ctrl+K (⌘K).
@@ -45,13 +46,21 @@ function writeRecent(hrefs: readonly string[]): void {
 }
 
 /** Кнопка «Поиск» для шапки и само окно. Горячая клавиша живёт, пока кабинет открыт. */
-export function CommandPalette({ groups }: { groups: readonly NavGroup[] }) {
+export function CommandPalette({
+  groups,
+  objects = false,
+}: {
+  groups: readonly NavGroup[];
+  /** Искать ещё и клиентов с партнёрами (только сотрудникам: чужие списки остальным не отдаются). */
+  objects?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const [recent, setRecent] = useState<string[]>([]);
+  const [found, setFound] = useState<Entry[]>([]);
   const listRef = useRef<HTMLUListElement>(null);
 
   const entries = useMemo<Entry[]>(
@@ -97,6 +106,51 @@ export function CommandPalette({ groups }: { groups: readonly NavGroup[] }) {
     }
   }, [open]);
 
+  // Клиенты и партнёры по названию: запрос уходит, когда человек перестал печатать на четверть секунды.
+  useEffect(() => {
+    const text = query.trim();
+    if (!objects || !open || text.length < 2) {
+      setFound([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      const search = `name=${encodeURIComponent(text)}&limit=5`;
+      void Promise.allSettled([
+        request<{ clients: { id: string; name: string }[] }>(`/clients?${search}`, {
+          signal: controller.signal,
+        }),
+        request<{ partners: { id: string; name: string }[] }>(`/partners?${search}`, {
+          signal: controller.signal,
+        }),
+      ]).then(([clients, partners]) => {
+        if (controller.signal.aborted) return;
+        setFound([
+          ...(clients.status === 'fulfilled'
+            ? clients.value.clients.map((row) => ({
+                href: `/clients/${row.id}`,
+                label: row.name,
+                group: 'Клиент',
+                Icon: Wallet,
+              }))
+            : []),
+          ...(partners.status === 'fulfilled'
+            ? partners.value.partners.map((row) => ({
+                href: `/partners/${row.id}`,
+                label: row.name,
+                group: 'Партнёр',
+                Icon: Radio,
+              }))
+            : []),
+        ]);
+      });
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, objects, open]);
+
   const results = useMemo<Entry[]>(() => {
     const words = query
       .toLowerCase()
@@ -108,11 +162,12 @@ export function CommandPalette({ groups }: { groups: readonly NavGroup[] }) {
         .map((href) => byHref.get(href))
         .filter((entry): entry is Entry => entry !== undefined && !isCurrent(pathname, entry.href));
     }
-    return entries.filter((entry) => {
+    const sections = entries.filter((entry) => {
       const haystack = `${entry.label} ${entry.group}`.toLowerCase();
       return words.every((word) => haystack.includes(word));
     });
-  }, [query, entries, recent, pathname]);
+    return [...sections, ...found];
+  }, [query, entries, recent, pathname, found]);
 
   useEffect(() => {
     listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
@@ -159,10 +214,10 @@ export function CommandPalette({ groups }: { groups: readonly NavGroup[] }) {
               aria-activedescendant={
                 results[active] === undefined ? undefined : `palette-${String(active)}`
               }
-              aria-label="Название раздела"
+              aria-label={objects ? 'Раздел, клиент или партнёр' : 'Название раздела'}
               autoComplete="off"
               spellCheck={false}
-              placeholder="Название раздела…"
+              placeholder={objects ? 'Раздел, клиент или партнёр…' : 'Название раздела…'}
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -221,7 +276,11 @@ export function CommandPalette({ groups }: { groups: readonly NavGroup[] }) {
             ))}
             {results.length === 0 && (
               <li role="presentation" className="px-3 py-6 text-center text-muted-foreground">
-                {query === '' ? 'Начните вводить название раздела.' : 'Такого раздела нет.'}
+                {query === ''
+                  ? 'Начните вводить название.'
+                  : objects
+                    ? 'Ничего не найдено.'
+                    : 'Такого раздела нет.'}
               </li>
             )}
           </ul>

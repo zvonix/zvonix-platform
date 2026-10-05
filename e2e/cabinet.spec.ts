@@ -526,6 +526,22 @@ test.describe('меню и поиск по разделам', () => {
     await expect(dialog).toHaveCount(0);
   });
 
+  test('поиск находит клиента по названию без учёта регистра и открывает его карточку', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/users');
+    await expect(page.getByRole('button', { name: 'Поиск по разделам' })).toBeVisible();
+    await page.keyboard.press('Control+KeyK');
+    const dialog = page.getByRole('dialog', { name: 'Поиск по разделам' });
+    await dialog.getByRole('combobox').fill('бриз');
+    const option = dialog.getByRole('option', { name: /Бриз/u });
+    await expect(option).toBeVisible();
+    await expect(option).toContainText('Клиент');
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/clients\/[0-9a-f-]+$/u);
+  });
+
   test('группа меню сворачивается, запоминается и разворачивается вновь', async ({ page }) => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/users');
