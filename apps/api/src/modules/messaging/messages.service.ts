@@ -193,6 +193,27 @@ export class MessagesService {
     return earlier;
   }
 
+  /** Обзор для сотрудников: каждые из последних `days` суток (с нулями), плюс итог. */
+  async overview(days: number, offsetMinutes: number) {
+    const dayOf = (back: number): string =>
+      new Date(Date.now() + offsetMinutes * 60_000 - back * 86_400_000).toISOString().slice(0, 10);
+    const labels = Array.from({ length: days }, (_unused, index) => dayOf(days - 1 - index));
+    const first = labels[0] ?? dayOf(0);
+    const since = new Date(Date.parse(`${first}T00:00:00Z`) - offsetMinutes * 60_000);
+    const rows = new Map(
+      (await this.repository.dailyCounts(since, offsetMinutes)).map((row) => [row.day, row]),
+    );
+    const series = labels.map((day) => ({
+      day,
+      messages: rows.get(day)?.messages ?? 0,
+      delivered: rows.get(day)?.delivered ?? 0,
+      failed: rows.get(day)?.failed ?? 0,
+      revenue: Money.fromMicros(rows.get(day)?.revenue ?? 0n),
+      margin: Money.fromMicros(rows.get(day)?.margin ?? 0n),
+    }));
+    return series;
+  }
+
   list(filter: MessageFilter): Promise<{ rows: MessageRow[]; total: number }> {
     return this.repository.list(filter);
   }
