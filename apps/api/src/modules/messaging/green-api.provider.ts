@@ -33,6 +33,10 @@ const STATES: Record<string, ProviderState> = {
   starting: 'starting',
   sleepMode: 'starting',
   yellowCard: 'blocked',
+  // Временный запрет отправки (по документации провайдера): пока он действует, сообщения не уходят.
+  suspended: 'blocked',
+  // Ждёт пароль двухэтапной проверки MAX: вход возможен, только если пароль отключить.
+  pendingPassword: 'not_authorized',
 };
 
 @Injectable()
@@ -55,7 +59,8 @@ export class GreenApiMessageProvider implements MessageProvider {
         'GET',
         `${partnerUrl}/partner/getInstances/${encodeURIComponent(partnerToken)}`,
       );
-      return { state: 'ok', instances: Array.isArray(body) ? body.length : 0 };
+      // Неверный ключ провайдер отвечает кодом 200 и ошибкой в теле, поэтому годится только список.
+      return Array.isArray(body) ? { state: 'ok', instances: body.length } : { state: 'rejected' };
     } catch (cause) {
       this.unavailable(cause);
       const refused =
@@ -161,7 +166,7 @@ export class GreenApiMessageProvider implements MessageProvider {
   async configureWebhook(ref: ProviderAccountRef, url: string): Promise<void> {
     await this.call('POST', `${this.base(ref)}/setSettings/${encodeURIComponent(ref.token)}`, {
       webhookUrl: url,
-      outgoingMessageWebhook: 'yes',
+      outgoingWebhook: 'yes',
       stateWebhook: 'yes',
       incomingWebhook: 'no',
     });
