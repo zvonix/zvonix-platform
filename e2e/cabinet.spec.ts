@@ -68,8 +68,8 @@ test.describe('вход', () => {
 
 test.describe('разводка по ролям', () => {
   const homes: [keyof typeof PEOPLE, RegExp][] = [
-    ['admin', /\/calls$/u],
-    ['support', /\/calls$/u],
+    ['admin', /\/overview$/u],
+    ['support', /\/overview$/u],
     ['client', /\/my\/calls$/u],
     ['partner', /\/partner\/calls$/u],
   ];
@@ -485,6 +485,22 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
 
     await adminContext.close();
     await clientContext.close();
+  });
+});
+
+test.describe('обзор для сотрудников', () => {
+  test('администратор после входа попадает в «Обзор»: дела, показатели, графики; числа ведут дальше', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/overview$/u);
+    await expect(page.getByRole('heading', { name: 'Вызовы по дням' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Требует внимания' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Доля состоявшихся/u })).toBeVisible();
+
+    await page.getByRole('link', { name: /Заявки на рассмотрении/u }).click();
+    await expect(page).toHaveURL(/\/applications/u);
   });
 });
 

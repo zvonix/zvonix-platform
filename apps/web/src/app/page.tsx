@@ -22,8 +22,8 @@ import { Onboarding } from './onboarding';
  * не назначен раздел, — а роль без раздела открывала бы пустой экран.
  */
 const STAFF_HOME: Record<StaffRole, string> = {
-  admin: '/calls',
-  support: '/calls',
+  admin: '/overview',
+  support: '/overview',
 };
 
 export default function HomePage() {

@@ -12,6 +12,7 @@ import {
   HandCoins,
   HardDrive,
   Inbox,
+  LayoutDashboard,
   MessageSquare,
   KeyRound,
   Plus,
@@ -97,6 +98,10 @@ function ReleaseVersion() {
 const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
   admin: [
     {
+      title: 'Главное',
+      items: [{ href: '/overview', label: 'Обзор', Icon: LayoutDashboard }],
+    },
+    {
       title: 'Участники',
       items: [
         { href: '/applications', label: 'Заявки', Icon: Inbox },
@@ -149,6 +154,10 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
    * чтения помечен `@Roles('admin')`, так что раздел открывался бы пустым отказом.
    */
   support: [
+    {
+      title: 'Главное',
+      items: [{ href: '/overview', label: 'Обзор', Icon: LayoutDashboard }],
+    },
     {
       title: 'Участники',
       items: [
