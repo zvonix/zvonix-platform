@@ -18,6 +18,10 @@ import { MessagingRepository } from './messaging.repository.js';
 import { MessagingService } from './messaging.service.js';
 import { MESSAGE_PROVIDER, type MessageProvider } from './provider.js';
 import { SimulatedMessageProvider } from './simulated.provider.js';
+import { SmppServer } from './smpp/server.js';
+import { ClientSmppController } from './smpp/smpp.controller.js';
+import { SmppRepository } from './smpp/smpp.repository.js';
+import { SmppService } from './smpp/smpp.service.js';
 
 /**
  * Сообщения MAX через аккаунты партнёров ([ADR-0071](../../../../../docs/adr/0071-soobscheniya-max.md)).
@@ -30,6 +34,7 @@ import { SimulatedMessageProvider } from './simulated.provider.js';
     MessagingController,
     ClientMessagesController,
     ClientApiMessagesController,
+    ClientSmppController,
     StaffMessagesController,
     MessengerWebhookController,
   ],
@@ -38,6 +43,9 @@ import { SimulatedMessageProvider } from './simulated.provider.js';
     MessagingRepository,
     MessagesService,
     MessagesRepository,
+    SmppRepository,
+    SmppService,
+    SmppServer,
     {
       provide: MESSAGE_PROVIDER,
       inject: [APP_CONFIG, APP_LOGGER, SettingsService],
@@ -47,6 +55,6 @@ import { SimulatedMessageProvider } from './simulated.provider.js';
           : new GreenApiMessageProvider(settings, logger),
     },
   ],
-  exports: [MessagingService, MessagesService],
+  exports: [MessagingService, MessagesService, SmppServer],
 })
 export class MessagingModule {}

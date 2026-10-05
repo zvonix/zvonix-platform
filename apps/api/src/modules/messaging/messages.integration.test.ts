@@ -10,10 +10,9 @@ import {
   prepareEnvironment,
   resetDatabase,
   startApi,
-  TEST_PASSWORD,
-  uniqueEmail,
   withDatabase,
 } from '../../testing/harness.js';
+import { bearer, fixtures } from './messaging.fixtures.js';
 import { MessagesService } from './messages.service.js';
 import { MessagingService } from './messaging.service.js';
 import { simulateAccountState, simulatedSent } from './simulated.provider.js';
@@ -28,111 +27,10 @@ function api(): NestFastifyApplication {
   return app;
 }
 
-const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 const MINUTE = 60_000;
 
-async function user(role: 'admin' | 'client' | 'partner'): Promise<{ id: string; token: string }> {
-  const email = uniqueEmail();
-  const { IdentityService } = await import('../identity/identity.service.js');
-  const created = await api().get(IdentityService).createByAdmin({
-    email,
-    password: TEST_PASSWORD,
-    fullName: 'Владелец',
-    role,
-    status: 'active',
-  });
-  const login = await api().inject({
-    method: 'POST',
-    url: '/auth/login',
-    payload: { email, password: TEST_PASSWORD },
-  });
-  return { id: created.id, token: login.json<{ token: string }>().token };
-}
-
-const put = (token: string, settings: Record<string, unknown>) =>
-  api().inject({ method: 'PUT', url: '/settings', headers: bearer(token), payload: { settings } });
-
-/** Партнёр с рабочим аккаунтом MAX, у которого назначена цена. */
-async function partnerWithAccount(price = '0.45', limits: Record<string, number | null> = {}) {
-  const owner = await user('partner');
-  const created = await api().inject({
-    method: 'POST',
-    url: '/partners',
-    headers: bearer(adminToken),
-    payload: {
-      ownerUserId: owner.id,
-      name: `Партнёр ${String(Date.now())}-${String(Math.random()).slice(2, 8)}`,
-      displayName: `Псевдоним ${String(Math.random()).slice(2, 8)}`,
-    },
-  });
-  const partnerId = created.json<{ partner: { id: string } }>().partner.id;
-  await api().inject({
-    method: 'PATCH',
-    url: `/partners/${partnerId}/status`,
-    headers: bearer(adminToken),
-    payload: { status: 'verified' },
-  });
-
-  const made = await api().inject({
-    method: 'POST',
-    url: '/partner/messenger/accounts',
-    headers: bearer(owner.token),
-    payload: { label: 'Основной' },
-  });
-  expect(made.statusCode).toBe(201);
-  const accountId = made.json<{ account: { id: string } }>().account.id;
-  const instance = await withDatabase(async (execute) => {
-    const result = await execute(
-      sql`select provider_instance_id as instance from messenger_accounts where id = ${accountId}`,
-    );
-    return (result.rows[0] as { instance: string }).instance;
-  });
-  simulateAccountState(instance, 'authorized', '79990001122');
-  // Состояние обновляется сверкой: QR-запрос с `authorized` делает её сразу.
-  await api().inject({
-    method: 'GET',
-    url: `/partner/messenger/accounts/${accountId}/qr`,
-    headers: bearer(owner.token),
-  });
-  const patched = await api().inject({
-    method: 'PATCH',
-    url: `/partner/messenger/accounts/${accountId}`,
-    headers: bearer(owner.token),
-    payload: { price, ...limits },
-  });
-  expect(patched.statusCode).toBe(200);
-  return { partnerId, ownerToken: owner.token, accountId, instance };
-}
-
-/** Клиент, допущенный к работе и с деньгами на счёте. */
-async function clientWithMoney(amount = '100') {
-  const owner = await user('client');
-  const created = await api().inject({
-    method: 'POST',
-    url: '/clients',
-    headers: bearer(adminToken),
-    payload: {
-      ownerUserId: owner.id,
-      name: `Такси ${String(Date.now())}-${String(Math.random()).slice(2, 8)}`,
-    },
-  });
-  const clientId = created.json<{ client: { id: string } }>().client.id;
-  await api().inject({
-    method: 'PATCH',
-    url: `/clients/${clientId}/status`,
-    headers: bearer(adminToken),
-    payload: { status: 'active' },
-  });
-  if (amount !== '0') {
-    await api().inject({
-      method: 'POST',
-      url: `/clients/${clientId}/deposit`,
-      headers: bearer(adminToken),
-      payload: { amount, idempotencyKey: `dep-${clientId}`, description: 'Пополнение' },
-    });
-  }
-  return { clientId, token: owner.token };
-}
+const fx = fixtures(api, () => adminToken);
+const { user, put, partnerWithAccount, clientWithMoney, balance } = fx;
 
 const send = (token: string, payload: Record<string, unknown>) =>
   api().inject({ method: 'POST', url: '/client/messages', headers: bearer(token), payload });
@@ -145,11 +43,6 @@ interface MessageView {
   failure_reason: string | null;
   cost: string | null;
 }
-
-const balance = async (token: string): Promise<string> =>
-  (await api().inject({ method: 'GET', url: '/client/account', headers: bearer(token) })).json<{
-    funds: { balance: string };
-  }>().funds.balance;
 
 const owed = async (partnerId: string): Promise<string> =>
   (

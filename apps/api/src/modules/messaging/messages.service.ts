@@ -18,6 +18,7 @@ import {
   normalizeMsisdn,
   validationFailed,
   type Id,
+  type MessageChannel,
   type MessageFailureReason,
   type MoneyAmount,
 } from '@zvonix/shared';
@@ -108,6 +109,7 @@ export class MessagesService {
   async send(
     clientId: Id<'client'>,
     input: { to: string; text: string; externalId?: string | undefined },
+    channel: MessageChannel = 'api',
   ): Promise<MessageRow> {
     await this.messaging.assertEnabled();
 
@@ -152,6 +154,7 @@ export class MessagesService {
               id,
               clientId,
               externalId,
+              channel,
               recipient,
               text: input.text,
               accountId: account.id,

@@ -302,6 +302,13 @@
       "when": 1791131478321,
       "tag": "0042_soobscheniya",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1791161923633,
+      "tag": "0043_smpp",
+      "breakpoints": true
     }
   ]
 }

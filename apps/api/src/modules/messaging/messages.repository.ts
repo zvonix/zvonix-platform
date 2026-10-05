@@ -3,12 +3,27 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
 import { messages, messengerAccounts } from '@zvonix/db/schema';
 import {
   newId,
   type Id,
+  type MessageChannel,
   type MessageFailureReason,
   type MessageStatus,
   type MoneyAmount,
@@ -39,6 +54,7 @@ export class MessagesRepository {
       id: MessageId;
       clientId: Id<'client'>;
       externalId: string | null;
+      channel: MessageChannel;
       recipient: string;
       text: string;
       accountId: Id<'messengerAccount'>;
@@ -277,6 +293,40 @@ export class MessagesRepository {
         and(eq(messages.accountId, accountId), eq(messages.providerMessageId, providerMessageId)),
       );
     return row;
+  }
+
+  /**
+   * Сообщения SMPP, чей отчёт о доставке ещё не отдан: дошли до конца (доставлено, прочитано, отказ),
+   * не старше `since`. Опрашивается, пока у клиента есть вошедший приёмник (ADR-0072).
+   */
+  pendingReceipts(
+    clientIds: readonly Id<'client'>[],
+    since: Date,
+    limit: number,
+  ): Promise<MessageRow[]> {
+    if (clientIds.length === 0) return Promise.resolve([]);
+    return this.database.db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.channel, 'smpp'),
+          isNull(messages.receiptSentAt),
+          inArray(messages.clientId, [...clientIds]),
+          inArray(messages.status, ['delivered', 'read', 'failed']),
+          gte(messages.createdAt, since),
+        ),
+      )
+      .orderBy(asc(messages.createdAt), asc(messages.id))
+      .limit(limit);
+  }
+
+  /** Клиент принял отчёт (`deliver_sm_resp`): больше не отдаём. */
+  async markReceiptSent(id: MessageId, at: Date): Promise<void> {
+    await this.database.db
+      .update(messages)
+      .set({ receiptSentAt: at })
+      .where(and(eq(messages.id, id), isNull(messages.receiptSentAt)));
   }
 
   /** Стирает текст сообщений старше срока; строка с суммами остаётся. Возвращает, сколько стёрто. */

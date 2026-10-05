@@ -17,7 +17,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { createServer } from 'node:net';
+import { connect, createServer } from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -115,6 +115,47 @@ async function stop(child) {
   return result;
 }
 
+/**
+ * Входит в SMPP заведомо неверными данными и возвращает код ответа сервера. Сервер SMPP запускается
+ * только из `main.ts` (ADR-0072), поэтому ни один тест с `inject` не докажет, что он поднимается.
+ */
+function smppBindStatus(port) {
+  const cString = (text) => Buffer.concat([Buffer.from(text, 'latin1'), Buffer.from([0])]);
+  const body = Buffer.concat([
+    cString('zxsmoke000'),
+    cString('wrong-password'),
+    cString(''),
+    Buffer.from([0x34, 0x01, 0x01]),
+    cString(''),
+  ]);
+  const pdu = Buffer.alloc(16 + body.length);
+  pdu.writeUInt32BE(pdu.length, 0);
+  pdu.writeUInt32BE(0x00000009, 4); // bind_transceiver
+  pdu.writeUInt32BE(0, 8);
+  pdu.writeUInt32BE(1, 12);
+  body.copy(pdu, 16);
+
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1');
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('SMPP не ответил на вход'));
+    }, 5000);
+    socket.once('connect', () => {
+      socket.write(pdu);
+    });
+    socket.once('data', (chunk) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve({ command: chunk.readUInt32BE(4), status: chunk.readUInt32BE(8) });
+    });
+    socket.once('error', (cause) => {
+      clearTimeout(timer);
+      reject(cause);
+    });
+  });
+}
+
 const checks = [];
 function check(name, passed, detail = '') {
   checks.push({ name, passed, detail });
@@ -124,6 +165,7 @@ function check(name, passed, detail = '') {
 
 async function main() {
   const port = await freePort();
+  const smppPort = await freePort();
   const base = `http://127.0.0.1:${String(port)}`;
 
   const child = spawn(process.execPath, [ENTRY], {
@@ -139,6 +181,8 @@ async function main() {
       APP_PORT: String(port),
       LOG_LEVEL: 'error',
       LOG_FORMAT: 'json',
+      SMPP_HOST: '127.0.0.1',
+      SMPP_PORT: String(smppPort),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -176,6 +220,13 @@ async function main() {
       'несуществующий маршрут отвечает 404 в общем виде ошибки',
       missing.status === 404 && missing.body.includes('"not_found"'),
       `HTTP ${String(missing.status)}`,
+    );
+
+    const bind = await smppBindStatus(smppPort);
+    check(
+      'SMPP слушает порт и отказывает неверному входу кодом «неверный пароль»',
+      bind.command === 0x80000009 && bind.status === 0x0e,
+      `команда ${bind.command.toString(16)}, код ${bind.status.toString(16)}`,
     );
 
     const stoppedItself = await stop(child);
