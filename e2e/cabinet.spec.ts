@@ -357,6 +357,23 @@ test.describe('проверка ключа провайдера сообщени
   });
 });
 
+test.describe('наценка на сообщения MAX', () => {
+  test('лежит на странице «Тарифы и наценка», а в настройках площадки её нет', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/tariffs');
+    const field = page.getByLabel('Процент к цене партнёра за сообщение');
+    await field.fill('25');
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    await expect(page.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
+    await page.reload();
+    await expect(page.getByLabel('Процент к цене партнёра за сообщение')).toHaveValue('25');
+
+    await page.goto('/settings');
+    await expect(page.getByText('Наценка на сообщение, %')).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Сообщения: цена' })).toHaveCount(0);
+  });
+});
+
 test.describe('сообщения MAX у клиента (ADR-0071)', () => {
   test('клиент видит форму и журнал; без рабочего аккаунта сказано, что отправлять некуда', async ({
     browser,

@@ -14,6 +14,9 @@ import { SettingField, labelOf, type DraftValue, type SettingView } from './sett
 
 const SETTINGS_QUERY_KEY = ['settings'] as const;
 
+/** Настройки, живущие на других страницах: здесь не показываются. */
+const MOVED_KEYS: ReadonlySet<string> = new Set(['messages.markup_percent']);
+
 interface SettingsResponse {
   readonly settings: SettingView[];
 }
@@ -90,23 +93,24 @@ function SettingsForm() {
   if (settings.data === undefined) return null;
 
   const groups = [
-    { title: 'Почта', prefix: 'mail.' },
-    { title: 'Проверка «я не робот»', prefix: 'captcha.' },
-    { title: 'Регистрация', prefix: 'partners.' },
-    { title: 'Регистрация клиентов', prefix: 'clients.' },
-    { title: 'Письма о событиях', prefix: 'notifications.' },
-    { title: 'Пополнение счёта', prefix: 'payments.' },
-    { title: 'Хранение', prefix: 'retention.' },
-    { title: 'Записи разговоров', prefix: 'recordings.' },
-    { title: 'Сообщения MAX', prefix: 'messaging.' },
-    { title: 'Сообщения: цена', prefix: 'messages.' },
-    { title: 'Узлы', prefix: 'nodes.' },
-    { title: 'Вход', prefix: 'security.' },
-    { title: 'Цены партнёров', prefix: 'pricing.' },
-    { title: 'Кабинеты', prefix: 'cabinets.' },
+    { title: 'Почта', prefixes: ['mail.'] },
+    { title: 'Проверка «я не робот»', prefixes: ['captcha.'] },
+    { title: 'Регистрация', prefixes: ['partners.'] },
+    { title: 'Регистрация клиентов', prefixes: ['clients.'] },
+    { title: 'Письма о событиях', prefixes: ['notifications.'] },
+    { title: 'Пополнение счёта', prefixes: ['payments.'] },
+    { title: 'Хранение', prefixes: ['retention.'] },
+    { title: 'Записи разговоров', prefixes: ['recordings.'] },
+    { title: 'Сообщения MAX', prefixes: ['messaging.', 'messages.'] },
+    { title: 'Узлы', prefixes: ['nodes.'] },
+    { title: 'Вход', prefixes: ['security.'] },
+    { title: 'Цены партнёров', prefixes: ['pricing.'] },
+    { title: 'Кабинеты', prefixes: ['cabinets.'] },
   ];
-  const known = new Set(groups.map((group) => group.prefix));
-  const rest = settings.data.settings.filter(
+  const known = new Set(groups.flatMap((group) => group.prefixes));
+  // Наценка на сообщения лежит на странице «Тарифы и наценка» — рядом с наценкой на звонки.
+  const shown = settings.data.settings.filter((setting) => !MOVED_KEYS.has(setting.key));
+  const rest = shown.filter(
     (setting) => ![...known].some((prefix) => setting.key.startsWith(prefix)),
   );
 
@@ -138,16 +142,21 @@ function SettingsForm() {
     <div className="flex max-w-[1100px] flex-col gap-4">
       <div className="grid gap-4 lg:grid-cols-2">
         {groups.map((group) => (
-          <section key={group.prefix} className="rounded-lg border border-border bg-card p-4">
+          <section
+            key={group.prefixes.join()}
+            className="rounded-lg border border-border bg-card p-4"
+          >
             <h2 className="pb-2 font-semibold">{group.title}</h2>
             <div className="divide-y divide-border-soft">
-              {settings.data.settings
-                .filter((setting) => setting.key.startsWith(group.prefix))
+              {shown
+                .filter((setting) =>
+                  group.prefixes.some((prefix) => setting.key.startsWith(prefix)),
+                )
                 .map(field)}
             </div>
-            {group.prefix === 'mail.' && <TestLetter />}
-            {group.prefix === 'captcha.' && <CaptchaWarning />}
-            {group.prefix === 'messaging.' && <TestProviderKey />}
+            {group.prefixes[0] === 'mail.' && <TestLetter />}
+            {group.prefixes[0] === 'captcha.' && <CaptchaWarning />}
+            {group.prefixes[0] === 'messaging.' && <TestProviderKey />}
           </section>
         ))}
 
