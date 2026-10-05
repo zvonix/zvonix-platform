@@ -229,7 +229,7 @@ function EntryRows({
           <button
             type="button"
             onClick={onFilterEntity}
-            className="num text-left text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            className="num min-h-6 text-left text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
             {entry.entity_type}
             {entry.entity_id !== null && (

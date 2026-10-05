@@ -57,6 +57,7 @@ const LABELS: Record<string, string> = {
   'notifications.payment_decision_enabled': 'Писать клиенту о решении по заявке на пополнение',
   'notifications.partner_suspension_enabled':
     'Писать партнёру, когда его SIM или шлюз отключились из-за отказов',
+  'recordings.record_all': 'Записывать разговоры по всем линиям',
   'retention.recordings_days': 'Срок хранения записей, суток',
   'retention.metrics_days': 'Срок хранения истории нагрузки, суток',
   'payments.manual_instructions': 'Реквизиты для пополнения переводом',

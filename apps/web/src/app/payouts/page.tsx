@@ -156,7 +156,7 @@ function PayoutsView() {
               >
                 <input
                   type="checkbox"
-                  className="size-4"
+                  className="size-6"
                   aria-label={`Выплатить партнёру ${row.partner.name}`}
                   checked={row.checked}
                   disabled={!canChange}
