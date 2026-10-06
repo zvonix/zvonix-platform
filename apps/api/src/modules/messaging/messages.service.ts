@@ -193,6 +193,11 @@ export class MessagesService {
     return earlier;
   }
 
+  /** Сколько сообщений принято с `since` и сколько из них окончательно не отправлено — для тревоги. */
+  health(since: Date): Promise<{ total: number; failed: number }> {
+    return this.repository.healthSince(since);
+  }
+
   /** Обзор для сотрудников: каждые из последних `days` суток (с нулями), плюс итог. */
   async overview(days: number, offsetMinutes: number) {
     const dayOf = (back: number): string =>

@@ -13,6 +13,7 @@ import {
   TEST_PASSWORD,
   uniqueEmail,
 } from '../../testing/harness.js';
+import { ServersRepository } from './servers.repository.js';
 import { ServersService } from './servers.service.js';
 
 prepareEnvironment();
@@ -251,6 +252,58 @@ describe('уборка истории и тревога о диске', () => {
     expect((await api().get(ServersService).lowDisk(later)).map((row) => row.id)).not.toContain(
       parseId(low.nodeId, 'node'),
     );
+  });
+});
+
+describe('нагрузка: память и процессор (тревога)', () => {
+  it('память занята на 95 % — источник под нагрузкой; процессор — только если перегрузка держится минуты, а не одна точка', async () => {
+    const hot = await enrolledNode();
+    const spike = await enrolledNode();
+    const calm = await enrolledNode();
+    const repository = api().get(ServersRepository);
+    const now = Date.now();
+    const draft = (load1Centi: number, memAvailableMb: number) => ({
+      load1Centi,
+      cpuCores: 2,
+      memTotalMb: 8000,
+      memAvailableMb,
+      diskTotalMb: 100_000,
+      diskFreeMb: 60_000,
+      activeCalls: 0,
+    });
+    // Шесть минут подряд нагрузка 5 на два ядра (2,5 на ядро); память занята на 95 %.
+    for (let minute = 6; minute >= 0; minute -= 1) {
+      await repository.insert(
+        parseId(hot.nodeId, 'node'),
+        new Date(now - minute * 60_000),
+        draft(500, 400),
+      );
+    }
+    // Одна точка перегрузки среди спокойных — всплеск, а не перегрузка.
+    for (let minute = 6; minute >= 1; minute -= 1) {
+      await repository.insert(
+        parseId(spike.nodeId, 'node'),
+        new Date(now - minute * 60_000),
+        draft(50, 6000),
+      );
+    }
+    await repository.insert(parseId(spike.nodeId, 'node'), new Date(now), draft(900, 6000));
+    for (let minute = 6; minute >= 0; minute -= 1) {
+      await repository.insert(
+        parseId(calm.nodeId, 'node'),
+        new Date(now - minute * 60_000),
+        draft(80, 6000),
+      );
+    }
+
+    const found = await api()
+      .get(ServersService)
+      .strained(new Date(now + 1000));
+    const byId = new Map(found.map((row) => [row.id, row]));
+    expect(byId.get(hot.nodeId)).toMatchObject({ memoryUsedPercent: 95 });
+    expect(byId.get(hot.nodeId)?.loadPerCore).toBeGreaterThan(2);
+    expect(byId.has(spike.nodeId)).toBe(false);
+    expect(byId.has(calm.nodeId)).toBe(false);
   });
 });
 
