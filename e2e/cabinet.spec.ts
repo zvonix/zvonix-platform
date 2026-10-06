@@ -572,6 +572,26 @@ test.describe('меню и поиск по разделам', () => {
     await expect(page).toHaveURL(/\/clients\/[0-9a-f-]+$/u);
   });
 
+  test('плотность таблиц: строки ниже, выбор запоминается', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/clients');
+    const cell = page.getByRole('cell', { name: /Бриз/u }).first();
+    await expect(cell).toBeVisible();
+    const normal = (await cell.boundingBox())?.height ?? 0;
+
+    const switcher = page.getByRole('button', { name: 'Плотные таблицы' });
+    await switcher.click();
+    await expect(switcher).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
+    expect((await cell.boundingBox())?.height ?? normal).toBeLessThan(normal);
+
+    // До первой отрисовки: после перезагрузки плотность уже стоит, таблица не дёргается.
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
+    await page.getByRole('button', { name: 'Плотные таблицы' }).click();
+    await expect(page.locator('html')).not.toHaveAttribute('data-density', 'compact');
+  });
+
   test('группа меню сворачивается, запоминается и разворачивается вновь', async ({ page }) => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/users');

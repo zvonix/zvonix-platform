@@ -34,6 +34,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { CommandPalette } from '@/components/command-palette';
+import { DensitySwitch } from '@/components/density-switch';
 import { MobileMenuButton, MobileTabs, SideNav, type NavGroup } from '@/components/shell-nav';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { Button } from '@/components/ui/button';
@@ -415,6 +416,7 @@ export function ConsoleShell({
               <CabinetSwitch owned={owned} current={current} />
             ) : null}
             <CommandPalette groups={groups} objects={isStaffRole(user.role)} />
+            <DensitySwitch />
             <ThemeSwitch />
             <button
               type="button"

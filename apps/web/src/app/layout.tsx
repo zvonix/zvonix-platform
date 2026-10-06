@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { THEME_BOOTSTRAP_SCRIPT } from '@/lib/theme';
+import { DENSITY_BOOTSTRAP_SCRIPT } from '@/lib/density';
 import './fonts.css';
 import './globals.css';
 import { Providers } from './providers';
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
          * у того, кто выбрал тёмную. Отсюда же `suppressHydrationWarning` — атрибут
          * на `<html>` к моменту сверки уже стоит, и сервер о нём не знал.
          */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+        <script
+          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT + DENSITY_BOOTSTRAP_SCRIPT }}
+        />
       </head>
       <body className="min-h-dvh font-sans text-base antialiased">
         <Providers>{children}</Providers>
