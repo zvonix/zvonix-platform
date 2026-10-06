@@ -97,6 +97,7 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
 | `/opt/zvonix/current`, `/opt/zvonix/previous` | ссылки на работающий и предыдущий |
 | `/var/lib/zvonix-recordings` | записи разговоров ([ADR-0063](../docs/adr/0063-hranilishche-zapisey-na-diske.md)): создаёт systemd (`StateDirectory`), выкладка не стирает, **копий нет**; срок хранения — настройка «Срок хранения записей» (30 суток) в кабинете ([ADR-0065](../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)) |
 | `/var/backups/zvonix/<метка>-<время>.dump` | копия базы перед миграциями каждой выкладки, пять последних; `postgres 0700` |
+| `/var/backups/zvonix/daily/daily-<время>.dump` | ежедневная копия базы (03:30, таймер `zvonix-backup.timer`), четырнадцать последних, каждая проверена; `postgres 0700` |
 | `/etc/zvonix/zvonix.env` | окружение площадки, `root:zvonix 0640`; выкладкой не переписывается |
 | `/etc/zvonix/secrets.env` | пароль базы и `SECRET_KEY`, только root |
 | `/etc/zvonix/github.env` | репозиторий и токен для выпусков, только root |
@@ -159,6 +160,30 @@ full-upgrade` (блокировку dpkg в первые минуты держи
 | 8021 | нет | управление FreeSWITCH |
 | 8000, 3000 | нет | API и кабинет — только через nginx |
 | 5432, 6379 | нет | PostgreSQL и Redis |
+
+## Копии и восстановление
+
+**База.** Копия снимается перед миграциями каждой выкладки (пять последних) и **ежедневно в 03:30**
+(`zvonix-backup.timer`, четырнадцать последних; ставится выкладкой, включается сама). Ежедневная копия проверяется:
+`pg_restore --list` обязан прочитать оглавление, иначе файл удаляется и служба падает — это видно в
+`systemctl status zvonix-backup.service` и `journalctl -u zvonix-backup`. Снять сейчас: `sudo zvonix-backup`.
+Когда запускалась последняя: `systemctl list-timers zvonix-backup.timer`.
+
+**Восстановить** (останавливает площадку на время; делает человек, не выкладка):
+
+```
+sudo systemctl stop zvonix-api zvonix-worker zvonix-web
+sudo -u postgres dropdb zvonix && sudo -u postgres createdb -O zvonix zvonix
+sudo -u postgres pg_restore --no-owner --role=zvonix -d zvonix /var/backups/zvonix/daily/daily-<время>.dump
+sudo systemctl start zvonix-api zvonix-worker zvonix-web
+```
+
+После восстановления откройте кабинет и проверьте последние платежи и вызовы: копия отстаёт от работы на время с момента снимка.
+
+**Чего здесь нет.** Копии лежат **на той же машине**: диск или сервер потерян — потеряны и они. Нужна копия за пределами
+сервера (чужой диск, объектное хранилище, второй сервер): куда класть и чем, выбирает владелец; до этого перед
+переустановкой сервера копию снимают и **забирают руками** (`scp` каталога `daily`). Записи разговоров (`/var/lib/zvonix-recordings`)
+не копируются вовсе — это отдельный вопрос с размером и сроком хранения.
 
 ## Сервер SMPP
 

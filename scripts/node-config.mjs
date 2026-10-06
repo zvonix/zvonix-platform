@@ -102,6 +102,7 @@ const SHELL_SCRIPTS = [
   'node/install.sh',
   'node/build-freeswitch.sh',
   'deploy/deploy.sh',
+  'deploy/backup.sh',
   'deploy/server-setup.sh',
   'deploy/install.sh',
 ];
