@@ -9,6 +9,7 @@ import { ExportButton } from '@/components/export-button';
 import { FilterInput } from '@/components/filter-input';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
+import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
 import {
@@ -70,6 +71,7 @@ export default function MyCallsPage() {
 
 function MyCalls() {
   const url = useUrlState();
+  const columns = useColumnPicker('my-calls');
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
 
   const channels = useQuery({
@@ -171,6 +173,8 @@ function MyCalls() {
         />
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
+          <SavedFilters />
+          {columns.picker}
           <ExportButton
             name="вызовы"
             load={async () => {
@@ -231,7 +235,7 @@ function MyCalls() {
       )}
 
       <div className="rounded-lg border border-border bg-card">
-        <Table>
+        <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Когда</TableHead>

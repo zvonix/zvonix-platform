@@ -605,6 +605,62 @@ test.describe('сообщения в «Обзоре»', () => {
   });
 });
 
+test.describe('вид таблиц: колонки и наборы фильтров', () => {
+  test('колонку можно скрыть, выбор переживает перезагрузку; последняя видимая остаётся', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/clients');
+    const table = page.getByRole('table');
+    await expect(table.getByRole('columnheader', { name: 'Остаток' })).toBeVisible();
+
+    await page.getByRole('button', { name: /Колонки/u }).click();
+    const panel = page.getByRole('dialog', { name: 'Какие колонки показывать' });
+    await panel.getByLabel('Остаток').uncheck();
+    await expect(table.getByRole('columnheader', { name: 'Остаток' })).toBeHidden();
+    // Ячейки той же колонки скрыты вместе с шапкой: «1 500,5 ₽» из таблицы пропало.
+    await expect(table.getByRole('cell', { name: /1\s500,5/u })).toBeHidden();
+    await expect(table.getByRole('columnheader', { name: 'Название' })).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await page.reload();
+    await expect(table.getByRole('columnheader', { name: 'Остаток' })).toBeHidden();
+
+    await page.getByRole('button', { name: /Колонки/u }).click();
+    await page.getByRole('button', { name: 'Показать все' }).click();
+    await expect(table.getByRole('columnheader', { name: 'Остаток' })).toBeVisible();
+  });
+
+  test('набор фильтров сохраняется, применяется из пустого вида и удаляется', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/clients?name=%D0%B1%D1%80%D0%B8%D0%B7');
+    await expect(page.getByRole('cell', { name: 'Такси «Бриз»', exact: true })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'Такси «Волна»', exact: true })).toHaveCount(0);
+
+    await page.getByRole('button', { name: /Наборы/u }).click();
+    const panel = page.getByRole('dialog', { name: 'Сохранённые наборы фильтров' });
+    await panel.getByLabel('Название набора').fill('Только «Бриз»');
+    await panel.getByRole('button', { name: 'Сохранить текущие' }).click();
+    await expect(panel.getByRole('button', { name: 'Только «Бриз»', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await page.keyboard.press('Escape');
+
+    // Из чистой страницы набор возвращает фильтры в адрес.
+    await page.goto('/clients');
+    await expect(page.getByRole('cell', { name: 'Такси «Волна»', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: /Наборы/u }).click();
+    await page.getByRole('button', { name: 'Только «Бриз»', exact: true }).click();
+    await expect(page).toHaveURL(/name=/u);
+    await expect(page.getByRole('cell', { name: 'Такси «Волна»', exact: true })).toHaveCount(0);
+
+    await page.getByRole('button', { name: /Наборы/u }).click();
+    await page.getByRole('button', { name: 'Удалить набор «Только «Бриз»»' }).click();
+    await expect(page.getByText('Сохранённых наборов нет.')).toBeVisible();
+  });
+});
+
 test.describe('меню и поиск по разделам', () => {
   test('Ctrl+K открывает поиск, по запросу находит раздел и переходит в него', async ({ page }) => {
     await signIn(page, PEOPLE.admin);

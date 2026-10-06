@@ -9,6 +9,7 @@ import { ConsoleShell } from '@/components/console-shell';
 import { ExportButton } from '@/components/export-button';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
+import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
 import {
@@ -77,6 +78,7 @@ export default function PartnerCallsPage() {
  */
 function PartnerCalls() {
   const url = useUrlState();
+  const columns = useColumnPicker('partner-calls');
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
   const filtered = url.get('from') !== '' || url.get('to') !== '' || url.get('status') !== '';
 
@@ -152,6 +154,8 @@ function PartnerCalls() {
         />
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
+          <SavedFilters />
+          {columns.picker}
           <ExportButton
             name="вызовы-через-меня"
             load={async () => {
@@ -199,7 +203,7 @@ function PartnerCalls() {
       )}
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
-        <Table>
+        <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Когда</TableHead>

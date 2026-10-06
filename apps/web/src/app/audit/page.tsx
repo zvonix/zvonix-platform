@@ -6,6 +6,7 @@ import { Suspense, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
+import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { PeriodInput } from '@/components/period-input';
 import { Button } from '@/components/ui/button';
 import {
@@ -52,6 +53,7 @@ export default function AuditPage() {
 
 function AuditTable() {
   const url = useUrlState();
+  const columns = useColumnPicker('audit');
   const [opened, setOpened] = useState<string | undefined>(undefined);
 
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
@@ -133,7 +135,9 @@ function AuditTable() {
           }}
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <SavedFilters />
+          {columns.picker}
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}
@@ -152,7 +156,7 @@ function AuditTable() {
       )}
 
       <div className="rounded-lg border border-border bg-card">
-        <Table>
+        <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Когда</TableHead>

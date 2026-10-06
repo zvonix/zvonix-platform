@@ -17,6 +17,7 @@ import { ErrorNote } from '@/components/error-note';
 import { FilterInput } from '@/components/filter-input';
 import { FormDialog } from '@/components/form-dialog';
 import { PageNav } from '@/components/page-nav';
+import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { Button } from '@/components/ui/button';
 import { DialogClose } from '@/components/ui/dialog';
 import {
@@ -104,6 +105,7 @@ function UsersTable() {
   // Запрос общий с оболочкой кабинета: второго обращения к `/auth/me` не будет.
   const selfId = useSession().data?.id;
   const url = useUrlState();
+  const columns = useColumnPicker('users');
 
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
   const search = new URLSearchParams(url.query);
@@ -162,7 +164,9 @@ function UsersTable() {
           }}
         />
 
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <SavedFilters />
+          {columns.picker}
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}
@@ -179,7 +183,7 @@ function UsersTable() {
       {listError !== undefined && <ErrorNote error={listError} />}
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
-        <Table>
+        <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Адрес</TableHead>

@@ -9,6 +9,7 @@ import { ConfirmEmailButton } from '@/components/confirm-email-button';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { PageNav } from '@/components/page-nav';
+import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -69,6 +70,7 @@ export default function ApplicationsPage() {
 function ApplicationsTable() {
   const canChange = useCanChange();
   const url = useUrlState();
+  const columns = useColumnPicker('applications');
   const queryClient = useQueryClient();
 
   // Пустое значение в адресе — «ждут решения»: сброс отбора возвращает к очереди,
@@ -111,7 +113,9 @@ function ApplicationsTable() {
             url.set({ status: value, offset: '' });
           }}
         />
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <SavedFilters />
+          {columns.picker}
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}
@@ -131,7 +135,7 @@ function ApplicationsTable() {
       {listError !== undefined && <ErrorNote error={listError} />}
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
-        <Table>
+        <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Заявитель</TableHead>
