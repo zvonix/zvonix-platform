@@ -219,7 +219,7 @@ const DIALOGS: Partial<Record<Role, { route: string; open: (page: Page) => Promi
   admin: {
     route: '/tariffs',
     open: async (page) => {
-      await page.getByRole('button', { name: 'Добавить правило' }).click();
+      await page.getByRole('button', { name: 'Добавить правило' }).first().click();
       await page.getByLabel('Доля, %').fill('12,5');
       await page.getByRole('button', { name: 'Добавить', exact: true }).click();
     },

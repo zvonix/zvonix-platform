@@ -440,6 +440,43 @@ test.describe('сообщения MAX у клиента (ADR-0071)', () => {
   });
 });
 
+test.describe('отправка сообщений из кабинета партнёра', () => {
+  test('без клиентского кабинета — путь к заявке, с ним — форма отправки со ссылкой на счёт', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const admin = await adminContext.newPage();
+    await signIn(admin, PEOPLE.admin);
+    await admin.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'messaging.enabled': true } },
+    });
+
+    const partnerContext = await browser.newContext();
+    const partner = await partnerContext.newPage();
+    await signIn(partner, PEOPLE.partner);
+    await partner.goto('/partner/send');
+    await expect(partner.getByText(/Клиентского кабинета у вас пока нет/u)).toBeVisible();
+    await expect(partner.getByRole('link', { name: 'Стать клиентом' }).first()).toBeVisible();
+    // Формы, которая отказала бы, нет.
+    await expect(partner.getByLabel('Номер получателя')).toHaveCount(0);
+
+    const bothContext = await browser.newContext();
+    const both = await bothContext.newPage();
+    await signIn(both, PEOPLE.both);
+    await both.goto('/partner/send');
+    await expect(
+      both.getByText(/Деньги списываются со счёта вашего клиентского кабинета/u),
+    ).toBeVisible();
+    await expect(both.getByLabel('Номер получателя')).toBeVisible();
+    await expect(both.getByRole('button', { name: 'Отправить', exact: true })).toBeDisabled();
+
+    await adminContext.close();
+    await partnerContext.close();
+    await bothContext.close();
+  });
+});
+
 test.describe('подключение по SMPP (ADR-0072)', () => {
   test('клиент создаёт подключение, видит пароль один раз, выпускает новый и отключает', async ({
     browser,
@@ -492,12 +529,25 @@ test.describe('обзор для сотрудников', () => {
   test('администратор после входа попадает в «Обзор»: дела, показатели, графики; числа ведут дальше', async ({
     page,
   }) => {
+    // Страница не должна ходить в API с неверными запросами: пустые графики из-за отказа 400 прошли бы
+    // незамеченными (так и было: «Обзор» просил 14 суток, а сводка принимает 1, 7, 30 и 90).
+    const refused: string[] = [];
+    page.on('response', (response) => {
+      if (response.url().includes('/api/') && response.status() >= 400) {
+        refused.push(`${String(response.status())} ${response.url()}`);
+      }
+    });
     await signIn(page, PEOPLE.admin);
     await page.goto('/');
     await expect(page).toHaveURL(/\/overview$/u);
     await expect(page.getByRole('heading', { name: 'Вызовы по дням' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Требует внимания' })).toBeVisible();
     await expect(page.getByRole('link', { name: /Доля состоявшихся/u })).toBeVisible();
+
+    // Четырнадцать столбцов за четырнадцать суток: график получил данные, а не пустой ответ.
+    await expect(page.locator('[role="img"][aria-label="Вызовы по дням"] > div')).toHaveCount(14);
+    await page.waitForLoadState('networkidle');
+    expect(refused).toEqual([]);
 
     await page.getByRole('link', { name: /Заявки на рассмотрении/u }).click();
     await expect(page).toHaveURL(/\/applications/u);

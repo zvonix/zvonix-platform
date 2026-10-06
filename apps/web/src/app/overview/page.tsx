@@ -16,6 +16,9 @@ import { useOverview, type ReportRow } from '@/lib/reports';
 /** Сколько суток сравниваем: последние со всеми предыдущими такой же длины. */
 const SPAN = 7;
 
+/** Сводка принимает только 1, 7, 30 и 90 суток: берём 30 и показываем из них последние `SPAN * 2`. */
+const FETCH_DAYS = 30;
+
 const shortDay = (day: string): string => `${day.slice(8, 10)}.${day.slice(5, 7)}`;
 const asNumber = (value: string | undefined): number => Number(value ?? '0');
 
@@ -50,12 +53,12 @@ export default function OverviewPage() {
 }
 
 function Overview() {
-  const overview = useOverview('/reports', SPAN * 2);
+  const overview = useOverview('/reports', FETCH_DAYS);
   const live = useLiveInterval();
 
   const applications = useQuery({
     queryKey: ['overview', 'applications'],
-    queryFn: () => request<{ total: number }>('/applications?status=pending&limit=1'),
+    queryFn: () => request<{ total: number }>('/applications?status=submitted&limit=1'),
     refetchInterval: live,
   });
   const payments = useQuery({
@@ -72,7 +75,7 @@ function Overview() {
     refetchInterval: live,
   });
 
-  const series = overview.data?.series ?? [];
+  const series = (overview.data?.series ?? []).slice(-SPAN * 2);
   const recent = series.slice(-SPAN);
   const previous = series.slice(-SPAN * 2, -SPAN);
   const now = sum(recent);
