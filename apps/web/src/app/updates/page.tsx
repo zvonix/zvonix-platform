@@ -73,7 +73,7 @@ interface LogChunk {
 const ACTION_NAME: Record<Action, string> = {
   deploy: 'Обновление',
   rollback: 'Откат',
-  refresh: 'Список выпусков',
+  refresh: 'Проверка обновлений',
 };
 
 const STATUS_NAME: Record<Status, string> = {
@@ -181,7 +181,7 @@ function Updates() {
               act.mutate({ path: '/updates/refresh' });
             }}
           >
-            Обновить список
+            Проверить обновления
           </Button>
           <ConfirmAction
             label="Вернуться на прежний выпуск"
@@ -231,12 +231,12 @@ function Updates() {
           <span className="font-normal text-muted-foreground">
             {data.releases_fetched_at === null
               ? ''
-              : `список от ${moment(data.releases_fetched_at)}`}
+              : `проверено ${moment(data.releases_fetched_at)}`}
           </span>
         </h2>
         {data.releases.length === 0 ? (
           <p className="text-muted-foreground">
-            Список пуст. Нажмите «Обновить список» — служба спросит GitHub.
+            Список пуст. Нажмите «Проверить обновления» — служба спросит GitHub.
           </p>
         ) : (
           <div className="rounded-lg border border-border bg-card">

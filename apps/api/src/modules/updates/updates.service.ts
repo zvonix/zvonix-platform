@@ -228,7 +228,7 @@ export class UpdatesService {
     if (action === 'deploy') {
       if (tag === null) throw validationFailed('Не указан выпуск');
       const known = (await this.releases()).items.some((item) => item.tag === tag);
-      if (!known) throw notFound('Такого выпуска нет в списке — обновите список выпусков');
+      if (!known) throw notFound('Такого выпуска нет в списке — нажмите «Проверить обновления»');
       if (tag === this.current.version) throw conflict('Этот выпуск уже работает');
     }
 
