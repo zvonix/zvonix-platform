@@ -36,6 +36,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Вся история и метки: описание выпуска — это коммиты с прошлой метки.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
@@ -55,6 +58,15 @@ jobs:
       - name: Архив выпуска
         run: node scripts/release-pack.mjs "$TAG" release
 
+      # Что вошло: заголовки коммитов с прошлой метки. Их показывает раздел «Обновления» в кабинете
+      # (ADR-0074), поэтому первая строка — главное изменение, а не служебная фраза.
+      - name: Описание выпуска
+        run: |
+          previous="$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_SHA}^" 2>/dev/null || true)"
+          range="${previous:+${previous}..}${GITHUB_SHA}"
+          git log --no-merges --pretty='%s' "$range" | head -n 15 > release/notes.md
+          [ -s release/notes.md ] || echo "Выкладка на сервере: deploy/deploy.sh ${TAG}" > release/notes.md
+
       # Существующий выпуск не перезаписывается: `gh release create` откажет. Метка — адрес
       # выпуска, и под одним адресом не должно лежать два разных архива.
       - name: Выпуск в GitHub Releases
@@ -66,4 +78,4 @@ jobs:
             "release/zvonix-${TAG}.tgz.sha256" \
             --target "$GITHUB_SHA" \
             --title "$TAG" \
-            --notes "Выкладка на сервере: deploy/deploy.sh ${TAG}"
+            --notes-file release/notes.md

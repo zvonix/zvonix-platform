@@ -138,6 +138,8 @@ function Updates() {
   const busy =
     data !== undefined && (running !== undefined || data.queue.some((q) => q.action !== 'refresh'));
 
+  const deploy = (tag: string) => act.mutateAsync({ path: '/updates/deploy', body: { tag } });
+
   if (data === undefined) {
     return overview.error instanceof ApiError ? <ErrorNote error={overview.error} /> : null;
   }
@@ -150,6 +152,11 @@ function Updates() {
       </p>
     );
   }
+
+  // GitHub отдаёт выпуски от новых к старым: всё, что выше работающего, — обновление, ниже — прежние версии.
+  const currentIndex = data.releases.findIndex((release) => release.tag === data.current.version);
+  const newer = currentIndex === -1 ? data.releases : data.releases.slice(0, currentIndex);
+  const older = currentIndex === -1 ? [] : data.releases.slice(currentIndex + 1);
 
   return (
     <div className="flex flex-col gap-4">
@@ -225,6 +232,44 @@ function Updates() {
 
       {shown !== null && <RunConsole key={shown} runId={shown} />}
 
+      {data.current.version !== null && data.releases.length > 0 && (
+        <section
+          aria-label="Новая версия"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-4"
+        >
+          {newer[0] === undefined ? (
+            <span className="text-ok">Установлена последняя версия</span>
+          ) : (
+            <>
+              <div>
+                <div className="font-semibold">
+                  Доступно обновление до <span className="num">{newer[0].tag}</span>
+                  {newer.length > 1 && (
+                    <span className="font-normal text-muted-foreground">
+                      {' '}
+                      · новых версий: {String(newer.length)}
+                    </span>
+                  )}
+                </div>
+                <div className="text-muted-foreground">{summary(newer[0].notes)}</div>
+              </div>
+              <div className="ml-auto">
+                <ConfirmAction
+                  label={`Обновить до ${newer[0].tag}`}
+                  title={`Обновить площадку до ${newer[0].tag}`}
+                  consequence={UPDATE_CONSEQUENCE}
+                  confirmLabel="Обновить"
+                  tone="neutral"
+                  variant="default"
+                  disabled={busy}
+                  onConfirm={() => deploy(newer[0]?.tag ?? '')}
+                />
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
       <section aria-label="Выпуски" className="flex flex-col gap-2">
         <h2 className="font-semibold">
           Выпуски{' '}
@@ -239,60 +284,25 @@ function Updates() {
             Список пуст. Нажмите «Проверить обновления» — служба спросит GitHub.
           </p>
         ) : (
-          <div className="rounded-lg border border-border bg-card">
-            <Table>
-              <TableHeader>
-                <TableRow className="text-muted-foreground hover:bg-transparent">
-                  <TableHead className="h-8">Выпуск</TableHead>
-                  <TableHead className="h-8">Дата</TableHead>
-                  <TableHead className="hidden h-8 sm:table-cell">Что нового</TableHead>
-                  <TableHead className="h-8" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.releases.map((release) => {
-                  const current = release.tag === data.current.version;
-                  return (
-                    <TableRow key={release.tag}>
-                      <TableCell>
-                        <span className="num font-semibold">{release.tag}</span>
-                        {release.prerelease && <span className="ml-2 text-warn">пробный</span>}
-                      </TableCell>
-                      <TableCell>
-                        <span className="num text-muted-foreground">
-                          {moment(release.published_at)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="hidden max-w-md truncate text-muted-foreground sm:table-cell">
-                        {release.notes.split('\n').find((line) => line.trim() !== '') ?? ''}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {current ? (
-                          <span className="text-ok">Работает</span>
-                        ) : (
-                          <ConfirmAction
-                            label="Обновить"
-                            title={`Обновить площадку до ${release.tag}`}
-                            consequence="Перед миграциями снимется копия базы, затем код переключится и службы перезапустятся — кабинет и API будут недоступны несколько секунд, звонки на узлах продолжатся. Если выпуск не поднимется, вернётся прежний."
-                            confirmLabel="Обновить"
-                            tone="neutral"
-                            size="xs"
-                            disabled={busy}
-                            onConfirm={() =>
-                              act.mutateAsync({
-                                path: '/updates/deploy',
-                                body: { tag: release.tag },
-                              })
-                            }
-                          />
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+          <>
+            {newer.length > 0 && (
+              <ReleaseTable releases={newer} label="Обновить" busy={busy} onDeploy={deploy} />
+            )}
+            {older.length > 0 && (
+              <details className="rounded-lg border border-border bg-card">
+                <summary className="cursor-pointer px-3 py-2 text-muted-foreground">
+                  Более ранние версии: {String(older.length)}
+                </summary>
+                <ReleaseTable
+                  releases={older}
+                  label="Вернуться"
+                  returning
+                  busy={busy}
+                  onDeploy={deploy}
+                />
+              </details>
+            )}
+          </>
         )}
       </section>
 
@@ -342,6 +352,76 @@ function Updates() {
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+const UPDATE_CONSEQUENCE =
+  'Перед миграциями снимется копия базы, затем код переключится и службы перезапустятся — кабинет и API будут недоступны несколько секунд, звонки на узлах продолжатся. Если выпуск не поднимется, вернётся прежний.';
+
+const RETURN_CONSEQUENCE =
+  'Это более ранняя версия. Код вернётся к ней, но изменения в базе, сделанные новыми версиями, не откатываются: старый код может с ними не работать. Возвращайтесь, только если знаете, что делаете; для отката на предыдущую версию есть отдельная кнопка.';
+
+/** Первая непустая строка описания выпуска — главное, что в нём изменилось. */
+const summary = (notes: string): string =>
+  notes.split('\n').find((line) => line.trim() !== '') ?? '';
+
+function ReleaseTable({
+  releases,
+  label,
+  returning = false,
+  busy,
+  onDeploy,
+}: {
+  releases: readonly Release[];
+  label: string;
+  returning?: boolean;
+  busy: boolean;
+  onDeploy: (tag: string) => Promise<unknown>;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-card">
+      <Table>
+        <TableHeader>
+          <TableRow className="text-muted-foreground hover:bg-transparent">
+            <TableHead className="h-8">Выпуск</TableHead>
+            <TableHead className="h-8">Дата</TableHead>
+            <TableHead className="hidden h-8 sm:table-cell">Что нового</TableHead>
+            <TableHead className="h-8" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {releases.map((release) => (
+            <TableRow key={release.tag}>
+              <TableCell>
+                <span className="num font-semibold">{release.tag}</span>
+                {release.prerelease && <span className="ml-2 text-warn">пробный</span>}
+              </TableCell>
+              <TableCell>
+                <span className="num text-muted-foreground">{moment(release.published_at)}</span>
+              </TableCell>
+              <TableCell
+                className="hidden max-w-md truncate text-muted-foreground sm:table-cell"
+                title={release.notes}
+              >
+                {summary(release.notes)}
+              </TableCell>
+              <TableCell className="text-right">
+                <ConfirmAction
+                  label={label}
+                  title={`${returning ? 'Вернуться на' : 'Обновить площадку до'} ${release.tag}`}
+                  consequence={returning ? RETURN_CONSEQUENCE : UPDATE_CONSEQUENCE}
+                  confirmLabel={label}
+                  tone={returning ? 'danger' : 'neutral'}
+                  size="xs"
+                  disabled={busy}
+                  onConfirm={() => onDeploy(release.tag)}
+                />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -461,7 +541,7 @@ function RunConsole({ runId }: { runId: string }) {
           const pane = event.currentTarget;
           followRef.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 24;
         }}
-        className="num max-h-[50dvh] min-h-40 overflow-auto rounded-lg border border-border bg-[#0f1115] p-3 text-xs leading-relaxed whitespace-pre-wrap text-[#d8dee9]"
+        className={`num max-h-[50dvh] ${run?.action === 'refresh' ? 'min-h-12' : 'min-h-40'} overflow-auto rounded-lg border border-border bg-[#0f1115] p-3 text-xs leading-relaxed whitespace-pre-wrap text-[#d8dee9]`}
       >
         {text === '' ? (done ? 'Журнал пуст.' : 'Ждём первых строк…') : text}
       </pre>
