@@ -23,6 +23,9 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+# Заявки на обновление из кабинета (ADR-0074): единственное место вне своих каталогов, куда API пишет.
+# Дефис — каталога может не быть (площадка до первой выкладки со службой обновления).
+ReadWritePaths=-/var/lib/zvonix-updater/requests
 
 [Install]
 WantedBy=multi-user.target
