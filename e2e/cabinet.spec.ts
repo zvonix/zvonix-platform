@@ -504,6 +504,77 @@ test.describe('обзор для сотрудников', () => {
   });
 });
 
+test.describe('серверы в «Обзоре»', () => {
+  test('у каждого сервера процессор, память и диск полосками; перегрузка подсвечена по порогам', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    // Ответ подменён: на стенде замеров нет, а проверяется вид блока.
+    await page.route('**/api/servers*', (route) =>
+      route.fulfill({
+        json: {
+          servers: [
+            {
+              scope: 'platform',
+              id: null,
+              name: 'Площадка',
+              status: null,
+              stale: false,
+              current: {
+                load1: 0.8,
+                cpu_cores: 4,
+                mem_total_mb: 8192,
+                mem_available_mb: 2048,
+                disk_total_mb: 100000,
+                disk_free_mb: 5000,
+                active_calls: null,
+                taken_at: new Date().toISOString(),
+              },
+              series: [],
+            },
+            {
+              scope: 'node',
+              id: 'n1',
+              name: 'Узел Москва',
+              status: 'online',
+              stale: true,
+              current: {
+                load1: 4,
+                cpu_cores: 2,
+                mem_total_mb: 4096,
+                mem_available_mb: 3500,
+                disk_total_mb: 50000,
+                disk_free_mb: 40000,
+                active_calls: 7,
+                taken_at: new Date().toISOString(),
+              },
+              series: [],
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto('/overview');
+    const block = page.getByRole('region', { name: 'Серверы' });
+    await expect(block).toBeVisible();
+    await expect(block.getByText('Площадка')).toBeVisible();
+    await expect(block.getByText('звонков 7')).toBeVisible();
+    await expect(block.getByText('замер давний')).toBeVisible();
+
+    // Диск площадки занят на 95 %, память — на 75 %, процессор — на 20 %.
+    const first = block.getByRole('link', { name: /Площадка/u });
+    await expect(first.getByRole('meter', { name: 'Диск' })).toHaveAttribute('aria-valuenow', '95');
+    await expect(first.getByRole('meter', { name: 'Память' })).toHaveAttribute(
+      'aria-valuenow',
+      '75',
+    );
+    await expect(first.getByRole('meter', { name: 'Процессор' })).toHaveAttribute(
+      'aria-valuenow',
+      '20',
+    );
+  });
+});
+
 test.describe('сообщения в «Обзоре»', () => {
   test('блок появляется, когда сообщения были: показатели за 7 суток и график; без них блока нет', async ({
     page,

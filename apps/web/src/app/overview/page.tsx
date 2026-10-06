@@ -9,6 +9,8 @@ import { request } from '@/lib/api';
 import { duration, plural } from '@/lib/format';
 import { useLiveInterval } from '@/lib/live';
 import { money } from '@/lib/money';
+import { gaugeTone, usedPercent } from '@/lib/gauge';
+import { NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
 import { useOverview, type ReportRow } from '@/lib/reports';
 
 /** Сколько суток сравниваем: последние со всеми предыдущими такой же длины. */
@@ -112,6 +114,8 @@ function Overview() {
           critical
         />
       </section>
+
+      <ServersBlock />
 
       <section aria-label={`Показатели за ${String(SPAN)} суток`} className="flex flex-col gap-2">
         <h2 className="font-semibold">Последние {String(SPAN)} суток</h2>
@@ -369,5 +373,122 @@ function MessagesBlock() {
         summary="Сообщения по дням"
       />
     </section>
+  );
+}
+
+interface ServerNow {
+  readonly name: string;
+  readonly status: NodeStatus | null;
+  readonly stale: boolean;
+  readonly current: {
+    readonly load1: number;
+    readonly cpu_cores: number;
+    readonly mem_total_mb: number;
+    readonly mem_available_mb: number;
+    readonly disk_total_mb: number;
+    readonly disk_free_mb: number;
+    readonly active_calls: number | null;
+  } | null;
+}
+
+/**
+ * Серверы одним взглядом: у каждого процессор, память и диск полосками, состояние и звонки. Подробнее и с историей —
+ * на странице «Серверы». Давний замер помечен: старое число выглядело бы живым.
+ */
+function ServersBlock() {
+  const servers = useQuery({
+    queryKey: ['overview', 'servers'],
+    queryFn: ({ signal }) => request<{ servers: ServerNow[] }>('/servers?range=hour', { signal }),
+    // Замеры идут раз в минуту.
+    refetchInterval: 60_000,
+  });
+  const rows = servers.data?.servers ?? [];
+  if (rows.length === 0) return null;
+
+  return (
+    <section aria-label="Серверы" className="flex flex-col gap-2">
+      <div className="flex items-baseline gap-3">
+        <h2 className="font-semibold">Серверы</h2>
+        <Link
+          href="/servers"
+          className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          история нагрузки
+        </Link>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        {rows.map((server) => (
+          <Link
+            key={server.name}
+            href="/servers"
+            className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold">{server.name}</span>
+              {server.status !== null && (
+                <span className={`rounded-sm px-1.5 py-0.5 text-xs ${nodeTone(server.status)}`}>
+                  {NODE_STATUS_NAME[server.status]}
+                </span>
+              )}
+              {server.current?.active_calls !== null &&
+                server.current?.active_calls !== undefined && (
+                  <span className="num ml-auto text-muted-foreground">
+                    звонков {String(server.current.active_calls)}
+                  </span>
+                )}
+            </span>
+            {server.current === null ? (
+              <span className="text-muted-foreground">замеров нет</span>
+            ) : (
+              <>
+                {server.stale && <span className="text-warn">замер давний</span>}
+                <MiniGauge
+                  label="Процессор"
+                  used={usedPercent(server.current.load1, server.current.cpu_cores)}
+                />
+                <MiniGauge
+                  label="Память"
+                  used={usedPercent(
+                    server.current.mem_total_mb - server.current.mem_available_mb,
+                    server.current.mem_total_mb,
+                  )}
+                />
+                <MiniGauge
+                  label="Диск"
+                  used={usedPercent(
+                    server.current.disk_total_mb - server.current.disk_free_mb,
+                    server.current.disk_total_mb,
+                  )}
+                />
+              </>
+            )}
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Полоска заполненности: подпись, процент числом и цвет по порогам (75 % — внимание, 90 % — тревога). */
+function MiniGauge({ label, used }: { label: string; used: number }) {
+  const clamped = Math.min(100, used);
+  return (
+    <span className="grid grid-cols-[5.5rem_1fr_3rem] items-center gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span
+        role="meter"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={clamped}
+        className="h-2 overflow-hidden rounded-full bg-muted"
+      >
+        <span
+          className={`block h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none ${gaugeTone(clamped)}`}
+          style={{ width: `${String(clamped)}%` }}
+        />
+      </span>
+      <span className="num text-right">{String(used)} %</span>
+    </span>
   );
 }
