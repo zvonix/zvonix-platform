@@ -23,6 +23,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { ServersModule } from './modules/servers/servers.module.js';
 import { ReportsModule } from './modules/reports/reports.module.js';
+import { UpdatesModule } from './modules/updates/updates.module.js';
 import { TelephonyModule } from './modules/telephony/telephony.module.js';
 
 @Module({
@@ -48,6 +49,7 @@ import { TelephonyModule } from './modules/telephony/telephony.module.js';
     NotificationsModule,
     PaymentsModule,
     ServersModule,
+    UpdatesModule,
     ApplicationsModule,
     HealthModule,
   ],

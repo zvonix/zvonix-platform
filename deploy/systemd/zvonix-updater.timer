@@ -1,0 +1,9 @@
+[Unit]
+Description=Zvonix updater: раз в десять минут обновляет список выпусков
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+
+[Install]
+WantedBy=timers.target

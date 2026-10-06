@@ -86,7 +86,8 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
 | [install.sh](install.sh) | не ставится — его скачивает и запускает строка установки |
 | [deploy.sh](deploy.sh) | `/usr/local/sbin/zvonix-deploy` — обновляется каждым выпуском |
 | [server-setup.sh](server-setup.sh) | запускается при подготовке; повторный запуск безопасен |
-| [systemd/](systemd/) | `/etc/systemd/system/zvonix-{api,worker,web}.service` |
+| [systemd/](systemd/) | `/etc/systemd/system/zvonix-{api,worker,web}.service`, `zvonix-backup.*`, `zvonix-updater.{service,path,timer}` |
+| [updater.py](updater.py) | `/usr/local/sbin/zvonix-updater` — служба обновления из кабинета ([ADR-0074](../docs/adr/0074-obnovlenie-iz-adminki.md)) |
 | [nginx/zvonix.conf](nginx/zvonix.conf) | шаблон `/etc/nginx/sites-available/zvonix` — кабинет и API |
 | [nginx/zvonix-acme.conf](nginx/zvonix-acme.conf) | шаблон `/etc/nginx/sites-available/zvonix-acme` — порт 80 при домене: проверка Let's Encrypt и перенаправление на https |
 | [scripts/release-pack.mjs](../scripts/release-pack.mjs), [release.yml](../.github/workflows/release.yml) | — архив собирает GitHub Actions |
@@ -96,6 +97,7 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
 | `/opt/zvonix/releases/<метка>-<время>` | выпуски, хранятся пять последних |
 | `/opt/zvonix/current`, `/opt/zvonix/previous` | ссылки на работающий и предыдущий |
 | `/var/lib/zvonix-recordings` | записи разговоров ([ADR-0063](../docs/adr/0063-hranilishche-zapisey-na-diske.md)): создаёт systemd (`StateDirectory`), выкладка не стирает, **копий нет**; срок хранения — настройка «Срок хранения записей» (30 суток) в кабинете ([ADR-0065](../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)) |
+| `/var/lib/zvonix-updater/` | обмен кабинета со службой обновления: `requests/` (заявки, пишет `zvonix`), `runs/<id>/` (состояние и журнал, пишет root), `releases.json` |
 | `/var/backups/zvonix/<метка>-<время>.dump` | копия базы перед миграциями каждой выкладки, пять последних; `postgres 0700` |
 | `/var/backups/zvonix/daily/daily-<время>.dump` | ежедневная копия базы (03:30, таймер `zvonix-backup.timer`), четырнадцать последних, каждая проверена; `postgres 0700` |
 | `/etc/zvonix/zvonix.env` | окружение площадки, `root:zvonix 0640`; выкладкой не переписывается |
@@ -245,6 +247,20 @@ pnpm install --frozen-lockfile && pnpm build && pnpm web:build
 node scripts/release-pack.mjs v0.1.0         # release/zvonix-v0.1.0.tgz и .sha256
 sudo zvonix-deploy --archive zvonix-v0.1.0.tgz
 ```
+
+## Обновление из кабинета
+
+Раздел «Обновления» (только администратор): текущий выпуск, список выпусков из GitHub, «Обновить», «Вернуться на
+прежний выпуск», журнал выкладки в реальном времени ([ADR-0074](../docs/adr/0074-obnovlenie-iz-adminki.md),
+контракт — [docs/api/updates.md](../docs/api/updates.md)). Кабинет заявки не исполняет: их кладёт API, а исполняет
+`zvonix-updater` от root — по появлению файла в `/var/lib/zvonix-updater/requests` (`zvonix-updater.path`) и раз
+в 10 минут для списка выпусков (`zvonix-updater.timer`). Службу и каталог ставит сама выкладка, поэтому
+**первое** обновление с этой возможностью делается как обычно по SSH, дальше — из кабинета. Токен GitHub служба
+берёт из `/etc/zvonix/github.env`; у API его нет.
+
+Выкладка берёт замок `/run/zvonix-deploy.lock`: ручной `zvonix-deploy` и кнопка не пойдут одновременно (второй
+отвечает «уже идёт другая выкладка»). Журнал каждой выкладки лежит в `/var/lib/zvonix-updater/runs/<id>/log`,
+хранятся тридцать последних. Смотреть на сервере: `journalctl -u zvonix-updater`, `systemctl status zvonix-updater.path`.
 
 ## Проверка после выкладки
 

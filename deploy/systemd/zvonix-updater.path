@@ -1,0 +1,9 @@
+[Unit]
+Description=Zvonix updater: появилась заявка на обновление
+
+[Path]
+DirectoryNotEmpty=/var/lib/zvonix-updater/requests
+Unit=zvonix-updater.service
+
+[Install]
+WantedBy=multi-user.target
