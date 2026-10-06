@@ -89,6 +89,16 @@ id:<message_id> sub:001 dlvrd:001 submit date:ГГММДДччмм done date:Г�
 Создание, смена пароля и изменение пишутся в журнал (`smpp_account.created`, `smpp_account.password_reset`,
 `smpp_account.updated`); пароль в журнал не попадает.
 
+## Сотрудникам
+
+- `GET /smpp/accounts` (роли `admin`, `support`) → `{ "accounts": [{ "client_id", "client_name", "system_id", "enabled",
+  "allowed_ips", "last_bind_at", "created_at" }] }`. Пароль не отдаётся никому, кроме клиента при создании.
+- `PATCH /smpp/accounts/:clientId` (только `admin`) ← `{ "enabled": false }` — отключить подключение клиента (например,
+  при подозрении на утечку пароля) или вернуть; пишется в журнал (`smpp_account.updated`). Открытые сессии доживают до
+  разрыва, новые входы отклоняются (`ESME_RBINDFAIL`).
+
+В кабинете — «Сообщения MAX» → блок «Подключения клиентов по SMPP».
+
 ## Настройка площадки
 
 Переменные окружения API (не процесса воркера): `SMPP_HOST` (по умолчанию `0.0.0.0`), `SMPP_PORT`,

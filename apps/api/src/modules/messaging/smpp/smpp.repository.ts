@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { toDatabaseError } from '@zvonix/db';
 import { smppAccounts } from '@zvonix/db/schema';
 import { newId, type Id } from '@zvonix/shared';
@@ -21,6 +21,11 @@ export class SmppRepository {
       .from(smppAccounts)
       .where(eq(smppAccounts.clientId, clientId));
     return row;
+  }
+
+  /** Все учётные записи SMPP — сотрудникам: кто подключён, когда заходил последний раз. */
+  list(): Promise<SmppAccountRow[]> {
+    return this.database.db.select().from(smppAccounts).orderBy(desc(smppAccounts.createdAt));
   }
 
   async findBySystemId(systemId: string): Promise<SmppAccountRow | undefined> {

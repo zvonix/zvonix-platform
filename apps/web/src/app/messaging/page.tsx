@@ -97,7 +97,8 @@ function MessagingView() {
             <ManualForm />
           </FormDialog>
           <p className="text-muted-foreground">
-            Продукт включается и наценка задаётся в «Настройки площадки» → «Сообщения MAX».
+            Продукт включается и ключ провайдера вписывается в «Настройки площадки» → «Сообщения
+            MAX», наценка — в «Тарифы и наценка».
           </p>
         </div>
       )}
@@ -188,6 +189,8 @@ function MessagingView() {
           </TableBody>
         </Table>
       </div>
+
+      <SmppConnections />
 
       <RecentMessages />
     </div>
@@ -352,5 +355,108 @@ function ManualForm() {
         />
       </DialogField>
     </DialogForm>
+  );
+}
+
+interface SmppConnection {
+  readonly client_id: string;
+  readonly client_name: string | null;
+  readonly system_id: string;
+  readonly enabled: boolean;
+  readonly allowed_ips: readonly string[];
+  readonly last_bind_at: string | null;
+}
+
+/**
+ * Подключения клиентов по SMPP ([ADR-0072](../../../../../docs/adr/0072-smpp-dlya-soobscheniy.md)): кто подключён и
+ * когда заходил в последний раз. Администратор может отключить подключение (например, при подозрении на утечку
+ * пароля) и вернуть его; пароль и адреса клиента он не видит и не меняет. Пока подключений нет, блока нет.
+ */
+function SmppConnections() {
+  const canChange = useCanChange();
+  const queryClient = useQueryClient();
+  const list = useQuery({
+    queryKey: ['smpp', 'accounts'],
+    queryFn: ({ signal }) => request<{ accounts: SmppConnection[] }>('/smpp/accounts', { signal }),
+    refetchInterval: 30_000,
+  });
+  const toggle = useMutation({
+    mutationFn: (input: { clientId: string; enabled: boolean }) =>
+      request<unknown>(`/smpp/accounts/${input.clientId}`, {
+        method: 'PATCH',
+        body: { enabled: input.enabled },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['smpp', 'accounts'] }),
+  });
+
+  const accounts = list.data?.accounts ?? [];
+  if (accounts.length === 0) return null;
+
+  return (
+    <section aria-label="Подключения по SMPP" className="flex flex-col gap-2">
+      <h2 className="font-semibold">Подключения клиентов по SMPP</h2>
+      <div className="rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className="h-8">Клиент</TableHead>
+              <TableHead className="h-8">Имя входа</TableHead>
+              <TableHead className="h-8">Адреса</TableHead>
+              <TableHead className="h-8">Был на связи</TableHead>
+              <TableHead className="h-8">Состояние</TableHead>
+              {canChange && <TableHead className="h-8" />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {accounts.map((account) => (
+              <TableRow key={account.client_id}>
+                <TableCell>{account.client_name ?? account.client_id}</TableCell>
+                <TableCell>
+                  <span className="num">{account.system_id}</span>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {account.allowed_ips.length === 0
+                    ? 'любые'
+                    : `ограничены: ${String(account.allowed_ips.length)}`}
+                </TableCell>
+                <TableCell>
+                  <span className="num text-muted-foreground">{moment(account.last_bind_at)}</span>
+                </TableCell>
+                <TableCell className={account.enabled ? 'text-ok' : 'text-warn'}>
+                  {account.enabled ? 'Включено' : 'Отключено'}
+                </TableCell>
+                {canChange && (
+                  <TableCell className="text-right">
+                    {account.enabled ? (
+                      <ConfirmAction
+                        label="Отключить"
+                        title={`Отключить SMPP клиента «${account.client_name ?? account.system_id}»`}
+                        consequence="Новые подключения клиента будут отклоняться, пока вы не включите его снова. Открытые сессии доживут до разрыва."
+                        confirmLabel="Отключить"
+                        size="xs"
+                        onConfirm={() =>
+                          toggle.mutateAsync({ clientId: account.client_id, enabled: false })
+                        }
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={toggle.isPending}
+                        onClick={() => {
+                          toggle.mutate({ clientId: account.client_id, enabled: true });
+                        }}
+                        className="min-h-7 rounded-md border border-border px-2 hover:bg-muted"
+                      >
+                        Включить
+                      </button>
+                    )}
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
   );
 }

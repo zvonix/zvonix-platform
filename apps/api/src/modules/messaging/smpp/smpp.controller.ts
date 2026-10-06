@@ -5,16 +5,17 @@
  * Пароль отдаётся один раз — в ответе на создание и на смену. Дальше он нигде не читается.
  */
 
-import { Body, Controller, Get, Inject, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/common';
 import type { z } from 'zod';
-import { Cabinets } from '../../../http/auth.guard.js';
+import { parseId } from '@zvonix/shared';
+import { Cabinets, Roles } from '../../../http/auth.guard.js';
 import { CurrentUser } from '../../../http/request-context.js';
 import { zodBody } from '../../../http/zod.pipe.js';
 import { APP_CONFIG, type Config } from '../../../infra/tokens.js';
 import { BillingService } from '../../billing/billing.service.js';
 import type { Principal } from '../../identity/identity.service.js';
 import { MessagingService } from '../messaging.service.js';
-import { updateSmppSchema } from '../schemas.js';
+import { updateSmppSchema, staffSmppSchema } from '../schemas.js';
 import type { SmppAccountRow } from './smpp.repository.js';
 import { SmppService } from './smpp.service.js';
 
@@ -100,6 +101,46 @@ export class ClientSmppController {
   ): Promise<{ smpp: SmppView }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     const account = await this.smpp.update(actor, client.id, body);
+    return { smpp: toView(account) };
+  }
+}
+
+/** Подключения SMPP всех клиентов — сотрудникам; отключить или вернуть может администратор. */
+@Controller()
+export class StaffSmppController {
+  constructor(
+    private readonly smpp: SmppService,
+    private readonly billing: BillingService,
+  ) {}
+
+  @Roles('admin', 'support')
+  @Get('smpp/accounts')
+  async list(): Promise<{
+    accounts: (SmppView & { client_id: string; client_name: string | null })[];
+  }> {
+    const { rows } = await this.billing.listClients({ limit: 200, offset: 0 });
+    const names = new Map<string, string>(rows.map((client) => [client.id, client.name]));
+    const accounts = await this.smpp.list();
+    return {
+      accounts: accounts.map((row) => ({
+        ...toView(row),
+        client_id: row.clientId,
+        client_name: names.get(row.clientId) ?? null,
+      })),
+    };
+  }
+
+  /** Отключение или возврат подключения клиента: пароль и адреса не трогаются. */
+  @Roles('admin')
+  @Patch('smpp/accounts/:clientId')
+  async update(
+    @CurrentUser() actor: Principal,
+    @Param('clientId') clientId: string,
+    @Body(zodBody(staffSmppSchema)) body: z.infer<typeof staffSmppSchema>,
+  ): Promise<{ smpp: SmppView }> {
+    const account = await this.smpp.update(actor, parseId(clientId, 'client'), {
+      enabled: body.enabled,
+    });
     return { smpp: toView(account) };
   }
 }

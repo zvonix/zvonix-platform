@@ -60,6 +60,9 @@ export const messagesOverviewQuerySchema = z.object({
     .pipe(z.number().int().min(-720).max(840)),
 });
 
+/** Сотрудник отключает или возвращает подключение SMPP клиента. */
+export const staffSmppSchema = z.object({ enabled: z.boolean() });
+
 /** Пустое значение параметра — «любое»: форма отбора шлёт все свои поля. */
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === '' ? undefined : value), schema.optional());
