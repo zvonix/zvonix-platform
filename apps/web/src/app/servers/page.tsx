@@ -8,6 +8,7 @@ import { ErrorNote } from '@/components/error-note';
 import { LineChart, type ChartPoint } from '@/components/line-chart';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
+import { gaugeTone, usedPercent } from '@/lib/gauge';
 import { NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
 
 type Range = 'hour' | 'day' | 'week';
@@ -44,16 +45,6 @@ interface Server {
 
 const NUMBER = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
 const gigabytes = (mb: number): string => `${NUMBER.format(mb / 1024)} ГБ`;
-const percent = (part: number, whole: number): number =>
-  whole <= 0 ? 0 : Math.round((part / whole) * 100);
-
-/** Заполненность: с девяти десятых — тревога, с трёх четвертей — внимание. */
-function tone(used: number): string {
-  if (used >= 90) return 'bg-crit';
-  if (used >= 75) return 'bg-warn';
-  return 'bg-ok';
-}
-
 export default function ServersPage() {
   return (
     <ConsoleShell title="Серверы" requireRole={['admin', 'support']}>
@@ -159,17 +150,20 @@ function ServerCard({
           )}
           <Gauge
             title="Процессор"
-            used={percent(current.load1, current.cpu_cores)}
+            used={usedPercent(current.load1, current.cpu_cores)}
             text={`нагрузка ${NUMBER.format(current.load1)} на ${String(current.cpu_cores)} яд.`}
           />
           <Gauge
             title="Память"
-            used={percent(current.mem_total_mb - current.mem_available_mb, current.mem_total_mb)}
+            used={usedPercent(
+              current.mem_total_mb - current.mem_available_mb,
+              current.mem_total_mb,
+            )}
             text={`занято ${gigabytes(current.mem_total_mb - current.mem_available_mb)} из ${gigabytes(current.mem_total_mb)}`}
           />
           <Gauge
             title="Диск"
-            used={percent(current.disk_total_mb - current.disk_free_mb, current.disk_total_mb)}
+            used={usedPercent(current.disk_total_mb - current.disk_free_mb, current.disk_total_mb)}
             text={`свободно ${gigabytes(current.disk_free_mb)} из ${gigabytes(current.disk_total_mb)}`}
           />
 
@@ -232,7 +226,7 @@ function Gauge({ title, used, text }: { title: string; used: number; text: strin
         aria-valuemax={100}
         aria-valuenow={clamped}
       >
-        <div className={`h-full ${tone(clamped)}`} style={{ width: `${String(clamped)}%` }} />
+        <div className={`h-full ${gaugeTone(clamped)}`} style={{ width: `${String(clamped)}%` }} />
       </div>
     </div>
   );
