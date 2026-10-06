@@ -139,6 +139,29 @@ for (const script of SHELL_SCRIPTS) {
   }
 }
 
+// Служба обновления из кабинета (ADR-0074) — Python: он уже нужен выкладке для разбора ответов GitHub.
+{
+  const script = 'deploy/updater.py';
+  const file = path.join(ROOT, script);
+  if (readFileSync(file, 'utf8').includes(String.fromCharCode(13))) {
+    problems.push(`${script}: возврат каретки в файле, нужен только LF`);
+  }
+  const python = process.platform === 'win32' ? 'python' : 'python3';
+  try {
+    execFileSync(
+      python,
+      ['-c', 'import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())', file],
+      {
+        stdio: 'pipe',
+      },
+    );
+  } catch (error) {
+    const output =
+      error instanceof Error && 'stderr' in error ? String(error.stderr) : String(error);
+    problems.push(`${script}: синтаксическая ошибка — ${output.trim()}`);
+  }
+}
+
 if (problems.length > 0) {
   console.error(`Проблем в конфигурации узла и выкладки: ${problems.length}`);
   for (const problem of problems) console.error(`  ${problem}`);
@@ -147,5 +170,5 @@ if (problems.length > 0) {
 
 console.log(
   `Конфигурация узла и выкладки проверена: ${String(configs.length)} файлов XML, ` +
-    `${String(SHELL_SCRIPTS.length)} скрипта.`,
+    `${String(SHELL_SCRIPTS.length)} скрипта и служба обновления.`,
 );

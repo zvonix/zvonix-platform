@@ -50,6 +50,7 @@ const PUBLIC_VARIABLES = new Set([
   'SMPP_TLS_KEY_FILE',
   'RECORDINGS_STORAGE',
   'RECORDINGS_DIR',
+  'UPDATER_DIR',
   'RECORDING_LINK_TTL_SECONDS',
   'LOG_LEVEL',
   'LOG_FORMAT',
@@ -202,6 +203,11 @@ export const configSchema = z.object({
   RECORDINGS_STORAGE: z.enum(['local', 's3']).default('local'),
   /** Каталог записей при `local`. На сервере — вне каталога выпуска, чтобы выкладка не стирала записи. */
   RECORDINGS_DIR: z.string().min(1, 'не может быть пустым').default('./data/recordings'),
+  /**
+   * Каталог обмена с службой обновления (ADR-0074): API кладёт туда заявки и читает состояние и журнал.
+   * Каталог создаёт выкладка; нет каталога — обновление из кабинета «не настроено».
+   */
+  UPDATER_DIR: z.string().min(1, 'не может быть пустым').default('/var/lib/zvonix-updater'),
   S3_ENDPOINT: z.url('должен быть адресом').default('http://127.0.0.1:9000'),
   S3_BUCKET: z
     .string()

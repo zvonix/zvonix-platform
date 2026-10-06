@@ -1,0 +1,9 @@
+[Unit]
+Description=Zvonix updater (заявки на обновление из кабинета, ADR-0074)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/zvonix-updater
+# Выкладка идёт минуты; служба не должна обрываться по сроку запуска.
+TimeoutStartSec=infinity

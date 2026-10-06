@@ -24,6 +24,8 @@
  */
 
 import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import http from 'node:http';
 import { createServer } from 'node:net';
 import path from 'node:path';
@@ -205,6 +207,69 @@ function startProxy({ port, apiPort, webPort, api, web }) {
   });
 }
 
+/** Идентификатор завершённого обновления в каталоге обмена стенда: на нём проверяется журнал (ADR-0074). */
+export const UPDATER_FIXTURE_RUN = '11111111-1111-4111-8111-111111111111';
+
+/**
+ * Каталог обмена со службой обновления (ADR-0074). Самой службы на стенде нет: её след — список выпусков
+ * и одно завершённое обновление с журналом — кладётся готовым, заявки же остаются в очереди.
+ */
+function prepareUpdaterDir() {
+  const dir = mkdtempSync(path.join(tmpdir(), 'zvonix-e2e-updater-'));
+  mkdirSync(path.join(dir, 'requests'));
+  const run = path.join(dir, 'runs', UPDATER_FIXTURE_RUN);
+  mkdirSync(run, { recursive: true });
+  writeFileSync(
+    path.join(dir, 'releases.json'),
+    JSON.stringify({
+      fetched_at: '2026-10-06T10:00:00+00:00',
+      releases: [
+        {
+          tag: 'v9.9.9',
+          name: 'v9.9.9',
+          published_at: '2026-10-06T09:00:00Z',
+          prerelease: false,
+          notes: 'Обновление из кабинета',
+        },
+        {
+          tag: 'v9.9.8',
+          name: 'v9.9.8',
+          published_at: '2026-10-05T09:00:00Z',
+          prerelease: false,
+          notes: '',
+        },
+      ],
+    }),
+  );
+  writeFileSync(
+    path.join(run, 'state.json'),
+    JSON.stringify({
+      id: UPDATER_FIXTURE_RUN,
+      action: 'deploy',
+      tag: 'v9.9.8',
+      by: 'admin@example.test',
+      requested_at: '2026-10-05T10:00:00+00:00',
+      status: 'succeeded',
+      started_at: '2026-10-05T10:00:01+00:00',
+      finished_at: '2026-10-05T10:01:00+00:00',
+      exit_code: 0,
+    }),
+  );
+  writeFileSync(
+    path.join(run, 'log'),
+    [
+      '$ zvonix-deploy v9.9.8',
+      '=== Выпуск v9.9.8',
+      '=== Копия базы',
+      '=== Миграции',
+      '=== Переход на выпуск',
+      'DEPLOY_OK v9.9.8',
+      '',
+    ].join('\n'),
+  );
+  return dir;
+}
+
 /**
  * Поднимает стенд целиком и возвращает адрес и способ его погасить.
  *
@@ -219,6 +284,7 @@ export async function startStack() {
     freePort(),
     freePort(),
   ]);
+  const updaterDir = prepareUpdaterDir();
   const output = [];
   const collect = (chunk) => output.push(String(chunk));
 
@@ -234,6 +300,7 @@ export async function startStack() {
       // Сервер SMPP включён: без порта кабинет не показал бы кнопку «Создать подключение» (ADR-0072).
       SMPP_HOST: '127.0.0.1',
       SMPP_PORT: String(smppPort),
+      UPDATER_DIR: updaterDir,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -261,6 +328,7 @@ export async function startStack() {
     proxy = await startProxy({ port, apiPort, webPort, api, web });
   } catch (error) {
     await Promise.all([stop(api), stop(web)]);
+    rmSync(updaterDir, { recursive: true, force: true });
     throw error;
   }
 
@@ -271,6 +339,7 @@ export async function startStack() {
     async stop() {
       await new Promise((resolve) => proxy.close(resolve));
       await Promise.all([stop(api), stop(web)]);
+      rmSync(updaterDir, { recursive: true, force: true });
     },
   };
 }

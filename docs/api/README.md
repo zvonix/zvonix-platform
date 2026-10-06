@@ -32,6 +32,8 @@
   Обоснование — [ADR-0013](../adr/0013-opredelenie-operatora.md).
 - [billing.md](billing.md) — клиенты, партнёры, счета, журнал проводок, пополнение
   баланса. Обоснование — [ADR-0010](../adr/0010-model-billinga.md).
+- [updates.md](updates.md) — обновление площадки из кабинета администратора: выпуски, заявка, отмена, журнал
+  выкладки онлайн. Обоснование — [ADR-0074](../adr/0074-obnovlenie-iz-adminki.md).
 - [tariffs.md](tariffs.md) — цены партнёров, правила тарификации и наценка платформы.
   Обоснование — [ADR-0010](../adr/0010-model-billinga.md).
 - [machine-keys.md](machine-keys.md) — выпуск и отзыв ключей узлов и клиентских

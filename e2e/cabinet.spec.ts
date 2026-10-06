@@ -833,6 +833,43 @@ test.describe('SMPP у сотрудников', () => {
   });
 });
 
+test.describe('обновление из кабинета (ADR-0074)', () => {
+  test('администратор видит выпуски и журнал, ставит заявку и отменяет её', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/updates');
+
+    await expect(page.getByRole('heading', { name: 'Выпуски' })).toBeVisible();
+    await expect(page.getByRole('main').getByText('сборка не из выпуска')).toBeVisible();
+    const releases = page.getByRole('region', { name: 'Выпуски' });
+    await expect(releases.getByText('v9.9.9')).toBeVisible();
+
+    // Последнее завершённое обновление показано с шагами и журналом.
+    const progress = page.getByRole('region', { name: 'Ход обновления' });
+    await expect(progress.getByRole('listitem').filter({ hasText: 'Копия базы' })).toBeVisible();
+    await expect(progress.getByLabel('Журнал выкладки')).toContainText('DEPLOY_OK v9.9.8');
+
+    await releases.getByRole('button', { name: 'Обновить' }).first().click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Обновить' }).click();
+
+    const queue = page.getByRole('region', { name: 'Очередь' });
+    await expect(queue.getByText('Ждёт службу')).toBeVisible();
+    // Пока заявка ждёт, вторую выкладку начать нельзя.
+    await expect(releases.getByRole('button', { name: 'Обновить' }).first()).toBeDisabled();
+
+    await queue.getByRole('button', { name: 'Отменить' }).click();
+    await expect(queue).toBeHidden();
+    await expect(releases.getByRole('button', { name: 'Обновить' }).first()).toBeEnabled();
+  });
+
+  test('поддержке раздел закрыт', async ({ page }) => {
+    await signIn(page, PEOPLE.support);
+    const response = await page.request.get('/api/updates');
+    expect(response.status()).toBe(403);
+    await page.goto('/overview');
+    await expect(page.getByRole('link', { name: 'Обновления' })).toHaveCount(0);
+  });
+});
+
 test.describe('шрифты со своего адреса', () => {
   test('IBM Plex загружается с площадки, а не с чужого сервера', async ({ page }) => {
     const foreign: string[] = [];

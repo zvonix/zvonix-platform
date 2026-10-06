@@ -34,12 +34,16 @@ die() {
 step() { printf '\n=== %s\n' "$*"; }
 
 [ "$(id -u)" -eq 0 ] || die "нужны права root"
-for command in curl tar sha256sum node pnpm python3 systemctl sudo find pg_dump; do
+for command in curl tar sha256sum node pnpm python3 systemctl sudo find pg_dump flock; do
   command -v "$command" >/dev/null 2>&1 \
     || die "не найдена команда ${command} — сначала deploy/server-setup.sh"
 done
 id zvonix >/dev/null 2>&1 || die "нет пользователя zvonix — сначала deploy/server-setup.sh"
 [ -s "${ETC}/zvonix.env" ] || die "нет ${ETC}/zvonix.env — сначала deploy/server-setup.sh"
+
+# Одна выкладка за раз: ручной запуск по SSH и кнопка в кабинете (ADR-0074) не должны столкнуться.
+exec 9>/run/zvonix-deploy.lock
+flock -n 9 || die "уже идёт другая выкладка"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -68,15 +72,21 @@ point() {
 activate() {
   local release="$1"
   if [ -d "${release}/deploy/systemd" ]; then
-    install -m 0644 "${release}"/deploy/systemd/zvonix-*.service "${release}"/deploy/systemd/zvonix-*.timer       /etc/systemd/system/
+    install -m 0644 "${release}"/deploy/systemd/zvonix-*.service "${release}"/deploy/systemd/zvonix-*.timer       "${release}"/deploy/systemd/zvonix-*.path /etc/systemd/system/
     install -m 0755 "${release}/deploy/deploy.sh" /usr/local/sbin/zvonix-deploy
     # Ежедневная копия базы: сценарий и таймер ставятся выкладкой, как и службы.
     install -m 0755 "${release}/deploy/backup.sh" /usr/local/sbin/zvonix-backup
+    # Обновление из кабинета (ADR-0074): служба от root и каталог обмена с API. Служба
+    # обновления выкладкой не перезапускается — она сама её и запускает.
+    install -m 0755 "${release}/deploy/updater.py" /usr/local/sbin/zvonix-updater
+    install -d -o root -g root -m 0755 /var/lib/zvonix-updater /var/lib/zvonix-updater/runs
+    install -d -o zvonix -g zvonix -m 0750 /var/lib/zvonix-updater/requests
   fi
   point "$CURRENT" "$release"
   systemctl daemon-reload
   systemctl enable "${SERVICES[@]}" >/dev/null 2>&1
   systemctl enable --now zvonix-backup.timer >/dev/null 2>&1 || echo "ВНИМАНИЕ: таймер копий не включён" >&2
+  systemctl enable --now zvonix-updater.path zvonix-updater.timer >/dev/null 2>&1     || echo "ВНИМАНИЕ: обновление из кабинета не включено" >&2
   systemctl restart "${SERVICES[@]}"
   wait_ready "$API_READY" && wait_ready "$WEB_READY"
 }
