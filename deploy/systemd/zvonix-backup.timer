@@ -1,0 +1,11 @@
+[Unit]
+Description=Zvonix daily database backup (timer)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10min
+# Машина была выключена в 03:30 — копия снимается при следующем включении.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

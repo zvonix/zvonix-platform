@@ -1,0 +1,9 @@
+[Unit]
+Description=Zvonix daily database backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zvonix-backup
+Nice=10
+IOSchedulingClass=idle

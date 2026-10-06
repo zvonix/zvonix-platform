@@ -68,12 +68,15 @@ point() {
 activate() {
   local release="$1"
   if [ -d "${release}/deploy/systemd" ]; then
-    install -m 0644 "${release}"/deploy/systemd/zvonix-*.service /etc/systemd/system/
+    install -m 0644 "${release}"/deploy/systemd/zvonix-*.service "${release}"/deploy/systemd/zvonix-*.timer       /etc/systemd/system/
     install -m 0755 "${release}/deploy/deploy.sh" /usr/local/sbin/zvonix-deploy
+    # Ежедневная копия базы: сценарий и таймер ставятся выкладкой, как и службы.
+    install -m 0755 "${release}/deploy/backup.sh" /usr/local/sbin/zvonix-backup
   fi
   point "$CURRENT" "$release"
   systemctl daemon-reload
   systemctl enable "${SERVICES[@]}" >/dev/null 2>&1
+  systemctl enable --now zvonix-backup.timer >/dev/null 2>&1 || echo "ВНИМАНИЕ: таймер копий не включён" >&2
   systemctl restart "${SERVICES[@]}"
   wait_ready "$API_READY" && wait_ready "$WEB_READY"
 }
