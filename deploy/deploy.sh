@@ -157,6 +157,22 @@ update_local_node() {
   echo "ВНИМАНИЕ: узел АТС не обновлён — площадка работает; повторите zvonix-node-update" >&2
 }
 
+# Канал сервера до GitHub бывает очень медленным (2026-10-06: около 11 КБ/с, архив в 15 МБ не
+# укладывался в десять минут). Поэтому каждая попытка продолжает файл с места обрыва, а не
+# начинает заново, и попыток несколько. Строки попыток видны в журнале обновления из кабинета.
+fetch_resumable() {
+  local out="$1" url="$2" headers="$3" attempt
+  for attempt in 1 2 3 4 5 6; do
+    if curl -fsSL -C - --max-time 600 -H @"$headers" -H 'Accept: application/octet-stream' \
+      -o "$out" "$url"; then
+      return 0
+    fi
+    echo "скачивание не завершилось (попытка ${attempt} из 6), продолжаю с места обрыва: $(du -h "$out" 2>/dev/null | cut -f1)" >&2
+    sleep 3
+  done
+  return 1
+}
+
 # Скачивание выпуска по токену только на чтение (ADR-0049).
 download() {
   local tag="$1" env_file="${ETC}/github.env" headers api name id release_id
@@ -199,8 +215,7 @@ PY
     [ -n "$id" ] || die "в выпуске ${tag} нет файла ${name}"
     # Файл отдаёт хранилище GitHub переадресацией; заголовок авторизации curl на чужой
     # адрес не переносит.
-    curl -fsSL --max-time 600 -H @"$headers" -H 'Accept: application/octet-stream' \
-      -o "${WORK}/${name}" "${api}/releases/assets/${id}" \
+    fetch_resumable "${WORK}/${name}" "${api}/releases/assets/${id}" "$headers" \
       || die "не удалось скачать ${name}"
   done
 
