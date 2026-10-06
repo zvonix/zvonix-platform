@@ -853,7 +853,8 @@ test.describe('обновление из кабинета (ADR-0074)', () => {
 
     const queue = page.getByRole('region', { name: 'Очередь' });
     await expect(queue.getByText('Ждёт службу')).toBeVisible();
-    // Пока заявка ждёт, вторую выкладку начать нельзя.
+    // Пока заявка ждёт, ни вторую выкладку, ни проверку обновлений начать нельзя.
+    await expect(page.getByRole('button', { name: 'Идёт работа…' })).toBeDisabled();
     await expect(releases.getByRole('button', { name: 'Обновить' }).first()).toBeDisabled();
 
     await queue.getByRole('button', { name: 'Отменить' }).click();
