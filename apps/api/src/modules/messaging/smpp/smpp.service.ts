@@ -56,6 +56,11 @@ export class SmppService {
     private readonly audit: AuditService,
   ) {}
 
+  /** Все подключения — для сотрудников. */
+  list(): Promise<SmppAccountRow[]> {
+    return this.repository.list();
+  }
+
   find(clientId: Id<'client'>): Promise<SmppAccountRow | undefined> {
     return this.repository.findByClient(clientId);
   }

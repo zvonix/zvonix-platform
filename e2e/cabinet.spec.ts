@@ -738,6 +738,51 @@ test.describe('меню и поиск по разделам', () => {
   });
 });
 
+// После сценария клиента: он создаёт подключение, и тому нужен чистый кабинет клиента.
+test.describe('SMPP у сотрудников', () => {
+  test('администратор видит подключение клиента и отключает его через подтверждение', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const admin = await adminContext.newPage();
+    await signIn(admin, PEOPLE.admin);
+    await admin.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'messaging.enabled': true } },
+    });
+
+    const clientContext = await browser.newContext();
+    const client = await clientContext.newPage();
+    await signIn(client, PEOPLE.client);
+    const created = await client.request.post('/api/client/messages/smpp', {
+      headers: { 'X-Zvonix-Web': '1' },
+    });
+    // Подключение могло быть создано другим сценарием: для проверки важно, что оно есть.
+    expect([201, 409]).toContain(created.status());
+
+    await admin.goto('/messaging');
+    const block = admin.getByRole('region', { name: 'Подключения по SMPP' });
+    await expect(block).toBeVisible();
+    await expect(block.getByText(/^zx[a-z0-9]{8}$/u).first()).toBeVisible();
+
+    // Сценарий клиента выше оставил своё подключение отключённым: сначала возвращаем его.
+    const enable = block.getByRole('button', { name: 'Включить' }).first();
+    if ((await enable.count()) > 0) {
+      await enable.click();
+      await expect(block.getByRole('button', { name: 'Отключить' }).first()).toBeVisible();
+    }
+
+    await block.getByRole('button', { name: 'Отключить' }).first().click();
+    await admin.getByRole('alertdialog').getByRole('button', { name: 'Отключить' }).click();
+    await expect(block.getByText('Отключено').first()).toBeVisible();
+    await block.getByRole('button', { name: 'Включить' }).first().click();
+    await expect(block.getByText('Включено').first()).toBeVisible();
+
+    await adminContext.close();
+    await clientContext.close();
+  });
+});
+
 test.describe('шрифты со своего адреса', () => {
   test('IBM Plex загружается с площадки, а не с чужого сервера', async ({ page }) => {
     const foreign: string[] = [];

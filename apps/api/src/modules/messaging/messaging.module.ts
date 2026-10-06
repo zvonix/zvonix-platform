@@ -20,7 +20,7 @@ import { MessagingService } from './messaging.service.js';
 import { MESSAGE_PROVIDER, type MessageProvider } from './provider.js';
 import { SimulatedMessageProvider } from './simulated.provider.js';
 import { SmppServer } from './smpp/server.js';
-import { ClientSmppController } from './smpp/smpp.controller.js';
+import { ClientSmppController, StaffSmppController } from './smpp/smpp.controller.js';
 import { SmppRepository } from './smpp/smpp.repository.js';
 import { SmppService } from './smpp/smpp.service.js';
 
@@ -36,6 +36,7 @@ import { SmppService } from './smpp/smpp.service.js';
     ClientMessagesController,
     ClientApiMessagesController,
     ClientSmppController,
+    StaffSmppController,
     StaffMessagesController,
     MessengerWebhookController,
   ],

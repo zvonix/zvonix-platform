@@ -12,7 +12,9 @@ import { simulateAccountState } from './simulated.provider.js';
 export const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
 export interface Fixtures {
-  user: (role: 'admin' | 'client' | 'partner') => Promise<{ id: string; token: string }>;
+  user: (
+    role: 'admin' | 'client' | 'partner' | 'support',
+  ) => Promise<{ id: string; token: string }>;
   put: (
     token: string,
     settings: Record<string, unknown>,
@@ -28,7 +30,7 @@ export interface Fixtures {
 }
 
 export function fixtures(api: () => NestFastifyApplication, adminToken: () => string): Fixtures {
-  async function user(role: 'admin' | 'client' | 'partner') {
+  async function user(role: 'admin' | 'client' | 'partner' | 'support') {
     const email = uniqueEmail();
     const { IdentityService } = await import('../identity/identity.service.js');
     const created = await api().get(IdentityService).createByAdmin({

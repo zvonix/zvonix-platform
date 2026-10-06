@@ -274,6 +274,79 @@ describe('подключение клиента в кабинете', () => {
   });
 });
 
+describe('подключения у сотрудников', () => {
+  it('сотрудники видят подключения; администратор отключает — вход закрывается, возвращает — открывается; поддержка и клиент не меняют', async () => {
+    const { client, credentials } = await smppClient('5');
+
+    const list = await api().inject({
+      method: 'GET',
+      url: '/smpp/accounts',
+      headers: bearer(adminToken),
+    });
+    expect(list.statusCode).toBe(200);
+    const found = list
+      .json<{ accounts: { client_id: string; system_id: string; enabled: boolean }[] }>()
+      .accounts.find((account) => account.client_id === client.clientId);
+    expect(found).toMatchObject({ system_id: credentials.systemId, enabled: true });
+    // Пароль не уходит никому, кроме самого клиента при создании.
+    expect(list.body).not.toContain(credentials.password);
+
+    const off = await api().inject({
+      method: 'PATCH',
+      url: `/smpp/accounts/${client.clientId}`,
+      headers: bearer(adminToken),
+      payload: { enabled: false },
+    });
+    expect(off.statusCode).toBe(200);
+    const blocked = await connect();
+    expect(
+      (await blocked.bind(Command.bindTransceiver, credentials.systemId, credentials.password))
+        .status,
+    ).toBe(Status.bindFailed);
+
+    const support = await fx.user('support');
+    expect(
+      (
+        await api().inject({
+          method: 'GET',
+          url: '/smpp/accounts',
+          headers: bearer(support.token),
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await api().inject({
+          method: 'PATCH',
+          url: `/smpp/accounts/${client.clientId}`,
+          headers: bearer(support.token),
+          payload: { enabled: true },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await api().inject({
+          method: 'GET',
+          url: '/smpp/accounts',
+          headers: bearer(client.token),
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    await api().inject({
+      method: 'PATCH',
+      url: `/smpp/accounts/${client.clientId}`,
+      headers: bearer(adminToken),
+      payload: { enabled: true },
+    });
+    const open = await connect();
+    expect(
+      (await open.bind(Command.bindTransceiver, credentials.systemId, credentials.password)).status,
+    ).toBe(Status.ok);
+  });
+});
+
 describe('вход', () => {
   it('верные данные — вход; неверный пароль — отказ и закрытие соединения', async () => {
     const { credentials } = await smppClient();
