@@ -19,6 +19,8 @@ export interface UrlState {
   get: (key: string) => string;
   /** Задаёт значения; пустая строка убирает параметр из адреса. */
   set: (values: Record<string, string>) => void;
+  /** Заменяет все параметры сразу (применить сохранённый набор фильтров); пустая строка очищает адрес. */
+  apply: (query: string) => void;
   /** Всё, что задано, — готовой строкой запроса для API. */
   query: string;
 }
@@ -43,7 +45,14 @@ export function useUrlState(): UrlState {
     [parameters, pathname, router],
   );
 
+  const apply = useCallback(
+    (search: string) => {
+      router.replace(search === '' ? pathname : `${pathname}?${search}`, { scroll: false });
+    },
+    [pathname, router],
+  );
+
   const query = useMemo(() => parameters.toString(), [parameters]);
 
-  return { get, set, query };
+  return { get, set, apply, query };
 }

@@ -307,3 +307,34 @@ html[data-density='compact'] [data-slot='table-cell'] {
 html[data-density='compact'] [data-slot='table-head'] {
   height: 1.75rem;
 }
+
+/*
+ * Скрытые колонки таблицы (`components/table-view.tsx`): номера колонок лежат в `data-hide`, строка с объединёнными
+ * ячейками («нет записей», «загружаем») остаётся целой. Правила на двадцать четыре колонки — больше у таблиц нет.
+ */
+table[data-hide~='1'] > :is(thead, tbody) > tr > :is(th, td):nth-child(1):not([colspan]),
+table[data-hide~='2'] > :is(thead, tbody) > tr > :is(th, td):nth-child(2):not([colspan]),
+table[data-hide~='3'] > :is(thead, tbody) > tr > :is(th, td):nth-child(3):not([colspan]),
+table[data-hide~='4'] > :is(thead, tbody) > tr > :is(th, td):nth-child(4):not([colspan]),
+table[data-hide~='5'] > :is(thead, tbody) > tr > :is(th, td):nth-child(5):not([colspan]),
+table[data-hide~='6'] > :is(thead, tbody) > tr > :is(th, td):nth-child(6):not([colspan]),
+table[data-hide~='7'] > :is(thead, tbody) > tr > :is(th, td):nth-child(7):not([colspan]),
+table[data-hide~='8'] > :is(thead, tbody) > tr > :is(th, td):nth-child(8):not([colspan]),
+table[data-hide~='9'] > :is(thead, tbody) > tr > :is(th, td):nth-child(9):not([colspan]),
+table[data-hide~='10'] > :is(thead, tbody) > tr > :is(th, td):nth-child(10):not([colspan]),
+table[data-hide~='11'] > :is(thead, tbody) > tr > :is(th, td):nth-child(11):not([colspan]),
+table[data-hide~='12'] > :is(thead, tbody) > tr > :is(th, td):nth-child(12):not([colspan]),
+table[data-hide~='13'] > :is(thead, tbody) > tr > :is(th, td):nth-child(13):not([colspan]),
+table[data-hide~='14'] > :is(thead, tbody) > tr > :is(th, td):nth-child(14):not([colspan]),
+table[data-hide~='15'] > :is(thead, tbody) > tr > :is(th, td):nth-child(15):not([colspan]),
+table[data-hide~='16'] > :is(thead, tbody) > tr > :is(th, td):nth-child(16):not([colspan]),
+table[data-hide~='17'] > :is(thead, tbody) > tr > :is(th, td):nth-child(17):not([colspan]),
+table[data-hide~='18'] > :is(thead, tbody) > tr > :is(th, td):nth-child(18):not([colspan]),
+table[data-hide~='19'] > :is(thead, tbody) > tr > :is(th, td):nth-child(19):not([colspan]),
+table[data-hide~='20'] > :is(thead, tbody) > tr > :is(th, td):nth-child(20):not([colspan]),
+table[data-hide~='21'] > :is(thead, tbody) > tr > :is(th, td):nth-child(21):not([colspan]),
+table[data-hide~='22'] > :is(thead, tbody) > tr > :is(th, td):nth-child(22):not([colspan]),
+table[data-hide~='23'] > :is(thead, tbody) > tr > :is(th, td):nth-child(23):not([colspan]),
+table[data-hide~='24'] > :is(thead, tbody) > tr > :is(th, td):nth-child(24):not([colspan]) {
+  display: none;
+}

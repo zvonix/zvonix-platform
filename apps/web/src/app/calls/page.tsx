@@ -10,6 +10,7 @@ import { ExportButton } from '@/components/export-button';
 import { FilterInput } from '@/components/filter-input';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
+import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
 import { Button } from '@/components/ui/button';
@@ -72,6 +73,7 @@ export default function CallsPage() {
 
 function CallsView() {
   const url = useUrlState();
+  const columns = useColumnPicker('calls');
   const clients = useClients();
   const partners = usePartners();
   const [checking, setChecking] = useState(false);
@@ -242,6 +244,8 @@ function CallsView() {
         />
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
+          <SavedFilters />
+          {columns.picker}
           <ExportButton
             name="разбор-вызовов"
             load={async () => {
@@ -310,7 +314,7 @@ function CallsView() {
       )}
 
       <div className="rounded-lg border border-border bg-card">
-        <Table>
+        <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Когда</TableHead>
