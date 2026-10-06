@@ -48,7 +48,7 @@ const ACCOUNTS_KEY = ['partner', 'messenger', 'accounts'] as const;
 
 export default function PartnerMessagesPage() {
   return (
-    <ConsoleShell title="Сообщения MAX" cabinet="partner">
+    <ConsoleShell title="Аккаунты MAX" cabinet="partner">
       {() => <Accounts />}
     </ConsoleShell>
   );
