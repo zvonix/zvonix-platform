@@ -295,3 +295,15 @@
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * Плотные таблицы (переключатель в шапке, `lib/density.ts`): строки ниже, чтобы на экран помещалось больше.
+ * Отступы по горизонтали остаются — колонки не слипаются; высота цели нажатия внутри строки — своя у кнопок.
+ */
+html[data-density='compact'] [data-slot='table-cell'] {
+  padding-block: 0.125rem;
+}
+
+html[data-density='compact'] [data-slot='table-head'] {
+  height: 1.75rem;
+}
