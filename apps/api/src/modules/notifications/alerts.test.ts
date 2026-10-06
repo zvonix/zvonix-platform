@@ -24,6 +24,13 @@ interface Setup {
   alreadySent?: (kind: string, recipient: string) => boolean;
   nodesFail?: boolean;
   lowDisk?: { id: string | null; name: string; freeMb: number; totalMb: number }[];
+  strained?: {
+    id: string | null;
+    name: string;
+    memoryUsedPercent?: number;
+    loadPerCore?: number;
+  }[];
+  messages?: { total: number; failed: number };
   payments?: {
     id: string;
     clientId: string;
@@ -59,7 +66,11 @@ function build(setup: Setup) {
     } as never,
     { list: () => Promise.resolve({ rows: setup.payments ?? [], total: 0 }) } as never,
     { clientWithBalance: () => Promise.resolve({ name: 'Такси Ромашка' }) } as never,
-    { lowDisk: () => Promise.resolve(setup.lowDisk ?? []) } as never,
+    {
+      lowDisk: () => Promise.resolve(setup.lowDisk ?? []),
+      strained: () => Promise.resolve(setup.strained ?? []),
+    } as never,
+    { health: () => Promise.resolve(setup.messages ?? { total: 0, failed: 0 }) } as never,
     logger(),
   );
   return { service, enqueue };
@@ -177,6 +188,37 @@ describe('тревоги администраторам', () => {
     const sent = (enqueue.mock.calls[0] as unknown as [{ kind: string; body: string }])[0];
     expect(sent.kind).toBe('alert_disk:platform');
     expect(sent.body).toContain('5 %');
+  });
+
+  it('память почти кончилась и процессор перегружен — по письму на каждое', async () => {
+    const { service, enqueue } = build({
+      admins: [confirmed],
+      strained: [
+        { id: 'n1', name: 'Узел Москва', memoryUsedPercent: 95, loadPerCore: 3.4 },
+        { id: null, name: 'Площадка', loadPerCore: 2.2 },
+      ],
+    });
+
+    expect(await service.notify(NOW)).toBe(3);
+    const kinds = enqueue.mock.calls.map((call) => (call as unknown as [{ kind: string }])[0].kind);
+    expect(kinds).toEqual(['alert_memory:n1', 'alert_cpu:n1', 'alert_cpu:platform']);
+    const memory = (enqueue.mock.calls[0] as unknown as [{ body: string }])[0];
+    expect(memory.body).toContain('95 %');
+    const cpu = (enqueue.mock.calls[1] as unknown as [{ body: string }])[0];
+    expect(cpu.body).toContain('3,4');
+  });
+
+  it('сообщения MAX: больше половины не отправлено при достаточном числе — письмо; иначе тишина', async () => {
+    const trouble = build({ admins: [confirmed], messages: { total: 20, failed: 12 } });
+    expect(await trouble.service.notify(NOW)).toBe(1);
+    expect((trouble.enqueue.mock.calls[0] as unknown as [{ kind: string }])[0].kind).toBe(
+      'alert_messages',
+    );
+
+    const few = build({ admins: [confirmed], messages: { total: 4, failed: 4 } });
+    expect(await few.service.notify(NOW)).toBe(0);
+    const fine = build({ admins: [confirmed], messages: { total: 40, failed: 3 } });
+    expect(await fine.service.notify(NOW)).toBe(0);
   });
 
   it('сбой чтения узлов не гасит тревогу о качестве', async () => {

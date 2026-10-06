@@ -40,6 +40,15 @@ const METRIC_FRESH_MS = 15 * MINUTE_MS;
 /** Свободного места меньше этой доли — тревога (ADR-0062, четвёртое условие). */
 const LOW_DISK_FRACTION = 0.1;
 
+/** Занято памяти больше этой доли — тревога: дальше сервер начнёт убивать процессы. */
+const HIGH_MEMORY_FRACTION = 0.92;
+
+/** Нагрузка выше удвоенного числа ядер, и так все последние минуты, — перегрузка, а не всплеск. */
+const OVERLOAD_RATIO = 2;
+const OVERLOAD_WINDOW_MINUTES = 10;
+/** Замеров в окне не меньше стольких (раз в минуту): иначе «все минуты» — это одна случайная точка. */
+const OVERLOAD_MIN_POINTS = 5;
+
 interface ServerSnapshot {
   readonly load1Centi: number;
   readonly cpuCores: number;
@@ -61,6 +70,17 @@ export interface ServerView {
   readonly stale: boolean;
   readonly current: ServerSnapshot | null;
   readonly series: readonly MetricPoint[];
+}
+
+/** Источник под нагрузкой: память почти кончилась и (или) процессор перегружен несколько минут подряд. */
+export interface Strained {
+  readonly scope: 'platform' | 'node';
+  readonly id: string | null;
+  readonly name: string;
+  /** Занятая память в процентах; `undefined` — память в порядке. */
+  readonly memoryUsedPercent?: number;
+  /** Нагрузка в долях от числа ядер (2,5 — на ядро приходится два с половиной процесса); `undefined` — в порядке. */
+  readonly loadPerCore?: number;
 }
 
 export interface LowDisk {
@@ -195,9 +215,10 @@ export class ServersService {
     return views;
   }
 
-  /** Источники, у которых по свежему замеру мало места на диске. */
-  async lowDisk(now: Date = new Date()): Promise<LowDisk[]> {
-    const found: LowDisk[] = [];
+  /** Площадка и действующие узлы: источники замеров. */
+  private async sources(): Promise<
+    { scope: 'platform' | 'node'; id: MetricSource; name: string }[]
+  > {
     const sources: { scope: 'platform' | 'node'; id: MetricSource; name: string }[] = [
       { scope: 'platform', id: null, name: 'Площадка' },
     ];
@@ -205,8 +226,57 @@ export class ServersService {
       if (node.status === 'decommissioned') continue;
       sources.push({ scope: 'node', id: node.id, name: node.name });
     }
+    return sources;
+  }
 
-    for (const source of sources) {
+  /**
+   * Источники под нагрузкой по свежим замерам: память занята почти вся либо процессор перегружен все последние
+   * минуты. Один всплеск не тревога — смотрится окно, а не последняя точка.
+   */
+  async strained(now: Date = new Date()): Promise<Strained[]> {
+    const found: Strained[] = [];
+    for (const source of await this.sources()) {
+      const latest = await this.repository.latest(source.id);
+      if (latest === undefined) continue;
+      if (now.getTime() - latest.takenAt.getTime() > METRIC_FRESH_MS) continue;
+
+      const memoryUsed = latest.memTotalMb > 0 ? 1 - latest.memAvailableMb / latest.memTotalMb : 0;
+      const points = await this.repository.series(
+        source.id,
+        new Date(now.getTime() - OVERLOAD_WINDOW_MINUTES * MINUTE_MS),
+        60,
+      );
+      const cores = Math.max(latest.cpuCores, 1);
+      const overloaded =
+        points.length >= OVERLOAD_MIN_POINTS &&
+        points.every((point) => point.load1Centi / 100 / cores >= OVERLOAD_RATIO);
+
+      if (memoryUsed < HIGH_MEMORY_FRACTION && !overloaded) continue;
+      found.push({
+        scope: source.scope,
+        id: source.id,
+        name: source.name,
+        ...(memoryUsed >= HIGH_MEMORY_FRACTION
+          ? { memoryUsedPercent: Math.round(memoryUsed * 100) }
+          : {}),
+        ...(overloaded
+          ? {
+              loadPerCore:
+                points.reduce((sum, point) => sum + point.load1Centi, 0) /
+                points.length /
+                100 /
+                cores,
+            }
+          : {}),
+      });
+    }
+    return found;
+  }
+
+  /** Источники, у которых по свежему замеру мало места на диске. */
+  async lowDisk(now: Date = new Date()): Promise<LowDisk[]> {
+    const found: LowDisk[] = [];
+    for (const source of await this.sources()) {
       const latest = await this.repository.latest(source.id);
       if (latest === undefined || latest.diskTotalMb <= 0) continue;
       if (now.getTime() - latest.takenAt.getTime() > METRIC_FRESH_MS) continue;

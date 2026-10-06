@@ -369,6 +369,18 @@ export class MessagesRepository {
     ).map((row) => ({ ...row, revenue: BigInt(row.revenue), margin: BigInt(row.margin) }));
   }
 
+  /** Принято и окончательно не отправлено с `since`: по этому судят, что отправка в целом сломалась. */
+  async healthSince(since: Date): Promise<{ total: number; failed: number }> {
+    const [row] = await this.database.db
+      .select({
+        total: count(),
+        failed: sql<number>`(count(*) filter (where ${messages.status} = 'failed'))::int`,
+      })
+      .from(messages)
+      .where(gte(messages.createdAt, since));
+    return { total: row?.total ?? 0, failed: row?.failed ?? 0 };
+  }
+
   /** Стирает текст сообщений старше срока; строка с суммами остаётся. Возвращает, сколько стёрто. */
   async purgeTexts(before: Date): Promise<number> {
     const erased = await this.database.db

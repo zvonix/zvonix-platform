@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BillingModule } from '../billing/billing.module.js';
 import { IdentityModule } from '../identity/identity.module.js';
 import { MailModule } from '../mail/mail.module.js';
+import { MessagingModule } from '../messaging/messaging.module.js';
 import { NodesModule } from '../nodes/nodes.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
 import { ServersModule } from '../servers/servers.module.js';
@@ -18,6 +19,7 @@ import { SuspensionNoticeService } from './suspension-notice.service.js';
     BillingModule,
     IdentityModule,
     MailModule,
+    MessagingModule,
     NodesModule,
     PaymentsModule,
     ServersModule,

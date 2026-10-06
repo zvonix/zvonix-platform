@@ -19,6 +19,7 @@ import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import type { ClientId } from '../billing/billing.repository.js';
 import { BillingService } from '../billing/billing.service.js';
 import { MailService } from '../mail/mail.service.js';
+import { MessagesService } from '../messaging/messages.service.js';
 import { NodesService } from '../nodes/nodes.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { ServersService } from '../servers/servers.service.js';
@@ -36,6 +37,12 @@ const ENOUGH_CALLS = 10;
 
 /** Ниже этой доли состоявшихся, в десятитысячных, объект считается больным (30 %). */
 const LOW_ASR_BASIS_POINTS = 3000;
+
+/** Минут перегрузки процессора, о которых пишем (окно — в `ServersService`). */
+const OVERLOAD_MINUTES = 10;
+
+/** Сообщений за час, меньше которых доля неудач ни о чём не говорит. */
+const MESSAGES_ENOUGH = 10;
 
 /** Администраторов на площадке единицы; страница с запасом покрывает всех. */
 const ADMINS_PAGE = 100;
@@ -71,6 +78,7 @@ export class AlertsService {
     private readonly payments: PaymentsService,
     private readonly billing: BillingService,
     private readonly servers: ServersService,
+    private readonly messages: MessagesService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('alerts');
@@ -173,7 +181,61 @@ export class AlertsService {
       this.logger.error('Тревоги: диски не прочитаны', cause);
     }
 
+    try {
+      for (const server of await this.servers.strained(now)) {
+        const id = server.id ?? 'platform';
+        if (server.memoryUsedPercent !== undefined) {
+          alerts.push({
+            kind: `alert_memory:${id}`,
+            subject: `Zvonix: на «${server.name}» почти не осталось памяти`,
+            body: [
+              `На «${server.name}» занято ${String(server.memoryUsedPercent)} % памяти.`,
+              '',
+              'Когда память кончится, система начнёт останавливать процессы — звонки и кабинет могут пропасть.',
+              'Посмотрите страницу «Серверы» (история) и перезапустите то, что разрослось, либо добавьте памяти.',
+            ].join('\n'),
+          });
+        }
+        if (server.loadPerCore !== undefined) {
+          alerts.push({
+            kind: `alert_cpu:${id}`,
+            subject: `Zvonix: процессор «${server.name}» перегружен`,
+            body: [
+              `Нагрузка на «${server.name}» держится выше нормы последние ${String(OVERLOAD_MINUTES)} минут: ${server.loadPerCore.toFixed(1).replace('.', ',')} на каждое ядро.`,
+              '',
+              'Звонки на перегруженном сервере рвутся и звучат с провалами. Посмотрите страницу «Серверы» и разгрузите машину.',
+            ].join('\n'),
+          });
+        }
+      }
+    } catch (cause) {
+      this.logger.error('Тревоги: нагрузка серверов не прочитана', cause);
+    }
+
+    try {
+      alerts.push(...(await this.messageAlerts(now)));
+    } catch (cause) {
+      this.logger.error('Тревоги: сообщения не прочитаны', cause);
+    }
+
     return alerts;
+  }
+
+  /** Сообщения MAX, которые массово не уходят: за последний час не отправлено больше половины. */
+  private async messageAlerts(now: Date): Promise<Alert[]> {
+    const health = await this.messages.health(new Date(now.getTime() - HOUR_MS));
+    if (health.total < MESSAGES_ENOUGH || health.failed * 2 < health.total) return [];
+    return [
+      {
+        kind: 'alert_messages',
+        subject: 'Zvonix: сообщения MAX массово не отправляются',
+        body: [
+          `За последний час принято ${String(health.total)} сообщений, не отправлено ${String(health.failed)}.`,
+          '',
+          'Скорее всего, аккаунты MAX партнёров вышли из мессенджера или у провайдера сбой. Проверьте раздел «Сообщения MAX»: состояние аккаунтов и последние сообщения. Деньги за неотправленное клиентам возвращены.',
+        ].join('\n'),
+      },
+    ];
   }
 
   /** Заявки на пополнение, которые ждут решения администратора дольше `PAYMENT_WAIT_MINUTES`. */
