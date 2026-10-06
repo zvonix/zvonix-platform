@@ -138,6 +138,8 @@ function Updates() {
   const busy =
     data !== undefined && (running !== undefined || data.queue.some((q) => q.action !== 'refresh'));
 
+  // Что-то уже исполняется или ждёт службу (в том числе сама проверка): вторую заявку не принимаем.
+  const working = running !== undefined || data?.queue.length !== 0;
   const deploy = (tag: string) => act.mutateAsync({ path: '/updates/deploy', body: { tag } });
 
   if (data === undefined) {
@@ -183,12 +185,12 @@ function Updates() {
         <div className="ml-auto flex flex-wrap gap-2">
           <Button
             variant="outline"
-            disabled={act.isPending}
+            disabled={act.isPending || working}
             onClick={() => {
               act.mutate({ path: '/updates/refresh' });
             }}
           >
-            Проверить обновления
+            {working ? 'Идёт работа…' : 'Проверить обновления'}
           </Button>
           <ConfirmAction
             label="Вернуться на прежний выпуск"
@@ -543,7 +545,13 @@ function RunConsole({ runId }: { runId: string }) {
         }}
         className={`num max-h-[50dvh] ${run?.action === 'refresh' ? 'min-h-12' : 'min-h-40'} overflow-auto rounded-lg border border-border bg-[#0f1115] p-3 text-xs leading-relaxed whitespace-pre-wrap text-[#d8dee9]`}
       >
-        {text === '' ? (done ? 'Журнал пуст.' : 'Ждём первых строк…') : text}
+        {text === ''
+          ? done
+            ? 'Журнал пуст.'
+            : run?.action === 'refresh'
+              ? 'Спрашиваем GitHub о новых версиях…'
+              : 'Ждём первых строк…'
+          : text}
       </pre>
     </section>
   );
