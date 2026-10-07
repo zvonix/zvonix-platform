@@ -163,7 +163,7 @@ describe('заведение и вход', () => {
     ['authorized', 'authorized'],
     ['notAuthorized', 'not_authorized'],
     ['blocked', 'blocked'],
-    ['suspended', 'blocked'],
+    ['suspended', 'suspended'],
     ['starting', 'starting'],
     ['pendingPassword', 'not_authorized'],
     ['что-то новое', 'unknown'],

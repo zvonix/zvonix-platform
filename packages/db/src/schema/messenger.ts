@@ -13,11 +13,13 @@ import {
   MESSAGE_CHANNELS,
   MESSAGE_FAILURE_REASONS,
   MESSAGE_STATUSES,
+  MESSENGER_ACCOUNT_REASONS,
   MESSENGER_ACCOUNT_STATUSES,
   MESSENGER_PROVIDERS,
   type MessageChannel,
   type MessageFailureReason,
   type MessageStatus,
+  type MessengerAccountReason,
   type MessengerAccountStatus,
   type MessengerProviderId,
 } from '@zvonix/shared';
@@ -79,6 +81,9 @@ export const messengerAccounts = pgTable(
 
     status: text().$type<MessengerAccountStatus>().notNull().default('pending'),
 
+    /** Почему недоступен, по последней сверке; пусто — рабочий или ждёт входа. Только для показа партнёру и сотрудникам. */
+    stateReason: text().$type<MessengerAccountReason>(),
+
     provider: text().$type<MessengerProviderId>().notNull(),
 
     /** Идентификатор инстанса у провайдера. Уникален: один инстанс — один аккаунт. */
@@ -118,6 +123,10 @@ export const messengerAccounts = pgTable(
   },
   (t) => [
     check('messenger_accounts_status_check', oneOf(t.status, MESSENGER_ACCOUNT_STATUSES)),
+    check(
+      'messenger_accounts_reason_check',
+      sql`${t.stateReason} is null or ${t.stateReason} in ('suspended', 'blocked', 'logged_out')`,
+    ),
     check('messenger_accounts_provider_check', oneOf(t.provider, MESSENGER_PROVIDERS)),
     check('messenger_accounts_price_positive', sql`${t.price} is null or ${t.price} > 0`),
     check(

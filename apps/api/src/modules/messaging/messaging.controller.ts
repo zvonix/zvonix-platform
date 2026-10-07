@@ -26,6 +26,8 @@ interface AccountView {
   readonly id: string;
   readonly label: string;
   readonly status: string;
+  /** Почему недоступен: `suspended`, `blocked`, `logged_out`; пусто — рабочий или ждёт входа. */
+  readonly state_reason: string | null;
   /** Номер, под которым аккаунт вошёл в MAX; пусто, пока QR-код не отсканирован. */
   readonly phone: string | null;
   /** Назначенный тариф; пусто — аккаунт идёт за тарифом по умолчанию. Цена и лимиты ниже — действующие. */
@@ -41,6 +43,7 @@ const toView = (row: MessengerAccountRow): AccountView => ({
   id: row.id,
   label: row.label,
   status: row.status,
+  state_reason: row.stateReason,
   phone: row.phone,
   tariff_id: row.tariffId,
   price: row.price === null ? null : Money.format(row.price),

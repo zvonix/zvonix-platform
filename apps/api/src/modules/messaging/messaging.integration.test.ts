@@ -14,6 +14,7 @@ import {
   withDatabase,
 } from '../../testing/harness.js';
 import { sql } from 'drizzle-orm';
+import { MessagingRepository } from './messaging.repository.js';
 import { MessagingService } from './messaging.service.js';
 import { simulateAccountState, simulateAwaitingPassword } from './simulated.provider.js';
 
@@ -173,6 +174,7 @@ describe('заведение аккаунта', () => {
       'phone',
       'price',
       'state_checked_at',
+      'state_reason',
       'status',
       'tariff_id',
     ]);
@@ -266,6 +268,44 @@ describe('вход по QR-коду и состояние', () => {
       })
     ).json<{ accounts: AccountView[] }>().accounts;
     expect(listed[0]).toMatchObject({ status: 'active' });
+  });
+
+  it('недоступный аккаунт показывает причину: приостановлен, заблокирован, вышел; рабочий — без причины', async () => {
+    await setSetting('messaging.enabled', true);
+    const partner = await verifiedPartner();
+    const { id } = (await create(partner.token)).json<{ account: AccountView }>().account;
+    const instance = (await instanceOf(id)).instance;
+    const seen = async () => {
+      const row = await api()
+        .get(MessagingRepository)
+        .findById(id as never);
+      await api()
+        .get(MessagingService)
+        .refreshOne(row as never);
+      return (
+        await api().inject({
+          method: 'GET',
+          url: '/partner/messenger/accounts',
+          headers: bearer(partner.token),
+        })
+      )
+        .json<{ accounts: (AccountView & { state_reason: string | null })[] }>()
+        .accounts.find((item) => item.id === id);
+    };
+
+    simulateAccountState(instance, 'authorized', '79990001122');
+    expect(await seen()).toMatchObject({ status: 'active', state_reason: null });
+    simulateAccountState(instance, 'suspended');
+    expect(await seen()).toMatchObject({ status: 'unavailable', state_reason: 'suspended' });
+    simulateAccountState(instance, 'blocked');
+    expect(await seen()).toMatchObject({ status: 'unavailable', state_reason: 'blocked' });
+    simulateAccountState(instance, 'not_authorized');
+    expect(await seen()).toMatchObject({ status: 'unavailable', state_reason: 'logged_out' });
+    // «Запускается» прежнюю причину не стирает: сверка могла просто не дозвониться.
+    simulateAccountState(instance, 'starting');
+    expect(await seen()).toMatchObject({ status: 'unavailable', state_reason: 'logged_out' });
+    simulateAccountState(instance, 'authorized', '79990001122');
+    expect(await seen()).toMatchObject({ status: 'active', state_reason: null });
   });
 
   it('фоновая сверка: вышедший из MAX аккаунт становится недоступным, вернувшийся — рабочим', async () => {

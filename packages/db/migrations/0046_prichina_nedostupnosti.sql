@@ -1,0 +1,2 @@
+ALTER TABLE "messenger_accounts" ADD COLUMN "state_reason" text;--> statement-breakpoint
+ALTER TABLE "messenger_accounts" ADD CONSTRAINT "messenger_accounts_reason_check" CHECK ("messenger_accounts"."state_reason" is null or "messenger_accounts"."state_reason" in ('suspended', 'blocked', 'logged_out'));

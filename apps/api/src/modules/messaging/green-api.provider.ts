@@ -34,8 +34,8 @@ const STATES: Record<string, ProviderState> = {
   starting: 'starting',
   sleepMode: 'starting',
   yellowCard: 'blocked',
-  // Временный запрет отправки (по документации провайдера): пока он действует, сообщения не уходят.
-  suspended: 'blocked',
+  // Работа экземпляра приостановлена провайдером (запрет отправки, не оплачен): сообщения не уходят.
+  suspended: 'suspended',
   // Ждёт пароль двухэтапной проверки MAX: вход возможен, только если пароль отключить.
   pendingPassword: 'not_authorized',
 };

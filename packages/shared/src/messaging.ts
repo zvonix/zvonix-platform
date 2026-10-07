@@ -21,6 +21,14 @@ export type MessengerProviderId = (typeof MESSENGER_PROVIDERS)[number];
 export const MESSENGER_ACCOUNT_STATUSES = ['pending', 'active', 'unavailable', 'retired'] as const;
 export type MessengerAccountStatus = (typeof MESSENGER_ACCOUNT_STATUSES)[number];
 
+/**
+ * Почему аккаунт недоступен — по последней сверке с провайдером: `suspended` — работа приостановлена на стороне
+ * службы доставки (не оплачен, не активирован, временный запрет), `blocked` — MAX ограничил аккаунт,
+ * `logged_out` — аккаунт вышел из MAX. Пусто — аккаунт рабочий или ждёт входа.
+ */
+export const MESSENGER_ACCOUNT_REASONS = ['suspended', 'blocked', 'logged_out'] as const;
+export type MessengerAccountReason = (typeof MESSENGER_ACCOUNT_REASONS)[number];
+
 /** Сообщение принимает только `active`. */
 export const SENDABLE_ACCOUNT_STATUSES: readonly MessengerAccountStatus[] = ['active'];
 
