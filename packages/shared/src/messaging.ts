@@ -101,5 +101,22 @@ export const COMMISSION_MAX_BASIS_POINTS: Record<CommissionProduct, number> = {
   message: 100_000,
 };
 
+/**
+ * Отчёты SMPP по настройкам клиента ([ADR-0076](../../../docs/adr/0076-statusy-smpp-po-nastrojkam-klienta.md)):
+ * на какое событие с сообщением что отдать — ничего, `ACCEPTD` («принято») или `DELIVRD` («доставлено»).
+ */
+export const SMPP_RECEIPT_EVENTS = ['sent', 'delivered', 'read'] as const;
+export type SmppReceiptEvent = (typeof SMPP_RECEIPT_EVENTS)[number];
+export const SMPP_RECEIPT_ACTIONS = ['none', 'accepted', 'delivered'] as const;
+export type SmppReceiptAction = (typeof SMPP_RECEIPT_ACTIONS)[number];
+export type SmppReceiptMap = Record<SmppReceiptEvent, SmppReceiptAction>;
+
+/** Прежнее поведение: ушло — молчим, доставлено и прочитано — `DELIVRD`. */
+export const SMPP_RECEIPT_DEFAULTS: SmppReceiptMap = {
+  sent: 'none',
+  delivered: 'delivered',
+  read: 'delivered',
+};
+
 /** Сколько адресов можно разрешить учётной записи SMPP: больше — это уже «любые». */
 export const SMPP_ALLOWED_IPS_MAX = 20;

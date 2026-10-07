@@ -44,6 +44,9 @@ const DISPATCH_BATCH = 50;
 /** Повтор после временного сбоя: 1, 2, 4, 8 минут — и возврат. */
 const BACKOFF_BASE_SECONDS = 60;
 
+/** Пауза проверок аккаунта после отказа «лимит исчерпан»: столько советует провайдер. */
+const CHECK_PAUSE_SECONDS = 2 * 3600;
+
 /** Сколько суток помнится результат проверки номера (настройки площадки); `null` вместо него — проверки нет. */
 interface PrecheckMemory {
   readonly existsDays: number;
@@ -285,7 +288,19 @@ export class MessagesService {
         reason: cause instanceof Error ? cause.name : 'unknown',
       });
     }
+    const paused = `messaging:max:pause:${account.id}`;
+    if ((await this.redis.connection.exists(paused).catch(() => 0)) === 1) return 'unknown';
     const result = await this.provider.checkRecipient(this.messaging.refOf(account), recipient);
+    if (result === 'limited') {
+      // Предел проверок у мессенджера: пока он не снят, аккаунт только отправляет, а не спрашивает.
+      await this.redis.connection
+        .set(paused, '1', 'EX', CHECK_PAUSE_SECONDS)
+        .catch(() => undefined);
+      this.logger.warn('Предел проверок номеров исчерпан, проверки аккаунта приостановлены', {
+        account_id: account.id,
+      });
+      return 'unknown';
+    }
     if (result !== 'unknown') {
       const days = result === 'exists' ? memory.existsDays : memory.absentDays;
       const ttl = days * 86_400;

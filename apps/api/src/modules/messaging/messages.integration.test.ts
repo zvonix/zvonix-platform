@@ -282,6 +282,26 @@ describe('не ушло — деньги возвращаются', () => {
       expect(timesChecked(recipient)).toBe(1);
     });
 
+    it('предел проверок исчерпан — сообщение уходит, а аккаунт больше не спрашивается', async () => {
+      await partnerWithAccount('0.45');
+      const client = await clientWithMoney('10');
+      const limited = '79003337777';
+      const next = '79003338881';
+      const redis = api().get(RedisService).connection;
+      await redis.del(redisKey(limited), redisKey(next));
+      for (const key of await redis.keys('messaging:max:pause:*')) await redis.del(key);
+
+      await send(client.token, { to: limited, text: 'Раз' });
+      await send(client.token, { to: next, text: 'Два' });
+      await api().get(MessagesService).dispatchDue(new Date());
+
+      expect(simulatedSent.some((item) => item.recipient === limited)).toBe(true);
+      expect(simulatedSent.some((item) => item.recipient === next)).toBe(true);
+      expect(timesChecked(limited)).toBe(1);
+      expect(timesChecked(next)).toBe(0);
+      for (const key of await redis.keys('messaging:max:pause:*')) await redis.del(key);
+    });
+
     it('проверка не удалась — сообщение всё равно уходит; выключатель отключает проверку', async () => {
       await partnerWithAccount('0.45');
       const client = await clientWithMoney('10');

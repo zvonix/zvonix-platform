@@ -3,23 +3,9 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  ne,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
-import { messages, messengerAccounts } from '@zvonix/db/schema';
+import { messages, messengerAccounts, smppAccounts } from '@zvonix/db/schema';
 import {
   newId,
   type Id,
@@ -27,6 +13,8 @@ import {
   type MessageFailureReason,
   type MessageStatus,
   type MoneyAmount,
+  type SmppReceiptEvent,
+  type SmppReceiptMap,
 } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
@@ -296,37 +284,72 @@ export class MessagesRepository {
   }
 
   /**
-   * Сообщения SMPP, чей отчёт о доставке ещё не отдан: дошли до конца (доставлено, прочитано, отказ),
-   * не старше `since`. Опрашивается, пока у клиента есть вошедший приёмник (ADR-0072).
+   * Сообщения SMPP, по которым есть неотданный отчёт ([ADR-0076](../../../../docs/adr/0076-statusy-smpp-po-nastrojkam-klienta.md)):
+   * отказ, либо событие (ушло, доставлено, прочитано), на которое у клиента включён отчёт, а в сообщении оно ещё
+   * не отмечено обработанным. Не старше `since`. Опрашивается, пока у клиента есть вошедший приёмник.
    */
-  pendingReceipts(
+  async pendingReceipts(
     clientIds: readonly Id<'client'>[],
     since: Date,
     limit: number,
-  ): Promise<MessageRow[]> {
-    if (clientIds.length === 0) return Promise.resolve([]);
-    return this.database.db
-      .select()
+  ): Promise<{ message: MessageRow; map: SmppReceiptMap }[]> {
+    if (clientIds.length === 0) return [];
+    const open = (event: SmppReceiptEvent) => sql`not ${event} = any(${messages.receiptEvents})`;
+    const rows = await this.database.db
+      .select({
+        message: messages,
+        onSent: smppAccounts.receiptOnSent,
+        onDelivered: smppAccounts.receiptOnDelivered,
+        onRead: smppAccounts.receiptOnRead,
+      })
       .from(messages)
+      .innerJoin(smppAccounts, eq(smppAccounts.clientId, messages.clientId))
       .where(
         and(
           eq(messages.channel, 'smpp'),
-          isNull(messages.receiptSentAt),
           inArray(messages.clientId, [...clientIds]),
-          inArray(messages.status, ['delivered', 'read', 'failed']),
           gte(messages.createdAt, since),
+          or(
+            and(eq(messages.status, 'failed'), sql`not 'failed' = any(${messages.receiptEvents})`),
+            and(
+              inArray(messages.status, ['sent', 'delivered', 'read']),
+              sql`${smppAccounts.receiptOnSent} <> 'none'`,
+              open('sent'),
+            ),
+            and(
+              inArray(messages.status, ['delivered', 'read']),
+              sql`${smppAccounts.receiptOnDelivered} <> 'none'`,
+              open('delivered'),
+            ),
+            and(
+              eq(messages.status, 'read'),
+              sql`${smppAccounts.receiptOnRead} <> 'none'`,
+              open('read'),
+            ),
+          ),
         ),
       )
       .orderBy(asc(messages.createdAt), asc(messages.id))
       .limit(limit);
+    return rows.map((row) => ({
+      message: row.message,
+      map: { sent: row.onSent, delivered: row.onDelivered, read: row.onRead },
+    }));
   }
 
-  /** Клиент принял отчёт (`deliver_sm_resp`): больше не отдаём. */
-  async markReceiptSent(id: MessageId, at: Date): Promise<void> {
+  /** Событие обработано (отчёт принят клиентом или не нужен): повторно не отдаём. `sentAt` — время приёма отчёта. */
+  async markReceiptEvent(
+    id: MessageId,
+    event: SmppReceiptEvent | 'failed',
+    sentAt: Date | null,
+  ): Promise<void> {
     await this.database.db
       .update(messages)
-      .set({ receiptSentAt: at })
-      .where(and(eq(messages.id, id), isNull(messages.receiptSentAt)));
+      .set({
+        receiptEvents: sql`array_append(${messages.receiptEvents}, ${event})`,
+        ...(sentAt === null ? {} : { receiptSentAt: sentAt }),
+      })
+      .where(and(eq(messages.id, id), sql`not ${event} = any(${messages.receiptEvents})`));
   }
 
   /**

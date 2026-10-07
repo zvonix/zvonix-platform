@@ -50,11 +50,13 @@ export const simulatedChecks: string[] = [];
 
 /**
  * Номера на `0000` имитация считает не имеющими MAX; на `9999` — временный сбой отправки;
- * на `8888` — проверка наличия MAX не удалась (отправка при этом проходит).
+ * на `8888` — проверка наличия MAX не удалась (отправка при этом проходит);
+ * на `7777` — у аккаунта исчерпан предел проверок.
  */
 const NOT_IN_MESSENGER = /0000$/u;
 const TEMPORARY_FAILURE = /9999$/u;
 const CHECK_UNKNOWN = /8888$/u;
+const CHECK_LIMITED = /7777$/u;
 
 @Injectable()
 export class SimulatedMessageProvider implements MessageProvider {
@@ -117,6 +119,7 @@ export class SimulatedMessageProvider implements MessageProvider {
     simulatedChecks.push(recipient);
     if (NOT_IN_MESSENGER.test(recipient)) return Promise.resolve('absent');
     if (CHECK_UNKNOWN.test(recipient)) return Promise.resolve('unknown');
+    if (CHECK_LIMITED.test(recipient)) return Promise.resolve('limited');
     return Promise.resolve('exists');
   }
 

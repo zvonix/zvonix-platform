@@ -7,7 +7,7 @@
 
 import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/common';
 import type { z } from 'zod';
-import { parseId } from '@zvonix/shared';
+import { parseId, type SmppReceiptMap } from '@zvonix/shared';
 import { Cabinets, Roles } from '../../../http/auth.guard.js';
 import { CurrentUser } from '../../../http/request-context.js';
 import { zodBody } from '../../../http/zod.pipe.js';
@@ -17,12 +17,13 @@ import type { Principal } from '../../identity/identity.service.js';
 import { MessagingService } from '../messaging.service.js';
 import { updateSmppSchema, staffSmppSchema } from '../schemas.js';
 import type { SmppAccountRow } from './smpp.repository.js';
-import { SmppService } from './smpp.service.js';
+import { receiptsOf, SmppService } from './smpp.service.js';
 
 interface SmppView {
   readonly system_id: string;
   readonly enabled: boolean;
   readonly allowed_ips: readonly string[];
+  readonly receipts: SmppReceiptMap;
   readonly last_bind_at: string | null;
   readonly created_at: string;
 }
@@ -37,6 +38,7 @@ const toView = (row: SmppAccountRow): SmppView => ({
   system_id: row.systemId,
   enabled: row.enabled,
   allowed_ips: row.allowedIps,
+  receipts: receiptsOf(row),
   last_bind_at: row.lastBindAt?.toISOString() ?? null,
   created_at: row.createdAt.toISOString(),
 });
