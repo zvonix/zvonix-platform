@@ -10,18 +10,13 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
   dependencyUnavailable,
-  MESSAGE_PRICE_MAX_RUBLES,
-  MESSAGE_PRICE_MIN_RUBLES,
   MESSENGER_ACCOUNTS_PER_PARTNER_MAX,
-  MESSENGER_LIMIT_MAX,
-  Money,
   notFound,
   parseId,
   rateLimited,
   validationFailed,
   type Id,
   type MessengerAccountStatus,
-  type MoneyAmount,
   type UserRole,
 } from '@zvonix/shared';
 import { createHmac } from 'node:crypto';

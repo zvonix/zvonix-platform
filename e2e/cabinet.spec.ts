@@ -330,10 +330,22 @@ test.describe('сообщения MAX (ADR-0071)', () => {
 
     const row = partner.getByRole('row', { name: /Основной/u });
     await expect(row.getByText('Ждёт входа')).toBeVisible();
-    await row.getByRole('button', { name: 'Условия' }).click();
+    // Цена — в тарифе (ADR-0075): без тарифа аккаунту предлагают его создать.
+    await expect(row.getByRole('link', { name: 'Создайте тариф' })).toBeVisible();
+    await partner.goto('/partner/prices?tab=max');
+    await partner.getByRole('button', { name: 'Создать тариф' }).click();
+    await partner.getByLabel('Название').fill('Основной');
     await partner.getByLabel('Цена за сообщение, ₽').fill('0,45');
-    await partner.getByRole('button', { name: 'Сохранить' }).click();
-    await expect(row.getByText(/0,45/u)).toBeVisible();
+    await partner.getByRole('button', { name: 'Создать', exact: true }).click();
+    await expect(
+      partner.getByRole('row', { name: /Основной/u }).getByText('по умолчанию'),
+    ).toBeVisible();
+
+    // Новый тариф — умолчание: аккаунт сразу получает его цену; свой тариф назначается выбором в строке.
+    await partner.goto('/partner/messages');
+    const accountRow = partner.getByRole('row', { name: /Основной/u });
+    await expect(accountRow.getByText(/0,45/u)).toBeVisible();
+    await expect(accountRow.getByLabel(/Тариф аккаунта/u)).toHaveValue('');
 
     await admin.goto('/messaging');
     await expect(admin.getByRole('row', { name: /Основной/u })).toBeVisible();

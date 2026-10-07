@@ -41,7 +41,7 @@ export interface TariffView {
 }
 
 /** Условия тарифа: цена в границах продукта, лимиты положительные, минутный не больше суточного. */
-export function assertTariffTerms(terms: {
+function assertTariffTerms(terms: {
   price?: MoneyAmount;
   limitPerMinute?: number | null;
   limitPerDay?: number | null;
