@@ -170,15 +170,15 @@ function MessagingView() {
                 <TableCell className="text-right">
                   {canChange && (
                     <ConfirmAction
-                      label="Списать"
-                      title={`Списать аккаунт «${account.label}» партнёра ${account.partner_name}`}
+                      label="Удалить"
+                      title={`Удалить аккаунт «${account.label}» партнёра ${account.partner_name}`}
                       consequence={
                         <p>
                           Аккаунт перестанет принимать сообщения, подключение у провайдера будет
                           удалено. Вернуть нельзя.
                         </p>
                       }
-                      confirmLabel="Списать"
+                      confirmLabel="Удалить"
                       size="xs"
                       onConfirm={() => retire.mutateAsync(account.id)}
                     />

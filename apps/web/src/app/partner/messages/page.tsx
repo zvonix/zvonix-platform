@@ -235,15 +235,15 @@ function AccountRow({
             <TermsForm account={account} />
           </FormDialog>
           <ConfirmAction
-            label="Списать"
-            title={`Списать аккаунт «${account.label}»`}
+            label="Удалить"
+            title={`Удалить аккаунт «${account.label}»`}
             consequence={
               <p>
-                Аккаунт перестанет принимать сообщения, его подключение к площадке будет удалено.
-                Вернуть нельзя — только добавить новый и снова войти по QR-коду.
+                Аккаунт перестанет принимать сообщения и будет удалён вместе с подключением к
+                площадке. Вернуть нельзя — только добавить новый и снова войти по QR-коду.
               </p>
             }
-            confirmLabel="Списать"
+            confirmLabel="Удалить"
             size="xs"
             onConfirm={onRetire}
           />
@@ -332,6 +332,9 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
   // а не ошибка. Красным показывается только то, что само не пройдёт.
   const starting = failure !== undefined && failure.code === 'dependency_unavailable';
   const error = starting ? undefined : failure;
+  const status = qr.data?.status;
+  const waiting =
+    error === undefined && status !== 'qr' && status !== 'authorized' && status !== 'password';
 
   return (
     <FormDialog
@@ -344,11 +347,10 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
     >
       <div className="flex flex-col items-center gap-3 px-5 pb-5">
         {error !== undefined && <ErrorNote error={error} />}
-        {(qr.isPending || starting) && (
+        {waiting && (
+          // Одна надпись на всё ожидание: запуск аккаунта, пустой ответ, повторный запрос — человеку это одно и то же.
           <p role="status" className="text-muted-foreground">
-            {starting
-              ? 'Аккаунт запускается — QR-код появится через несколько секунд…'
-              : 'Получаем QR-код…'}
+            Ждём QR-код — новый аккаунт запускается, это может занять до минуты…
           </p>
         )}
         {qr.data?.status === 'qr' && qr.data.image !== undefined && (
@@ -366,9 +368,6 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
               void qr.refetch();
             }}
           />
-        )}
-        {qr.data?.status === 'unavailable' && (
-          <p className="text-muted-foreground">QR-код пока не готов — повторяем…</p>
         )}
         {authorized && (
           <p role="status" className="text-ok">
