@@ -24,6 +24,46 @@ import {
 import { createdAt, idRef, money, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 import { clients, partners } from './billing.js';
 
+/**
+ * Тариф MAX ([ADR-0075](../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)): именованный набор условий партнёра —
+ * цена за сообщение и лимиты отправки. Назначается аккаунту; аккаунт без своего тарифа берёт тариф партнёра
+ * «по умолчанию» (один на партнёра), как SIM у тарифов звонков (ADR-0056).
+ */
+export const messengerTariffs = pgTable(
+  'messenger_tariffs',
+  {
+    id: primaryId<'messengerTariff'>(),
+    partnerId: idRef<'partner'>()
+      .notNull()
+      .references(() => partners.id, { onDelete: 'restrict' }),
+    name: text().notNull(),
+    /** Цена партнёра за одно сообщение, микроединицы. */
+    price: money().notNull(),
+    /** Лимиты отправки; пусто — без ограничения. Сообщение сверх лимита ждёт, а не отклоняется. */
+    limitPerMinute: integer(),
+    limitPerDay: integer(),
+    isDefault: boolean().notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check('messenger_tariffs_name_length', sql`char_length(${t.name}) between 1 and 60`),
+    check('messenger_tariffs_price_positive', sql`${t.price} > 0`),
+    check(
+      'messenger_tariffs_limits_positive',
+      sql`(${t.limitPerMinute} is null or ${t.limitPerMinute} > 0) and (${t.limitPerDay} is null or ${t.limitPerDay} > 0)`,
+    ),
+    // Имя уникально у партнёра без учёта регистра; регистр приводится в локали ICU (ADR-0038).
+    uniqueIndex('messenger_tariffs_partner_name_idx').on(
+      t.partnerId,
+      sql`lower(${t.name} collate "und-x-icu")`,
+    ),
+    uniqueIndex('messenger_tariffs_default_idx')
+      .on(t.partnerId)
+      .where(sql`${t.isDefault}`),
+  ],
+);
+
 export const messengerAccounts = pgTable(
   'messenger_accounts',
   {
@@ -56,13 +96,17 @@ export const messengerAccounts = pgTable(
     /** Когда состояние аккаунта сверялось с провайдером последний раз. */
     stateCheckedAt: timestamptz(),
 
+    /** Назначенный тариф; пусто — действует тариф партнёра по умолчанию ([ADR-0075](../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)). */
+    tariffId: idRef<'messengerTariff'>().references(() => messengerTariffs.id, {
+      onDelete: 'restrict',
+    }),
+
     /**
-     * Цена партнёра за одно сообщение, микроединицы. Пусто — цена не назначена, аккаунт
-     * сообщений не принимает (как SIM без цены на номер).
+     * **Действующие** условия — производные от тарифа (свой → по умолчанию), прямой записи нет: пересчитывает
+     * `recomputeTerms` в той же транзакции, что и любое изменение тарифа. Хранятся здесь, чтобы выбор аккаунта
+     * под сообщение и сверка лимитов не соединяли таблицы. Цена пуста — аккаунт сообщений не принимает.
      */
     price: money(),
-
-    /** Лимиты отправки; пусто — без ограничения. Сообщение сверх лимита ждёт, а не отклоняется. */
     limitPerMinute: integer(),
     limitPerDay: integer(),
 
@@ -82,6 +126,7 @@ export const messengerAccounts = pgTable(
     ),
     uniqueIndex('messenger_accounts_instance_key').on(t.provider, t.providerInstanceId),
     index('messenger_accounts_partner_idx').on(t.partnerId),
+    index('messenger_accounts_tariff_idx').on(t.tariffId),
     // Опрос состояния и выбор аккаунта под сообщение читают только живые.
     index('messenger_accounts_live_idx')
       .on(t.status)

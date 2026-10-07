@@ -3,10 +3,10 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, eq, lt, ne, or, isNull } from 'drizzle-orm';
-import { toDatabaseError } from '@zvonix/db';
+import { and, asc, count, eq, lt, ne, or, isNull, sql } from 'drizzle-orm';
+import { toDatabaseError, type Executor } from '@zvonix/db';
 import { messengerAccounts } from '@zvonix/db/schema';
-import { newId, type Id, type MessengerAccountStatus, type MoneyAmount } from '@zvonix/shared';
+import { newId, type Id, type MessengerAccountStatus } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type MessengerAccountRow = typeof messengerAccounts.$inferSelect;
@@ -128,26 +128,50 @@ export class MessagingRepository {
     return row;
   }
 
-  async setTerms(
-    id: MessengerAccountId,
-    terms: {
-      label?: string;
-      price?: MoneyAmount | null;
-      limitPerMinute?: number | null;
-      limitPerDay?: number | null;
-    },
-  ): Promise<MessengerAccountRow | undefined> {
+  async setLabel(id: MessengerAccountId, label: string): Promise<MessengerAccountRow | undefined> {
     const [row] = await this.database.db
       .update(messengerAccounts)
-      .set({
-        ...(terms.label === undefined ? {} : { label: terms.label }),
-        ...(terms.price === undefined ? {} : { price: terms.price }),
-        ...(terms.limitPerMinute === undefined ? {} : { limitPerMinute: terms.limitPerMinute }),
-        ...(terms.limitPerDay === undefined ? {} : { limitPerDay: terms.limitPerDay }),
-      })
+      .set({ label })
       .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
       .returning();
     return row;
+  }
+
+  /** Назначает аккаунту тариф (`null` — идти за умолчанием партнёра). Пересчёт условий — отдельно, в той же транзакции. */
+  async setTariff(
+    id: MessengerAccountId,
+    tariffId: Id<'messengerTariff'> | null,
+    executor: Executor = this.database.db,
+  ): Promise<MessengerAccountRow | undefined> {
+    const [row] = await executor
+      .update(messengerAccounts)
+      .set({ tariffId })
+      .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
+      .returning();
+    return row;
+  }
+
+  /**
+   * Пересчёт действующих условий аккаунтов партнёра ([ADR-0075](../../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)):
+   * свой тариф → тариф по умолчанию → нет. **Единственное место, где пишутся `price` и лимиты аккаунта.**
+   * Вызывается в той же транзакции, что и любое изменение тарифа, назначения или умолчания.
+   */
+  async recomputeTerms(
+    partnerId: Id<'partner'>,
+    executor: Executor = this.database.db,
+  ): Promise<void> {
+    await executor.execute(sql`
+      update messenger_accounts a
+      set price = e.price, limit_per_minute = e.limit_per_minute, limit_per_day = e.limit_per_day
+      from (
+        select a2.id, t.price, t.limit_per_minute, t.limit_per_day
+        from messenger_accounts a2
+        left join messenger_tariffs d on d.partner_id = a2.partner_id and d.is_default
+        left join messenger_tariffs t on t.id = coalesce(a2.tariff_id, d.id)
+        where a2.partner_id = ${partnerId} and a2.status <> 'retired'
+      ) e
+      where a.id = e.id
+    `);
   }
 
   /** Списание: условное, чтобы повторное нажатие не перезаписывало. */

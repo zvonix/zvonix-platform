@@ -97,13 +97,14 @@ export function fixtures(api: () => NestFastifyApplication, adminToken: () => st
       url: `/partner/messenger/accounts/${accountId}/qr`,
       headers: bearer(owner.token),
     });
-    const patched = await api().inject({
-      method: 'PATCH',
-      url: `/partner/messenger/accounts/${accountId}`,
+    // Условия — тарифом по умолчанию: аккаунт без своего тарифа идёт за ним (ADR-0075).
+    const tariff = await api().inject({
+      method: 'POST',
+      url: '/partner/messenger/tariffs',
       headers: bearer(owner.token),
-      payload: { price, ...limits },
+      payload: { name: 'Основной', price, isDefault: true, ...limits },
     });
-    expect(patched.statusCode).toBe(200);
+    expect(tariff.statusCode).toBe(201);
     return { partnerId, ownerToken: owner.token, accountId, instance };
   }
 

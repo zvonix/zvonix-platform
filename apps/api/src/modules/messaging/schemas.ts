@@ -20,17 +20,37 @@ export const sendPasswordSchema = z.object({
   password: z.string().min(1, 'введите пароль').max(64, 'слишком длинный'),
 });
 
-/** Что партнёр меняет у аккаунта. Не названное — не трогается; `null` у цены и лимита — снять. */
-export const updateAccountSchema = z
+/** Что партнёр меняет у аккаунта: только название. Цена и лимиты — в тарифе ([ADR-0075](../../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)). */
+export const updateAccountSchema = z.object({ label });
+
+const tariffName = z.string().trim().min(1, 'слишком короткое').max(60, 'слишком длинное');
+const tariffLimit = limit;
+
+/** Новый тариф MAX: имя, цена за сообщение, лимиты (пусто — без ограничения), «по умолчанию». */
+export const createTariffSchema = z.object({
+  name: tariffName,
+  price: amount,
+  limitPerMinute: tariffLimit.default(null),
+  limitPerDay: tariffLimit.default(null),
+  isDefault: z.boolean().default(false),
+});
+
+/** Правка тарифа: не названное не трогается; `null` у лимита — снять. */
+export const updateTariffSchema = z
   .object({
-    label: label.optional(),
-    price: amount.nullable().optional(),
-    limitPerMinute: limit.optional(),
-    limitPerDay: limit.optional(),
+    name: tariffName.optional(),
+    price: amount.optional(),
+    limitPerMinute: tariffLimit.optional(),
+    limitPerDay: tariffLimit.optional(),
   })
   .refine((body) => Object.values(body).some((value) => value !== undefined), {
     message: 'Нечего менять',
   });
+
+/** Назначение тарифа аккаунту; `null` — идти за тарифом по умолчанию. */
+export const assignTariffSchema = z.object({
+  tariffId: z.uuid('должен быть идентификатором').nullable(),
+});
 
 /** Ручное заведение администратором: данные готового инстанса. Ключ в ответы не попадает. */
 export const registerAccountSchema = z.object({

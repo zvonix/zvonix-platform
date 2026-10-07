@@ -52,14 +52,6 @@ export interface MessagingActor {
   readonly role: UserRole;
 }
 
-/** Что партнёр меняет у аккаунта. `null` у цены и лимита — снять. */
-export interface AccountTerms {
-  readonly label?: string;
-  readonly price?: MoneyAmount | null;
-  readonly limitPerMinute?: number | null;
-  readonly limitPerDay?: number | null;
-}
-
 /** Состояние провайдера → состояние аккаунта. `undefined` — оставить как есть. */
 function statusAfter(
   current: MessengerAccountStatus,
@@ -235,6 +227,9 @@ export class MessagingService {
       providerToken: encryptSecret(ref.token, this.config.SECRET_KEY, MESSENGER_TOKEN_PURPOSE),
       providerApiUrl: ref.apiUrl,
     });
+    // Новый аккаунт сразу получает условия тарифа партнёра по умолчанию (ADR-0075).
+    await this.repository.recomputeTerms(partnerId);
+    const created = (await this.repository.findById(row.id)) ?? row;
     await this.audit.record({
       action: 'messenger_account.created',
       entityType: 'messenger_account',
@@ -244,7 +239,7 @@ export class MessagingService {
       // Ни ключа, ни идентификатора инстанса в журнал не попадает.
       after: { partner_id: partnerId, label },
     });
-    return row;
+    return created;
   }
 
   /** QR-код для входа. Вошёл — аккаунт сразу становится рабочим, и сказано об этом. */
@@ -326,15 +321,15 @@ export class MessagingService {
   }
 
   /** Партнёр задаёт название, цену за сообщение и лимиты своего аккаунта. */
+  /** Партнёр переименовывает аккаунт. Цена и лимиты — в тарифе ([ADR-0075](../../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)). */
   async updateOwn(
     actor: MessagingActor,
     id: string,
-    terms: AccountTerms,
+    patch: { label: string },
   ): Promise<MessengerAccountRow> {
     const { account } = await this.ownAccount(actor.userId, id);
-    this.assertTerms(terms);
 
-    const updated = await this.repository.setTerms(account.id, terms);
+    const updated = await this.repository.setLabel(account.id, patch.label);
     if (updated === undefined) throw notFound('Аккаунт не найден');
     await this.audit.record({
       action: 'messenger_account.terms_changed',
@@ -342,36 +337,10 @@ export class MessagingService {
       entityId: account.id,
       actorUserId: actor.userId,
       actorRole: actor.role,
-      before: termsView(account),
-      after: termsView(updated),
+      before: { label: account.label },
+      after: { label: updated.label },
     });
     return updated;
-  }
-
-  private assertTerms(terms: AccountTerms): void {
-    if (terms.price !== undefined && terms.price !== null) {
-      const min = Money.fromMajorUnits(MESSAGE_PRICE_MIN_RUBLES);
-      const max = Money.fromMajorUnits(MESSAGE_PRICE_MAX_RUBLES);
-      if (Money.compare(terms.price, min) < 0 || Money.compare(terms.price, max) > 0) {
-        throw validationFailed(
-          `Цена за сообщение — от ${MESSAGE_PRICE_MIN_RUBLES} до ${MESSAGE_PRICE_MAX_RUBLES} ₽`,
-        );
-      }
-    }
-    for (const limit of [terms.limitPerMinute, terms.limitPerDay]) {
-      if (limit !== undefined && limit !== null && (limit < 1 || limit > MESSENGER_LIMIT_MAX)) {
-        throw validationFailed(`Лимит — от 1 до ${String(MESSENGER_LIMIT_MAX)}`);
-      }
-    }
-    if (
-      terms.limitPerMinute !== undefined &&
-      terms.limitPerMinute !== null &&
-      terms.limitPerDay !== undefined &&
-      terms.limitPerDay !== null &&
-      terms.limitPerMinute > terms.limitPerDay
-    ) {
-      throw validationFailed('Лимит в минуту не может быть больше лимита в сутки');
-    }
   }
 
   /** Партнёр списывает аккаунт: инстанс у провайдера удаляется, платить за него перестаёт площадка. */
@@ -411,14 +380,4 @@ export class MessagingService {
       after: { status: 'retired' },
     });
   }
-}
-
-/** Что из условий аккаунта идёт в журнал. */
-function termsView(row: MessengerAccountRow) {
-  return {
-    label: row.label,
-    price: row.price === null ? null : Money.format(row.price),
-    limit_per_minute: row.limitPerMinute,
-    limit_per_day: row.limitPerDay,
-  };
 }

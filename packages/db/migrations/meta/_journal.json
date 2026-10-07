@@ -316,6 +316,13 @@
       "when": 1791206098748,
       "tag": "0044_nacenka_soobscheniy",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791361990401,
+      "tag": "0045_tarify_max",
+      "breakpoints": true
     }
   ]
 }

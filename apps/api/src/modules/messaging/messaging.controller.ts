@@ -28,6 +28,8 @@ interface AccountView {
   readonly status: string;
   /** Номер, под которым аккаунт вошёл в MAX; пусто, пока QR-код не отсканирован. */
   readonly phone: string | null;
+  /** Назначенный тариф; пусто — аккаунт идёт за тарифом по умолчанию. Цена и лимиты ниже — действующие. */
+  readonly tariff_id: string | null;
   readonly price: string | null;
   readonly limit_per_minute: number | null;
   readonly limit_per_day: number | null;
@@ -40,6 +42,7 @@ const toView = (row: MessengerAccountRow): AccountView => ({
   label: row.label,
   status: row.status,
   phone: row.phone,
+  tariff_id: row.tariffId,
   price: row.price === null ? null : Money.format(row.price),
   limit_per_minute: row.limitPerMinute,
   limit_per_day: row.limitPerDay,
@@ -121,10 +124,7 @@ export class MessagingController {
     @Body(zodBody(updateAccountSchema)) body: z.infer<typeof updateAccountSchema>,
   ): Promise<{ account: AccountView }> {
     const row = await this.messaging.updateOwn({ userId: actor.userId, role: actor.role }, id, {
-      ...(body.label === undefined ? {} : { label: body.label }),
-      ...(body.price === undefined ? {} : { price: body.price }),
-      ...(body.limitPerMinute === undefined ? {} : { limitPerMinute: body.limitPerMinute }),
-      ...(body.limitPerDay === undefined ? {} : { limitPerDay: body.limitPerDay }),
+      label: body.label,
     });
     return { account: toView(row) };
   }

@@ -2,6 +2,7 @@
  * Аккаунты MAX партнёров на реальной базе, провайдер — имитация (ADR-0071).
  */
 
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
@@ -173,6 +174,7 @@ describe('заведение аккаунта', () => {
       'price',
       'state_checked_at',
       'status',
+      'tariff_id',
     ]);
     expect(created.body).not.toMatch(/provider|instance|token|green/iu);
 
@@ -296,64 +298,239 @@ describe('вход по QR-коду и состояние', () => {
   });
 });
 
-describe('цена и лимиты партнёра', () => {
+describe('миграция условий аккаунтов в тарифы (0045)', () => {
+  it('частое сочетание — «Основной» по умолчанию, остальные — отдельные тарифы, аккаунты без цены идут за умолчанием', async () => {
+    await setSetting('messaging.enabled', true);
+    const partner = await verifiedPartner();
+    const ids: string[] = [];
+    for (const label of ['Акк-1', 'Акк-2', 'Акк-3', 'Акк-4']) {
+      ids.push((await create(partner.token, label)).json<{ account: AccountView }>().account.id);
+    }
+    const [a, b, c, d] = ids as [string, string, string, string];
+
+    // Состояние «до миграции»: тарифов нет, условия вписаны в аккаунты.
+    const sqlFile = new URL(
+      '../../../../../packages/db/migrations/0045_tarify_max.sql',
+      import.meta.url,
+    );
+    const statements = readFileSync(sqlFile, 'utf8')
+      .split('--> statement-breakpoint')
+      .filter(
+        (part) =>
+          part.includes('Данные (ADR-0075)') || part.includes('берут условия тарифа по умолчанию'),
+      );
+    expect(statements).toHaveLength(2);
+
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update messenger_accounts set tariff_id = null where id in (${a}, ${b}, ${c}, ${d})`,
+      );
+      await execute(sql`delete from messenger_tariffs`);
+      await execute(
+        sql`update messenger_accounts set price = 450000, limit_per_minute = 10, limit_per_day = 500 where id in (${a}, ${b})`,
+      );
+      await execute(
+        sql`update messenger_accounts set price = 900000, limit_per_minute = null, limit_per_day = null where id = ${c}`,
+      );
+      await execute(
+        sql`update messenger_accounts set price = null, limit_per_minute = null, limit_per_day = null where id = ${d}`,
+      );
+      for (const statement of statements) await execute(sql.raw(statement));
+    });
+
+    const state = await withDatabase(async (execute) => {
+      const tariffs = await execute(
+        sql`select name, price::text as price, limit_per_minute, is_default from messenger_tariffs order by name`,
+      );
+      const accounts = await execute(
+        sql`select label, tariff_id is not null as own, price::text as price from messenger_accounts
+             where id in (${a}, ${b}, ${c}, ${d}) order by label`,
+      );
+      return { tariffs: tariffs.rows, accounts: accounts.rows };
+    });
+    expect(state.tariffs).toEqual([
+      { name: 'Основной', price: '450000', limit_per_minute: 10, is_default: true },
+      { name: 'Тариф 2', price: '900000', limit_per_minute: null, is_default: false },
+    ]);
+    expect(state.accounts).toEqual([
+      { label: 'Акк-1', own: false, price: '450000' },
+      { label: 'Акк-2', own: false, price: '450000' },
+      { label: 'Акк-3', own: true, price: '900000' },
+      // Прежде без цены, теперь — по умолчанию партнёра.
+      { label: 'Акк-4', own: false, price: '450000' },
+    ]);
+  });
+});
+
+describe('тарифы MAX партнёра (ADR-0075)', () => {
   async function ownAccount() {
     await setSetting('messaging.enabled', true);
     const partner = await verifiedPartner();
     const { id } = (await create(partner.token)).json<{ account: AccountView }>().account;
-    const patch = (payload: Record<string, unknown>, token = partner.token) =>
+    const rename = (payload: Record<string, unknown>, token = partner.token) =>
       api().inject({
         method: 'PATCH',
         url: `/partner/messenger/accounts/${id}`,
         headers: bearer(token),
         payload,
       });
-    return { partner, id, patch };
+    const tariff = (payload: Record<string, unknown>, token = partner.token) =>
+      api().inject({
+        method: 'POST',
+        url: '/partner/messenger/tariffs',
+        headers: bearer(token),
+        payload,
+      });
+    const account = async (token = partner.token) =>
+      (
+        await api().inject({
+          method: 'GET',
+          url: '/partner/messenger/accounts',
+          headers: bearer(token),
+        })
+      )
+        .json<{ accounts: AccountView[] }>()
+        .accounts.find((item) => item.id === id) as AccountView;
+    const assign = (tariffId: string | null, token = partner.token) =>
+      api().inject({
+        method: 'PUT',
+        url: `/partner/messenger/accounts/${id}/tariff`,
+        headers: bearer(token),
+        payload: { tariffId },
+      });
+    return { partner, id, rename, tariff, account, assign };
   }
 
-  it('партнёр задаёт цену за сообщение и лимиты, снять можно значением null', async () => {
-    const { patch } = await ownAccount();
+  interface TariffJson {
+    id: string;
+    name: string;
+    is_default: boolean;
+    accounts: number;
+  }
 
-    const set = await patch({
-      price: '0.45',
-      limitPerMinute: 10,
-      limitPerDay: 500,
-      label: 'Рабочий',
-    });
-    expect(set.statusCode).toBe(200);
-    expect(set.json<{ account: AccountView }>().account).toMatchObject({
-      label: 'Рабочий',
+  it('первый тариф становится умолчанием и даёт условия аккаунту; назначение и умолчание действуют сразу', async () => {
+    const { partner, tariff, account, assign } = await ownAccount();
+    expect((await account()).price).toBeNull();
+
+    const first = (
+      await tariff({ name: 'Основной', price: '0.45', limitPerMinute: 10, limitPerDay: 500 })
+    ).json<{ tariff: TariffJson }>().tariff;
+    expect(first.is_default).toBe(true);
+    expect(await account()).toMatchObject({
+      tariff_id: null,
       price: '0.45',
       limit_per_minute: 10,
       limit_per_day: 500,
     });
 
-    const cleared = await patch({ price: null, limitPerMinute: null });
-    expect(cleared.json<{ account: AccountView }>().account).toMatchObject({
-      price: null,
+    const second = (await tariff({ name: 'Дорогой', price: '0.9' })).json<{ tariff: TariffJson }>()
+      .tariff;
+    expect(second.is_default).toBe(false);
+    expect((await account()).price).toBe('0.45');
+
+    // Свой тариф перебивает умолчание; снятие возвращает к умолчанию.
+    expect((await assign(second.id)).json()).toMatchObject({
+      tariff_id: second.id,
+      price: '0.9',
+      limit_per_minute: null,
+    });
+    expect((await assign(null)).json()).toMatchObject({ tariff_id: null, price: '0.45' });
+
+    // Правка тарифа и смена умолчания пересчитывают условия тех, кто за умолчанием.
+    const edited = await api().inject({
+      method: 'PATCH',
+      url: `/partner/messenger/tariffs/${first.id}`,
+      headers: bearer(partner.token),
+      payload: { price: '0.5', limitPerMinute: null },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(await account()).toMatchObject({
+      price: '0.5',
       limit_per_minute: null,
       limit_per_day: 500,
     });
+    const madeDefault = await api().inject({
+      method: 'POST',
+      url: `/partner/messenger/tariffs/${second.id}/default`,
+      headers: bearer(partner.token),
+    });
+    expect(madeDefault.statusCode).toBe(204);
+    expect((await account()).price).toBe('0.9');
+
+    const listed = (
+      await api().inject({
+        method: 'GET',
+        url: '/partner/messenger/tariffs',
+        headers: bearer(partner.token),
+      })
+    ).json<{ tariffs: TariffJson[] }>().tariffs;
+    expect(listed.map((item) => [item.name, item.is_default, item.accounts])).toEqual([
+      ['Основной', false, 0],
+      ['Дорогой', true, 1],
+    ]);
   });
 
-  it('негодные цена и лимиты отвергаются, а действие пишется в журнал', async () => {
-    const { id, patch } = await ownAccount();
-    expect((await patch({ price: '0' })).statusCode).toBe(400);
-    expect((await patch({ price: '100.01' })).statusCode).toBe(400);
-    expect((await patch({ price: 'много' })).statusCode).toBe(400);
-    expect((await patch({ limitPerMinute: 0 })).statusCode).toBe(400);
-    expect((await patch({ limitPerMinute: 100, limitPerDay: 50 })).statusCode).toBe(400);
-    expect((await patch({})).statusCode).toBe(400);
+  it('удаляется только неиспользуемый и не умолчание; чужой тариф и тариф с аккаунтом — отказ', async () => {
+    const { partner, tariff, assign } = await ownAccount();
+    const main = (await tariff({ name: 'Основной', price: '0.45' })).json<{ tariff: TariffJson }>()
+      .tariff;
+    const extra = (await tariff({ name: 'Запасной', price: '0.6' })).json<{ tariff: TariffJson }>()
+      .tariff;
+    const remove = (id: string, token = partner.token) =>
+      api().inject({
+        method: 'DELETE',
+        url: `/partner/messenger/tariffs/${id}`,
+        headers: bearer(token),
+      });
 
-    expect((await patch({ price: '1' })).statusCode).toBe(200);
+    expect((await remove(main.id)).statusCode).toBe(409);
+    await assign(extra.id);
+    expect((await remove(extra.id)).statusCode).toBe(409);
+    await assign(null);
+
+    const stranger = await verifiedPartner();
+    expect((await remove(extra.id, stranger.token)).statusCode).toBe(404);
+    expect((await assign(extra.id, stranger.token)).statusCode).toBe(404);
+
+    expect((await remove(extra.id)).statusCode).toBe(204);
+  });
+
+  it('негодные цена и лимиты отвергаются; новый аккаунт сразу идёт за умолчанием; действия пишутся в журнал', async () => {
+    const { partner, id, tariff, rename } = await ownAccount();
+    expect((await tariff({ name: 'А', price: '0' })).statusCode).toBe(400);
+    expect((await tariff({ name: 'А', price: '100.01' })).statusCode).toBe(400);
+    expect((await tariff({ name: 'А', price: 'много' })).statusCode).toBe(400);
+    expect((await tariff({ name: 'А', price: '1', limitPerMinute: 0 })).statusCode).toBe(400);
+    expect(
+      (await tariff({ name: 'А', price: '1', limitPerMinute: 100, limitPerDay: 50 })).statusCode,
+    ).toBe(400);
+    expect((await tariff({ name: '', price: '1' })).statusCode).toBe(400);
+
+    expect((await tariff({ name: 'Основной', price: '0.45' })).statusCode).toBe(201);
+    // Имя уникально у партнёра без учёта регистра.
+    expect((await tariff({ name: 'основной', price: '1' })).statusCode).toBe(409);
+
+    const second = (await create(partner.token, 'Второй')).json<{ account: AccountView }>().account;
+    expect(second).toMatchObject({ tariff_id: null, price: '0.45' });
+
+    // У аккаунта правится только название: цена и лимиты — в тарифе.
+    expect((await rename({ label: 'Рабочий' })).statusCode).toBe(200);
+    expect((await rename({})).statusCode).toBe(400);
+    expect((await rename({ label: 'Рабочий', price: '5' })).statusCode).toBe(200);
+
     const logged = await withDatabase(async (execute) => {
       const result = await execute(
-        sql`select count(*)::int as n from audit_log
-             where action = 'messenger_account.terms_changed' and entity_id = ${id}`,
+        sql`select action, count(*)::int as n from audit_log
+             where action = 'messenger_tariff.created'
+                or (action = 'messenger_account.terms_changed' and entity_id = ${id})
+             group by action`,
       );
-      return (result.rows[0] as { n: number }).n;
+      return Object.fromEntries(
+        (result.rows as { action: string; n: number }[]).map((row) => [row.action, row.n]),
+      );
     });
-    expect(logged).toBe(1);
+    expect(logged['messenger_tariff.created']).toBeGreaterThanOrEqual(1);
+    expect(logged['messenger_account.terms_changed']).toBe(2);
   });
 
   it('чужой аккаунт для партнёра не существует: ни прочитать, ни изменить, ни списать', async () => {
@@ -366,7 +543,7 @@ describe('цена и лимиты партнёра', () => {
           method: 'PATCH',
           url: `/partner/messenger/accounts/${id}`,
           headers,
-          payload: { price: '1' },
+          payload: { label: 'Чужой' },
         })
       ).statusCode,
     ).toBe(404);

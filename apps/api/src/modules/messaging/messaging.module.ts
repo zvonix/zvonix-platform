@@ -17,6 +17,9 @@ import { MessagesService } from './messages.service.js';
 import { MessagingController } from './messaging.controller.js';
 import { MessagingRepository } from './messaging.repository.js';
 import { MessagingService } from './messaging.service.js';
+import { MessengerTariffsController } from './tariffs.controller.js';
+import { MessengerTariffsRepository } from './tariffs.repository.js';
+import { MessengerTariffsService } from './tariffs.service.js';
 import { MESSAGE_PROVIDER, type MessageProvider } from './provider.js';
 import { SimulatedMessageProvider } from './simulated.provider.js';
 import { SmppServer } from './smpp/server.js';
@@ -33,6 +36,7 @@ import { SmppService } from './smpp/smpp.service.js';
   imports: [AuditModule, BillingModule, CatalogModule, SettingsModule],
   controllers: [
     MessagingController,
+    MessengerTariffsController,
     ClientMessagesController,
     ClientApiMessagesController,
     ClientSmppController,
@@ -43,6 +47,8 @@ import { SmppService } from './smpp/smpp.service.js';
   providers: [
     MessagingService,
     MessagingRepository,
+    MessengerTariffsService,
+    MessengerTariffsRepository,
     MessagesService,
     MessagesRepository,
     SmppRepository,
