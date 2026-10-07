@@ -25,7 +25,7 @@ import { moment } from '@/lib/format';
  * говорит об этом, а не показывает ошибку.
  */
 
-type Action = 'deploy' | 'rollback' | 'refresh';
+type Action = 'deploy' | 'prepare' | 'rollback' | 'refresh';
 type Status = 'running' | 'succeeded' | 'failed';
 
 interface Release {
@@ -55,11 +55,20 @@ interface Run {
   readonly exit_code: number | null;
 }
 
+interface Prepared {
+  readonly tag: string;
+  readonly ok: boolean;
+  readonly fresh: boolean;
+  readonly checked_at: string;
+  readonly checks: readonly { name: string; status: 'ok' | 'warn' | 'fail'; detail: string }[];
+}
+
 interface Overview {
   readonly available: boolean;
   readonly current: { version: string | null; commit: string | null; builtAt: string | null };
   readonly releases_fetched_at: string | null;
   readonly releases: readonly Release[];
+  readonly prepared: readonly Prepared[];
   readonly queue: readonly Queued[];
   readonly runs: readonly Run[];
 }
@@ -72,6 +81,7 @@ interface LogChunk {
 
 const ACTION_NAME: Record<Action, string> = {
   deploy: 'Обновление',
+  prepare: 'Проверка выпуска',
   rollback: 'Откат',
   refresh: 'Проверка обновлений',
 };
@@ -246,37 +256,21 @@ function Updates() {
       {hasBanner && (
         <section
           aria-label="Новая версия"
-          className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-4"
+          className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4"
         >
           {newer[0] === undefined ? (
             <span className="text-ok">Установлена последняя версия</span>
           ) : (
-            <>
-              <div>
-                <div className="font-semibold">
-                  Доступно обновление до <span className="num">{newer[0].tag}</span>
-                  {newer.length > 1 && (
-                    <span className="font-normal text-muted-foreground">
-                      {' '}
-                      · новых версий: {String(newer.length)}
-                    </span>
-                  )}
-                </div>
-                <div className="text-muted-foreground">{summary(newer[0].notes)}</div>
-              </div>
-              <div className="ml-auto">
-                <ConfirmAction
-                  label={`Обновить до ${newer[0].tag}`}
-                  title={`Обновить площадку до ${newer[0].tag}`}
-                  consequence={UPDATE_CONSEQUENCE}
-                  confirmLabel="Обновить"
-                  tone="neutral"
-                  variant="default"
-                  disabled={busy}
-                  onConfirm={() => deploy(newer[0]?.tag ?? '')}
-                />
-              </div>
-            </>
+            <NewVersion
+              release={newer[0]}
+              others={newer.length - 1}
+              prepared={data.prepared.find((item) => item.tag === newer[0]?.tag)}
+              busy={busy}
+              onPrepare={() =>
+                act.mutateAsync({ path: '/updates/prepare', body: { tag: newer[0]?.tag } })
+              }
+              onInstall={() => deploy(newer[0]?.tag ?? '')}
+            />
           )}
         </section>
       )}
@@ -434,6 +428,93 @@ function ReleaseTable({
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+const CHECK_MARK = { ok: '✓', warn: '!', fail: '✕' } as const;
+const CHECK_TONE = { ok: 'text-ok', warn: 'text-warn', fail: 'text-crit' } as const;
+
+/**
+ * Новая версия: сначала «Подготовить» — выпуск скачивается и проверяется на копии базы, рабочая площадка не
+ * затрагивается ([ADR-0074](../../../../../docs/adr/0074-obnovlenie-iz-adminki.md), этап 2); потом, если всё
+ * прошло, — «Установить». Установка перепроверяет сама, если подготовка устарела.
+ */
+function NewVersion({
+  release,
+  others,
+  prepared,
+  busy,
+  onPrepare,
+  onInstall,
+}: {
+  release: Release;
+  others: number;
+  prepared: Prepared | undefined;
+  busy: boolean;
+  onPrepare: () => Promise<unknown>;
+  onInstall: () => Promise<unknown>;
+}) {
+  const ready = prepared !== undefined && prepared.ok && prepared.fresh;
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-3">
+        <div>
+          <div className="font-semibold">
+            Доступно обновление до <span className="num">{release.tag}</span>
+            {others > 0 && (
+              <span className="font-normal text-muted-foreground">
+                {' '}
+                · новых версий: {String(others + 1)}
+              </span>
+            )}
+          </div>
+          <div className="text-muted-foreground">{summary(release.notes)}</div>
+        </div>
+        <div className="ml-auto">
+          {ready ? (
+            <ConfirmAction
+              label={`Установить ${release.tag}`}
+              title={`Установить ${release.tag}`}
+              consequence={UPDATE_CONSEQUENCE}
+              confirmLabel="Установить"
+              tone="neutral"
+              variant="default"
+              disabled={busy}
+              onConfirm={onInstall}
+            />
+          ) : (
+            <ConfirmAction
+              label={
+                prepared === undefined || prepared.fresh
+                  ? 'Подготовить и проверить'
+                  : 'Проверить заново'
+              }
+              title={`Подготовить ${release.tag}`}
+              consequence="Выпуск скачается и проверится на временной копии базы: места на диске, миграции на настоящих данных, запуск нового кода на запасном порту. Работающая площадка не затрагивается. Скачивание может занять много минут."
+              confirmLabel="Подготовить"
+              tone="neutral"
+              variant="default"
+              disabled={busy}
+              onConfirm={onPrepare}
+            />
+          )}
+        </div>
+      </div>
+      {prepared !== undefined && (
+        <ul aria-label="Результат проверки" className="flex flex-col gap-1">
+          {prepared.checks.map((check) => (
+            <li key={check.name} className={CHECK_TONE[check.status]}>
+              {CHECK_MARK[check.status]} {check.name}
+              <span className="text-muted-foreground"> — {check.detail}</span>
+            </li>
+          ))}
+          <li className="text-muted-foreground">
+            Проверено {moment(prepared.checked_at)}
+            {prepared.ok && !prepared.fresh && ' · результат устарел, проверьте заново'}
+          </li>
+        </ul>
+      )}
+    </>
   );
 }
 

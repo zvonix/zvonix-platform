@@ -169,6 +169,49 @@ describe('обновление из кабинета', () => {
     ]);
   });
 
+  it('проверка выпуска перед установкой: заявка «подготовить» и результат в обзоре', async () => {
+    await mkdir(path.join(root, 'prepared'), { recursive: true });
+    await writeFile(
+      path.join(root, 'prepared', 'v9.9.9.json'),
+      JSON.stringify({
+        tag: 'v9.9.9',
+        release: '/opt/zvonix/releases/v9.9.9-1',
+        ok: false,
+        checked_at: new Date().toISOString(),
+        checks: [
+          { name: 'Место на диске', status: 'ok', detail: 'достаточно' },
+          { name: 'Репетиция на копии базы', status: 'fail', detail: 'миграции не прошли' },
+          { name: 'мусор', status: 'странно', detail: 'пропускается' },
+        ],
+      }),
+    );
+
+    const overview = (await call('admin', 'GET', '/updates')).json<{
+      prepared: { tag: string; ok: boolean; fresh: boolean; checks: { name: string }[] }[];
+    }>();
+    expect(overview.prepared).toHaveLength(1);
+    expect(overview.prepared[0]).toMatchObject({ tag: 'v9.9.9', ok: false, fresh: true });
+    expect(overview.prepared[0]?.checks.map((check) => check.name)).toEqual([
+      'Место на диске',
+      'Репетиция на копии базы',
+    ]);
+
+    expect((await call('admin', 'POST', '/updates/prepare', { tag: 'v0.0.1' })).statusCode).toBe(
+      404,
+    );
+    const queued = await call('admin', 'POST', '/updates/prepare', { tag: 'v9.9.9' });
+    expect(queued.statusCode).toBe(202);
+    const id = queued.json<{ request: { id: string } }>().request.id;
+    expect(
+      JSON.parse(await readFile(path.join(root, 'requests', `${id}.json`), 'utf8')),
+    ).toMatchObject({ action: 'prepare', tag: 'v9.9.9' });
+    // Подготовка — тоже выкладка в очереди: вторую не принимаем, отменить можно.
+    expect((await call('admin', 'POST', '/updates/deploy', { tag: 'v9.9.8' })).statusCode).toBe(
+      409,
+    );
+    expect((await call('admin', 'POST', `/updates/${id}/cancel`)).statusCode).toBe(204);
+  });
+
   it('журнал выкладки отдаётся кусками и не режет недописанную строку', async () => {
     const run = {
       id: RUN,

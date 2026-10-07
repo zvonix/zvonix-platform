@@ -16,7 +16,7 @@ import { readRelease, type ReleaseInfo } from '../../infra/release.js';
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 
-export type UpdateAction = 'deploy' | 'rollback' | 'refresh';
+export type UpdateAction = 'deploy' | 'prepare' | 'rollback' | 'refresh';
 type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface ReleaseItem {
@@ -47,11 +47,23 @@ export interface RunView {
   readonly exit_code: number | null;
 }
 
+/** Результат проверки выпуска перед установкой (`zvonix-deploy --prepare`): что и как проверено. */
+export interface PreparedRelease {
+  readonly tag: string;
+  /** Все проверки без отказа: выпуск можно ставить. */
+  readonly ok: boolean;
+  /** Проверка ещё свежа: позже деплой всё равно перепроверит и не использует подготовленное. */
+  readonly fresh: boolean;
+  readonly checked_at: string;
+  readonly checks: readonly { name: string; status: 'ok' | 'warn' | 'fail'; detail: string }[];
+}
+
 export interface UpdatesOverview {
   readonly available: boolean;
   readonly current: ReleaseInfo;
   readonly releases_fetched_at: string | null;
   readonly releases: readonly ReleaseItem[];
+  readonly prepared: readonly PreparedRelease[];
   readonly queue: readonly QueuedRequest[];
   readonly runs: readonly RunView[];
 }
@@ -71,6 +83,8 @@ interface Actor {
 /** Не больше столько байт журнала за один ответ: кабинет догоняет остальное следующим опросом. */
 const LOG_CHUNK = 64 * 1024;
 const RUNS_SHOWN = 15;
+/** Как долго подготовленный выпуск считается годным; то же число — `PREPARED_MAX_AGE` в `deploy/deploy.sh`. */
+const PREPARED_FRESH_MS = 6 * 60 * 60 * 1000;
 const REQUEST_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json$/u;
 
 function isMissing(error: unknown): boolean {
@@ -126,6 +140,7 @@ export class UpdatesService {
         current: this.current,
         releases_fetched_at: null,
         releases: [],
+        prepared: [],
         queue: [],
         runs: [],
       };
@@ -136,6 +151,7 @@ export class UpdatesService {
       current: this.current,
       releases_fetched_at: list.fetchedAt,
       releases: list.items,
+      prepared: await this.prepared(),
       queue: await this.queue(),
       runs: await this.runs(),
     };
@@ -158,6 +174,37 @@ export class UpdatesService {
         : [],
     );
     return { fetchedAt: textOrNull(raw['fetched_at']), items };
+  }
+
+  private async prepared(): Promise<PreparedRelease[]> {
+    let names: string[];
+    try {
+      names = await readdir(path.join(this.config.UPDATER_DIR, 'prepared'));
+    } catch (error) {
+      if (isMissing(error)) return [];
+      throw error;
+    }
+    const found: PreparedRelease[] = [];
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      const raw = await readJson(path.join(this.config.UPDATER_DIR, 'prepared', name));
+      if (raw === null || typeof raw['tag'] !== 'string' || !Array.isArray(raw['checks'])) continue;
+      const checkedAt = textOrNull(raw['checked_at']) ?? '';
+      const age = Date.now() - Date.parse(checkedAt);
+      found.push({
+        tag: raw['tag'],
+        ok: raw['ok'] === true,
+        fresh: Number.isFinite(age) && age < PREPARED_FRESH_MS,
+        checked_at: checkedAt,
+        checks: (raw['checks'] as Json[]).flatMap((check) =>
+          typeof check['name'] === 'string' &&
+          (check['status'] === 'ok' || check['status'] === 'warn' || check['status'] === 'fail')
+            ? [{ name: check['name'], status: check['status'], detail: text(check['detail']) }]
+            : [],
+        ),
+      });
+    }
+    return found.sort((a, b) => b.checked_at.localeCompare(a.checked_at));
   }
 
   private async queue(): Promise<QueuedRequest[]> {
@@ -225,7 +272,7 @@ export class UpdatesService {
         (await this.runs()).some((run) => run.status === 'running' && run.action !== 'refresh');
       if (busy) throw conflict('Уже идёт или ждёт другое обновление — дождитесь его окончания');
     }
-    if (action === 'deploy') {
+    if (action === 'deploy' || action === 'prepare') {
       if (tag === null) throw validationFailed('Не указан выпуск');
       const known = (await this.releases()).items.some((item) => item.tag === tag);
       if (!known) throw notFound('Такого выпуска нет в списке — нажмите «Проверить обновления»');
@@ -236,7 +283,7 @@ export class UpdatesService {
     const request: QueuedRequest = {
       id,
       action,
-      tag: action === 'deploy' ? tag : null,
+      tag: action === 'deploy' || action === 'prepare' ? tag : null,
       by: actor.email,
       requested_at: new Date().toISOString(),
     };

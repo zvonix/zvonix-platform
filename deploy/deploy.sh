@@ -107,6 +107,12 @@ prune() {
   done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
 }
 
+# Записи о подготовленных выпусках живут двое суток: дольше подготовка всё равно считается устаревшей.
+prune_prepared() {
+  [ -d "$PREPARED" ] && find "$PREPARED" -maxdepth 1 -type f -name '*.json' -mtime +2 -delete
+  return 0
+}
+
 # Копия базы перед миграциями. Откат выпуска возвращает код, но не базу (ADR-0049):
 # данные, испорченные миграцией, возвращаются только из копии. Нет копии — нет миграций.
 # Снимает сам postgres в свой каталог: у root роли в базе нет, а копия с данными людей
@@ -224,8 +230,9 @@ PY
     || die "контрольная сумма zvonix-${tag}.tgz не совпала"
 }
 
-install_release() {
-  local archive="$1" label="$2" release before
+# Распаковка архива и зависимости. Каталог выпуска — в RELEASE_DIR (не в выводе: шаги печатают в журнал).
+unpack_release() {
+  local archive="$1" label="$2" release
   release="${RELEASES}/${label}-$(date +%Y%m%d%H%M%S)"
 
   step "Распаковка в ${release}"
@@ -239,6 +246,197 @@ install_release() {
   sudo -u zvonix -H env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true \
     sh -c 'cd "$0" && pnpm install --frozen-lockfile --prod --filter "@zvonix/api..." --filter "@zvonix/worker..."' \
     "$release"
+  RELEASE_DIR="$release"
+}
+
+# Подготовленный выпуск (ADR-0074, этап 2): скачан, распакован и проверен заранее. Запись о нём —
+# ${PREPARED}/<метка>.json; годится, пока каталог цел, метка в нём та же и проверка прошла не давно.
+PREPARED="${UPDATER_DIR:-/var/lib/zvonix-updater}/prepared"
+PREPARED_MAX_AGE=21600
+prepared_release() {
+  local tag="$1" record="${PREPARED}/${1}.json"
+  [ -f "$record" ] || return 1
+  python3 - "$record" "$tag" "$PREPARED_MAX_AGE" <<'PY'
+import json, os, sys, time
+record, tag, max_age = sys.argv[1], sys.argv[2], int(sys.argv[3])
+data = json.load(open(record, encoding='utf-8'))
+release = data.get('release', '')
+release_file = os.path.join(release, 'RELEASE')
+if not data.get('ok') or not os.path.isfile(release_file):
+    sys.exit(1)
+if open(release_file, encoding='utf-8').readline().strip() != tag:
+    sys.exit(1)
+if time.time() - os.stat(record).st_mtime > max_age:
+    sys.exit(1)
+print(release)
+PY
+}
+
+# --- Проверка выпуска до установки (ADR-0074, этап 2) -----------------------------------------
+# Результат каждой проверки — строка «имя|ok/warn/fail|подробности» в ${CHECKS}; `fail` останавливает
+# установку, `warn` только предупреждает. Прогон идёт на ВРЕМЕННОЙ копии базы и запасном порту:
+# рабочие база и службы не затрагиваются.
+CHECKS=""
+REHEARSAL_DB=zvonix_rehearsal
+REHEARSAL_PORT=18000
+
+check() {
+  printf '%s|%s|%s\n' "$1" "$2" "$3" >>"$CHECKS"
+  printf 'ПРОВЕРКА %s: %s — %s\n' "$1" "$2" "$3"
+}
+
+# Свободное место: выпуск (с зависимостями) и копия базы перед миграциями.
+check_disk() {
+  local free_opt free_backup
+  free_opt="$(df -Pm "$ROOT" | awk 'NR==2 {print $4}')"
+  install -d -o postgres -g postgres -m 0700 "$BACKUPS"
+  free_backup="$(df -Pm "$BACKUPS" | awk 'NR==2 {print $4}')"
+  if [ "$free_opt" -lt 1024 ] || [ "$free_backup" -lt 512 ]; then
+    check "Место на диске" fail "мало: для выпусков ${free_opt} МБ (нужно от 1024), для копий ${free_backup} МБ (от 512)"
+  else
+    check "Место на диске" ok "для выпусков ${free_opt} МБ, для копий ${free_backup} МБ"
+  fi
+}
+
+# Суточная копия базы: перед миграциями выкладка снимет свою, но свежая суточная — второй рубеж.
+check_daily_backup() {
+  local newest age_hours
+  newest="$(find "${BACKUPS}/daily" -maxdepth 1 -type f -name '*.dump' -printf '%T@\n' 2>/dev/null | sort -rn | head -1)"
+  if [ -z "$newest" ]; then
+    check "Суточная копия базы" warn "суточных копий нет — только копия перед миграциями"
+    return 0
+  fi
+  age_hours=$(( ($(date +%s) - ${newest%.*}) / 3600 ))
+  if [ "$age_hours" -gt 36 ]; then
+    check "Суточная копия базы" warn "последней суточной копии ${age_hours} ч — таймер копий не работает?"
+  else
+    check "Суточная копия базы" ok "последней ${age_hours} ч"
+  fi
+}
+
+check_release_files() {
+  local release="$1" tag="$2" first
+  first="$(head -1 "${release}/RELEASE")"
+  if [ "$first" != "$tag" ]; then
+    check "Состав выпуска" fail "метка в выпуске «${first}», ожидалась «${tag}»"
+  elif [ ! -f "${release}/apps/api/dist/main.js" ] || [ ! -d "${release}/apps/web/.next" ]; then
+    check "Состав выпуска" fail "нет собранного API или кабинета"
+  else
+    check "Состав выпуска" ok "${tag}, собраны API и кабинет"
+  fi
+}
+
+rehearsal_cleanup() {
+  (cd / && sudo -u postgres dropdb --if-exists "$REHEARSAL_DB") >/dev/null 2>&1 || true
+}
+
+# Репетиция: копия рабочей базы → миграции выпуска на ней → API выпуска на запасном порту отвечает «готов».
+# Ловит то, что не видно по тексту миграций: поведение на настоящих данных и запуск нового кода.
+check_rehearsal() {
+  local release="$1" live_url test_url pid ready=0 attempt
+  live_url="$(set -a; . "${ETC}/zvonix.env"; printf '%s' "${DATABASE_URL:-}")"
+  if [ -z "$live_url" ]; then
+    check "Репетиция на копии базы" fail "в zvonix.env нет DATABASE_URL"
+    return 0
+  fi
+  test_url="${live_url%/*}/${REHEARSAL_DB}"
+
+  rehearsal_cleanup
+  if ! (cd / && sudo -u postgres createdb -O zvonix "$REHEARSAL_DB") >/dev/null 2>&1; then
+    check "Репетиция на копии базы" fail "не удалось создать временную базу ${REHEARSAL_DB}"
+    return 0
+  fi
+  if ! (cd / && sudo -u postgres pg_dump --format=custom "$DATABASE" \
+      | sudo -u postgres pg_restore --no-owner --role=zvonix -d "$REHEARSAL_DB") >"${WORK}/rehearsal-restore.log" 2>&1; then
+    check "Репетиция на копии базы" fail "копия рабочей базы не развернулась: $(tail -2 "${WORK}/rehearsal-restore.log" | tr '\n' ' ')"
+    rehearsal_cleanup
+    return 0
+  fi
+
+  if ! sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; export DATABASE_URL="$1"; cd "$0" && exec node packages/db/dist/migrate.js' \
+      "$release" "$test_url" >"${WORK}/rehearsal-migrate.log" 2>&1; then
+    check "Репетиция на копии базы" fail "миграции не прошли на копии данных: $(tail -3 "${WORK}/rehearsal-migrate.log" | tr '\n' ' ')"
+    rehearsal_cleanup
+    return 0
+  fi
+
+  # API выпуска на запасном порту, только на себя; SMPP и обмен с службой обновления выключены.
+  sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; export DATABASE_URL="$1" APP_HOST=127.0.0.1 APP_PORT="$2" SMPP_PORT=0 SMPP_TLS_PORT=0 UPDATER_DIR=/nonexistent; cd "$0/apps/api" && exec node dist/main.js' \
+    "$release" "$test_url" "$REHEARSAL_PORT" >"${WORK}/rehearsal-api.log" 2>&1 &
+  pid=$!
+  for attempt in $(seq 1 40); do
+    if curl -fs --max-time 2 -o /dev/null "http://127.0.0.1:${REHEARSAL_PORT}/health/ready"; then
+      ready=1
+      break
+    fi
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  rehearsal_cleanup
+
+  if [ "$ready" -eq 1 ]; then
+    check "Репетиция на копии базы" ok "миграции прошли на копии данных, API выпуска запустился на порту ${REHEARSAL_PORT}"
+  else
+    check "Репетиция на копии базы" fail "API выпуска не стал готов: $(tail -3 "${WORK}/rehearsal-api.log" | tr '\n' ' ' | cut -c1-300)"
+  fi
+}
+
+# Все проверки выпуска; запись о результате — ${PREPARED}/<метка>.json. Код возврата: 0 — можно ставить.
+run_checks() {
+  # Для `--archive` метка — имя файла (zvonix-v0.1.0): в выпуске она без приставки.
+  local release="$1" tag="${2#zvonix-}" record
+  record="${PREPARED}/${tag}.json"
+  CHECKS="${WORK}/checks.txt"
+  : >"$CHECKS"
+
+  step "Проверка выпуска перед установкой"
+  check_disk
+  check_daily_backup
+  check_release_files "$release" "$tag"
+  # Репетиция имеет смысл, только если выпуск цел: иначе она упадёт по более глупой причине.
+  if ! grep -q '|fail|' "$CHECKS"; then
+    check_rehearsal "$release"
+  fi
+
+  install -d -m 0755 "$PREPARED"
+  if python3 - "$CHECKS" "$record" "$tag" "$release" <<'PY'
+import json, sys, time
+checks_file, record, tag, release = sys.argv[1:5]
+items = []
+for line in open(checks_file, encoding='utf-8'):
+    name, status, detail = line.rstrip('\n').split('|', 2)
+    items.append({'name': name, 'status': status, 'detail': detail})
+ok = bool(items) and all(item['status'] != 'fail' for item in items)
+data = {'tag': tag, 'release': release, 'ok': ok, 'checked_at': time.strftime('%Y-%m-%dT%H:%M:%S+00:00', time.gmtime()), 'checks': items}
+with open(record + '.tmp', 'w', encoding='utf-8') as handle:
+    json.dump(data, handle, ensure_ascii=False)
+import os
+os.chmod(record + '.tmp', 0o644)
+os.replace(record + '.tmp', record)
+sys.exit(0 if ok else 1)
+PY
+  then
+    return 0
+  fi
+  # Не прошёл проверку — каталог не нужен: он занимал бы место среди сохраняемых выпусков.
+  rm -rf -- "$release"
+  return 1
+}
+
+install_release() {
+  local archive="$1" label="$2" prepared="${3:-}" release before
+
+  if [ -n "$prepared" ]; then
+    step "Выпуск уже подготовлен и проверен: ${prepared}"
+    release="$prepared"
+  else
+    unpack_release "$archive" "$label"
+    release="$RELEASE_DIR"
+    run_checks "$release" "$label" \
+      || die "проверка выпуска не пройдена — установка остановлена, работает прежний выпуск"
+  fi
 
   step "Копия базы"
   backup_database "$label"
@@ -258,6 +456,7 @@ install_release() {
       point "$PREVIOUS" "$before"
     fi
     prune
+    prune_prepared
     update_local_node
     first_run_hint "$release"
     echo "DEPLOY_OK $(head -1 "${release}/RELEASE")"
@@ -285,6 +484,19 @@ rollback() {
 }
 
 case "${1:-}" in
+  --prepare)
+    # Заранее: скачать, распаковать и проверить на копии базы — ничего не устанавливая (ADR-0074).
+    tag="${2:-}"
+    [[ "$tag" =~ $TAG_PATTERN ]] || die "укажите метку: zvonix-deploy --prepare <метка>"
+    if prepared_release "$tag" >/dev/null; then
+      echo "Выпуск ${tag} уже подготовлен и проверен"
+    else
+      download "$tag"
+      unpack_release "${WORK}/zvonix-${tag}.tgz" "$tag"
+      run_checks "$RELEASE_DIR" "$tag" || die "проверка выпуска ${tag} не пройдена — устанавливать нельзя"
+    fi
+    echo "PREPARE_OK ${tag}"
+    ;;
   --rollback)
     rollback
     ;;
@@ -308,7 +520,13 @@ case "${1:-}" in
     ;;
   *)
     [[ "$1" =~ $TAG_PATTERN ]] || die "метка $1 недопустима"
-    download "$1"
-    install_release "${WORK}/zvonix-${1}.tgz" "$1"
+    prepared="$(prepared_release "$1" || true)"
+    if [ -n "$prepared" ]; then
+      install_release "" "$1" "$prepared"
+    else
+      download "$1"
+      install_release "${WORK}/zvonix-${1}.tgz" "$1"
+    fi
+    rm -f -- "${PREPARED}/${1}.json"
     ;;
 esac

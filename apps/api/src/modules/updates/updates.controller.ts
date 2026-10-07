@@ -36,6 +36,17 @@ export class UpdatesController {
     return { request: await this.updates.request(actor, 'deploy', body.tag) };
   }
 
+  /** Скачать выпуск и проверить его на копии базы, ничего не устанавливая (ADR-0074, этап 2). */
+  @Roles('admin')
+  @HttpCode(202)
+  @Post('updates/prepare')
+  async prepare(
+    @CurrentUser() actor: Principal,
+    @Body(zodBody(deployRequestSchema)) body: z.infer<typeof deployRequestSchema>,
+  ): Promise<{ request: QueuedRequest }> {
+    return { request: await this.updates.request(actor, 'prepare', body.tag) };
+  }
+
   @Roles('admin')
   @HttpCode(202)
   @Post('updates/rollback')
