@@ -159,6 +159,9 @@ function Updates() {
   const currentIndex = data.releases.findIndex((release) => release.tag === data.current.version);
   const newer = currentIndex === -1 ? data.releases : data.releases.slice(0, currentIndex);
   const older = currentIndex === -1 ? [] : data.releases.slice(currentIndex + 1);
+  // Плашка выше обновляет до самой новой версии; в таблице остаются только промежуточные, без второй такой же кнопки.
+  const hasBanner = data.current.version !== null && data.releases.length > 0;
+  const others = hasBanner ? newer.slice(1) : newer;
 
   return (
     <div className="flex flex-col gap-4">
@@ -234,7 +237,7 @@ function Updates() {
 
       {shown !== null && <RunConsole key={shown} runId={shown} />}
 
-      {data.current.version !== null && data.releases.length > 0 && (
+      {hasBanner && (
         <section
           aria-label="Новая версия"
           className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-4"
@@ -287,8 +290,8 @@ function Updates() {
           </p>
         ) : (
           <>
-            {newer.length > 0 && (
-              <ReleaseTable releases={newer} label="Обновить" busy={busy} onDeploy={deploy} />
+            {others.length > 0 && (
+              <ReleaseTable releases={others} label="Обновить" busy={busy} onDeploy={deploy} />
             )}
             {older.length > 0 && (
               <details className="rounded-lg border border-border bg-card">
