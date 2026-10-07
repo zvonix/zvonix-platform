@@ -263,7 +263,7 @@ function Updates() {
           ) : (
             <NewVersion
               release={newer[0]}
-              others={newer.length - 1}
+              others={newer.slice(1).map((item) => item.tag)}
               prepared={data.prepared.find((item) => item.tag === newer[0]?.tag)}
               busy={busy}
               onPrepare={() =>
@@ -288,26 +288,27 @@ function Updates() {
           <p className="text-muted-foreground">
             Список пуст. Нажмите «Проверить обновления» — служба спросит GitHub.
           </p>
+        ) : hasBanner ? (
+          others.length + older.length > 0 && (
+            <details className="rounded-lg border border-border bg-card">
+              <summary className="cursor-pointer px-3 py-2 text-muted-foreground">
+                Другие версии: {String(others.length + older.length)}
+              </summary>
+              <ReleaseTable
+                releases={[...others, ...older]}
+                isReturn={(tag) => older.some((release) => release.tag === tag)}
+                busy={busy}
+                onDeploy={deploy}
+              />
+            </details>
+          )
         ) : (
-          <>
-            {others.length > 0 && (
-              <ReleaseTable releases={others} label="Обновить" busy={busy} onDeploy={deploy} />
-            )}
-            {older.length > 0 && (
-              <details className="rounded-lg border border-border bg-card">
-                <summary className="cursor-pointer px-3 py-2 text-muted-foreground">
-                  Более ранние версии: {String(older.length)}
-                </summary>
-                <ReleaseTable
-                  releases={older}
-                  label="Вернуться"
-                  returning
-                  busy={busy}
-                  onDeploy={deploy}
-                />
-              </details>
-            )}
-          </>
+          <ReleaseTable
+            releases={data.releases}
+            isReturn={() => false}
+            busy={busy}
+            onDeploy={deploy}
+          />
         )}
       </section>
 
@@ -373,14 +374,13 @@ const summary = (notes: string): string =>
 
 function ReleaseTable({
   releases,
-  label,
-  returning = false,
+  isReturn,
   busy,
   onDeploy,
 }: {
   releases: readonly Release[];
-  label: string;
-  returning?: boolean;
+  /** Версия старше работающей — «Вернуться» с предупреждением, а не «Обновить». */
+  isReturn: (tag: string) => boolean;
   busy: boolean;
   onDeploy: (tag: string) => Promise<unknown>;
 }) {
@@ -412,15 +412,11 @@ function ReleaseTable({
                 {summary(release.notes)}
               </TableCell>
               <TableCell className="text-right">
-                <ConfirmAction
-                  label={label}
-                  title={`${returning ? 'Вернуться на' : 'Обновить площадку до'} ${release.tag}`}
-                  consequence={returning ? RETURN_CONSEQUENCE : UPDATE_CONSEQUENCE}
-                  confirmLabel={label}
-                  tone={returning ? 'danger' : 'neutral'}
-                  size="xs"
-                  disabled={busy}
-                  onConfirm={() => onDeploy(release.tag)}
+                <ReleaseAction
+                  release={release}
+                  returning={isReturn(release.tag)}
+                  busy={busy}
+                  onDeploy={onDeploy}
                 />
               </TableCell>
             </TableRow>
@@ -428,6 +424,32 @@ function ReleaseTable({
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+function ReleaseAction({
+  release,
+  returning,
+  busy,
+  onDeploy,
+}: {
+  release: Release;
+  returning: boolean;
+  busy: boolean;
+  onDeploy: (tag: string) => Promise<unknown>;
+}) {
+  const label = returning ? 'Вернуться' : 'Обновить';
+  return (
+    <ConfirmAction
+      label={label}
+      title={`${returning ? 'Вернуться на' : 'Обновить площадку до'} ${release.tag}`}
+      consequence={returning ? RETURN_CONSEQUENCE : UPDATE_CONSEQUENCE}
+      confirmLabel={label}
+      tone={returning ? 'danger' : 'neutral'}
+      size="xs"
+      disabled={busy}
+      onConfirm={() => onDeploy(release.tag)}
+    />
   );
 }
 
@@ -448,7 +470,8 @@ function NewVersion({
   onInstall,
 }: {
   release: Release;
-  others: number;
+  /** Промежуточные новые версии: перечисляются в одной строке рядом с главной, без своих кнопок. */
+  others: readonly string[];
   prepared: Prepared | undefined;
   busy: boolean;
   onPrepare: () => Promise<unknown>;
@@ -461,10 +484,11 @@ function NewVersion({
         <div>
           <div className="font-semibold">
             Доступно обновление до <span className="num">{release.tag}</span>
-            {others > 0 && (
-              <span className="font-normal text-muted-foreground">
+            {others.length > 0 && (
+              <span className="num font-normal text-muted-foreground">
                 {' '}
-                · новых версий: {String(others + 1)}
+                · также новые: {others.slice(0, 3).join(', ')}
+                {others.length > 3 && ` и ещё ${String(others.length - 3)}`}
               </span>
             )}
           </div>
