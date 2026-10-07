@@ -23,6 +23,7 @@ import {
   type MessageFailureReason,
   type MoneyAmount,
 } from '@zvonix/shared';
+import { RedisService } from '../../infra/redis.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { BillingService } from '../billing/billing.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
@@ -30,13 +31,24 @@ import { SettingsService } from '../settings/settings.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
 import { MessagingService } from './messaging.service.js';
 import { MessagesRepository, type MessageFilter, type MessageRow } from './messages.repository.js';
-import { MESSAGE_PROVIDER, RecipientRejectedError, type MessageProvider } from './provider.js';
+import {
+  MESSAGE_PROVIDER,
+  RecipientRejectedError,
+  type MessageProvider,
+  type RecipientCheck,
+} from './provider.js';
 
 /** Сколько сообщений воркер берёт за проход: с запасом на паузы, но без многоминутного прохода. */
 const DISPATCH_BATCH = 50;
 
 /** Повтор после временного сбоя: 1, 2, 4, 8 минут — и возврат. */
 const BACKOFF_BASE_SECONDS = 60;
+
+/** Сколько суток помнится результат проверки номера (настройки площадки); `null` вместо него — проверки нет. */
+interface PrecheckMemory {
+  readonly existsDays: number;
+  readonly absentDays: number;
+}
 
 /** Сообщений на проход проверки «ждёт слишком долго». */
 const EXPIRY_BATCH = 100;
@@ -69,6 +81,7 @@ export class MessagesService {
     private readonly billing: BillingService,
     private readonly settings: SettingsService,
     private readonly tariffs: TariffService,
+    private readonly redis: RedisService,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -236,11 +249,14 @@ export class MessagesService {
    */
   async dispatchDue(now: Date = new Date()): Promise<number> {
     const settings = await this.settings.messaging();
+    const precheck: PrecheckMemory | null = settings.precheckEnabled
+      ? { existsDays: settings.precheckExistsDays, absentDays: settings.precheckAbsentDays }
+      : null;
     const claimed = await this.repository.claimDue(now, DISPATCH_BATCH);
     let sent = 0;
     for (const message of claimed) {
       try {
-        if (await this.dispatchOne(message, now, settings.paceSeconds)) sent += 1;
+        if (await this.dispatchOne(message, now, settings.paceSeconds, precheck)) sent += 1;
       } catch (cause) {
         // Непредвиденное: сообщение возвращается в очередь, чтобы не зависнуть «в работе».
         this.logger.error('Отправка сообщения не удалась', cause, { message_id: message.id });
@@ -250,7 +266,40 @@ export class MessagesService {
     return sent;
   }
 
-  private async dispatchOne(message: MessageRow, now: Date, paceSeconds: number): Promise<boolean> {
+  /**
+   * Есть ли у номера MAX. Результат помнится в Redis столько суток, сколько задано настройками
+   * (у «нет» срок короче: номер мог завести аккаунт), «неизвестно» не помнится. Частые проверки одного номера мессенджер считает подозрительными,
+   * поэтому повтор идёт из памяти. Недоступный Redis — просто проверка без памяти.
+   */
+  private async hasMax(
+    account: MessengerAccountRow,
+    recipient: string,
+    memory: PrecheckMemory,
+  ): Promise<RecipientCheck> {
+    const key = `messaging:max:${recipient}`;
+    try {
+      const cached = await this.redis.connection.get(key);
+      if (cached === 'exists' || cached === 'absent') return cached;
+    } catch (cause) {
+      this.logger.warn('Память проверок номеров недоступна', {
+        reason: cause instanceof Error ? cause.name : 'unknown',
+      });
+    }
+    const result = await this.provider.checkRecipient(this.messaging.refOf(account), recipient);
+    if (result !== 'unknown') {
+      const days = result === 'exists' ? memory.existsDays : memory.absentDays;
+      const ttl = days * 86_400;
+      await this.redis.connection.set(key, result, 'EX', ttl).catch(() => undefined);
+    }
+    return result;
+  }
+
+  private async dispatchOne(
+    message: MessageRow,
+    now: Date,
+    paceSeconds: number,
+    precheck: PrecheckMemory | null,
+  ): Promise<boolean> {
     const account = await this.repository.findAccount(message.accountId);
     if (account === undefined || account.status === 'retired') {
       await this.fail(message, 'account_unavailable', now);
@@ -292,6 +341,14 @@ export class MessagesService {
         await this.repository.requeue(message.id, new Date(now.getTime() + 300_000), true);
         return false;
       }
+    }
+
+    if (
+      precheck !== null &&
+      (await this.hasMax(account, message.recipient, precheck)) === 'absent'
+    ) {
+      await this.fail(message, 'recipient_not_in_max', now);
+      return false;
     }
 
     try {

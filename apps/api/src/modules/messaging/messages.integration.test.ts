@@ -15,7 +15,8 @@ import {
 import { bearer, fixtures } from './messaging.fixtures.js';
 import { MessagesService } from './messages.service.js';
 import { MessagingService } from './messaging.service.js';
-import { simulateAccountState, simulatedSent } from './simulated.provider.js';
+import { RedisService } from '../../infra/redis.js';
+import { simulateAccountState, simulatedChecks, simulatedSent } from './simulated.provider.js';
 
 prepareEnvironment();
 
@@ -248,6 +249,66 @@ describe('не ушло — деньги возвращаются', () => {
     });
     expect(await balance(client.token)).toBe('10');
     expect(await owed(partner.partnerId)).toBe('0');
+  });
+
+  describe('проверка наличия MAX до отправки', () => {
+    const redisKey = (recipient: string) => `messaging:max:${recipient}`;
+    const timesChecked = (recipient: string) =>
+      simulatedChecks.filter((item) => item === recipient).length;
+
+    it('номера без MAX отклоняются до отправки, повторная проверка берётся из памяти', async () => {
+      await partnerWithAccount('0.45');
+      const client = await clientWithMoney('10');
+      const recipient = '79001110000';
+      await api().get(RedisService).connection.del(redisKey(recipient));
+      const sentBefore = simulatedSent.length;
+
+      const first = (await send(client.token, { to: recipient, text: 'Привет' })).json<{
+        message: MessageView;
+      }>().message.id;
+      const second = (await send(client.token, { to: recipient, text: 'Ещё' })).json<{
+        message: MessageView;
+      }>().message.id;
+      await api().get(MessagesService).dispatchDue(new Date());
+
+      for (const id of [first, second]) {
+        expect(await messageOf(client.token, id)).toMatchObject({
+          status: 'failed',
+          failure_reason: 'recipient_not_in_max',
+        });
+      }
+      expect(await balance(client.token)).toBe('10');
+      expect(simulatedSent).toHaveLength(sentBefore);
+      expect(timesChecked(recipient)).toBe(1);
+    });
+
+    it('проверка не удалась — сообщение всё равно уходит; выключатель отключает проверку', async () => {
+      await partnerWithAccount('0.45');
+      const client = await clientWithMoney('10');
+      const unknown = '79005558888';
+      const service = api().get(MessagesService);
+      await api().get(RedisService).connection.del(redisKey(unknown));
+
+      const id = (await send(client.token, { to: unknown, text: 'Дойдёт' })).json<{
+        message: MessageView;
+      }>().message.id;
+      await service.dispatchDue(new Date());
+      expect((await messageOf(client.token, id))?.status).toBe('sent');
+      expect(timesChecked(unknown)).toBe(1);
+
+      await put(adminToken, { 'messages.precheck_enabled': false });
+      const absent = '79002220000';
+      await api().get(RedisService).connection.del(redisKey(absent));
+      const rejected = (await send(client.token, { to: absent, text: 'Нет MAX' })).json<{
+        message: MessageView;
+      }>().message.id;
+      await service.dispatchDue(new Date());
+      // Без предпроверки отказ приходит по ответу отправки — итог тот же, но о номере не спрашивали.
+      expect(await messageOf(client.token, rejected)).toMatchObject({
+        failure_reason: 'recipient_not_in_max',
+      });
+      expect(timesChecked(absent)).toBe(0);
+    });
   });
 
   it('временный сбой: повторы с паузами, после пяти — отказ и возврат', async () => {

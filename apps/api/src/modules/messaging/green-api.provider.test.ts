@@ -206,6 +206,24 @@ describe('отправка', () => {
     );
   });
 
+  it('checkAccount: номер числом, «есть»/«нет» по полю exist; любой сбой и лимит проверок — «неизвестно», не отказ', async () => {
+    respond = () => ({ json: { exist: true, chatId: '10000000', fromCache: false } });
+    expect(await provider().checkRecipient(REF, '79001234567')).toBe('exists');
+    expect(calls[0]).toMatchObject({
+      method: 'POST',
+      url: `${REF.apiUrl}/waInstance${REF.instanceId}/checkAccount/${REF.token}`,
+      body: { phoneNumber: 79001234567 },
+    });
+    respond = () => ({ json: { exist: false } });
+    expect(await provider().checkRecipient(REF, '79001234567')).toBe('absent');
+    respond = () => ({ status: 469, json: {} });
+    expect(await provider().checkRecipient(REF, '79001234567')).toBe('unknown');
+    respond = () => ({ status: 500, json: {} });
+    expect(await provider().checkRecipient(REF, '79001234567')).toBe('unknown');
+    respond = () => ({ json: {} });
+    expect(await provider().checkRecipient(REF, '79001234567')).toBe('unknown');
+  });
+
   it('вебхук: включаются статусы отправленного и смена состояния, входящие выключены', async () => {
     respond = () => ({ json: { saveSettings: true } });
     await provider().configureWebhook(REF, 'https://cp.test/webhooks/messenger/секрет');
