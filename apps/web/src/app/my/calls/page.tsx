@@ -103,11 +103,6 @@ function MyCalls() {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground">
-        Каждая попытка вызова, включая несостоявшиеся. У отказа названа причина и то, что с ней
-        делать: часть из них — ваши настройки и деньги, часть — наша сторона.
-      </p>
-
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
           <span className="text-muted-foreground">Линия</span>

@@ -9,6 +9,7 @@ import { AccountLedger } from '@/components/account-ledger';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
+import { Hint } from '@/components/hint';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import { SipCredentials, type IssuedCredentials } from '@/components/sip-credentials';
@@ -316,10 +317,16 @@ function OverdraftField({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <h3 className="font-semibold">Разрешённый минус</h3>
-      <p className="text-muted-foreground">
-        Сейчас — <span className="num">{money(client.overdraft_limit)}</span>: насколько глубоко
-        клиенту разрешено уходить в минус. Ноль — только на свои.
+      <div className="flex items-center gap-1">
+        <h3 className="font-semibold">Разрешённый минус</h3>
+        <Hint label="Что такое разрешённый минус">
+          Насколько глубоко клиенту разрешено уходить в минус. Ноль — только на свои. Правка
+          действует на новые вызовы сразу и пишется в журнал. Уменьшение ниже текущего долга
+          допустимо: это «больше в долг не даём», потраченное никуда не девается.
+        </Hint>
+      </div>
+      <p>
+        Сейчас — <span className="num">{money(client.overdraft_limit)}</span>
       </p>
       <div>
         <FormDialog
@@ -386,11 +393,6 @@ function OverdraftForm({
             <b className="num">{shown}</b>.
           </p>
         )}
-        <p className="text-muted-foreground">
-          Правка действует на новые вызовы сразу и попадает в журнал вместе с прежним значением.
-          Уменьшение ниже текущего долга допустимо: это «больше в долг не даём», потраченное при
-          этом никуда не девается.
-        </p>
       </div>
     </DialogForm>
   );

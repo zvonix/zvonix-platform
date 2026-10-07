@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { Hint } from '@/components/hint';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import {
@@ -78,18 +79,24 @@ export function BlockedNumbers() {
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-3">
         <h2 className="text-[15px] font-semibold tracking-tight">Чёрный список номеров</h2>
+        <Hint label="Как работает чёрный список">
+          <p>
+            Правило — префикс: точный номер есть префикс длиной одиннадцать. Пишется так, как его
+            видит человек: <span className="num">8-809</span> приводится к{' '}
+            <span className="num">7809</span>.
+          </p>
+          <p className="mt-2">
+            Проверяется раньше определения оператора, поэтому запрещённый номер не уходит во внешний
+            источник. Короткие и экстренные номера вносить не нужно: до чёрного списка они не
+            доходят. Платные диапазоны проходят.
+          </p>
+        </Hint>
         {canChange && (
           <FormDialog label="Запретить номер" title="Запрет номера" className="ml-auto">
             <BlockForm onBlock={(input) => block.mutateAsync(input)} />
           </FormDialog>
         )}
       </div>
-      <p className="text-muted-foreground">
-        Правило — префикс: точный номер есть префикс длиной одиннадцать. Пишется так, как его видит
-        человек — <span className="num">8-809</span> приводится к <span className="num">7809</span>.
-        Проверяется раньше определения оператора, поэтому запрещённый номер не уходит во внешний
-        источник.
-      </p>
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
@@ -117,9 +124,7 @@ export function BlockedNumbers() {
             {list.data?.rules.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
-                  Список пуст — значит, не запрещено ничего. Короткие и экстренные номера сюда
-                  вносить не нужно: они не проходят разбор номера и до чёрного списка не доходят. А
-                  платные диапазоны проходят.
+                  Список пуст — запрещено ничего.
                 </TableCell>
               </TableRow>
             )}
