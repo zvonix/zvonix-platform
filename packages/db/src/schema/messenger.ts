@@ -125,7 +125,7 @@ export const messengerAccounts = pgTable(
     check('messenger_accounts_status_check', oneOf(t.status, MESSENGER_ACCOUNT_STATUSES)),
     check(
       'messenger_accounts_reason_check',
-      sql`${t.stateReason} is null or ${t.stateReason} in ('suspended', 'blocked', 'logged_out')`,
+      sql`${t.stateReason} is null or ${oneOf(t.stateReason, MESSENGER_ACCOUNT_REASONS)}`,
     ),
     check('messenger_accounts_provider_check', oneOf(t.provider, MESSENGER_PROVIDERS)),
     check('messenger_accounts_price_positive', sql`${t.price} is null or ${t.price} > 0`),
