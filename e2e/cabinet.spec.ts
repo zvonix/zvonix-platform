@@ -386,6 +386,9 @@ test.describe('наценка на сообщения MAX (ADR-0073)', () => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/tariffs');
     await expect(page.getByRole('heading', { name: 'Наценка на звонки' })).toBeVisible();
+    // Наценка на сообщения — на своей вкладке.
+    await page.getByRole('tab', { name: 'Сообщения MAX' }).click();
+    await expect(page).toHaveURL(/tab=max/u);
     const section = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'Наценка на сообщения MAX' }) });

@@ -1,6 +1,7 @@
 'use client';
 
 import { ConsoleShell } from '@/components/console-shell';
+import { SectionTabs } from '@/components/section-tabs';
 import { BandViolations } from './band-violations';
 import { CommissionRules } from './commission-rules';
 import { PriceBands } from './price-bands';
@@ -27,12 +28,26 @@ export default function TariffsPage() {
   return (
     <ConsoleShell title="Тарифы и наценка" requireRole={['admin', 'support']}>
       {() => (
-        <div className="flex flex-col gap-6">
-          <BandViolations />
-          <CommissionRules product="call" />
-          <CommissionRules product="message" />
-          <PriceBands />
-        </div>
+        <SectionTabs
+          tabs={[
+            {
+              id: 'calls',
+              label: 'Звонки',
+              content: (
+                <div className="flex flex-col gap-6">
+                  <BandViolations />
+                  <CommissionRules product="call" />
+                  <PriceBands />
+                </div>
+              ),
+            },
+            {
+              id: 'max',
+              label: 'Сообщения MAX',
+              content: <CommissionRules product="message" />,
+            },
+          ]}
+        />
       )}
     </ConsoleShell>
   );
