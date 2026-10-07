@@ -253,13 +253,15 @@ function AccountRow({
   );
 }
 
-/** QR-код входа: обновляется раз в пять секунд, пока человек не отсканирует, потом закрывается. */
+/** QR-код входа: обновляется раз в три секунды, пока человек не отсканирует, потом закрывается. */
 function QrDialog({ account, onClose }: { account: Account; onClose: () => void }) {
   const qr = useQuery({
     queryKey: [...ACCOUNTS_KEY, account.id, 'qr'],
     queryFn: ({ signal }) =>
       request<QrResponse>(`/partner/messenger/accounts/${account.id}/qr`, { signal }),
-    refetchInterval: (query) => (query.state.data?.status === 'authorized' ? false : 5_000),
+    refetchInterval: (query) => (query.state.data?.status === 'authorized' ? false : 3_000),
+    // Повторяет сам интервал: у только что созданного аккаунта первые ответы — «ещё запускается».
+    retry: false,
     gcTime: 0,
   });
 
@@ -272,7 +274,11 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
     };
   }, [authorized, onClose]);
 
-  const error = qr.error instanceof ApiError ? qr.error : undefined;
+  const failure = qr.error instanceof ApiError ? qr.error : undefined;
+  // Новый аккаунт у провайдера запускается до минуты и первое время отвечает «недоступен»: это ожидание,
+  // а не ошибка. Красным показывается только то, что само не пройдёт.
+  const starting = failure !== undefined && failure.code === 'dependency_unavailable';
+  const error = starting ? undefined : failure;
 
   return (
     <FormDialog
@@ -285,7 +291,13 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
     >
       <div className="flex flex-col items-center gap-3 px-5 pb-5">
         {error !== undefined && <ErrorNote error={error} />}
-        {qr.isPending && <p className="text-muted-foreground">Получаем QR-код…</p>}
+        {(qr.isPending || starting) && (
+          <p role="status" className="text-muted-foreground">
+            {starting
+              ? 'Аккаунт запускается — QR-код появится через несколько секунд…'
+              : 'Получаем QR-код…'}
+          </p>
+        )}
         {qr.data?.status === 'qr' && qr.data.image !== undefined && (
           // Картинка — готовая ссылка `data:`: внешнего адреса здесь нет.
           <img
