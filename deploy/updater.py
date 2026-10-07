@@ -32,7 +32,7 @@ MAX_REQUEST = 4096
 KEEP_RUNS = 30
 TAG_PATTERN = re.compile(r'^v?[0-9A-Za-z][0-9A-Za-z._-]*$')
 ID_PATTERN = re.compile(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json')
-ACTIONS = ('deploy', 'rollback', 'refresh')
+ACTIONS = ('deploy', 'prepare', 'rollback', 'refresh')
 
 requests_dir = os.path.join(ROOT, 'requests')
 runs_dir = os.path.join(ROOT, 'runs')
@@ -75,9 +75,9 @@ def read_request(path):
     tag = request.get('tag')
     if action not in ACTIONS:
         return None
-    if action == 'deploy' and not (isinstance(tag, str) and TAG_PATTERN.match(tag)):
+    if action in ('deploy', 'prepare') and not (isinstance(tag, str) and TAG_PATTERN.match(tag)):
         return None
-    return {'action': action, 'tag': tag if action == 'deploy' else None,
+    return {'action': action, 'tag': tag if action in ('deploy', 'prepare') else None,
             'by': str(request.get('by', ''))[:200], 'at': str(request.get('at', ''))[:40]}
 
 
@@ -134,10 +134,11 @@ def run_request(request_id, path, request):
         refresh_releases(log_path, run)
         return
 
-    command = DEPLOY + ([request['tag']] if request['action'] == 'deploy' else ['--rollback'])
+    arguments = {'deploy': [request['tag']], 'prepare': ['--prepare', request['tag']], 'rollback': ['--rollback']}
+    command = DEPLOY + arguments[request['action']]
     with open(log_path, 'wb', buffering=0) as log:
         os.chmod(log_path, 0o644)
-        log.write(('$ zvonix-deploy ' + ' '.join(command[1:]) + '\n').encode())
+        log.write(('$ zvonix-deploy ' + ' '.join(command[len(DEPLOY):]) + '\n').encode())
         try:
             code = subprocess.call(command, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
         except OSError as error:
