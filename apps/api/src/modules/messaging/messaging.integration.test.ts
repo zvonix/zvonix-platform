@@ -14,7 +14,7 @@ import {
 } from '../../testing/harness.js';
 import { sql } from 'drizzle-orm';
 import { MessagingService } from './messaging.service.js';
-import { simulateAccountState } from './simulated.provider.js';
+import { simulateAccountState, simulateAwaitingPassword } from './simulated.provider.js';
 
 prepareEnvironment();
 
@@ -224,6 +224,46 @@ describe('вход по QR-коду и состояние', () => {
       })
     ).json<{ accounts: AccountView[] }>().accounts;
     expect(listed[0]).toMatchObject({ status: 'active', phone: '79990001122' });
+  });
+
+  it('в MAX включён облачный пароль: QR просит его, неверный — 400, верный завершает вход', async () => {
+    await setSetting('messaging.enabled', true);
+    const partner = await verifiedPartner();
+    const { id } = (await create(partner.token)).json<{ account: AccountView }>().account;
+    const instance = (await instanceOf(id)).instance;
+    simulateAwaitingPassword(instance);
+
+    const qr = () =>
+      api().inject({
+        method: 'GET',
+        url: `/partner/messenger/accounts/${id}/qr`,
+        headers: bearer(partner.token),
+      });
+    const send = (password: string, token = partner.token) =>
+      api().inject({
+        method: 'POST',
+        url: `/partner/messenger/accounts/${id}/password`,
+        headers: bearer(token),
+        payload: { password },
+      });
+
+    expect((await qr()).json()).toEqual({ status: 'password' });
+    expect((await send('')).statusCode).toBe(400);
+    expect((await send('не-тот')).statusCode).toBe(400);
+    // Чужой партнёр чужой аккаунт не трогает.
+    const other = await verifiedPartner();
+    expect((await send('верный-пароль', other.token)).statusCode).toBe(404);
+
+    expect((await send('верный-пароль')).statusCode).toBe(204);
+    expect((await qr()).json()).toEqual({ status: 'authorized' });
+    const listed = (
+      await api().inject({
+        method: 'GET',
+        url: '/partner/messenger/accounts',
+        headers: bearer(partner.token),
+      })
+    ).json<{ accounts: AccountView[] }>().accounts;
+    expect(listed[0]).toMatchObject({ status: 'active' });
   });
 
   it('фоновая сверка: вышедший из MAX аккаунт становится недоступным, вернувшийся — рабочим', async () => {

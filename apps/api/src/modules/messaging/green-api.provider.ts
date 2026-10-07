@@ -16,6 +16,7 @@ import {
   RecipientRejectedError,
   type AccessCheck,
   type MessageProvider,
+  type PasswordRejection,
   type ProviderAccountRef,
   type ProviderState,
   type QrResult,
@@ -103,7 +104,37 @@ export class GreenApiMessageProvider implements MessageProvider {
     if (body.type === 'alreadyLogged' || body.type === 'already_registered') {
       return { kind: 'authorized' };
     }
+    // Отсканировано, но на аккаунте MAX включён облачный пароль: вход ждёт его ввода.
+    if (body.type === 'pendingPassword') return { kind: 'password_required' };
     return { kind: 'unavailable' };
+  }
+
+  async sendPassword(
+    ref: ProviderAccountRef,
+    password: string,
+  ): Promise<{ accepted: true } | { accepted: false; reason: PasswordRejection }> {
+    const body = await this.call<{ status?: boolean; data?: { status?: string; reason?: string } }>(
+      'POST',
+      `${this.base(ref)}/sendAuthorizationPassword/${encodeURIComponent(ref.token)}`,
+      { password },
+    );
+    if (body.data?.status === 'success' || body.data?.reason === 'already_registered') {
+      return { accepted: true };
+    }
+    const reason = body.data?.reason ?? '';
+    return {
+      accepted: false,
+      reason:
+        reason === 'invalid_password'
+          ? 'invalid_password'
+          : reason === 'rate_limit_exceeded'
+            ? 'rate_limit'
+            : reason === 'authorization_not_started'
+              ? 'not_started'
+              : reason === 'timeout'
+                ? 'timeout'
+                : 'other',
+    };
   }
 
   async state(ref: ProviderAccountRef): Promise<{ state: ProviderState; phone: string | null }> {

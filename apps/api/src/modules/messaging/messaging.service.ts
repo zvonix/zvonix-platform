@@ -9,6 +9,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
+  dependencyUnavailable,
   MESSAGE_PRICE_MAX_RUBLES,
   MESSAGE_PRICE_MIN_RUBLES,
   MESSENGER_ACCOUNTS_PER_PARTNER_MAX,
@@ -16,6 +17,7 @@ import {
   Money,
   notFound,
   parseId,
+  rateLimited,
   validationFailed,
   type Id,
   type MessengerAccountStatus,
@@ -251,6 +253,28 @@ export class MessagingService {
     const result = await this.provider.qr(this.refOf(account));
     if (result.kind === 'authorized') await this.refreshOne(account).catch(() => undefined);
     return result;
+  }
+
+  /**
+   * Облачный пароль MAX для завершения входа по QR. Пароль идёт провайдеру одним вызовом и нигде не
+   * хранится и не логируется. Неверный — `400` (можно повторить), слишком частые попытки — `429`.
+   */
+  async sendPasswordOwn(userId: Id<'user'>, id: string, password: string): Promise<void> {
+    const { account } = await this.ownAccount(userId, id);
+    const result = await this.provider.sendPassword(this.refOf(account), password);
+    if (!result.accepted) {
+      switch (result.reason) {
+        case 'invalid_password':
+          throw validationFailed('MAX не принял пароль — проверьте его и повторите');
+        case 'rate_limit':
+          throw rateLimited('Слишком много попыток входа: подождите несколько минут');
+        case 'not_started':
+          throw conflict('Сначала откройте QR-код и отсканируйте его в MAX');
+        default:
+          throw dependencyUnavailable('MAX не ответил вовремя — повторите позже');
+      }
+    }
+    await this.refreshOne(account).catch(() => undefined);
   }
 
   /** Сверяет аккаунт с провайдером и записывает состояние. Сбой провайдера состояние не меняет. */

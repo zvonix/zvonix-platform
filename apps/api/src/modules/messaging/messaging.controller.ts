@@ -15,7 +15,12 @@ import type { Principal } from '../identity/identity.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
 import { MessagingService } from './messaging.service.js';
-import { createAccountSchema, registerAccountSchema, updateAccountSchema } from './schemas.js';
+import {
+  createAccountSchema,
+  registerAccountSchema,
+  sendPasswordSchema,
+  updateAccountSchema,
+} from './schemas.js';
 
 interface AccountView {
   readonly id: string;
@@ -85,12 +90,27 @@ export class MessagingController {
   async qr(
     @CurrentUser() actor: Principal,
     @Param('id') id: string,
-  ): Promise<{ status: 'qr' | 'authorized' | 'unavailable'; image?: string }> {
+  ): Promise<{ status: 'qr' | 'authorized' | 'password' | 'unavailable'; image?: string }> {
     const result = await this.messaging.qrOwn(actor.userId, id);
     if (result.kind === 'qr') {
       return { status: 'qr', image: `data:image/png;base64,${result.image}` };
     }
-    return { status: result.kind };
+    return { status: result.kind === 'password_required' ? 'password' : result.kind };
+  }
+
+  /**
+   * Облачный пароль MAX, когда после сканирования QR вход ждёт его (`status: "password"` у QR). Пароль
+   * передаётся провайдеру и не сохраняется. `204` — вход завершён; `400` — неверный пароль.
+   */
+  @Cabinets('partner')
+  @HttpCode(204)
+  @Post('partner/messenger/accounts/:id/password')
+  async sendPassword(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+    @Body(zodBody(sendPasswordSchema)) body: z.infer<typeof sendPasswordSchema>,
+  ): Promise<void> {
+    await this.messaging.sendPasswordOwn(actor.userId, id, body.password);
   }
 
   @Cabinets('partner')
