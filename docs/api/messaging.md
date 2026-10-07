@@ -57,13 +57,46 @@ MAX либо нет связи; `retired` — списан (в списках е
 
 ### `PATCH /partner/messenger/accounts/:id`
 
-```json
-{ "label": "Рабочий", "price": "0.45", "limitPerMinute": 10, "limitPerDay": 500 }
-```
+`{ "label": "Рабочий" }` — переименование (`400`, если названия нет). **Цена и лимиты у аккаунта не правятся:** они
+действуют из тарифа ([ADR-0075](../adr/0075-tarify-max-nabor-uslovij.md)). Вид аккаунта: `tariff_id` — назначенный
+тариф (`null` — идёт за тарифом по умолчанию), `price`, `limit_per_minute`, `limit_per_day` — **действующие** условия
+(из своего тарифа или из умолчания; `price: null` — тарифа нет, аккаунт сообщений не принимает). Журнал:
+`messenger_account.terms_changed`.
 
-Всё необязательно, но хотя бы одно поле нужно (`400`). `null` у `price`, `limitPerMinute`, `limitPerDay` —
-снять. Цена — от 0,01 до 100 ₽; лимиты — целые от 1; в минуту не больше, чем в сутки (`400`). Журнал:
-`messenger_account.terms_changed`, до и после.
+### `PUT /partner/messenger/accounts/:id/tariff`
+
+`{ "tariffId": "<uuid>" }` или `{ "tariffId": null }` (идти за умолчанием) → `200` с `tariff_id`, `price`,
+`limit_per_minute`, `limit_per_day` — действующими условиями. Чужой тариф или аккаунт — `404`. Журнал:
+`messenger_account.tariff_assigned`.
+
+## Тарифы MAX партнёра
+
+Именованный набор «цена за сообщение + лимиты»; у партнёра один тариф по умолчанию. Первый созданный тариф становится
+умолчанием сам. Любое изменение сразу пересчитывает действующие условия аккаунтов (одной транзакцией).
+
+### `GET /partner/messenger/tariffs`
+
+`200` → `{ "tariffs": [ { "id", "name", "price": "0.45", "limit_per_minute", "limit_per_day", "is_default",
+"accounts" } ] }`; `accounts` — сколько живых аккаунтов действует по тарифу (у умолчания — и идущие за ним).
+
+### `POST /partner/messenger/tariffs`
+
+`{ "name": "Основной", "price": "0.45", "limitPerMinute": 10, "limitPerDay": 500, "isDefault": false }` → `201`.
+Цена — от 0,01 до 100 ₽; лимиты — целые от 1 или `null`; в минуту не больше, чем в сутки (`400`). Имя уникально у
+партнёра без учёта регистра (`409`). Журнал: `messenger_tariff.created`.
+
+### `PATCH /partner/messenger/tariffs/:id`
+
+Любые из `name`, `price`, `limitPerMinute`, `limitPerDay` (`null` у лимита — снять). Журнал: `messenger_tariff.changed`.
+
+### `POST /partner/messenger/tariffs/:id/default`
+
+`204`. Делает тариф умолчанием: аккаунты без своего тарифа переходят на него. Журнал: `messenger_tariff.default_changed`.
+
+### `DELETE /partner/messenger/tariffs/:id`
+
+`204`. Нельзя удалить тариф по умолчанию (сначала сделайте умолчанием другой) и тариф, назначенный аккаунтам
+(`409`). Журнал: `messenger_tariff.deleted`.
 
 ### `DELETE /partner/messenger/accounts/:id`
 

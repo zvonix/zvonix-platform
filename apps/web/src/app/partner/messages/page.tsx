@@ -23,7 +23,13 @@ import {
   messengerAccountTone,
 } from '@/lib/labels';
 import { money } from '@/lib/money';
-import { ACCOUNTS_KEY, TermsForm, useMessengerAccounts, type Account } from './terms';
+import {
+  ACCOUNTS_KEY,
+  AccountTariffSelect,
+  RenameForm,
+  useMessengerAccounts,
+  type Account,
+} from './terms';
 
 interface QrResponse {
   readonly status: 'qr' | 'authorized' | 'password' | 'unavailable';
@@ -88,8 +94,8 @@ function Accounts() {
               <NewAccountForm onCreate={(label) => create.mutateAsync(label)} />
             </FormDialog>
             <p className="text-muted-foreground">
-              Цену за одно сообщение и лимиты задаёте вы. Клиентам цена показывается с наценкой
-              площадки.
+              Цена и лимиты — в тарифе: создайте тарифы на странице «Мои тарифы» и назначьте
+              аккаунтам здесь. Без своего тарифа аккаунт идёт за тарифом по умолчанию.
             </p>
           </div>
 
@@ -99,6 +105,7 @@ function Accounts() {
                 <TableRow className="text-muted-foreground hover:bg-transparent">
                   <TableHead className="h-8">Аккаунт</TableHead>
                   <TableHead className="h-8">Состояние</TableHead>
+                  <TableHead className="h-8">Тариф</TableHead>
                   <TableHead className="h-8 text-right">Цена за сообщение</TableHead>
                   <TableHead className="h-8 text-right">Лимиты</TableHead>
                   <TableHead className="h-8" />
@@ -107,7 +114,7 @@ function Accounts() {
               <TableBody>
                 {list.data?.accounts.length === 0 && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={5} className="whitespace-normal text-muted-foreground">
+                    <TableCell colSpan={6} className="whitespace-normal text-muted-foreground">
                       Аккаунтов пока нет. Добавьте первый и войдите в него по QR-коду.
                     </TableCell>
                   </TableRow>
@@ -202,6 +209,10 @@ function AccountRow({
         )}
       </TableCell>
 
+      <TableCell>
+        <AccountTariffSelect account={account} />
+      </TableCell>
+
       <TableCell className="num text-right">
         {account.price === null ? (
           <span className="text-faint">не задана</span>
@@ -227,12 +238,12 @@ function AccountRow({
             </Button>
           )}
           <FormDialog
-            label="Условия"
-            title={`Условия: ${account.label}`}
+            label="Название"
+            title={`Аккаунт «${account.label}»`}
             variant="outline"
             size="xs"
           >
-            <TermsForm account={account} />
+            <RenameForm account={account} />
           </FormDialog>
           <ConfirmAction
             label="Удалить"
