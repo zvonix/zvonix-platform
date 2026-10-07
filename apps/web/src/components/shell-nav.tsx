@@ -33,19 +33,21 @@ export interface NavGroup {
 
 const COLLAPSED_KEY = 'zvonix.nav.collapsed';
 
-/** Свёрнуто ли меню. Хранилище может быть недоступно (приватное окно) — тогда развёрнуто. */
+/**
+ * Свёрнуто ли меню. Хранилище может быть недоступно (приватное окно) — тогда развёрнуто.
+ *
+ * Читается при первом рисовании, а не после него: меню рисуется, только когда сессия уже известна, то есть
+ * не на сервере. Чтение «потом» давало мигание на каждом переходе — каждая страница строит меню заново, оно
+ * на миг показывалось развёрнутым и тут же сворачивалось.
+ */
 function useCollapsed(): [boolean, (next: boolean) => void] {
-  const [collapsed, setCollapsed] = useState(false);
-
-  // Из хранилища — после монтирования: на сервере его нет, и чтение при первом рисовании
-  // разошлось бы с разметкой сервера.
-  useEffect(() => {
+  const [collapsed, setCollapsed] = useState(() => {
     try {
-      setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === '1');
+      return window.localStorage.getItem(COLLAPSED_KEY) === '1';
     } catch {
-      // Хранилище закрыто — остаётся развёрнутым, это состояние по умолчанию.
+      return false;
     }
-  }, []);
+  });
 
   const change = (next: boolean): void => {
     setCollapsed(next);
@@ -72,19 +74,20 @@ const CLOSED_GROUPS_KEY = 'zvonix.nav.closed';
  * хранится в браузере, а при закрытом хранилище группы просто остаются развёрнутыми.
  */
 function useClosedGroups(): [ReadonlySet<string>, (title: string, closed: boolean) => void] {
-  const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
-
-  useEffect(() => {
+  // Из хранилища сразу, по той же причине, что и у `useCollapsed`: иначе при каждом переходе свёрнутая группа
+  // на миг разворачивалась.
+  const [closed, setClosed] = useState<ReadonlySet<string>>(() => {
     try {
       const raw = window.localStorage.getItem(CLOSED_GROUPS_KEY);
       const parsed: unknown = raw === null ? [] : JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        setClosed(new Set(parsed.filter((title): title is string => typeof title === 'string')));
-      }
+      return Array.isArray(parsed)
+        ? new Set(parsed.filter((title): title is string => typeof title === 'string'))
+        : new Set<string>();
     } catch {
       // Хранилище закрыто или в нём мусор — все группы развёрнуты.
+      return new Set<string>();
     }
-  }, []);
+  });
 
   const change = (title: string, shut: boolean): void => {
     setClosed((previous) => {
