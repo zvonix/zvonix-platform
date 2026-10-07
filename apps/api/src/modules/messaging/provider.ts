@@ -22,7 +22,13 @@ export type ProviderState = 'authorized' | 'not_authorized' | 'blocked' | 'start
 export type QrResult =
   | { readonly kind: 'qr'; readonly image: string }
   | { readonly kind: 'authorized' }
+  /** QR отсканирован, но в аккаунте MAX включён облачный пароль (двухфакторный вход): нужен его ввод. */
+  | { readonly kind: 'password_required' }
   | { readonly kind: 'unavailable' };
+
+/** Почему MAX не принял облачный пароль. */
+export type PasswordRejection =
+  'invalid_password' | 'rate_limit' | 'not_started' | 'timeout' | 'other';
 
 /** У номера нет аккаунта MAX (или получатель недоступен навсегда): повторять бессмысленно, деньги возвращаются. */
 export class RecipientRejectedError extends Error {
@@ -48,6 +54,17 @@ export interface MessageProvider {
 
   /** QR-код для входа аккаунтом MAX. Живёт недолго: клиент запрашивает заново раз в несколько секунд. */
   qr(ref: ProviderAccountRef): Promise<QrResult>;
+
+  /**
+   * Передаёт облачный пароль MAX, чтобы завершить вход по QR. Пароль не хранится и не логируется:
+   * он уходит провайдеру в этом вызове и больше нигде не остаётся.
+   */
+  sendPassword(
+    ref: ProviderAccountRef,
+    password: string,
+  ): Promise<
+    { readonly accepted: true } | { readonly accepted: false; readonly reason: PasswordRejection }
+  >;
 
   /** Состояние и номер, под которым вошёл аккаунт. */
   state(ref: ProviderAccountRef): Promise<{ state: ProviderState; phone: string | null }>;

@@ -11,6 +11,7 @@ import {
   RecipientRejectedError,
   type AccessCheck,
   type MessageProvider,
+  type PasswordRejection,
   type ProviderAccountRef,
   type ProviderState,
   type QrResult,
@@ -18,6 +19,13 @@ import {
 
 /** Состояния имитированных инстансов: общее на процесс, чтобы проверка могла «отсканировать QR». */
 const states = new Map<string, { state: ProviderState; phone: string | null }>();
+
+/** Инстансы, у которых «после сканирования QR нужен облачный пароль MAX». Верный пароль имитации — `верный-пароль`. */
+const awaitingPassword = new Set<string>();
+
+export function simulateAwaitingPassword(instanceId: string): void {
+  awaitingPassword.add(instanceId);
+}
 
 /** Для проверок: «человек отсканировал QR» либо «аккаунт вышел из MAX». */
 export function simulateAccountState(
@@ -58,7 +66,23 @@ export class SimulatedMessageProvider implements MessageProvider {
     const known = states.get(ref.instanceId);
     if (known === undefined) return Promise.resolve({ kind: 'unavailable' });
     if (known.state === 'authorized') return Promise.resolve({ kind: 'authorized' });
+    if (awaitingPassword.has(ref.instanceId)) return Promise.resolve({ kind: 'password_required' });
     return Promise.resolve({ kind: 'qr', image: 'c2ltdWxhdGVkLXFy' });
+  }
+
+  sendPassword(
+    ref: ProviderAccountRef,
+    password: string,
+  ): Promise<{ accepted: true } | { accepted: false; reason: PasswordRejection }> {
+    if (!awaitingPassword.has(ref.instanceId)) {
+      return Promise.resolve({ accepted: false, reason: 'not_started' });
+    }
+    if (password !== 'верный-пароль') {
+      return Promise.resolve({ accepted: false, reason: 'invalid_password' });
+    }
+    awaitingPassword.delete(ref.instanceId);
+    states.set(ref.instanceId, { state: 'authorized', phone: '79990001122' });
+    return Promise.resolve({ accepted: true });
   }
 
   state(ref: ProviderAccountRef): Promise<{ state: ProviderState; phone: string | null }> {

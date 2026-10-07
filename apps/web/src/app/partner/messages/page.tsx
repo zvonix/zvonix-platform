@@ -26,7 +26,7 @@ import { money } from '@/lib/money';
 import { ACCOUNTS_KEY, TermsForm, useMessengerAccounts, type Account } from './terms';
 
 interface QrResponse {
-  readonly status: 'qr' | 'authorized' | 'unavailable';
+  readonly status: 'qr' | 'authorized' | 'password' | 'unavailable';
   readonly image?: string;
 }
 
@@ -253,6 +253,59 @@ function AccountRow({
   );
 }
 
+/**
+ * Облачный пароль MAX: QR отсканирован, но на аккаунте включён пароль для входа. Пароль уходит в MAX через
+ * площадку одним запросом и нигде не сохраняется; можно и не вводить его — отключить пароль в MAX и войти заново.
+ */
+function PasswordForm({ accountId, onSent }: { accountId: string; onSent: () => void }) {
+  const [password, setPassword] = useState('');
+  const send = useMutation({
+    mutationFn: () =>
+      request<undefined>(`/partner/messenger/accounts/${accountId}/password`, {
+        method: 'POST',
+        body: { password },
+      }),
+    onSuccess: () => {
+      setPassword('');
+      onSent();
+    },
+  });
+  const error = send.error instanceof ApiError ? send.error : undefined;
+
+  return (
+    <form
+      className="flex w-full max-w-sm flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (password !== '' && !send.isPending) send.mutate();
+      }}
+    >
+      <p role="status" className="text-center">
+        QR принят. В вашем MAX включён облачный пароль — введите его, чтобы завершить вход.
+      </p>
+      <Input
+        type="password"
+        autoComplete="off"
+        autoFocus
+        aria-label="Облачный пароль MAX"
+        placeholder="Облачный пароль MAX"
+        value={password}
+        onChange={(event) => {
+          setPassword(event.target.value);
+        }}
+      />
+      {error !== undefined && <ErrorNote error={error} />}
+      <Button type="submit" disabled={password === '' || send.isPending}>
+        {send.isPending ? 'Проверяем…' : 'Войти'}
+      </Button>
+      <p className="text-center text-muted-foreground">
+        Пароль передаётся в MAX и у нас не сохраняется. Не хотите вводить — отключите облачный
+        пароль в настройках MAX и отсканируйте QR заново.
+      </p>
+    </form>
+  );
+}
+
 /** QR-код входа: обновляется раз в три секунды, пока человек не отсканирует, потом закрывается. */
 function QrDialog({ account, onClose }: { account: Account; onClose: () => void }) {
   const qr = useQuery({
@@ -306,6 +359,14 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
             className="size-56 rounded-md bg-white p-2"
           />
         )}
+        {qr.data?.status === 'password' && (
+          <PasswordForm
+            accountId={account.id}
+            onSent={() => {
+              void qr.refetch();
+            }}
+          />
+        )}
         {qr.data?.status === 'unavailable' && (
           <p className="text-muted-foreground">QR-код пока не готов — повторяем…</p>
         )}
@@ -314,7 +375,7 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
             Готово: аккаунт вошёл в MAX.
           </p>
         )}
-        {!authorized && (
+        {!authorized && qr.data?.status !== 'password' && (
           <p className="text-center text-muted-foreground">
             Код обновляется сам. В приложении MAX отключите пароль для входа, если он включён.
           </p>

@@ -15,6 +15,11 @@ const limit = z
 /** Новый аккаунт MAX партнёра: от него нужно только название, остальное делает площадка. */
 export const createAccountSchema = z.object({ label });
 
+/** Облачный пароль MAX для завершения входа. Не обрезается и не нормализуется: пробелы в нём бывают значимыми. */
+export const sendPasswordSchema = z.object({
+  password: z.string().min(1, 'введите пароль').max(64, 'слишком длинный'),
+});
+
 /** Что партнёр меняет у аккаунта. Не названное — не трогается; `null` у цены и лимита — снять. */
 export const updateAccountSchema = z
   .object({
