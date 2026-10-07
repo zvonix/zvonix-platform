@@ -16,6 +16,7 @@ import {
   rateLimited,
   validationFailed,
   type Id,
+  type MessengerAccountReason,
   type MessengerAccountStatus,
   type UserRole,
 } from '@zvonix/shared';
@@ -47,13 +48,29 @@ export interface MessagingActor {
   readonly role: UserRole;
 }
 
+/**
+ * Причина недоступности для показа. Рабочий и ждущий входа аккаунт причины не имеет; временное «запускается» или
+ * «неизвестно» прежнюю причину не стирает: сверка могла просто не дозвониться.
+ */
+function reasonAfter(
+  status: MessengerAccountStatus,
+  state: ProviderState,
+  previous: MessengerAccountReason | null,
+): MessengerAccountReason | null {
+  if (status !== 'unavailable') return null;
+  if (state === 'suspended') return 'suspended';
+  if (state === 'blocked') return 'blocked';
+  if (state === 'not_authorized') return 'logged_out';
+  return previous;
+}
+
 /** Состояние провайдера → состояние аккаунта. `undefined` — оставить как есть. */
 function statusAfter(
   current: MessengerAccountStatus,
   state: ProviderState,
 ): MessengerAccountStatus | undefined {
   if (state === 'authorized') return 'active';
-  if (state === 'blocked') return 'unavailable';
+  if (state === 'blocked' || state === 'suspended') return 'unavailable';
   // Вышел из MAX: ждавшему QR (`pending`) это штатно, работавший становится недоступным.
   if (state === 'not_authorized') return current === 'pending' ? 'pending' : 'unavailable';
   return undefined;
@@ -273,6 +290,7 @@ export class MessagingService {
     const next = statusAfter(account.status, observed.state) ?? account.status;
     const updated = await this.repository.setState(account.id, {
       status: next,
+      reason: reasonAfter(next, observed.state, account.stateReason),
       phone: observed.phone ?? account.phone,
       checkedAt: now,
     });

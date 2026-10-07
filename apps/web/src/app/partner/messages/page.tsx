@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
+import { MessengerAccountStatus } from '@/components/messenger-status';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,11 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
-import {
-  MESSENGER_ACCOUNT_STATUS_MEANING,
-  MESSENGER_ACCOUNT_STATUS_NAME,
-  messengerAccountTone,
-} from '@/lib/labels';
+import {} from '@/lib/labels';
 import { money } from '@/lib/money';
 import {
   ACCOUNTS_KEY,
@@ -198,14 +195,11 @@ function AccountRow({
       </TableCell>
 
       <TableCell className="whitespace-normal">
-        <span
-          className={`rounded-md px-2 py-0.5 ${messengerAccountTone(account.status)}`}
-          title={MESSENGER_ACCOUNT_STATUS_MEANING[account.status]}
-        >
-          {MESSENGER_ACCOUNT_STATUS_NAME[account.status] ?? account.status}
-        </span>
+        <MessengerAccountStatus status={account.status} reason={account.state_reason} />
         {account.price === null && account.status === 'active' && (
-          <span className="block pt-0.5 text-warn">Задайте цену — без неё сообщения не идут</span>
+          <span className="block pt-0.5 text-warn">
+            Создайте тариф — без него сообщения не идут
+          </span>
         )}
       </TableCell>
 

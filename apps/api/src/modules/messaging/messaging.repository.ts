@@ -6,7 +6,12 @@ import { Injectable } from '@nestjs/common';
 import { and, asc, count, eq, lt, ne, or, isNull, sql } from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
 import { messengerAccounts } from '@zvonix/db/schema';
-import { newId, type Id, type MessengerAccountStatus } from '@zvonix/shared';
+import {
+  newId,
+  type Id,
+  type MessengerAccountReason,
+  type MessengerAccountStatus,
+} from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type MessengerAccountRow = typeof messengerAccounts.$inferSelect;
@@ -114,12 +119,18 @@ export class MessagingRepository {
   /** Состояние и номер по итогам сверки с провайдером. `retired` не трогается — из него не выходят. */
   async setState(
     id: MessengerAccountId,
-    state: { status: MessengerAccountStatus; phone: string | null; checkedAt: Date },
+    state: {
+      status: MessengerAccountStatus;
+      reason: MessengerAccountReason | null;
+      phone: string | null;
+      checkedAt: Date;
+    },
   ): Promise<MessengerAccountRow | undefined> {
     const [row] = await this.database.db
       .update(messengerAccounts)
       .set({
         status: state.status,
+        stateReason: state.reason,
         phone: state.phone,
         stateCheckedAt: state.checkedAt,
       })

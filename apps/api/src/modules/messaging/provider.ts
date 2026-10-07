@@ -17,7 +17,8 @@ export interface ProviderAccountRef {
 }
 
 /** Состояние аккаунта в терминах площадки. */
-export type ProviderState = 'authorized' | 'not_authorized' | 'blocked' | 'starting' | 'unknown';
+export type ProviderState =
+  'authorized' | 'not_authorized' | 'blocked' | 'suspended' | 'starting' | 'unknown';
 
 export type QrResult =
   | { readonly kind: 'qr'; readonly image: string }

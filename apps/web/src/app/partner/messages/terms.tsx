@@ -31,6 +31,7 @@ export interface Account {
   readonly id: string;
   readonly label: string;
   readonly status: string;
+  readonly state_reason: string | null;
   readonly phone: string | null;
   /** Назначенный тариф; пусто — аккаунт идёт за тарифом по умолчанию. */
   readonly tariff_id: string | null;

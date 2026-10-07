@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
+import { MessengerAccountStatus } from '@/components/messenger-status';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import { Input } from '@/components/ui/input';
@@ -19,14 +20,7 @@ import {
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
-import {
-  MESSAGE_FAILURE_NAME,
-  MESSAGE_STATUS_NAME,
-  MESSENGER_ACCOUNT_STATUS_MEANING,
-  MESSENGER_ACCOUNT_STATUS_NAME,
-  messageTone,
-  messengerAccountTone,
-} from '@/lib/labels';
+import { MESSAGE_FAILURE_NAME, MESSAGE_STATUS_NAME, messageTone } from '@/lib/labels';
 import { money } from '@/lib/money';
 import type { PartnerRow } from '../partners/partner-row';
 
@@ -47,6 +41,7 @@ interface Account {
   readonly price: string | null;
   readonly limit_per_minute: number | null;
   readonly limit_per_day: number | null;
+  readonly state_reason: string | null;
   readonly state_checked_at: string | null;
   readonly partner_id: string;
   readonly partner_name: string;
@@ -140,12 +135,11 @@ function MessagingView() {
                   <span className="num block text-faint">{account.phone ?? '—'}</span>
                 </TableCell>
                 <TableCell>
-                  <span
-                    className={`rounded-md px-2 py-0.5 ${messengerAccountTone(account.status)}`}
-                    title={MESSENGER_ACCOUNT_STATUS_MEANING[account.status]}
-                  >
-                    {MESSENGER_ACCOUNT_STATUS_NAME[account.status] ?? account.status}
-                  </span>
+                  <MessengerAccountStatus
+                    status={account.status}
+                    reason={account.state_reason}
+                    staff
+                  />
                 </TableCell>
                 <TableCell className="num text-right">
                   {account.price === null ? (
