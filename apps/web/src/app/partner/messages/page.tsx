@@ -22,29 +22,13 @@ import {
   MESSENGER_ACCOUNT_STATUS_NAME,
   messengerAccountTone,
 } from '@/lib/labels';
-import { money, moneyFromInput, numberFromInput } from '@/lib/money';
-
-interface Account {
-  readonly id: string;
-  readonly label: string;
-  readonly status: string;
-  readonly phone: string | null;
-  readonly price: string | null;
-  readonly limit_per_minute: number | null;
-  readonly limit_per_day: number | null;
-}
-
-interface AccountsResponse {
-  readonly enabled: boolean;
-  readonly accounts: Account[];
-}
+import { money } from '@/lib/money';
+import { ACCOUNTS_KEY, TermsForm, useMessengerAccounts, type Account } from './terms';
 
 interface QrResponse {
   readonly status: 'qr' | 'authorized' | 'unavailable';
   readonly image?: string;
 }
-
-const ACCOUNTS_KEY = ['partner', 'messenger', 'accounts'] as const;
 
 export default function PartnerMessagesPage() {
   return (
@@ -58,12 +42,7 @@ function Accounts() {
   const queryClient = useQueryClient();
   const [qrFor, setQrFor] = useState<Account | undefined>(undefined);
 
-  const list = useQuery({
-    queryKey: ACCOUNTS_KEY,
-    queryFn: ({ signal }) => request<AccountsResponse>('/partner/messenger/accounts', { signal }),
-    // Состояние аккаунта сверяет площадка раз в минуту: чаще спрашивать нечего.
-    refetchInterval: 30_000,
-  });
+  const list = useMessengerAccounts();
 
   const create = useMutation({
     mutationFn: (label: string) =>
@@ -271,101 +250,6 @@ function AccountRow({
         </span>
       </TableCell>
     </TableRow>
-  );
-}
-
-function TermsForm({ account }: { account: Account }) {
-  const queryClient = useQueryClient();
-  const [label, setLabel] = useState(account.label);
-  const [price, setPrice] = useState(account.price === null ? '' : numberFromInput(account.price));
-  const [perMinute, setPerMinute] = useState(
-    account.limit_per_minute === null ? '' : String(account.limit_per_minute),
-  );
-  const [perDay, setPerDay] = useState(
-    account.limit_per_day === null ? '' : String(account.limit_per_day),
-  );
-
-  const parseLimit = (text: string): number | null | undefined => {
-    if (text.trim() === '') return null;
-    return /^\d{1,7}$/u.test(text.trim()) ? Number(text.trim()) : undefined;
-  };
-  const priceValid = price.trim() === '' || moneyFromInput(price) !== undefined;
-  const minuteLimit = parseLimit(perMinute);
-  const dayLimit = parseLimit(perDay);
-  const valid =
-    label.trim().length >= 2 && priceValid && minuteLimit !== undefined && dayLimit !== undefined;
-
-  const save = useMutation({
-    mutationFn: () =>
-      request<{ account: Account }>(`/partner/messenger/accounts/${account.id}`, {
-        method: 'PATCH',
-        body: {
-          label: label.trim(),
-          price: price.trim() === '' ? null : numberFromInput(price),
-          limitPerMinute: minuteLimit,
-          limitPerDay: dayLimit,
-        },
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
-  });
-
-  return (
-    <DialogForm submitLabel="Сохранить" canSubmit={valid} onSubmit={() => save.mutateAsync()}>
-      <DialogField label="Название" wide>
-        <Input
-          autoComplete="off"
-          value={label}
-          onChange={(event) => {
-            setLabel(event.target.value);
-          }}
-        />
-      </DialogField>
-      <DialogField
-        label="Цена за сообщение, ₽"
-        hint="От 0,01 до 100. Пусто — аккаунт сообщений не принимает."
-      >
-        <Input
-          className="num"
-          inputMode="decimal"
-          autoComplete="off"
-          placeholder="0,45"
-          value={price}
-          onChange={(event) => {
-            setPrice(event.target.value);
-          }}
-        />
-      </DialogField>
-      <DialogField label="В минуту" hint="Пусто — без ограничения. Лишнее ждёт в очереди.">
-        <Input
-          className="num"
-          inputMode="numeric"
-          autoComplete="off"
-          value={perMinute}
-          onChange={(event) => {
-            setPerMinute(event.target.value);
-          }}
-        />
-      </DialogField>
-      <DialogField label="В сутки">
-        <Input
-          className="num"
-          inputMode="numeric"
-          autoComplete="off"
-          value={perDay}
-          onChange={(event) => {
-            setPerDay(event.target.value);
-          }}
-        />
-      </DialogField>
-      {!priceValid && (
-        <p className="text-warn sm:col-span-2">
-          Цена — число больше нуля, не больше шести знаков после запятой: например 0,45.
-        </p>
-      )}
-      {(minuteLimit === undefined || dayLimit === undefined) && (
-        <p className="text-warn sm:col-span-2">Лимит — целое число или пусто.</p>
-      )}
-    </DialogForm>
   );
 }
 

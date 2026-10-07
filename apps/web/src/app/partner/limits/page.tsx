@@ -26,6 +26,7 @@ import {
 import { request } from '@/lib/api';
 import { moment, plural } from '@/lib/format';
 import { LIMIT_WINDOW_NAME, limitRuleNote } from '@/lib/labels';
+import { CallsAndMax, MaxLimits } from '../messages/terms';
 
 /** Строка `GET /partner/limits` — правило вместе с израсходованным (ADR-0057). */
 interface LimitRow {
@@ -75,7 +76,7 @@ function counted(metric: LimitMetric, value: number): string {
 export default function PartnerLimitsPage() {
   return (
     <ConsoleShell title="Лимиты" cabinet="partner">
-      {() => <PartnerLimits />}
+      {() => <CallsAndMax calls={<PartnerLimits />} max={<MaxLimits />} />}
     </ConsoleShell>
   );
 }

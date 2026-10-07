@@ -833,6 +833,42 @@ test.describe('SMPP у сотрудников', () => {
   });
 });
 
+test.describe('вкладки «Звонки» и «Сообщения MAX» у партнёра', () => {
+  test('цены и лимиты сообщений — вкладкой на тех же страницах, что и звонки', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const admin = await adminContext.newPage();
+    await signIn(admin, PEOPLE.admin);
+    await admin.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'messaging.enabled': true } },
+    });
+    await adminContext.close();
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await signIn(page, PEOPLE.partner);
+
+    await page.goto('/partner/limits');
+    const tabs = page.getByRole('tablist');
+    await expect(tabs.getByRole('tab', { name: 'Звонки' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await tabs.getByRole('tab', { name: 'Сообщения MAX' }).click();
+    await expect(page).toHaveURL(/tab=max/u);
+    await expect(page.getByRole('columnheader', { name: 'В минуту' })).toBeVisible();
+
+    // Ссылка открывает нужную вкладку сразу.
+    await page.goto('/partner/prices?tab=max');
+    await expect(page.getByRole('columnheader', { name: 'Цена за сообщение' })).toBeVisible();
+    await tabs.getByRole('tab', { name: 'Звонки' }).click();
+    await expect(page).not.toHaveURL(/tab=/u);
+    await context.close();
+  });
+});
+
 test.describe('обновление из кабинета (ADR-0074)', () => {
   test('администратор видит выпуски и журнал, ставит заявку и отменяет её', async ({ page }) => {
     await signIn(page, PEOPLE.admin);
