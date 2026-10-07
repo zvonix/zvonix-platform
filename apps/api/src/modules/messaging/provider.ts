@@ -37,7 +37,8 @@ export class RecipientRejectedError extends Error {
 }
 
 /** Итог проверки номера до отправки. */
-export type RecipientCheck = 'exists' | 'absent' | 'unknown';
+/** `limited` — у аккаунта исчерпан предел проверок: некоторое время его не спрашивают. */
+export type RecipientCheck = 'exists' | 'absent' | 'unknown' | 'limited';
 
 /**
  * Результат проверки партнёрского ключа: `ok` — ключ принят (`instances` — сколько аккаунтов уже заведено),

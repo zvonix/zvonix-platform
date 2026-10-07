@@ -217,7 +217,7 @@ describe('отправка', () => {
     respond = () => ({ json: { exist: false } });
     expect(await provider().checkRecipient(REF, '79001234567')).toBe('absent');
     respond = () => ({ status: 469, json: {} });
-    expect(await provider().checkRecipient(REF, '79001234567')).toBe('unknown');
+    expect(await provider().checkRecipient(REF, '79001234567')).toBe('limited');
     respond = () => ({ status: 500, json: {} });
     expect(await provider().checkRecipient(REF, '79001234567')).toBe('unknown');
     respond = () => ({ json: {} });

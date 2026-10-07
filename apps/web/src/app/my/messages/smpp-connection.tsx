@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { SMPP_ALLOWED_IPS_MAX } from '@zvonix/shared';
+import { SMPP_ALLOWED_IPS_MAX, type SmppReceiptMap } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
@@ -11,11 +11,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
+import { SmppReceipts } from './smpp-receipts';
 
 interface SmppAccount {
   readonly system_id: string;
   readonly enabled: boolean;
   readonly allowed_ips: readonly string[];
+  readonly receipts: SmppReceiptMap;
   readonly last_bind_at: string | null;
 }
 
@@ -60,7 +62,7 @@ export function SmppConnection() {
   });
 
   const update = useMutation({
-    mutationFn: (patch: { enabled?: boolean; allowedIps?: string[] }) =>
+    mutationFn: (patch: { enabled?: boolean; allowedIps?: string[]; receipts?: SmppReceiptMap }) =>
       request<{ smpp: SmppAccount }>('/client/messages/smpp', { method: 'PATCH', body: patch }),
     onSuccess: async () => {
       setIps(undefined);
@@ -174,6 +176,14 @@ export function SmppConnection() {
               </Button>
             </div>
           </form>
+
+          <SmppReceipts
+            saved={smpp.receipts}
+            saving={update.isPending}
+            onSave={(receipts) => {
+              update.mutate({ receipts });
+            }}
+          />
 
           <div className="flex flex-wrap items-center gap-2">
             <ConfirmAction

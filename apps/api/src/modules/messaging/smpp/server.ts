@@ -11,7 +11,13 @@ import { readFileSync } from 'node:fs';
 import net from 'node:net';
 import tls from 'node:tls';
 import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
-import type { Id } from '@zvonix/shared';
+import {
+  SMPP_RECEIPT_EVENTS,
+  type Id,
+  type SmppReceiptAction,
+  type SmppReceiptEvent,
+  type SmppReceiptMap,
+} from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../../infra/tokens.js';
 import { MessagesRepository, type MessageRow } from '../messages.repository.js';
 import { MessagesService } from '../messages.service.js';
@@ -229,7 +235,7 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
 
   /**
    * Отдаёт отчёты по сообщениям SMPP вошедшим приёмникам клиентов. Работает от базы, а не от событий:
-   * статусы меняет воркер — другой процесс, и «хотя бы раз» держится на отметке `receipt_sent_at`.
+   * статусы меняет воркер — другой процесс, и «хотя бы раз» держится на отметках `receipt_events`.
    */
   async deliverReceipts(): Promise<number> {
     if (this.pumping) return 0;
@@ -247,7 +253,7 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
         RECEIPT_BATCH,
       );
       let started = 0;
-      for (const row of rows) {
+      for (const { message: row, map } of rows) {
         if (this.inFlight.has(row.id)) continue;
         const session = receivers
           .get(row.clientId)
@@ -255,11 +261,7 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
         if (session === undefined) continue;
         this.inFlight.add(row.id);
         started += 1;
-        void session
-          .sendDeliver(encodeReceiptBody(this.receiptOf(row)))
-          .then(async (status) => {
-            if (status === Status.ok) await this.messageRows.markReceiptSent(row.id, new Date());
-          })
+        void this.deliverFor(session, row, map)
           .catch((cause: unknown) => {
             this.logger.error('SMPP: отчёт о доставке не отмечен', cause, { message_id: row.id });
           })
@@ -276,16 +278,78 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
     }
   }
 
-  private receiptOf(row: MessageRow): Receipt {
-    const failed = row.status === 'failed';
+  /**
+   * Отчёты одного сообщения по настройкам клиента ([ADR-0076](../../../../../../docs/adr/0076-statusy-smpp-po-nastrojkam-klienta.md)):
+   * наступившие события — по порядку «ушло → доставлено → прочитано», один и тот же итог один раз, отказ — всегда.
+   * Обработанным событие считается, когда клиент принял отчёт (или отчёт не нужен); не принял — вернёмся на
+   * следующем проходе.
+   */
+  private async deliverFor(
+    session: SmppSession,
+    row: MessageRow,
+    map: SmppReceiptMap,
+  ): Promise<void> {
+    const handled = new Set<string>(row.receiptEvents);
+    const given = new Set<SmppReceiptAction>(
+      SMPP_RECEIPT_EVENTS.filter((event) => handled.has(event)).map((event) => map[event]),
+    );
+    for (const event of SMPP_RECEIPT_EVENTS) {
+      const action = map[event];
+      if (handled.has(event) || action === 'none' || !reached(row, event)) continue;
+      if (given.has(action)) {
+        await this.messageRows.markReceiptEvent(row.id, event, null);
+        continue;
+      }
+      if (!session.hasDeliverCapacity) return;
+      const receipt = this.receiptOf(row, action === 'accepted' ? 'ACCEPTD' : 'DELIVRD', event);
+      const status = await session.sendDeliver(encodeReceiptBody(receipt));
+      if (status !== Status.ok) return;
+      await this.messageRows.markReceiptEvent(row.id, event, new Date());
+      given.add(action);
+    }
+    if (row.status === 'failed' && !handled.has('failed')) {
+      if (!session.hasDeliverCapacity) return;
+      const reason = row.failureReason;
+      const state = reason === 'wait_expired' ? 'EXPIRED' : 'UNDELIV';
+      const status = await session.sendDeliver(encodeReceiptBody(this.receiptOf(row, state, null)));
+      if (status === Status.ok)
+        await this.messageRows.markReceiptEvent(row.id, 'failed', new Date());
+    }
+  }
+
+  private receiptOf(
+    row: MessageRow,
+    state: Receipt['state'],
+    event: SmppReceiptEvent | null,
+  ): Receipt {
     const reason = row.failureReason;
+    const at =
+      event === 'sent'
+        ? row.sentAt
+        : event === 'delivered'
+          ? (row.deliveredAt ?? row.sentAt)
+          : event === 'read'
+            ? (row.readAt ?? row.deliveredAt ?? row.sentAt)
+            : row.failedAt;
     return {
       messageId: row.id,
       recipient: row.recipient,
       submittedAt: row.createdAt,
-      doneAt: (failed ? row.failedAt : (row.deliveredAt ?? row.readAt)) ?? row.createdAt,
-      state: !failed ? 'DELIVRD' : reason === 'wait_expired' ? 'EXPIRED' : 'UNDELIV',
-      error: reason === null ? 0 : ERROR_CODE[reason],
+      doneAt: at ?? row.createdAt,
+      state,
+      error: reason === null || event !== null ? 0 : ERROR_CODE[reason],
     };
+  }
+}
+
+/** Наступило ли событие у сообщения: статусы идут только вперёд, поэтому «прочитано» значит и «доставлено». */
+function reached(row: MessageRow, event: SmppReceiptEvent): boolean {
+  switch (event) {
+    case 'sent':
+      return row.status === 'sent' || row.status === 'delivered' || row.status === 'read';
+    case 'delivered':
+      return row.status === 'delivered' || row.status === 'read';
+    case 'read':
+      return row.status === 'read';
   }
 }

@@ -16,12 +16,15 @@ import {
   MESSENGER_ACCOUNT_REASONS,
   MESSENGER_ACCOUNT_STATUSES,
   MESSENGER_PROVIDERS,
+  SMPP_RECEIPT_ACTIONS,
+  SMPP_RECEIPT_DEFAULTS,
   type MessageChannel,
   type MessageFailureReason,
   type MessageStatus,
   type MessengerAccountReason,
   type MessengerAccountStatus,
   type MessengerProviderId,
+  type SmppReceiptAction,
 } from '@zvonix/shared';
 import { createdAt, idRef, money, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 import { clients, partners } from './billing.js';
@@ -192,8 +195,13 @@ export const messages = pgTable(
 
     /** Путь приёма: по `smpp` клиенту отдаётся отчёт о доставке (ADR-0072). */
     channel: text().$type<MessageChannel>().notNull().default('api'),
-    /** Когда отчёт о доставке принят клиентом SMPP; пусто — ещё не отдан. */
+    /** Когда клиент SMPP принял последний отчёт; пусто — ни одного ещё не отдано. */
     receiptSentAt: timestamptz(),
+    /** Какие события уже обработаны для отчётов SMPP: `sent`, `delivered`, `read`, `failed` (ADR-0076). */
+    receiptEvents: text()
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
 
     attempts: integer().notNull().default(0),
     /** Не раньше этого момента воркер берёт сообщение (пауза, повтор после сбоя). */
@@ -227,10 +235,10 @@ export const messages = pgTable(
       .on(t.accountId, t.providerMessageId)
       .where(sql`${t.providerMessageId} is not null`),
     index('messages_client_idx').on(t.clientId, t.createdAt),
-    // Отчёты SMPP, которые ещё предстоит отдать: опрос читает только их.
+    // Сообщения SMPP, по которым опрос ищет неотданные отчёты (ADR-0076).
     index('messages_receipt_idx')
       .on(t.clientId, t.createdAt)
-      .where(sql`${t.channel} = 'smpp' and ${t.receiptSentAt} is null`),
+      .where(sql`${t.channel} = 'smpp'`),
     index('messages_account_sent_idx').on(t.accountId, t.sentAt),
     // Очередь воркера: что ждёт отправки.
     index('messages_queue_idx')
@@ -259,12 +267,25 @@ export const smppAccounts = pgTable(
       .notNull()
       .default(sql`'{}'::text[]`),
     enabled: boolean().notNull().default(true),
+    /** Что отдать клиенту на событие с сообщением (ADR-0076): ничего, «принято» или «доставлено». */
+    receiptOnSent: text().$type<SmppReceiptAction>().notNull().default(SMPP_RECEIPT_DEFAULTS.sent),
+    receiptOnDelivered: text()
+      .$type<SmppReceiptAction>()
+      .notNull()
+      .default(SMPP_RECEIPT_DEFAULTS.delivered),
+    receiptOnRead: text().$type<SmppReceiptAction>().notNull().default(SMPP_RECEIPT_DEFAULTS.read),
     /** Последний удачный вход: поддержке и клиенту видно, подключался ли он вообще. */
     lastBindAt: timestamptz(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check('smpp_accounts_receipt_on_sent_check', oneOf(t.receiptOnSent, SMPP_RECEIPT_ACTIONS)),
+    check(
+      'smpp_accounts_receipt_on_delivered_check',
+      oneOf(t.receiptOnDelivered, SMPP_RECEIPT_ACTIONS),
+    ),
+    check('smpp_accounts_receipt_on_read_check', oneOf(t.receiptOnRead, SMPP_RECEIPT_ACTIONS)),
     uniqueIndex('smpp_accounts_client_key').on(t.clientId),
     uniqueIndex('smpp_accounts_system_id_key').on(t.systemId),
   ],

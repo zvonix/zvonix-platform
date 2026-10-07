@@ -1,4 +1,4 @@
-import { MESSAGE_MAX_LENGTH, MESSAGE_STATUSES } from '@zvonix/shared';
+import { MESSAGE_MAX_LENGTH, MESSAGE_STATUSES, SMPP_RECEIPT_ACTIONS } from '@zvonix/shared';
 import { z } from 'zod';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 import { amount } from '../billing/schemas.js';
@@ -61,15 +61,25 @@ export const registerAccountSchema = z.object({
   apiUrl: z.url('должен быть адресом').max(200, 'слишком длинный'),
 });
 
-/** Что клиент меняет в подключении SMPP: включить/отключить и список разрешённых адресов. */
+/** Что клиент меняет в подключении SMPP: включить/отключить, список разрешённых адресов и отчёты. */
 export const updateSmppSchema = z
   .object({
     enabled: z.boolean().optional(),
     allowedIps: z.array(z.string().trim().min(1).max(45)).max(20, 'слишком много').optional(),
+    /** Что отдавать по SMPP на каждое событие с сообщением (ADR-0076); присылаются все три сразу. */
+    receipts: z
+      .object({
+        sent: z.enum(SMPP_RECEIPT_ACTIONS),
+        delivered: z.enum(SMPP_RECEIPT_ACTIONS),
+        read: z.enum(SMPP_RECEIPT_ACTIONS),
+      })
+      .optional(),
   })
-  .refine((body) => body.enabled !== undefined || body.allowedIps !== undefined, {
-    message: 'Нечего менять',
-  });
+  .refine(
+    (body) =>
+      body.enabled !== undefined || body.allowedIps !== undefined || body.receipts !== undefined,
+    { message: 'Нечего менять' },
+  );
 
 /** Обзор для сотрудников: число суток и смещение часового пояса браузера (минуты к востоку от UTC). */
 export const messagesOverviewQuerySchema = z.object({

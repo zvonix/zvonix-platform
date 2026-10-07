@@ -617,6 +617,152 @@ describe('отчёты о доставке', () => {
     expect(again.received[0]?.commandId).toBe(Command.deliverSm);
   });
 
+  describe('настройки отчётов (ADR-0076)', () => {
+    const setReceipts = (token: string, receipts: Record<string, string>) =>
+      api().inject({
+        method: 'PATCH',
+        url: '/client/messages/smpp',
+        headers: bearer(token),
+        payload: { receipts },
+      });
+
+    const providerIdOf = (messageId: string): Promise<string> =>
+      withDatabase(async (execute) => {
+        const result = await execute(
+          sql`select provider_message_id as id from messages where id = ${messageId}`,
+        );
+        return (result.rows[0] as { id: string }).id;
+      });
+
+    const handled = new WeakMap<Esme, number>();
+
+    /** Крутит опрос, подтверждает приходящие отчёты и возвращает тексты новых (всего должно быть `total`); потом убеждается, что лишнего нет. */
+    async function drain(esme: Esme, total: number): Promise<string[]> {
+      const texts: string[] = [];
+      const deadline = Date.now() + 5000;
+      let seen = handled.get(esme) ?? 0;
+      while (seen < total) {
+        await api().get(SmppServer).deliverReceipts();
+        while (seen < esme.received.length) {
+          const receipt = esme.received[seen];
+          if (receipt === undefined) break;
+          texts.push(decodeReceiptText(receipt.body));
+          esme.ack(receipt);
+          seen += 1;
+        }
+        if (Date.now() > deadline) throw new Error('Отчётов пришло меньше, чем ждали');
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+      for (let pass = 0; pass < 3; pass += 1) {
+        await api().get(SmppServer).deliverReceipts();
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      }
+      handled.set(esme, seen);
+      expect(esme.received).toHaveLength(total);
+      return texts;
+    }
+
+    it('настройки видны в подключении, неверное значение отвергается, смена пишется в журнал', async () => {
+      const { client } = await smppClient('10');
+      const view = (
+        await api().inject({
+          method: 'GET',
+          url: '/client/messages/smpp',
+          headers: bearer(client.token),
+        })
+      ).json<{ smpp: { receipts: Record<string, string> } }>();
+      expect(view.smpp.receipts).toEqual({
+        sent: 'none',
+        delivered: 'delivered',
+        read: 'delivered',
+      });
+
+      expect(
+        (await setReceipts(client.token, { sent: 'maybe', delivered: 'none', read: 'none' }))
+          .statusCode,
+      ).toBe(400);
+      const changed = await setReceipts(client.token, {
+        sent: 'accepted',
+        delivered: 'delivered',
+        read: 'none',
+      });
+      expect(changed.statusCode).toBe(200);
+      expect(changed.json<{ smpp: { receipts: unknown } }>().smpp.receipts).toEqual({
+        sent: 'accepted',
+        delivered: 'delivered',
+        read: 'none',
+      });
+      const logged = await withDatabase(async (execute) => {
+        const result = await execute(
+          sql`select count(*)::int as n from audit_log where action = 'smpp_account.updated'`,
+        );
+        return (result.rows[0] as { n: number }).n;
+      });
+      expect(logged).toBeGreaterThanOrEqual(1);
+    });
+
+    it('«сразу, как ушло»: отчёт DELIVRD приходит при отправке, дальнейшие события молчат', async () => {
+      const partner = await fx.partnerWithAccount('0.45');
+      const { client, credentials } = await smppClient('10');
+      await setReceipts(client.token, { sent: 'delivered', delivered: 'none', read: 'none' });
+      const esme = await connect();
+      await esme.bind(Command.bindTransceiver, credentials.systemId, credentials.password);
+      await esme.submit('79005550021', 'Подача');
+      await api().get(MessagesService).dispatchDue(new Date());
+
+      const [first] = await drain(esme, 1);
+      expect(first).toContain('stat:DELIVRD');
+
+      const [message] = await messagesOf(client.clientId);
+      const providerId = await providerIdOf(message?.id ?? '');
+      await api()
+        .get(MessagesService)
+        .applyDeliveryStatus(partner.instance, providerId, 'delivered');
+      await api().get(MessagesService).applyDeliveryStatus(partner.instance, providerId, 'read');
+      await drain(esme, 1);
+    });
+
+    it('«принято, затем доставлено»: ACCEPTD, потом один DELIVRD — «прочитано» тот же итог не повторяет', async () => {
+      const partner = await fx.partnerWithAccount('0.45');
+      const { client, credentials } = await smppClient('10');
+      await setReceipts(client.token, {
+        sent: 'accepted',
+        delivered: 'delivered',
+        read: 'delivered',
+      });
+      const esme = await connect();
+      await esme.bind(Command.bindTransceiver, credentials.systemId, credentials.password);
+      await esme.submit('79005550022', 'Подача');
+      await api().get(MessagesService).dispatchDue(new Date());
+
+      const [accepted] = await drain(esme, 1);
+      expect(accepted).toContain('stat:ACCEPTD');
+
+      const [message] = await messagesOf(client.clientId);
+      const providerId = await providerIdOf(message?.id ?? '');
+      // Доставлено и прочитано пришли подряд: клиент получает один DELIVRD.
+      await api()
+        .get(MessagesService)
+        .applyDeliveryStatus(partner.instance, providerId, 'delivered');
+      await api().get(MessagesService).applyDeliveryStatus(partner.instance, providerId, 'read');
+      const texts = await drain(esme, 2);
+      expect(texts[0]).toContain('stat:DELIVRD');
+    });
+
+    it('отказ приходит всегда, даже если на все события выбрано «ничего»', async () => {
+      await fx.partnerWithAccount('0.45');
+      const { client, credentials } = await smppClient('10');
+      await setReceipts(client.token, { sent: 'none', delivered: 'none', read: 'none' });
+      const esme = await connect();
+      await esme.bind(Command.bindTransceiver, credentials.systemId, credentials.password);
+      await esme.submit('79005550000', 'Нет MAX');
+      await api().get(MessagesService).dispatchDue(new Date());
+
+      const [text] = await drain(esme, 1);
+      expect(text).toContain('stat:UNDELIV');
+    });
+  });
+
   it('отчёт получает только владелец сообщения', async () => {
     await fx.partnerWithAccount('0.45');
     const sender = await smppClient('10');

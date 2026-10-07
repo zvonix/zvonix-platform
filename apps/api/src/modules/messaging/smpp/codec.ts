@@ -318,14 +318,14 @@ function decodeText(payload: Buffer, dataCoding: number): string {
 export const bindResponseBody = (systemId: string): Buffer => cString(systemId);
 
 /** Состояние сообщения в отчёте о доставке (`message_state`, SMPP 3.4, таблица 5-6). */
-const MessageState = { delivered: 2, expired: 3, undeliverable: 5 } as const;
+const MessageState = { delivered: 2, expired: 3, undeliverable: 5, accepted: 6 } as const;
 
 export interface Receipt {
   readonly messageId: string;
   readonly recipient: string;
   readonly submittedAt: Date;
   readonly doneAt: Date;
-  readonly state: 'DELIVRD' | 'EXPIRED' | 'UNDELIV';
+  readonly state: 'DELIVRD' | 'EXPIRED' | 'UNDELIV' | 'ACCEPTD';
   readonly error: number;
 }
 
@@ -342,9 +342,11 @@ export function encodeReceiptBody(receipt: Receipt): Buffer {
   const state =
     receipt.state === 'DELIVRD'
       ? MessageState.delivered
-      : receipt.state === 'EXPIRED'
-        ? MessageState.expired
-        : MessageState.undeliverable;
+      : receipt.state === 'ACCEPTD'
+        ? MessageState.accepted
+        : receipt.state === 'EXPIRED'
+          ? MessageState.expired
+          : MessageState.undeliverable;
   return Buffer.concat([
     cString(''), // service_type
     Buffer.from([0x01, 0x01]), // source: международный номер

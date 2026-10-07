@@ -6,7 +6,7 @@ import { Injectable } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
 import { toDatabaseError } from '@zvonix/db';
 import { smppAccounts } from '@zvonix/db/schema';
-import { newId, type Id } from '@zvonix/shared';
+import { newId, type Id, type SmppReceiptAction } from '@zvonix/shared';
 import { DatabaseService } from '../../../infra/database.service.js';
 
 export type SmppAccountRow = typeof smppAccounts.$inferSelect;
@@ -55,7 +55,14 @@ export class SmppRepository {
 
   async update(
     clientId: Id<'client'>,
-    patch: { passwordHash?: string; enabled?: boolean; allowedIps?: string[] },
+    patch: {
+      passwordHash?: string;
+      enabled?: boolean;
+      allowedIps?: string[];
+      receiptOnSent?: SmppReceiptAction;
+      receiptOnDelivered?: SmppReceiptAction;
+      receiptOnRead?: SmppReceiptAction;
+    },
   ): Promise<SmppAccountRow | undefined> {
     const [row] = await this.database.db
       .update(smppAccounts)

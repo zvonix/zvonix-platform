@@ -207,7 +207,8 @@ export class GreenApiMessageProvider implements MessageProvider {
       this.logger.warn('Провайдер ответил на проверку номера без результата', { reason: 'shape' });
       return 'unknown';
     } catch (cause) {
-      // 469 — исчерпан предел проверок: молча отправляем дальше, а не копим подозрения у мессенджера.
+      // 469 — исчерпан предел проверок: аккаунт больше не спрашиваем (пауза на стороне площадки).
+      if (cause instanceof ProviderHttpError && cause.status === 469) return 'limited';
       this.logger.warn('Не удалось проверить наличие MAX у номера', {
         reason: cause instanceof Error ? cause.name : 'unknown',
         ...(cause instanceof ProviderHttpError ? { status: cause.status } : {}),

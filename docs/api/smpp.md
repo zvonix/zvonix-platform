@@ -59,14 +59,19 @@ id:<message_id> sub:001 dlvrd:001 submit date:ГГММДДччмм done date:Г�
 
 | Сообщение | `stat` | `err` |
 |---|---|---|
-| доставлено, прочитано | `DELIVRD` | `000` |
+| «принято» (по настройке «ушло»/«доставлено»/«прочитано» = `accepted`) | `ACCEPTD` | `000` |
+| «доставлено» (по настройке = `delivered`; по умолчанию — на «доставлено» и «прочитано») | `DELIVRD` | `000` |
 | у получателя нет MAX | `UNDELIV` | `001` |
 | аккаунт недоступен | `UNDELIV` | `002` |
 | ждало отправки дольше срока | `EXPIRED` | `003` |
 | сбой площадки | `UNDELIV` | `004` |
 
-Деньги по не отправленным возвращены (`UNDELIV`, `EXPIRED`). Отчёт по состоянию «ушло, но подтверждения
-доставки нет» не отправляется. Текст сообщения в отчёт не входит.
+Деньги по не отправленным возвращены (`UNDELIV`, `EXPIRED`). Отказ присылается **всегда**. Остальные отчёты — по
+настройкам клиента ([ADR-0076](../adr/0076-statusy-smpp-po-nastrojkam-klienta.md)): на каждое из трёх событий
+(«ушло в MAX», «доставлено», «прочитано») клиент выбирает `none` (молчать), `accepted` (`ACCEPTD`) или
+`delivered` (`DELIVRD`). По умолчанию `none` / `delivered` / `delivered` — как было до настроек. Один и тот же итог по
+сообщению приходит один раз; события, наступившие между опросами, отдаются по порядку «ушло → доставлено →
+прочитано». Текст сообщения в отчёт не входит.
 
 Отчёты берутся из базы раз в 3 секунды, пока у клиента есть вошедший приёмник; отметка «отдан» ставится после
 `deliver_sm_resp` с `ESME_ROK`. Не подтвердил или не был на связи — отчёт придёт при следующем входе
@@ -77,14 +82,15 @@ id:<message_id> sub:001 dlvrd:001 submit date:ГГММДДччмм done date:Г�
 
 Только свой контур (`/client/*`).
 
-- `GET /client/messages/smpp` → `{ "enabled": true, "connection": { "host", "port", "tls_port" }, "smpp": { "system_id", "enabled", "allowed_ips", "last_bind_at", "created_at" } | null }`.
+- `GET /client/messages/smpp` → `{ "enabled": true, "connection": { "host", "port", "tls_port" }, "smpp": { "system_id", "enabled", "allowed_ips", "receipts": { "sent", "delivered", "read" }, "last_bind_at", "created_at" } | null }`.
   `port` и `tls_port` — `null`, если слушатель не включён.
 - `POST /client/messages/smpp` → `201`, `{ "smpp": { … }, "password": "…" }`. Пароль — единственный раз.
   `409` — подключение уже создано или продукт выключен.
 - `POST /client/messages/smpp/password` → `{ "smpp": { … }, "password": "…" }`: новый пароль, прежний
   перестаёт подходить для новых подключений (открытые сессии доживают до разрыва).
-- `PATCH /client/messages/smpp` ← `{ "enabled": false, "allowedIps": ["203.0.113.5"] }` — любое из двух
-  полей. Адреса — IPv4/IPv6 по одному, не больше 20; пустой список — «любые».
+- `PATCH /client/messages/smpp` ← `{ "enabled": false, "allowedIps": ["203.0.113.5"], "receipts": { "sent": "none",
+  "delivered": "delivered", "read": "delivered" } }` — любое из трёх полей. Адреса — IPv4/IPv6 по одному, не больше 20;
+  пустой список — «любые». `receipts` присылается целиком (все три события), значения `none`, `accepted`, `delivered`.
 
 Создание, смена пароля и изменение пишутся в журнал (`smpp_account.created`, `smpp_account.password_reset`,
 `smpp_account.updated`); пароль в журнал не попадает.

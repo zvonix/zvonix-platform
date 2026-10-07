@@ -15,6 +15,7 @@ import {
   SMPP_ALLOWED_IPS_MAX,
   validationFailed,
   type Id,
+  type SmppReceiptMap,
 } from '@zvonix/shared';
 import { AuditService } from '../../audit/audit.service.js';
 import { BillingService } from '../../billing/billing.service.js';
@@ -39,6 +40,13 @@ const pick = (alphabet: string, length: number): string =>
 
 const hashOf = (systemId: string, password: string): Buffer =>
   createHash('sha256').update(`${systemId}\n${password}`).digest();
+
+/** Настройки отчётов подключения одним значением: для ответа API и журнала. */
+export const receiptsOf = (row: SmppAccountRow): SmppReceiptMap => ({
+  sent: row.receiptOnSent,
+  delivered: row.receiptOnDelivered,
+  read: row.receiptOnRead,
+});
 
 /** Адрес без обёртки IPv4-в-IPv6 (`::ffff:1.2.3.4`) и в нижнем регистре: так же хранится список. */
 export const normalizeIp = (ip: string): string =>
@@ -121,13 +129,24 @@ export class SmppService {
   async update(
     actor: Principal,
     clientId: Id<'client'>,
-    patch: { enabled?: boolean | undefined; allowedIps?: string[] | undefined },
+    patch: {
+      enabled?: boolean | undefined;
+      allowedIps?: string[] | undefined;
+      receipts?: SmppReceiptMap | undefined;
+    },
   ): Promise<SmppAccountRow> {
     const before = await this.require(clientId);
     const allowedIps = patch.allowedIps === undefined ? undefined : this.validIps(patch.allowedIps);
     const account = await this.repository.update(clientId, {
       ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
       ...(allowedIps === undefined ? {} : { allowedIps }),
+      ...(patch.receipts === undefined
+        ? {}
+        : {
+            receiptOnSent: patch.receipts.sent,
+            receiptOnDelivered: patch.receipts.delivered,
+            receiptOnRead: patch.receipts.read,
+          }),
     });
     if (account === undefined) throw notFound('Подключение по SMPP не найдено');
     await this.audit.record({
@@ -136,8 +155,16 @@ export class SmppService {
       entityId: account.id,
       actorUserId: actor.userId,
       actorRole: actor.role,
-      before: { enabled: before.enabled, allowed_ips: before.allowedIps },
-      after: { enabled: account.enabled, allowed_ips: account.allowedIps },
+      before: {
+        enabled: before.enabled,
+        allowed_ips: before.allowedIps,
+        receipts: receiptsOf(before),
+      },
+      after: {
+        enabled: account.enabled,
+        allowed_ips: account.allowedIps,
+        receipts: receiptsOf(account),
+      },
     });
     return account;
   }
