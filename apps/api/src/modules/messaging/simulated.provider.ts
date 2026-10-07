@@ -15,6 +15,7 @@ import {
   type ProviderAccountRef,
   type ProviderState,
   type QrResult,
+  type RecipientCheck,
 } from './provider.js';
 
 /** Состояния имитированных инстансов: общее на процесс, чтобы проверка могла «отсканировать QR». */
@@ -44,9 +45,16 @@ export const simulatedSent: {
   messageId: string;
 }[] = [];
 
-/** Номера на `0000` имитация считает не имеющими MAX; номера на `9999` — временный сбой. */
+/** Для каких номеров провайдера спрашивали «есть ли MAX»: проверка читает отсюда. */
+export const simulatedChecks: string[] = [];
+
+/**
+ * Номера на `0000` имитация считает не имеющими MAX; на `9999` — временный сбой отправки;
+ * на `8888` — проверка наличия MAX не удалась (отправка при этом проходит).
+ */
 const NOT_IN_MESSENGER = /0000$/u;
 const TEMPORARY_FAILURE = /9999$/u;
+const CHECK_UNKNOWN = /8888$/u;
 
 @Injectable()
 export class SimulatedMessageProvider implements MessageProvider {
@@ -103,6 +111,13 @@ export class SimulatedMessageProvider implements MessageProvider {
     const messageId = `sim-msg-${randomUUID().slice(0, 12)}`;
     simulatedSent.push({ instanceId: ref.instanceId, recipient, text, messageId });
     return Promise.resolve({ messageId });
+  }
+
+  checkRecipient(_ref: ProviderAccountRef, recipient: string): Promise<RecipientCheck> {
+    simulatedChecks.push(recipient);
+    if (NOT_IN_MESSENGER.test(recipient)) return Promise.resolve('absent');
+    if (CHECK_UNKNOWN.test(recipient)) return Promise.resolve('unknown');
+    return Promise.resolve('exists');
   }
 
   configureWebhook(): Promise<void> {

@@ -20,6 +20,7 @@ import {
   type ProviderAccountRef,
   type ProviderState,
   type QrResult,
+  type RecipientCheck,
 } from './provider.js';
 
 const TIMEOUT_MS = 10_000;
@@ -191,6 +192,27 @@ export class GreenApiMessageProvider implements MessageProvider {
         throw new RecipientRejectedError(`ответ ${String(cause.status)}`);
       }
       throw this.unavailable(cause);
+    }
+  }
+
+  async checkRecipient(ref: ProviderAccountRef, recipient: string): Promise<RecipientCheck> {
+    try {
+      const body = await this.request<{ exist?: unknown }>(
+        'POST',
+        `${this.base(ref)}/checkAccount/${encodeURIComponent(ref.token)}`,
+        { phoneNumber: Number(recipient) },
+      );
+      if (body.exist === true) return 'exists';
+      if (body.exist === false) return 'absent';
+      this.logger.warn('Провайдер ответил на проверку номера без результата', { reason: 'shape' });
+      return 'unknown';
+    } catch (cause) {
+      // 469 — исчерпан предел проверок: молча отправляем дальше, а не копим подозрения у мессенджера.
+      this.logger.warn('Не удалось проверить наличие MAX у номера', {
+        reason: cause instanceof Error ? cause.name : 'unknown',
+        ...(cause instanceof ProviderHttpError ? { status: cause.status } : {}),
+      });
+      return 'unknown';
     }
   }
 

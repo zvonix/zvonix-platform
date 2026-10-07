@@ -36,6 +36,9 @@ export class RecipientRejectedError extends Error {
   override readonly name = 'RecipientRejectedError';
 }
 
+/** Итог проверки номера до отправки. */
+export type RecipientCheck = 'exists' | 'absent' | 'unknown';
+
 /**
  * Результат проверки партнёрского ключа: `ok` — ключ принят (`instances` — сколько аккаунтов уже заведено),
  * `no_key` — ключ не задан, `rejected` — провайдер ключ не принял, `unreachable` — нет связи с провайдером.
@@ -85,6 +88,13 @@ export interface MessageProvider {
     recipient: string,
     text: string,
   ): Promise<{ messageId: string }>;
+
+  /**
+   * Есть ли у номера аккаунт MAX, до отправки. `unknown` — выяснить не удалось (провайдер недоступен,
+   * лимит проверок, номер не из поддержанных стран): сообщение тогда всё равно отправляется, а отказ
+   * получателя ловится по ответу отправки. Ошибок не бросает.
+   */
+  checkRecipient(ref: ProviderAccountRef, recipient: string): Promise<RecipientCheck>;
 
   /** Сообщает инстансу адрес, на который слать статусы доставки и смену состояния. */
   configureWebhook(ref: ProviderAccountRef, url: string): Promise<void>;

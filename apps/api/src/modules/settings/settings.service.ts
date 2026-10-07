@@ -163,6 +163,9 @@ export class SettingsService {
     readonly partnerUrl: string;
     readonly partnerToken: string;
     readonly paceSeconds: number;
+    readonly precheckEnabled: boolean;
+    readonly precheckExistsDays: number;
+    readonly precheckAbsentDays: number;
     readonly maxWaitMinutes: number;
     readonly textDays: number;
   }> {
@@ -172,6 +175,9 @@ export class SettingsService {
       partnerUrl: this.text(values, 'messaging.provider_partner_url').replace(/\/+$/u, ''),
       partnerToken: this.text(values, 'messaging.provider_partner_token'),
       paceSeconds: this.number(values, 'messages.pace_seconds'),
+      precheckEnabled: this.flag(values, 'messages.precheck_enabled'),
+      precheckExistsDays: this.number(values, 'messages.precheck_exists_days'),
+      precheckAbsentDays: this.number(values, 'messages.precheck_absent_days'),
       maxWaitMinutes: this.number(values, 'messages.max_wait_minutes'),
       textDays: this.number(values, 'retention.messages_days'),
     };
