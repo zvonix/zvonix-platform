@@ -52,7 +52,8 @@ trap 'rm -rf "$WORK"' EXIT
 wait_ready() {
   local url="$1" attempt
   for attempt in $(seq 1 60); do
-    if curl -fsS --max-time 3 -o /dev/null "$url"; then
+    # Без -S: пока служба поднимается, каждая попытка «не соединилась» — штатна и только засоряет журнал.
+    if curl -fs --max-time 3 -o /dev/null "$url"; then
       return 0
     fi
     sleep 1

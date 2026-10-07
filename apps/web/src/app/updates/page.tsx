@@ -130,6 +130,12 @@ function Updates() {
   });
 
   const data = overview.data;
+
+  // Выкладка сменила версию — подпись в углу меню должна догнать её без перезагрузки страницы.
+  const shownVersion = data?.current.version;
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: ['release'] });
+  }, [queryClient, shownVersion]);
   const running = data?.runs.find((run) => run.status === 'running');
   const latest = data?.runs[0];
 
