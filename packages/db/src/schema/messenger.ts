@@ -15,9 +15,15 @@ import {
   MESSAGE_STATUSES,
   MESSENGER_ACCOUNT_REASONS,
   MESSENGER_ACCOUNT_STATUSES,
+  BOT_KINDS,
+  BOT_STATUSES,
+  BOT_SUBSCRIBER_STATES,
   MESSENGER_PROVIDERS,
   SMPP_RECEIPT_ACTIONS,
   SMPP_RECEIPT_DEFAULTS,
+  type BotKind,
+  type BotStatus,
+  type BotSubscriberState,
   type MessageChannel,
   type MessageFailureReason,
   type MessageStatus,
@@ -288,5 +294,101 @@ export const smppAccounts = pgTable(
     check('smpp_accounts_receipt_on_read_check', oneOf(t.receiptOnRead, SMPP_RECEIPT_ACTIONS)),
     uniqueIndex('smpp_accounts_client_key').on(t.clientId),
     uniqueIndex('smpp_accounts_system_id_key').on(t.systemId),
+  ],
+);
+
+/**
+ * Бот MAX ([ADR-0077](../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)): бот площадки (один) или бот клиента (по
+ * одному на клиента). Токен выдаёт MAX при создании бота в «MAX для бизнеса»; хранится зашифрованным.
+ */
+export const messengerBots = pgTable(
+  'messenger_bots',
+  {
+    id: primaryId<'messengerBot'>(),
+    kind: text().$type<BotKind>().notNull(),
+    /** Чей бот — только у бота клиента. */
+    clientId: idRef<'client'>().references(() => clients.id, { onDelete: 'restrict' }),
+    token: text().notNull(),
+    /** Идентификатор, имя и никнейм бота у MAX — из проверки токена; никнейм нужен для ссылки пассажирам. */
+    botUserId: text().notNull(),
+    name: text().notNull(),
+    username: text().notNull(),
+    status: text().$type<BotStatus>().notNull().default('active'),
+    /** Чем кончилась последняя проверка бота (токен, вебхук); пусто — всё в порядке. */
+    lastError: text(),
+    lastCheckedAt: timestamptz(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check('messenger_bots_kind_check', oneOf(t.kind, BOT_KINDS)),
+    check('messenger_bots_status_check', oneOf(t.status, BOT_STATUSES)),
+    check('messenger_bots_owner_check', sql`(${t.kind} = 'client') = (${t.clientId} is not null)`),
+    // Бот площадки один; у клиента — не больше одного своего.
+    uniqueIndex('messenger_bots_platform_key')
+      .on(t.kind)
+      .where(sql`${t.kind} = 'platform'`),
+    uniqueIndex('messenger_bots_client_key')
+      .on(t.clientId)
+      .where(sql`${t.clientId} is not null`),
+  ],
+);
+
+/**
+ * Подключение клиента к боту: какой бот его, включено ли и по какому коду его пассажиры приходят в бота
+ * (ссылка `…?start=<код>`). Цены клиента (необязательные) и период ежемесячной платы добавляются в следующем выпуске.
+ */
+export const botConnections = pgTable(
+  'bot_connections',
+  {
+    id: primaryId<'botConnection'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    botId: idRef<'messengerBot'>()
+      .notNull()
+      .references(() => messengerBots.id, { onDelete: 'restrict' }),
+    enabled: boolean().notNull().default(true),
+    /** Публичный код клиента для ссылки бота. Случайный, без смысла: по нему нельзя узнать клиента. */
+    code: text().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('bot_connections_client_key').on(t.clientId),
+    uniqueIndex('bot_connections_code_key').on(t.code),
+  ],
+);
+
+/**
+ * Подписчик бота — человек, запустивший бота по ссылке клиента. Номер появляется, когда человек сам делится
+ * контактом; сообщение уходит боту только подписчику с номером в состоянии `started`.
+ */
+export const botSubscribers = pgTable(
+  'bot_subscribers',
+  {
+    id: primaryId<'botSubscriber'>(),
+    botId: idRef<'messengerBot'>()
+      .notNull()
+      .references(() => messengerBots.id, { onDelete: 'restrict' }),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    /** Пользователь и чат MAX, куда писать. */
+    maxUserId: text().notNull(),
+    chatId: text().notNull(),
+    /** Номер из контакта, который человек прислал о себе; пусто — ещё не поделился. */
+    phone: text(),
+    state: text().$type<BotSubscriberState>().notNull().default('started'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check('bot_subscribers_state_check', oneOf(t.state, BOT_SUBSCRIBER_STATES)),
+    uniqueIndex('bot_subscribers_user_key').on(t.botId, t.clientId, t.maxUserId),
+    // Поиск получателя при отправке: клиент + номер, только живые.
+    index('bot_subscribers_phone_idx')
+      .on(t.clientId, t.phone)
+      .where(sql`${t.phone} is not null and ${t.state} = 'started'`),
   ],
 );

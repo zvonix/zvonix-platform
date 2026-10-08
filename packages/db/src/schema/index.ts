@@ -45,4 +45,12 @@ export { outboxMessages, authTokens } from './mail.js';
 export { applications } from './applications.js';
 export { payments } from './payments.js';
 export { serverMetrics } from './server-metrics.js';
-export { messengerAccounts, messengerTariffs, messages, smppAccounts } from './messenger.js';
+export {
+  botConnections,
+  botSubscribers,
+  messengerAccounts,
+  messengerBots,
+  messengerTariffs,
+  messages,
+  smppAccounts,
+} from './messenger.js';

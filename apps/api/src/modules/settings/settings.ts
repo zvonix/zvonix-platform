@@ -128,6 +128,16 @@ export const SETTINGS = {
     fallback: '',
     hint: 'Ключ партнёрского доступа провайдера (выдаёт его поддержка). Пусто — аккаунты заводит администратор вручную',
   },
+  'bot.enabled': {
+    kind: 'boolean',
+    fallback: 'false',
+    hint: 'Бот MAX как второй канал сообщений: клиенты подключаются к боту площадки, пассажиры подписываются по ссылке. Включайте, когда бот вписан в разделе «Сообщения MAX»',
+  },
+  'bot.api_url': {
+    kind: 'string',
+    fallback: 'https://platform-api.max.ru',
+    hint: 'Адрес API ботов MAX. Менять, только если платформа сменила его',
+  },
   'messages.pace_seconds': {
     kind: 'number',
     fallback: '3',
