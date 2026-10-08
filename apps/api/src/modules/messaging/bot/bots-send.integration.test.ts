@@ -451,3 +451,146 @@ describe('плата за бота и условия клиента', () => {
     expect(logged).toBe(2);
   });
 });
+
+describe('тексты и порядок отправки бота клиента (этап 3)', () => {
+  const settingsPatch = (token: string, payload: Record<string, unknown>) =>
+    api().inject({
+      method: 'PATCH',
+      url: '/client/messages/bot/settings',
+      headers: bearer(token),
+      payload,
+    });
+
+  const connectPlatform = async () => {
+    const registered = await api().inject({
+      method: 'PUT',
+      url: '/bots/platform',
+      headers: bearer(adminToken),
+      payload: { token: 'ok-taxibot' },
+    });
+    expect(registered.statusCode).toBe(200);
+    await fx.put(adminToken, { 'bot.message_price': 0, 'bot.monthly_fee': 0 });
+  };
+
+  it('настройки сохраняются, пустая строка возвращает стандартный текст, слишком длинное и чужое отвергается', async () => {
+    await connectPlatform();
+    const client = await fx.clientWithMoney('5');
+    // Пока не подключён к боту — нечего настраивать.
+    expect((await settingsPatch(client.token, { textBefore: 'Привет' })).statusCode).toBe(404);
+
+    await api().inject({
+      method: 'POST',
+      url: '/client/messages/bot',
+      headers: bearer(client.token),
+    });
+    expect((await settingsPatch(client.token, {})).statusCode).toBe(400);
+    expect((await settingsPatch(client.token, { greeting: 'я'.repeat(301) })).statusCode).toBe(400);
+    expect((await settingsPatch(client.token, { textBefore: 'я'.repeat(151) })).statusCode).toBe(
+      400,
+    );
+
+    const saved = await settingsPatch(client.token, {
+      greeting: '  Здравствуйте! Вас приветствует {служба}  ',
+      textBefore: 'Такси Волна:',
+      textAfter: 'Отписаться: СТОП',
+      fallbackAccounts: false,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json<{ settings: Record<string, unknown> }>().settings).toEqual({
+      greeting: 'Здравствуйте! Вас приветствует {служба}',
+      text_before: 'Такси Волна:',
+      text_after: 'Отписаться: СТОП',
+      fallback_accounts: false,
+    });
+
+    const cleared = await settingsPatch(client.token, { greeting: '', textBefore: null });
+    expect(cleared.json<{ settings: Record<string, unknown> }>().settings).toMatchObject({
+      greeting: null,
+      text_before: null,
+      text_after: 'Отписаться: СТОП',
+    });
+  });
+
+  it('вставки до и после добавляются к каждому сообщению бота; слишком длинное уходит без вставок', async () => {
+    await connectPlatform();
+    const { client, phone } = await subscribed();
+    await settingsPatch(client.token, {
+      textBefore: 'Такси Волна:',
+      textAfter: 'СТОП — отписаться',
+    });
+
+    await sendTo(client.token, phone);
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect(simulatedBotSent.at(-1)?.text).toBe('Такси Волна:\nМашина подана\nСТОП — отписаться');
+
+    const long = 'я'.repeat(3990);
+    await api().inject({
+      method: 'POST',
+      url: '/client/messages',
+      headers: bearer(client.token),
+      payload: { to: phone, text: long },
+    });
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect(simulatedBotSent.at(-1)?.text).toBe(long);
+  });
+
+  it('своё приветствие подставляет название службы; без него — стандартный текст', async () => {
+    await connectPlatform();
+    const client = await fx.clientWithMoney('5');
+    const view = await api().inject({
+      method: 'POST',
+      url: '/client/messages/bot',
+      headers: bearer(client.token),
+    });
+    const link = view.json<{ connection: { link: string } }>().connection.link;
+    const botId = await botIdOf();
+    await settingsPatch(client.token, { greeting: 'Добро пожаловать в {служба}!' });
+
+    await event(botId, {
+      update_type: 'bot_started',
+      chat_id: 501,
+      user: { user_id: 91 },
+      payload: link.split('start=')[1],
+    });
+    expect(simulatedBotSent.at(-1)?.text).toMatch(/^Добро пожаловать в Такси .+!$/u);
+    expect(simulatedBotSent.at(-1)?.requestContact).toBe('Поделиться номером');
+
+    await settingsPatch(client.token, { greeting: null });
+    await event(botId, {
+      update_type: 'bot_started',
+      chat_id: 502,
+      user: { user_id: 92 },
+      payload: link.split('start=')[1],
+    });
+    expect(simulatedBotSent.at(-1)?.text).toContain('будет присылать вам уведомления');
+  });
+
+  it('запасной путь выключен: номер без подписчика не принимается и деньги не списываются; включён или бот не работает — идёт через аккаунты', async () => {
+    await connectPlatform();
+    const { client, phone } = await subscribed();
+    await fx.partnerWithAccount('0.45');
+    const stranger = '79005550123';
+
+    // По умолчанию запасной путь есть.
+    expect((await sendTo(client.token, stranger)).statusCode).toBe(201);
+    expect(await fx.balance(client.token)).toBe('9.46');
+
+    await settingsPatch(client.token, { fallbackAccounts: false });
+    const refused = await sendTo(client.token, stranger);
+    expect(refused.statusCode).toBe(400);
+    expect(refused.body).toContain('не подписан');
+    expect(await fx.balance(client.token)).toBe('9.46');
+
+    // Подписчику бот пишет по-прежнему.
+    expect((await sendTo(client.token, phone)).statusCode).toBe(201);
+
+    // Бот клиента выключен — запрет не действует: сообщения должны доходить.
+    await api().inject({
+      method: 'PATCH',
+      url: '/client/messages/bot',
+      headers: bearer(client.token),
+      payload: { enabled: false },
+    });
+    expect((await sendTo(client.token, stranger)).statusCode).toBe(201);
+  });
+});

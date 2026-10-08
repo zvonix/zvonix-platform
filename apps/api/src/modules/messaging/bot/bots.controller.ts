@@ -15,7 +15,14 @@ import {
   Post,
   Put,
 } from '@nestjs/common';
-import { Money, parseId, permissionDenied, type MoneyAmount } from '@zvonix/shared';
+import {
+  BOT_GREETING_MAX,
+  BOT_INSERT_MAX,
+  Money,
+  parseId,
+  permissionDenied,
+  type MoneyAmount,
+} from '@zvonix/shared';
 import { z } from 'zod';
 import { Cabinets, Public, Roles } from '../../../http/auth.guard.js';
 import { CurrentUser } from '../../../http/request-context.js';
@@ -31,6 +38,26 @@ import {
 
 const registerBotSchema = z.object({ token: z.string().trim().min(1).max(500) });
 const connectionSchema = z.object({ enabled: z.boolean() });
+
+/** Текст бота: пустой — вернуть стандартный; длина в пределах, которые держит и база. */
+const botText = (max: number) =>
+  z
+    .string()
+    .max(max, `не больше ${String(max)} знаков`)
+    .nullable()
+    .optional();
+
+/** Настройки бота клиента: тексты и запасной путь; что не названо — не меняется. */
+const botSettingsSchema = z
+  .object({
+    greeting: botText(BOT_GREETING_MAX),
+    textBefore: botText(BOT_INSERT_MAX),
+    textAfter: botText(BOT_INSERT_MAX),
+    fallbackAccounts: z.boolean().optional(),
+  })
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: 'Нечего менять',
+  });
 
 /** Сумма в рублях строкой, от 0 до предела: `0` — бесплатно, `null` — вернуть к общим условиям. */
 const price = (max: number) =>
@@ -175,6 +202,16 @@ export class ClientBotController {
   async removeOwn(@CurrentUser() actor: Principal): Promise<BotClientView> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     return this.bots.removeOwnBot(actor, client.id);
+  }
+
+  @Cabinets('client')
+  @Patch('client/messages/bot/settings')
+  async updateSettings(
+    @CurrentUser() actor: Principal,
+    @Body(zodBody(botSettingsSchema)) body: z.infer<typeof botSettingsSchema>,
+  ): Promise<BotClientView> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return this.bots.updateSettings(actor, client.id, body);
   }
 
   @Cabinets('client')

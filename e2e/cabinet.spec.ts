@@ -586,6 +586,14 @@ test.describe('бот MAX (ADR-0077)', () => {
     await admin.getByRole('button', { name: 'Сохранить' }).click();
     await expect(admin.getByText('своя')).toBeVisible();
 
+    // Тексты бота: сохраняются и видны при следующем открытии окна.
+    await page.getByRole('button', { name: 'Тексты и порядок' }).click();
+    await page.getByLabel('Текст перед каждым сообщением').fill('Такси Волна:');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await page.getByRole('button', { name: 'Тексты и порядок' }).click();
+    await expect(page.getByLabel('Текст перед каждым сообщением')).toHaveValue('Такси Волна:');
+    await page.keyboard.press('Escape');
+
     // Блок бота отдельно: «Отключено» бывает и у подключения SMPP того же клиента.
     const botBlock = page.locator('section', {
       has: page.getByRole('heading', { name: 'Бот MAX', exact: true }),

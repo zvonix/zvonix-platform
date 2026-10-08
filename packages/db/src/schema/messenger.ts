@@ -15,6 +15,8 @@ import {
   MESSAGE_STATUSES,
   MESSENGER_ACCOUNT_REASONS,
   MESSENGER_ACCOUNT_STATUSES,
+  BOT_GREETING_MAX,
+  BOT_INSERT_MAX,
   BOT_KINDS,
   BOT_STATUSES,
   BOT_SUBSCRIBER_STATES,
@@ -372,10 +374,25 @@ export const botConnections = pgTable(
     monthlyFee: money(),
     /** Месяц (ГГГГ-ММ, UTC), за который плата уже взята; пусто — не бралась. Пока не взята — бот клиенту не отправляет. */
     feePaidPeriod: text(),
+    /**
+     * Настройки бота клиента (ADR-0077, этап 3): приветствие при запуске (`{служба}` — название службы), вставки до и
+     * после каждого сообщения, и можно ли писать через аккаунты партнёров тем, кто не подписан на бота. Пусто — по
+     * умолчанию (наш текст; вставок нет).
+     */
+    greeting: text(),
+    textBefore: text(),
+    textAfter: text(),
+    fallbackAccounts: boolean().notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check(
+      'bot_connections_texts_check',
+      sql`(${t.greeting} is null or char_length(${t.greeting}) <= ${sql.raw(String(BOT_GREETING_MAX))})
+        and (${t.textBefore} is null or char_length(${t.textBefore}) <= ${sql.raw(String(BOT_INSERT_MAX))})
+        and (${t.textAfter} is null or char_length(${t.textAfter}) <= ${sql.raw(String(BOT_INSERT_MAX))})`,
+    ),
     check(
       'bot_connections_prices_check',
       sql`(${t.messagePrice} is null or ${t.messagePrice} >= 0) and (${t.monthlyFee} is null or ${t.monthlyFee} >= 0)`,

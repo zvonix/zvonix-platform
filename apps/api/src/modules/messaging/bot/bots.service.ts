@@ -9,6 +9,7 @@ import {
   conflict,
   dependencyUnavailable,
   isDomainError,
+  MESSAGE_MAX_LENGTH,
   Money,
   normalizeMsisdn,
   notFound,
@@ -122,6 +123,14 @@ interface BotTerms {
   readonly monthly_fee: string;
 }
 
+/** Настройки бота клиента: свои тексты (пусто — стандартные) и запасной путь через аккаунты. */
+interface BotSettingsView {
+  readonly greeting: string | null;
+  readonly text_before: string | null;
+  readonly text_after: string | null;
+  readonly fallback_accounts: boolean;
+}
+
 export interface BotClientView {
   /** Продукт включён: клиент видит блок «Бот MAX». */
   readonly available: boolean;
@@ -137,6 +146,7 @@ export interface BotClientView {
   } | null;
   /** Что платит клиент: общие условия площадки или свои, если администратор их задал. */
   readonly terms: BotTerms;
+  readonly settings: BotSettingsView;
   /** Общие условия бота площадки. */
   readonly platform_terms: BotTerms;
   /** Свой бот клиента (этап 2): данные бота без токена и условия для своих ботов. */
@@ -150,6 +160,21 @@ export interface BotClientView {
     readonly terms: BotTerms;
   };
   readonly subscribers: { readonly total: number; readonly with_phone: number };
+}
+
+/**
+ * Текст сообщения бота с вставками клиента: до и после, каждая с новой строки. Не влезает в предел сообщения —
+ * уходит без вставок: чем обрезать текст пассажиру, лучше отправить его целиком.
+ */
+function composeText(
+  connection: { textBefore: string | null; textAfter: string | null } | undefined,
+  text: string,
+): string {
+  const parts = [connection?.textBefore, text, connection?.textAfter].filter(
+    (part): part is string => part !== null && part !== undefined && part !== '',
+  );
+  const composed = parts.join('\n');
+  return composed.length > MESSAGE_MAX_LENGTH ? text : composed;
 }
 
 /** Месяц по часам UTC, ГГГГ-ММ: за него берётся ежемесячная плата. */
@@ -396,6 +421,12 @@ export class BotsService {
         connection === undefined
           ? format(platform === undefined ? ownTerms : platformTerms)
           : format(terms),
+      settings: {
+        greeting: connection?.greeting ?? null,
+        text_before: connection?.textBefore ?? null,
+        text_after: connection?.textAfter ?? null,
+        fallback_accounts: connection?.fallbackAccounts ?? true,
+      },
       platform_terms: format(platformTerms),
       own: {
         bot:
@@ -620,6 +651,46 @@ export class BotsService {
     return charged;
   }
 
+  /**
+   * Настройки бота клиента: свои тексты и запасной путь. Пустая строка — вернуть стандартный текст. Длины проверяет
+   * база и схема запроса; здесь только приведение пустого к «не задано».
+   */
+  async updateSettings(
+    actor: Principal,
+    clientId: Id<'client'>,
+    patch: {
+      greeting?: string | null | undefined;
+      textBefore?: string | null | undefined;
+      textAfter?: string | null | undefined;
+      fallbackAccounts?: boolean | undefined;
+    },
+    now: Date = new Date(),
+  ): Promise<BotClientView> {
+    const before = await this.repository.findConnectionByClient(clientId);
+    if (before === undefined) throw notFound('Клиент ещё не подключён к боту');
+    const clean = (value: string | null | undefined): string | null | undefined =>
+      value === undefined ? undefined : value === null || value.trim() === '' ? null : value.trim();
+    const greeting = clean(patch.greeting);
+    const textBefore = clean(patch.textBefore);
+    const textAfter = clean(patch.textAfter);
+    const after = await this.repository.setConnectionSettings(clientId, {
+      ...(greeting === undefined ? {} : { greeting }),
+      ...(textBefore === undefined ? {} : { textBefore }),
+      ...(textAfter === undefined ? {} : { textAfter }),
+      ...(patch.fallbackAccounts === undefined ? {} : { fallbackAccounts: patch.fallbackAccounts }),
+    });
+    await this.audit.record({
+      action: 'bot_connection.settings_changed',
+      entityType: 'bot_connection',
+      entityId: before.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { fallback_accounts: before.fallbackAccounts },
+      after: { fallback_accounts: after?.fallbackAccounts ?? before.fallbackAccounts },
+    });
+    return this.clientView(clientId, now);
+  }
+
   // --- Администратор: условия клиентов -----------------------------------------------------------
 
   async adminClients(now: Date = new Date()): Promise<{ clients: BotClientRow[] }> {
@@ -712,6 +783,16 @@ export class BotsService {
   }
 
   /**
+   * Запретил ли клиент отправку через аккаунты тем, кто не подписан на его бота: бот у него работает (включён, бот
+   * жив, плата за месяц взята), а «запасной путь» выключен. Тогда сообщение на номер без подписчика не принимается.
+   */
+  async fallbackForbidden(clientId: Id<'client'>, now: Date = new Date()): Promise<boolean> {
+    const connection = await this.repository.findConnectionByClient(clientId);
+    if (connection?.enabled !== true || connection.fallbackAccounts) return false;
+    return (await this.connectedPrice(clientId, now)) !== undefined;
+  }
+
+  /**
    * Цена сообщения бота клиента, если бот сейчас может отправлять (продукт включён, подключение включено, бот работает,
    * плата за месяц взята); иначе `undefined`. Для показа цены в форме отправки, когда аккаунтов партнёров нет.
    */
@@ -744,8 +825,13 @@ export class BotsService {
     if (bot?.status !== 'active') throw dependencyUnavailable('Бот сейчас недоступен');
     const subscriber = await this.repository.findReachable(clientId, bot.id, recipient);
     if (subscriber === undefined) throw new BotRecipientRejectedError('нет подписчика');
+    const connection = await this.repository.findConnectionByClient(clientId);
     try {
-      return await this.provider.send(this.tokenOf(bot), subscriber.chatId, text);
+      return await this.provider.send(
+        this.tokenOf(bot),
+        subscriber.chatId,
+        composeText(connection, text),
+      );
     } catch (cause) {
       if (cause instanceof BotRecipientRejectedError) {
         await this.repository.stopSubscriber(subscriber.id);
@@ -795,9 +881,12 @@ export class BotsService {
       chatId,
     });
     const client = await this.billing.clientWithBalance(connection.clientId);
-    await this.provider.send(token, chatId, TEXT.askContact(client.name), {
-      requestContact: TEXT.shareButton,
-    });
+    // Своё приветствие клиента: `{служба}` заменяется названием; пусто — стандартный текст.
+    const greeting =
+      connection.greeting === null
+        ? TEXT.askContact(client.name)
+        : connection.greeting.replaceAll('{служба}', client.name);
+    await this.provider.send(token, chatId, greeting, { requestContact: TEXT.shareButton });
   }
 
   private async onMessage(bot: BotRow, update: BotUpdate): Promise<void> {

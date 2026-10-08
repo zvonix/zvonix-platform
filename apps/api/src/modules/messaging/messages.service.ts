@@ -164,6 +164,9 @@ export class MessagesService {
 
     // Сначала бот: у номера есть подписчик этого клиента (ADR-0077). Иначе — аккаунты партнёров.
     const viaBot = await this.bots.routeFor(clientId, recipient);
+    if (viaBot === undefined && (await this.bots.fallbackForbidden(clientId))) {
+      throw validationFailed('Получатель не подписан на бота этого клиента');
+    }
     const account = viaBot === undefined ? await this.pickAccount() : undefined;
     if (viaBot === undefined && account === undefined) {
       throw dependencyUnavailable('Сейчас нет доступных аккаунтов для отправки — повторите позже');

@@ -136,5 +136,9 @@ export type BotStatus = (typeof BOT_STATUSES)[number];
 export const BOT_SUBSCRIBER_STATES = ['started', 'stopped'] as const;
 export type BotSubscriberState = (typeof BOT_SUBSCRIBER_STATES)[number];
 
+/** Пределы настраиваемых текстов бота клиента (ADR-0077, этап 3): приветствие и вставки до и после сообщения. */
+export const BOT_GREETING_MAX = 300;
+export const BOT_INSERT_MAX = 150;
+
 /** Сколько адресов можно разрешить учётной записи SMPP: больше — это уже «любые». */
 export const SMPP_ALLOWED_IPS_MAX = 20;

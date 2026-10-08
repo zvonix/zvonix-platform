@@ -176,6 +176,24 @@ export class BotsRepository {
     return row;
   }
 
+  /** Настройки бота клиента: `undefined` — не трогать, `null` у текста — вернуть стандартный. */
+  async setConnectionSettings(
+    clientId: Id<'client'>,
+    patch: {
+      greeting?: string | null;
+      textBefore?: string | null;
+      textAfter?: string | null;
+      fallbackAccounts?: boolean;
+    },
+  ): Promise<BotConnectionRow | undefined> {
+    const [row] = await this.database.db
+      .update(botConnections)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(botConnections.clientId, clientId))
+      .returning();
+    return row;
+  }
+
   /** Подключение клиента теперь работает через другого бота (свой или площадки); включается. */
   async setConnectionBot(
     clientId: Id<'client'>,

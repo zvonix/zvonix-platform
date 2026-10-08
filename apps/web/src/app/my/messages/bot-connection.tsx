@@ -9,8 +9,11 @@ import { Hint } from '@/components/hint';
 import { QrCode } from '@/components/qr-code';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { ApiError, request } from '@/lib/api';
 import { money } from '@/lib/money';
+import { BOT_GREETING_MAX, BOT_INSERT_MAX } from '@zvonix/shared';
 
 interface Terms {
   readonly message_price: string;
@@ -27,6 +30,12 @@ interface BotState {
     readonly fee_paid: boolean;
   } | null;
   readonly terms: Terms;
+  readonly settings: {
+    readonly greeting: string | null;
+    readonly text_before: string | null;
+    readonly text_after: string | null;
+    readonly fallback_accounts: boolean;
+  };
   readonly platform_terms: Terms;
   readonly own: {
     readonly bot: {
@@ -84,6 +93,17 @@ export function BotConnection() {
   const error = [connect.error, toggle.error, state.error].find(
     (candidate): candidate is ApiError => candidate instanceof ApiError,
   );
+
+  const saveSettings = async (patch: {
+    greeting: string;
+    textBefore: string;
+    textAfter: string;
+    fallbackAccounts: boolean;
+  }) => {
+    store(
+      await request<BotState>('/client/messages/bot/settings', { method: 'PATCH', body: patch }),
+    );
+  };
 
   const saveToken = async (token: string) => {
     store(await request<BotState>('/client/messages/bot/own', { method: 'PUT', body: { token } }));
@@ -153,6 +173,9 @@ export function BotConnection() {
             >
               {copied ? 'Скопировано' : 'Копировать ссылку'}
             </Button>
+            <FormDialog label="Тексты и порядок" title="Настройки бота" variant="outline" size="sm">
+              <SettingsForm settings={data.settings} onSave={saveSettings} />
+            </FormDialog>
             {connection.enabled ? (
               <Button
                 variant="outline"
@@ -292,6 +315,111 @@ function OwnBotForm({
         />
       </DialogField>
       <p className="text-muted-foreground sm:col-span-2">{termsLine(terms)}</p>
+    </DialogForm>
+  );
+}
+
+/** Поле текста с счётчиком знаков: не длиннее предела, который держит и сервер. */
+function TextField({
+  id,
+  label,
+  value,
+  max,
+  placeholder,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  max: number;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1 sm:col-span-2">
+      <Label htmlFor={id}>{label}</Label>
+      <textarea
+        id={id}
+        rows={2}
+        maxLength={max}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+        className="w-full rounded-md border border-input bg-transparent px-3 py-2"
+      />
+      <span className="num text-muted-foreground">
+        {String(value.length)} из {String(max)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Окно настроек бота клиента: приветствие, вставки до и после каждого сообщения и порядок отправки. Пустое поле —
+ * стандартный текст; `{служба}` в приветствии заменяется названием службы.
+ */
+function SettingsForm({
+  settings,
+  onSave,
+}: {
+  settings: BotState['settings'];
+  onSave: (patch: {
+    greeting: string;
+    textBefore: string;
+    textAfter: string;
+    fallbackAccounts: boolean;
+  }) => Promise<unknown>;
+}) {
+  const [greeting, setGreeting] = useState(settings.greeting ?? '');
+  const [before, setBefore] = useState(settings.text_before ?? '');
+  const [after, setAfter] = useState(settings.text_after ?? '');
+  const [fallback, setFallback] = useState(settings.fallback_accounts);
+
+  return (
+    <DialogForm
+      submitLabel="Сохранить"
+      canSubmit
+      onSubmit={() =>
+        onSave({ greeting, textBefore: before, textAfter: after, fallbackAccounts: fallback })
+      }
+    >
+      <TextField
+        id="bot-greeting"
+        label="Приветствие, когда пассажир запускает бота"
+        value={greeting}
+        max={BOT_GREETING_MAX}
+        placeholder="Стандартное. {служба} — название вашей службы"
+        onChange={setGreeting}
+      />
+      <TextField
+        id="bot-before"
+        label="Текст перед каждым сообщением"
+        value={before}
+        max={BOT_INSERT_MAX}
+        placeholder="Например: Такси Волна:"
+        onChange={setBefore}
+      />
+      <TextField
+        id="bot-after"
+        label="Текст после каждого сообщения"
+        value={after}
+        max={BOT_INSERT_MAX}
+        placeholder="Например: Остановить уведомления — напишите СТОП"
+        onChange={setAfter}
+      />
+      <div className="flex items-start gap-3 sm:col-span-2">
+        <Switch id="bot-fallback" checked={fallback} onCheckedChange={setFallback} />
+        <div>
+          <Label htmlFor="bot-fallback" className="font-normal">
+            Тем, кто не подписан на бота, писать через аккаунты партнёров
+          </Label>
+          <p className="text-muted-foreground">
+            Выключено — сообщение на номер без подписки не принимается и деньги не списываются.
+          </p>
+        </div>
+      </div>
     </DialogForm>
   );
 }
