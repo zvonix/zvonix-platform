@@ -48,6 +48,8 @@ const LABELS: Record<string, string> = {
   'messaging.enabled': 'Продукт «Сообщения MAX» включён',
   'messaging.provider_partner_url': 'Адрес партнёрского доступа провайдера',
   'messaging.provider_partner_token': 'Ключ партнёрского доступа провайдера',
+  'bot.enabled': 'Бот MAX (второй канал сообщений)',
+  'bot.api_url': 'Адрес API ботов MAX',
   'messages.pace_seconds': 'Пауза между сообщениями аккаунта, секунд',
   'messages.precheck_enabled': 'Проверять наличие MAX у номера перед отправкой',
   'messages.precheck_exists_days': 'Помнить «у номера есть MAX», суток',

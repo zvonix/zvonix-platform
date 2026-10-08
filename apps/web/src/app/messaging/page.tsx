@@ -6,6 +6,7 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { MessengerAccountStatus } from '@/components/messenger-status';
+import { BotPlatform } from './bot-platform';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import { Input } from '@/components/ui/input';
@@ -184,6 +185,7 @@ function MessagingView() {
         </Table>
       </div>
 
+      <BotPlatform />
       <SmppConnections />
 
       <RecentMessages />

@@ -540,6 +540,50 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
   });
 });
 
+test.describe('бот MAX (ADR-0077)', () => {
+  test('администратор вписывает токен бота, клиент подключается и получает ссылку для пассажиров', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const admin = await adminContext.newPage();
+    await signIn(admin, PEOPLE.admin);
+    const enabled = await admin.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'messaging.enabled': true, 'bot.enabled': true } },
+    });
+    expect(enabled.ok()).toBe(true);
+
+    await admin.goto('/messaging');
+    // Негодный токен — понятный отказ, бот не появляется.
+    await admin.getByLabel('Токен бота').fill('не-токен');
+    await admin.getByRole('button', { name: 'Подключить', exact: true }).click();
+    await expect(admin.getByText(/не принял токен/u)).toBeVisible();
+
+    await admin.getByLabel('Токен бота').fill('ok-e2ebot');
+    await admin.getByRole('button', { name: 'Подключить', exact: true }).click();
+    await expect(admin.getByText('@e2ebot_bot')).toBeVisible();
+    await expect(admin.getByText('Работает')).toBeVisible();
+    // Токен после записи нигде не показывается.
+    await expect(admin.getByText('ok-e2ebot')).toHaveCount(0);
+
+    const clientContext = await browser.newContext();
+    const page = await clientContext.newPage();
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/messages');
+    await page.getByRole('button', { name: 'Подключить бота' }).click();
+    await expect(
+      page.getByText(/^https:\/\/max\.ru\/e2ebot_bot\?start=[a-z0-9]{10}$/u),
+    ).toBeVisible();
+    await expect(page.getByText(/Подписчиков/u)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Отключить', exact: true }).click();
+    await expect(page.getByText('Отключено')).toBeVisible();
+
+    await adminContext.close();
+    await clientContext.close();
+  });
+});
+
 test.describe('обзор для сотрудников', () => {
   test('администратор после входа попадает в «Обзор»: дела, показатели, графики; числа ведут дальше', async ({
     page,

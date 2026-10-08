@@ -118,5 +118,16 @@ export const SMPP_RECEIPT_DEFAULTS: SmppReceiptMap = {
   read: 'delivered',
 };
 
+/**
+ * Бот MAX — второй канал сообщений ([ADR-0077](../../../docs/adr/0077-bot-max-vtoroy-kanal.md)).
+ * `platform` — один бот площадки, `client` — бот клиента; подписчик — человек, запустивший бота по ссылке службы.
+ */
+export const BOT_KINDS = ['platform', 'client'] as const;
+export type BotKind = (typeof BOT_KINDS)[number];
+export const BOT_STATUSES = ['active', 'disabled'] as const;
+export type BotStatus = (typeof BOT_STATUSES)[number];
+export const BOT_SUBSCRIBER_STATES = ['started', 'stopped'] as const;
+export type BotSubscriberState = (typeof BOT_SUBSCRIBER_STATES)[number];
+
 /** Сколько адресов можно разрешить учётной записи SMPP: больше — это уже «любые». */
 export const SMPP_ALLOWED_IPS_MAX = 20;

@@ -5,6 +5,16 @@ import { BillingModule } from '../billing/billing.module.js';
 import { CatalogModule } from '../catalog/catalog.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { BOT_PROVIDER, type BotProvider } from './bot/bot.provider.js';
+import {
+  BotWebhookController,
+  ClientBotController,
+  StaffBotController,
+} from './bot/bots.controller.js';
+import { BotsRepository } from './bot/bots.repository.js';
+import { BotsService } from './bot/bots.service.js';
+import { MaxBotProvider } from './bot/max-bot.provider.js';
+import { SimulatedBotProvider } from './bot/simulated-bot.provider.js';
 import { GreenApiMessageProvider } from './green-api.provider.js';
 import {
   ClientApiMessagesController,
@@ -43,6 +53,9 @@ import { SmppService } from './smpp/smpp.service.js';
     StaffSmppController,
     StaffMessagesController,
     MessengerWebhookController,
+    StaffBotController,
+    ClientBotController,
+    BotWebhookController,
   ],
   providers: [
     MessagingService,
@@ -54,6 +67,16 @@ import { SmppService } from './smpp/smpp.service.js';
     SmppRepository,
     SmppService,
     SmppServer,
+    BotsRepository,
+    BotsService,
+    {
+      provide: BOT_PROVIDER,
+      inject: [APP_CONFIG, APP_LOGGER, SettingsService],
+      useFactory: (config: Config, logger: Logger, settings: SettingsService): BotProvider =>
+        config.MESSENGER_PROVIDER === 'simulated'
+          ? new SimulatedBotProvider()
+          : new MaxBotProvider(settings, logger),
+    },
     {
       provide: MESSAGE_PROVIDER,
       inject: [APP_CONFIG, APP_LOGGER, SettingsService],

@@ -183,6 +183,15 @@ export class SettingsService {
     };
   }
 
+  /** Бот MAX ([ADR-0077](../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)): включён ли и адрес API. */
+  async bot(): Promise<{ readonly enabled: boolean; readonly apiUrl: string }> {
+    const values = await this.values();
+    return {
+      enabled: this.flag(values, 'bot.enabled'),
+      apiUrl: this.text(values, 'bot.api_url').replace(/\/+$/u, ''),
+    };
+  }
+
   /** Автообновление узлов ([ADR-0068](../../../../../docs/adr/0068-avtoobnovlenie-uzlov.md)). */
   async nodes(): Promise<{ readonly autoUpdate: boolean }> {
     const values = await this.values();
