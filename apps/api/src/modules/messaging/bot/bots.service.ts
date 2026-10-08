@@ -5,7 +5,15 @@
 
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { conflict, normalizeMsisdn, notFound, validationFailed, type Id } from '@zvonix/shared';
+import {
+  conflict,
+  dependencyUnavailable,
+  normalizeMsisdn,
+  notFound,
+  validationFailed,
+  type Id,
+  type MoneyAmount,
+} from '@zvonix/shared';
 import {
   decryptSecret,
   encryptSecret,
@@ -16,7 +24,12 @@ import { AuditService } from '../../audit/audit.service.js';
 import { BillingService } from '../../billing/billing.service.js';
 import type { Principal } from '../../identity/identity.service.js';
 import { SettingsService } from '../../settings/settings.service.js';
-import { BOT_PROVIDER, BotTokenRejectedError, type BotProvider } from './bot.provider.js';
+import {
+  BOT_PROVIDER,
+  BotRecipientRejectedError,
+  BotTokenRejectedError,
+  type BotProvider,
+} from './bot.provider.js';
 import {
   BotsRepository,
   type BotConnectionRow,
@@ -315,6 +328,52 @@ export class BotsService {
       throw notFound('Клиент ещё не подключён к боту');
     }
     return this.clientView(clientId);
+  }
+
+  // --- Отправка -----------------------------------------------------------------------------------
+
+  /**
+   * Можно ли отправить сообщение на этот номер ботом клиента: продукт включён, бот работает, клиент к нему
+   * подключён, а у номера есть живой подписчик этого клиента. Возвращает бота и цену сообщения; `undefined` —
+   * сообщение пойдёт через аккаунты.
+   */
+  async routeFor(
+    clientId: Id<'client'>,
+    recipient: string,
+  ): Promise<{ botId: BotId; price: MoneyAmount } | undefined> {
+    const [settings, bot, connection] = await Promise.all([
+      this.settings.bot(),
+      this.repository.findPlatformBot(),
+      this.repository.findConnectionByClient(clientId),
+    ]);
+    if (!settings.enabled || bot?.status !== 'active') return undefined;
+    if (connection?.enabled !== true || connection.botId !== bot.id) return undefined;
+    if ((await this.repository.findReachable(clientId, recipient)) === undefined) return undefined;
+    return { botId: bot.id, price: settings.messagePrice };
+  }
+
+  /**
+   * Отправляет текст подписчику клиента. `BotRecipientRejectedError` — подписчика нет или он остановил бота:
+   * окончательно; прочее — временный сбой, сообщение повторится.
+   */
+  async sendTo(
+    botId: BotId,
+    clientId: Id<'client'>,
+    recipient: string,
+    text: string,
+  ): Promise<{ messageId: string }> {
+    const bot = await this.repository.findBot(botId);
+    if (bot?.status !== 'active') throw dependencyUnavailable('Бот сейчас недоступен');
+    const subscriber = await this.repository.findReachable(clientId, recipient);
+    if (subscriber === undefined) throw new BotRecipientRejectedError('нет подписчика');
+    try {
+      return await this.provider.send(this.tokenOf(bot), subscriber.chatId, text);
+    } catch (cause) {
+      if (cause instanceof BotRecipientRejectedError) {
+        await this.repository.stopSubscriber(subscriber.id);
+      }
+      throw cause;
+    }
   }
 
   // --- События от MAX ----------------------------------------------------------------------------

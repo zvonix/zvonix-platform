@@ -11,6 +11,7 @@ import {
   type Id,
   type MessageChannel,
   type MessageFailureReason,
+  type MessageRoute,
   type MessageStatus,
   type MoneyAmount,
   type SmppReceiptEvent,
@@ -45,13 +46,16 @@ export class MessagesRepository {
       channel: MessageChannel;
       recipient: string;
       text: string;
-      accountId: Id<'messengerAccount'>;
-      partnerId: Id<'partner'>;
+      route?: MessageRoute;
+      /** Аккаунт и партнёр — у сообщения аккаунта; бот — у сообщения бота (ADR-0077). */
+      accountId?: Id<'messengerAccount'>;
+      partnerId?: Id<'partner'>;
+      botId?: Id<'messengerBot'>;
       clientAmount: MoneyAmount;
       partnerAmount: MoneyAmount;
       commissionAmount: MoneyAmount;
     },
-    executor: Executor,
+    executor: Executor = this.database.db,
   ): Promise<MessageRow> {
     try {
       const [row] = await executor.insert(messages).values(draft).returning();
@@ -195,6 +199,19 @@ export class MessagesRepository {
       .update(messages)
       .set({ status: 'sent', providerMessageId, sentAt: at })
       .where(and(eq(messages.id, id), eq(messages.status, 'sending')));
+  }
+
+  /** Сообщение бота: MAX принял его — это и есть доставка (отчёта о прочтении у бота нет). */
+  async markDelivered(id: MessageId, at: Date): Promise<void> {
+    await this.database.db
+      .update(messages)
+      .set({ status: 'delivered', deliveredAt: at })
+      .where(and(eq(messages.id, id), eq(messages.status, 'sent')));
+  }
+
+  /** Окончательный отказ без денег (бесплатное сообщение бота): отдельной транзакции возврата нет. */
+  async markFailedFree(id: MessageId, reason: MessageFailureReason, at: Date): Promise<void> {
+    await this.markFailed(id, reason, at, this.database.db);
   }
 
   /** Аккаунт только что отправлял: от этого момента считается пауза и порядок выбора. */

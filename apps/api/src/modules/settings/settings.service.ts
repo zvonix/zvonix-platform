@@ -4,7 +4,7 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { notFound, parseId, validationFailed } from '@zvonix/shared';
+import { Money, notFound, parseId, validationFailed, type MoneyAmount } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { decryptSecret, encryptSecret, PLATFORM_SETTING_PURPOSE } from '../../infra/secret-box.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -183,12 +183,17 @@ export class SettingsService {
     };
   }
 
-  /** Бот MAX ([ADR-0077](../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)): включён ли и адрес API. */
-  async bot(): Promise<{ readonly enabled: boolean; readonly apiUrl: string }> {
+  /** Бот MAX ([ADR-0077](../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)): включён ли, адрес API и цена сообщения. */
+  async bot(): Promise<{
+    readonly enabled: boolean;
+    readonly apiUrl: string;
+    readonly messagePrice: MoneyAmount;
+  }> {
     const values = await this.values();
     return {
       enabled: this.flag(values, 'bot.enabled'),
       apiUrl: this.text(values, 'bot.api_url').replace(/\/+$/u, ''),
+      messagePrice: Money.fromMajorUnits(this.number(values, 'bot.message_price').toFixed(6)),
     };
   }
 

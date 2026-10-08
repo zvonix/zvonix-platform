@@ -29,6 +29,8 @@ import { BillingService } from '../billing/billing.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
+import { BotsService } from './bot/bots.service.js';
+import { BotRecipientRejectedError } from './bot/bot.provider.js';
 import { MessagingService } from './messaging.service.js';
 import { MessagesRepository, type MessageFilter, type MessageRow } from './messages.repository.js';
 import {
@@ -85,6 +87,7 @@ export class MessagesService {
     private readonly settings: SettingsService,
     private readonly tariffs: TariffService,
     private readonly redis: RedisService,
+    private readonly bots: BotsService,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -152,41 +155,72 @@ export class MessagesService {
       if (earlier !== undefined) return this.sameOrRefuse(earlier, recipient, input.text);
     }
 
-    const account = await this.pickAccount();
-    if (account === undefined) {
+    // Сначала бот: у номера есть подписчик этого клиента (ADR-0077). Иначе — аккаунты партнёров.
+    const viaBot = await this.bots.routeFor(clientId, recipient);
+    const account = viaBot === undefined ? await this.pickAccount() : undefined;
+    if (viaBot === undefined && account === undefined) {
       throw dependencyUnavailable('Сейчас нет доступных аккаунтов для отправки — повторите позже');
     }
-    const quote = await this.quoteFor(account, clientId);
 
     const id = this.repository.newId();
     try {
-      await this.billing.chargeMessage({
-        messageId: id,
-        clientId,
-        partnerId: account.partnerId,
-        clientAmount: quote.clientAmount,
-        partnerAmount: quote.partnerAmount,
-        commissionAmount: quote.commissionAmount,
-        // Строка очереди — той же транзакцией, что и деньги: нет средств — нет и сообщения.
-        alsoInTransaction: async (tx) => {
-          await this.repository.insert(
-            {
-              id,
-              clientId,
-              externalId,
-              channel,
-              recipient,
-              text: input.text,
-              accountId: account.id,
-              partnerId: account.partnerId,
-              clientAmount: quote.clientAmount,
-              partnerAmount: quote.partnerAmount,
-              commissionAmount: quote.commissionAmount,
+      if (viaBot !== undefined) {
+        const draft = {
+          id,
+          clientId,
+          externalId,
+          channel,
+          recipient,
+          text: input.text,
+          route: 'bot' as const,
+          botId: viaBot.botId,
+          clientAmount: viaBot.price,
+          partnerAmount: Money.ZERO,
+          commissionAmount: viaBot.price,
+        };
+        if (Money.isZero(viaBot.price)) {
+          // Бесплатно: денег не двигаем, строка встаёт в очередь сама.
+          await this.repository.insert(draft);
+        } else {
+          await this.billing.chargeBotMessage({
+            messageId: id,
+            clientId,
+            amount: viaBot.price,
+            alsoInTransaction: async (tx) => {
+              await this.repository.insert(draft, tx);
             },
-            tx,
-          );
-        },
-      });
+          });
+        }
+      } else if (account !== undefined) {
+        const quote = await this.quoteFor(account, clientId);
+        await this.billing.chargeMessage({
+          messageId: id,
+          clientId,
+          partnerId: account.partnerId,
+          clientAmount: quote.clientAmount,
+          partnerAmount: quote.partnerAmount,
+          commissionAmount: quote.commissionAmount,
+          // Строка очереди — той же транзакцией, что и деньги: нет средств — нет и сообщения.
+          alsoInTransaction: async (tx) => {
+            await this.repository.insert(
+              {
+                id,
+                clientId,
+                externalId,
+                channel,
+                recipient,
+                text: input.text,
+                accountId: account.id,
+                partnerId: account.partnerId,
+                clientAmount: quote.clientAmount,
+                partnerAmount: quote.partnerAmount,
+                commissionAmount: quote.commissionAmount,
+              },
+              tx,
+            );
+          },
+        });
+      }
     } catch (cause) {
       // Две одновременные отправки с одним ключом: вторая упёрлась в уникальный индекс и откатилась
       // вместе со списанием. Отдаём то, что успела первая.
@@ -309,13 +343,56 @@ export class MessagesService {
     return result;
   }
 
+  /** Сообщение бота: подписчику клиента, без пауз и лимитов аккаунтов (ADR-0077). Доставлено — как только MAX приняло. */
+  private async dispatchBot(message: MessageRow, now: Date): Promise<boolean> {
+    if (message.botId === null) {
+      await this.fail(message, 'platform', now);
+      return false;
+    }
+    try {
+      const { messageId } = await this.bots.sendTo(
+        message.botId,
+        message.clientId,
+        message.recipient,
+        message.text,
+      );
+      await this.repository.markSent(message.id, messageId, now);
+      await this.repository.markDelivered(message.id, now);
+      return true;
+    } catch (cause) {
+      await this.afterSendFailure(message, cause, now);
+      return false;
+    }
+  }
+
+  /** Отказ получателя — окончательный (возврат); прочее — повтор с паузами, после пяти попыток возврат. */
+  private async afterSendFailure(message: MessageRow, cause: unknown, now: Date): Promise<void> {
+    if (cause instanceof RecipientRejectedError || cause instanceof BotRecipientRejectedError) {
+      await this.fail(message, 'recipient_not_in_max', now);
+      return;
+    }
+    this.logger.warn('Временный сбой отправки сообщения', {
+      message_id: message.id,
+      attempt: message.attempts,
+      reason: cause instanceof Error ? cause.name : 'unknown',
+    });
+    if (message.attempts >= MESSAGE_MAX_ATTEMPTS) {
+      await this.fail(message, 'platform', now);
+    } else {
+      const delay = BACKOFF_BASE_SECONDS * 2 ** (message.attempts - 1);
+      await this.repository.requeue(message.id, new Date(now.getTime() + delay * 1000), false);
+    }
+  }
+
   private async dispatchOne(
     message: MessageRow,
     now: Date,
     paceSeconds: number,
     precheck: PrecheckMemory | null,
   ): Promise<boolean> {
-    const account = await this.repository.findAccount(message.accountId);
+    if (message.route === 'bot') return this.dispatchBot(message, now);
+    const account =
+      message.accountId === null ? undefined : await this.repository.findAccount(message.accountId);
     if (account === undefined || account.status === 'retired') {
       await this.fail(message, 'account_unavailable', now);
       return false;
@@ -376,36 +453,36 @@ export class MessagesService {
       await this.repository.touchAccount(account.id, now);
       return true;
     } catch (cause) {
-      if (cause instanceof RecipientRejectedError) {
-        await this.fail(message, 'recipient_not_in_max', now);
-        return false;
-      }
-      this.logger.warn('Временный сбой отправки сообщения', {
-        message_id: message.id,
-        attempt: message.attempts,
-        reason: cause instanceof Error ? cause.name : 'unknown',
-      });
-      if (message.attempts >= MESSAGE_MAX_ATTEMPTS) {
-        await this.fail(message, 'platform', now);
-      } else {
-        const delay = BACKOFF_BASE_SECONDS * 2 ** (message.attempts - 1);
-        await this.repository.requeue(message.id, new Date(now.getTime() + delay * 1000), false);
-      }
+      await this.afterSendFailure(message, cause, now);
       return false;
     }
   }
 
   /** Окончательный отказ с возвратом денег: проводка и состояние — одной транзакцией. */
   async fail(message: MessageRow, reason: MessageFailureReason, now: Date): Promise<void> {
-    await this.billing.refundMessage({
-      messageId: message.id,
-      clientId: message.clientId,
-      partnerId: message.partnerId,
-      clientAmount: message.clientAmount,
-      partnerAmount: message.partnerAmount,
-      commissionAmount: message.commissionAmount,
-      alsoInTransaction: (tx) => this.repository.markFailed(message.id, reason, now, tx),
-    });
+    if (message.partnerId === null) {
+      // Сообщение бота: деньги ушли только площадке; бесплатное — возвращать нечего.
+      if (Money.isZero(message.clientAmount)) {
+        await this.repository.markFailedFree(message.id, reason, now);
+      } else {
+        await this.billing.refundBotMessage({
+          messageId: message.id,
+          clientId: message.clientId,
+          amount: message.clientAmount,
+          alsoInTransaction: (tx) => this.repository.markFailed(message.id, reason, now, tx),
+        });
+      }
+    } else {
+      await this.billing.refundMessage({
+        messageId: message.id,
+        clientId: message.clientId,
+        partnerId: message.partnerId,
+        clientAmount: message.clientAmount,
+        partnerAmount: message.partnerAmount,
+        commissionAmount: message.commissionAmount,
+        alsoInTransaction: (tx) => this.repository.markFailed(message.id, reason, now, tx),
+      });
+    }
     this.logger.info('Сообщение не отправлено, деньги возвращены', {
       message_id: message.id,
       reason,

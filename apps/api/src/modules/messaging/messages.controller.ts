@@ -67,8 +67,10 @@ const toClientView = (row: MessageRow): ClientMessageView => ({
 /** То же для сотрудника плюс деньги по трём счетам и чей это аккаунт. */
 interface StaffMessageView extends Omit<ClientMessageView, 'text'> {
   readonly client_id: string;
-  readonly partner_id: string;
-  readonly account_id: string;
+  /** `bot` — сообщение ушло ботом; у него нет ни партнёра, ни аккаунта. */
+  readonly route: 'account' | 'bot';
+  readonly partner_id: string | null;
+  readonly account_id: string | null;
   readonly attempts: number;
   readonly money: { client: string; partner: string; margin: string };
 }
@@ -77,6 +79,7 @@ interface StaffMessageView extends Omit<ClientMessageView, 'text'> {
 const toStaffView = (row: MessageRow): StaffMessageView => ({
   ...withoutText(toClientView(row)),
   client_id: row.clientId,
+  route: row.route,
   partner_id: row.partnerId,
   account_id: row.accountId,
   attempts: row.attempts,

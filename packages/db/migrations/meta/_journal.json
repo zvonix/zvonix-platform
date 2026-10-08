@@ -344,6 +344,13 @@
       "when": 1791427050763,
       "tag": "0048_bot_max",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791432001805,
+      "tag": "0049_soobscheniya_bota",
+      "breakpoints": true
     }
   ]
 }

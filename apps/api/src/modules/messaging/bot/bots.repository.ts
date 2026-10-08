@@ -195,6 +195,14 @@ export class BotsRepository {
     return row;
   }
 
+  /** Подписчик перестал принимать сообщения бота (остановил бота в MAX): дальше ему не пишем. */
+  async stopSubscriber(id: BotSubscriberRow['id']): Promise<void> {
+    await this.database.db
+      .update(botSubscribers)
+      .set({ state: 'stopped', updatedAt: new Date() })
+      .where(eq(botSubscribers.id, id));
+  }
+
   /** Сколько у клиента подписчиков всего и сколько из них уже сообщили номер. */
   async countFor(clientId: Id<'client'>): Promise<{ total: number; withPhone: number }> {
     const [row] = await this.database.db

@@ -18,6 +18,7 @@ import {
   BOT_KINDS,
   BOT_STATUSES,
   BOT_SUBSCRIBER_STATES,
+  MESSAGE_ROUTES,
   MESSENGER_PROVIDERS,
   SMPP_RECEIPT_ACTIONS,
   SMPP_RECEIPT_DEFAULTS,
@@ -26,6 +27,7 @@ import {
   type BotSubscriberState,
   type MessageChannel,
   type MessageFailureReason,
+  type MessageRoute,
   type MessageStatus,
   type MessengerAccountReason,
   type MessengerAccountStatus,
@@ -183,13 +185,15 @@ export const messages = pgTable(
     status: text().$type<MessageStatus>().notNull().default('queued'),
     failureReason: text().$type<MessageFailureReason>(),
 
-    /** Аккаунт и партнёр выбираются при приёме (по цене) и дальше не меняются. */
-    accountId: idRef<'messengerAccount'>()
-      .notNull()
-      .references(() => messengerAccounts.id, { onDelete: 'restrict' }),
-    partnerId: idRef<'partner'>()
-      .notNull()
-      .references(() => partners.id, { onDelete: 'restrict' }),
+    /** Путь отправки: `account` — через аккаунт партнёра, `bot` — ботом подписчику клиента (ADR-0077). */
+    route: text().$type<MessageRoute>().notNull().default('account'),
+    /** Аккаунт и партнёр выбираются при приёме (по цене) и дальше не меняются; у сообщения бота их нет. */
+    accountId: idRef<'messengerAccount'>().references(() => messengerAccounts.id, {
+      onDelete: 'restrict',
+    }),
+    partnerId: idRef<'partner'>().references(() => partners.id, { onDelete: 'restrict' }),
+    /** Бот, которым уходит сообщение; только при `route = 'bot'`. */
+    botId: idRef<'messengerBot'>().references(() => messengerBots.id, { onDelete: 'restrict' }),
 
     /** Идентификатор сообщения у провайдера; по нему приходят статусы доставки. */
     providerMessageId: text(),
@@ -230,9 +234,18 @@ export const messages = pgTable(
       'messages_failure_matches_status',
       sql`(${t.status} = 'failed') = (${t.failureReason} is not null)`,
     ),
+    check('messages_route_check', oneOf(t.route, MESSAGE_ROUTES)),
+    // Сообщение аккаунта держится на аккаунте и партнёре, сообщение бота — на боте (ADR-0077).
+    check(
+      'messages_route_owner_check',
+      sql`(${t.route} = 'account' and ${t.accountId} is not null and ${t.partnerId} is not null and ${t.botId} is null)
+        or (${t.route} = 'bot' and ${t.botId} is not null and ${t.accountId} is null and ${t.partnerId} is null)`,
+    ),
+    // Аккаунт: клиент платит = партнёру + наценка. Бот: партнёра нет, вся сумма — площадке (может быть нулевой).
     check(
       'messages_amounts_check',
-      sql`${t.partnerAmount} > 0 and ${t.commissionAmount} >= 0 and ${t.clientAmount} = ${t.partnerAmount} + ${t.commissionAmount}`,
+      sql`${t.commissionAmount} >= 0 and ${t.clientAmount} = ${t.partnerAmount} + ${t.commissionAmount}
+        and ((${t.route} = 'account' and ${t.partnerAmount} > 0) or (${t.route} = 'bot' and ${t.partnerAmount} = 0))`,
     ),
     uniqueIndex('messages_client_external_key')
       .on(t.clientId, t.externalId)

@@ -86,6 +86,13 @@ export const MESSAGE_MAX_ATTEMPTS = 5;
  * От пути зависит только одно: по `smpp` клиенту отдаётся отчёт о доставке (`deliver_sm`).
  */
 export const MESSAGE_CHANNELS = ['api', 'smpp'] as const;
+
+/**
+ * Каким путём сообщение уходит получателю ([ADR-0077](../../../docs/adr/0077-bot-max-vtoroy-kanal.md)): `account` —
+ * с аккаунта партнёра, `bot` — от бота подписчику клиента.
+ */
+export const MESSAGE_ROUTES = ['account', 'bot'] as const;
+export type MessageRoute = (typeof MESSAGE_ROUTES)[number];
 export type MessageChannel = (typeof MESSAGE_CHANNELS)[number];
 
 /**
