@@ -11,6 +11,7 @@ import {
   type Id,
   type MessengerAccountReason,
   type MessengerAccountStatus,
+  type MessengerPauseReason,
 } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
@@ -32,7 +33,7 @@ export class MessagingRepository {
     try {
       const [row] = await this.database.db
         .insert(messengerAccounts)
-        .values({ id: newId<'messengerAccount'>(), ...draft })
+        .values({ id: newId<'messengerAccount'>(), ...draft, warmupStartedAt: new Date() })
         .returning();
       if (row === undefined) throw new Error('Аккаунт не вставлен');
       return row;
@@ -133,6 +134,64 @@ export class MessagingRepository {
         stateReason: state.reason,
         phone: state.phone,
         stateCheckedAt: state.checkedAt,
+      })
+      .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
+      .returning();
+    return row;
+  }
+
+  /** Пауза здоровья: условный переход — аккаунт, уже стоящий на паузе, повторно не ставится. */
+  async pause(
+    id: MessengerAccountId,
+    reason: MessengerPauseReason,
+    until: Date,
+    now: Date,
+  ): Promise<boolean> {
+    const rows = await this.database.db
+      .update(messengerAccounts)
+      .set({ pausedUntil: until, pauseReason: reason, healthSince: until })
+      .where(
+        and(
+          eq(messengerAccounts.id, id),
+          ne(messengerAccounts.status, 'retired'),
+          or(isNull(messengerAccounts.pausedUntil), lt(messengerAccounts.pausedUntil, now)),
+        ),
+      )
+      .returning({ id: messengerAccounts.id });
+    return rows.length > 0;
+  }
+
+  /** Администратор снимает паузу: статистика здоровья считается заново с этого момента. */
+  async resume(id: MessengerAccountId, now: Date): Promise<MessengerAccountRow | undefined> {
+    const [row] = await this.database.db
+      .update(messengerAccounts)
+      .set({ pausedUntil: null, pauseReason: null, healthSince: now })
+      .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
+      .returning();
+    return row;
+  }
+
+  /** Прогрев заново: аккаунт получил ограничение, и набирать силу надо с первых суток. */
+  async restartWarmup(id: MessengerAccountId, at: Date): Promise<void> {
+    await this.database.db
+      .update(messengerAccounts)
+      .set({ warmupStartedAt: at })
+      .where(and(eq(messengerAccounts.id, id), eq(messengerAccounts.warmupEnabled, true)));
+  }
+
+  /** Включить или выключить автопрогрев. Включение начинает прогрев с начала, если он не шёл. */
+  async setWarmupEnabled(
+    id: MessengerAccountId,
+    enabled: boolean,
+    at: Date,
+  ): Promise<MessengerAccountRow | undefined> {
+    const [row] = await this.database.db
+      .update(messengerAccounts)
+      .set({
+        warmupEnabled: enabled,
+        ...(enabled
+          ? { warmupStartedAt: sql`coalesce(${messengerAccounts.warmupStartedAt}, ${at})` }
+          : {}),
       })
       .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
       .returning();

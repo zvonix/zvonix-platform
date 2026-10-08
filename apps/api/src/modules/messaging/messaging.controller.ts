@@ -14,12 +14,14 @@ import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
+import { effectiveLimits } from './warmup.js';
 import { MessagingService } from './messaging.service.js';
 import {
   createAccountSchema,
   registerAccountSchema,
   sendPasswordSchema,
   updateAccountSchema,
+  warmupSchema,
 } from './schemas.js';
 
 interface AccountView {
@@ -35,11 +37,20 @@ interface AccountView {
   readonly price: string | null;
   readonly limit_per_minute: number | null;
   readonly limit_per_day: number | null;
+  /** Автопрогрев и равномерная отправка включены. */
+  readonly warmup_enabled: boolean;
+  /** Номер суток прогрева с нуля; пусто — прогрева нет. */
+  readonly warmup_day: number | null;
+  /** Сколько сообщений за сутки аккаунту разрешено сейчас; пусто — без ограничения. */
+  readonly daily_limit_now: number | null;
+  /** Пауза здоровья до этого времени (MAX часто сообщает «нет аккаунта» после отправки); пусто — не на паузе. */
+  readonly paused_until: string | null;
+  readonly pause_reason: string | null;
   readonly state_checked_at: string | null;
   readonly created_at: string;
 }
 
-const toView = (row: MessengerAccountRow): AccountView => ({
+const toView = (row: MessengerAccountRow, now: Date = new Date()): AccountView => ({
   id: row.id,
   label: row.label,
   status: row.status,
@@ -49,6 +60,12 @@ const toView = (row: MessengerAccountRow): AccountView => ({
   price: row.price === null ? null : Money.format(row.price),
   limit_per_minute: row.limitPerMinute,
   limit_per_day: row.limitPerDay,
+  warmup_enabled: row.warmupEnabled,
+  warmup_day: effectiveLimits(row, now).warmupDay,
+  daily_limit_now: effectiveLimits(row, now).daily,
+  paused_until:
+    row.pausedUntil !== null && row.pausedUntil > now ? row.pausedUntil.toISOString() : null,
+  pause_reason: row.pausedUntil !== null && row.pausedUntil > now ? row.pauseReason : null,
   state_checked_at: row.stateCheckedAt?.toISOString() ?? null,
   created_at: row.createdAt.toISOString(),
 });
@@ -70,7 +87,7 @@ export class MessagingController {
       this.messaging.listOwn(actor.userId),
       this.settings.messaging(),
     ]);
-    return { enabled: config.enabled, accounts: rows.map(toView) };
+    return { enabled: config.enabled, accounts: rows.map((row) => toView(row)) };
   }
 
   /** Партнёр заводит аккаунт; дальше — QR-код. `201` с аккаунтом в состоянии «ждёт входа». */
@@ -198,6 +215,34 @@ export class MessagingController {
         token: body.token,
         apiUrl: body.apiUrl,
       },
+    );
+    return { account: toView(row) };
+  }
+
+  /** Снять паузу здоровья раньше срока (ADR-0079). */
+  @Roles('admin')
+  @Post('messenger/accounts/:id/resume')
+  @HttpCode(200)
+  async resume(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+  ): Promise<{ account: AccountView }> {
+    const row = await this.messaging.resume({ userId: actor.userId, role: actor.role }, id);
+    return { account: toView(row) };
+  }
+
+  /** Автопрогрев аккаунта: включить или выключить (ADR-0078). */
+  @Roles('admin')
+  @Patch('messenger/accounts/:id/warmup')
+  async setWarmup(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+    @Body(zodBody(warmupSchema)) body: z.infer<typeof warmupSchema>,
+  ): Promise<{ account: AccountView }> {
+    const row = await this.messaging.setWarmup(
+      { userId: actor.userId, role: actor.role },
+      id,
+      body.enabled,
     );
     return { account: toView(row) };
   }

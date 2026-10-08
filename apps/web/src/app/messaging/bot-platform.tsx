@@ -4,13 +4,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
+import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Label } from '@/components/ui/label';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
+import { money } from '@/lib/money';
 
 interface BotView {
   readonly enabled: boolean;
@@ -177,6 +187,160 @@ export function BotPlatform() {
           </div>
         )}
       </div>
+
+      {bot !== null && <BotClients canChange={canChange} />}
     </section>
+  );
+}
+
+interface ClientRow {
+  readonly client_id: string;
+  readonly client_name: string;
+  readonly enabled: boolean;
+  readonly subscribers: number;
+  readonly own: { readonly message_price: string | null; readonly monthly_fee: string | null };
+  readonly terms: { readonly message_price: string; readonly monthly_fee: string };
+  readonly fee_paid: boolean;
+}
+
+const CLIENTS_KEY = ['bots', 'platform', 'clients'] as const;
+
+/** Клиенты, подключённые к боту: условия (общие или свои), подписчики, оплачен ли месяц. */
+function BotClients({ canChange }: { canChange: boolean }) {
+  const queryClient = useQueryClient();
+  const list = useQuery({
+    queryKey: CLIENTS_KEY,
+    queryFn: ({ signal }) =>
+      request<{ clients: ClientRow[] }>('/bots/platform/clients', { signal }),
+  });
+  const save = useMutation({
+    mutationFn: (input: {
+      clientId: string;
+      messagePrice: string | null;
+      monthlyFee: string | null;
+    }) =>
+      request<{ clients: ClientRow[] }>(`/bots/platform/clients/${input.clientId}`, {
+        method: 'PATCH',
+        body: { messagePrice: input.messagePrice, monthlyFee: input.monthlyFee },
+      }),
+    onSuccess: (view) => queryClient.setQueryData(CLIENTS_KEY, view),
+  });
+
+  const rows = list.data?.clients ?? [];
+  if (list.isSuccess && rows.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="font-semibold">Клиенты бота</h3>
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className="h-8">Клиент</TableHead>
+              <TableHead className="h-8 text-right">Подписчиков</TableHead>
+              <TableHead className="h-8 text-right">Цена сообщения</TableHead>
+              <TableHead className="h-8 text-right">Плата в месяц</TableHead>
+              <TableHead className="h-8">Месяц</TableHead>
+              <TableHead className="h-8" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.isPending && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} className="text-muted-foreground">
+                  Загружаем…
+                </TableCell>
+              </TableRow>
+            )}
+            {rows.map((row) => (
+              <TableRow key={row.client_id}>
+                <TableCell>
+                  {row.client_name}
+                  {!row.enabled && <span className="block text-faint">отключён</span>}
+                </TableCell>
+                <TableCell className="num text-right">{row.subscribers}</TableCell>
+                <TableCell className="num text-right">
+                  {money(row.terms.message_price)}
+                  {row.own.message_price !== null && <span className="block text-faint">своя</span>}
+                </TableCell>
+                <TableCell className="num text-right">
+                  {money(row.terms.monthly_fee)}
+                  {row.own.monthly_fee !== null && <span className="block text-faint">своя</span>}
+                </TableCell>
+                <TableCell>{row.fee_paid ? 'Оплачен' : 'Ждёт оплаты'}</TableCell>
+                <TableCell className="text-right">
+                  {canChange && (
+                    <FormDialog
+                      label="Условия"
+                      title={`Условия бота: ${row.client_name}`}
+                      description="Пусто — как у всех клиентов. 0 — бесплатно. Новая плата действует со следующего месяца."
+                      variant="outline"
+                      size="xs"
+                    >
+                      <TermsForm
+                        row={row}
+                        onSave={(messagePrice, monthlyFee) =>
+                          save.mutateAsync({ clientId: row.client_id, messagePrice, monthlyFee })
+                        }
+                      />
+                    </FormDialog>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+/** Окно «Условия бота» клиента: цена сообщения и плата за месяц, пусто — общие. */
+function TermsForm({
+  row,
+  onSave,
+}: {
+  row: ClientRow;
+  onSave: (messagePrice: string | null, monthlyFee: string | null) => Promise<unknown>;
+}) {
+  const [messagePrice, setMessagePrice] = useState(row.own.message_price ?? '');
+  const [monthlyFee, setMonthlyFee] = useState(row.own.monthly_fee ?? '');
+  const valid = (value: string) =>
+    value.trim() === '' || /^\d{1,7}([.,]\d{1,6})?$/u.test(value.trim());
+  const normalize = (value: string) =>
+    value.trim() === '' ? null : value.trim().replace(',', '.');
+
+  return (
+    <DialogForm
+      submitLabel="Сохранить"
+      canSubmit={valid(messagePrice) && valid(monthlyFee)}
+      onSubmit={() => onSave(normalize(messagePrice), normalize(monthlyFee))}
+    >
+      <DialogField label={`Цена сообщения, ₽ (общая ${money(row.terms.message_price)})`}>
+        <Input
+          className="num"
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder="как у всех"
+          autoFocus
+          value={messagePrice}
+          onChange={(event) => {
+            setMessagePrice(event.target.value);
+          }}
+        />
+      </DialogField>
+      <DialogField label="Плата в месяц, ₽">
+        <Input
+          className="num"
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder="как у всех"
+          value={monthlyFee}
+          onChange={(event) => {
+            setMonthlyFee(event.target.value);
+          }}
+        />
+      </DialogField>
+    </DialogForm>
   );
 }

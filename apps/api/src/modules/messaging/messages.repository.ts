@@ -3,7 +3,23 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  min,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
 import { messages, messengerAccounts, smppAccounts } from '@zvonix/db/schema';
 import {
@@ -11,6 +27,7 @@ import {
   type Id,
   type MessageChannel,
   type MessageFailureReason,
+  type MessageRoute,
   type MessageStatus,
   type MoneyAmount,
   type SmppReceiptEvent,
@@ -21,6 +38,14 @@ import type { MessengerAccountRow } from './messaging.repository.js';
 
 export type MessageRow = typeof messages.$inferSelect;
 export type MessageId = Id<'message'>;
+
+/** Нагрузка на аккаунт: отправки за минуту, час, сутки и очередь, которая за ним стоит. */
+export interface AccountLoad {
+  minute: number;
+  hour: number;
+  day: number;
+  backlog: number;
+}
 
 /** Сколько «взятое в работу» считается живым: дольше — воркер умер, сообщение берут заново. */
 const LEASE_MS = 5 * 60_000;
@@ -45,13 +70,16 @@ export class MessagesRepository {
       channel: MessageChannel;
       recipient: string;
       text: string;
-      accountId: Id<'messengerAccount'>;
-      partnerId: Id<'partner'>;
+      route?: MessageRoute;
+      /** Аккаунт и партнёр — у сообщения аккаунта; бот — у сообщения бота (ADR-0077). */
+      accountId?: Id<'messengerAccount'>;
+      partnerId?: Id<'partner'>;
+      botId?: Id<'messengerBot'>;
       clientAmount: MoneyAmount;
       partnerAmount: MoneyAmount;
       commissionAmount: MoneyAmount;
     },
-    executor: Executor,
+    executor: Executor = this.database.db,
   ): Promise<MessageRow> {
     try {
       const [row] = await executor.insert(messages).values(draft).returning();
@@ -99,19 +127,93 @@ export class MessagesRepository {
   }
 
   /**
-   * Аккаунты, на которые можно принять сообщение: вошли, цена назначена. Дешёвый первым, при равной
-   * цене — тот, что дольше не отправлял. Допущен ли партнёр к работе, проверяет служба.
+   * Кандидаты под сообщение ([ADR-0079](../../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)):
+   * рабочие аккаунты с ценой, не на паузе, самой дешёвой цены, а в ней — давно не работавшие первыми. Читается
+   * `limit` строк, а не все: у партнёра их могут быть сотни. `partnerId` и `price` сужают выбор до «соседей»
+   * по сообщению, `exceptPartners` — до допущенных партнёров, `exceptId` — без самого аккаунта.
    */
-  listEligibleAccounts(): Promise<MessengerAccountRow[]> {
+  async listCandidates(filter: {
+    now: Date;
+    limit: number;
+    partnerId?: Id<'partner'>;
+    price?: MoneyAmount;
+    exceptId?: Id<'messengerAccount'>;
+    exceptPartners: readonly Id<'partner'>[];
+  }): Promise<MessengerAccountRow[]> {
+    const conditions = [
+      eq(messengerAccounts.status, 'active'),
+      isNotNull(messengerAccounts.price),
+      or(isNull(messengerAccounts.pausedUntil), lt(messengerAccounts.pausedUntil, filter.now)),
+      filter.partnerId === undefined
+        ? undefined
+        : eq(messengerAccounts.partnerId, filter.partnerId),
+      filter.price === undefined ? undefined : eq(messengerAccounts.price, filter.price),
+      filter.exceptId === undefined ? undefined : ne(messengerAccounts.id, filter.exceptId),
+      filter.exceptPartners.length === 0
+        ? undefined
+        : notInArray(messengerAccounts.partnerId, [...filter.exceptPartners]),
+    ];
+    // Самая дешёвая цена среди подходящих: только её группа — цена клиента не прыгает на дорогой аккаунт.
+    const [cheapest] = await this.database.db
+      .select({ price: min(messengerAccounts.price) })
+      .from(messengerAccounts)
+      .where(and(...conditions));
+    if (cheapest?.price === null || cheapest?.price === undefined) return [];
     return this.database.db
       .select()
       .from(messengerAccounts)
-      .where(and(eq(messengerAccounts.status, 'active'), isNotNull(messengerAccounts.price)))
-      .orderBy(
-        asc(messengerAccounts.price),
-        asc(messengerAccounts.lastUsedAt),
-        asc(messengerAccounts.id),
-      );
+      .where(and(...conditions, eq(messengerAccounts.price, cheapest.price)))
+      .orderBy(sql`${messengerAccounts.lastUsedAt} asc nulls first`, asc(messengerAccounts.id))
+      .limit(filter.limit);
+  }
+
+  /** Отправки аккаунтов за минуту, час и сутки и очередь за ними — для лимитов. Одним запросом на всех кандидатов. */
+  async loadOf(
+    accountIds: readonly Id<'messengerAccount'>[],
+    now: Date,
+  ): Promise<Map<string, AccountLoad>> {
+    const result = new Map<string, AccountLoad>();
+    if (accountIds.length === 0) return result;
+    const minuteAgo = new Date(now.getTime() - 60_000);
+    const hourAgo = new Date(now.getTime() - 3_600_000);
+    const dayAgo = new Date(now.getTime() - 86_400_000);
+    const ids = [...accountIds];
+    const sent = await this.database.db
+      .select({
+        accountId: messages.accountId,
+        minute: sql<number>`count(*) filter (where ${messages.sentAt} >= ${minuteAgo})::int`,
+        hour: sql<number>`count(*) filter (where ${messages.sentAt} >= ${hourAgo})::int`,
+        day: sql<number>`count(*)::int`,
+      })
+      .from(messages)
+      .where(and(inArray(messages.accountId, ids), gte(messages.sentAt, dayAgo)))
+      .groupBy(messages.accountId);
+    const queued = await this.database.db
+      .select({ accountId: messages.accountId, backlog: sql<number>`count(*)::int` })
+      .from(messages)
+      .where(and(inArray(messages.accountId, ids), inArray(messages.status, ['queued', 'sending'])))
+      .groupBy(messages.accountId);
+    for (const id of ids) result.set(id, { minute: 0, hour: 0, day: 0, backlog: 0 });
+    for (const row of sent) {
+      if (row.accountId === null) continue;
+      const load = result.get(row.accountId);
+      if (load !== undefined)
+        Object.assign(load, { minute: row.minute, hour: row.hour, day: row.day });
+    }
+    for (const row of queued) {
+      if (row.accountId === null) continue;
+      const load = result.get(row.accountId);
+      if (load !== undefined) Object.assign(load, { backlog: row.backlog });
+    }
+    return result;
+  }
+
+  /** Сообщение переносится на другой аккаунт того же партнёра и той же цены, пока оно «в работе». */
+  async reassign(id: MessageId, accountId: Id<'messengerAccount'>): Promise<void> {
+    await this.database.db
+      .update(messages)
+      .set({ accountId })
+      .where(and(eq(messages.id, id), eq(messages.status, 'sending')));
   }
 
   async findAccount(id: Id<'messengerAccount'>): Promise<MessengerAccountRow | undefined> {
@@ -197,6 +299,19 @@ export class MessagesRepository {
       .where(and(eq(messages.id, id), eq(messages.status, 'sending')));
   }
 
+  /** Сообщение бота: MAX принял его — это и есть доставка (отчёта о прочтении у бота нет). */
+  async markDelivered(id: MessageId, at: Date): Promise<void> {
+    await this.database.db
+      .update(messages)
+      .set({ status: 'delivered', deliveredAt: at })
+      .where(and(eq(messages.id, id), eq(messages.status, 'sent')));
+  }
+
+  /** Окончательный отказ без денег (бесплатное сообщение бота): отдельной транзакции возврата нет. */
+  async markFailedFree(id: MessageId, reason: MessageFailureReason, at: Date): Promise<void> {
+    await this.markFailed(id, reason, at, this.database.db);
+  }
+
   /** Аккаунт только что отправлял: от этого момента считается пауза и порядок выбора. */
   async touchAccount(id: Id<'messengerAccount'>, at: Date): Promise<void> {
     await this.database.db
@@ -218,12 +333,41 @@ export class MessagesRepository {
       .where(and(eq(messages.id, id), inArray(messages.status, ['queued', 'sending', 'sent'])));
   }
 
-  /** Сколько отправил аккаунт с `since` — для лимитов в минуту и в сутки. */
-  async countSentSince(accountId: Id<'messengerAccount'>, since: Date): Promise<number> {
+  /**
+   * Итоги по аккаунтам за окно: сколько сообщений ушло и у скольких MAX уже после отправки сообщил «нет аккаунта»
+   * (`sent_at` заполнен — отказ предпроверки до отправки аккаунту не вредит и не считается). Аккаунты на паузе и
+   * списанные не считаются; счёт идёт с `health_since` аккаунта.
+   */
+  async healthOutcomes(
+    since: Date,
+    now: Date,
+  ): Promise<{ accountId: Id<'messengerAccount'>; absent: number; ok: number }[]> {
+    const result = await this.database.db.execute(sql`
+      select m.account_id as "accountId",
+             count(*) filter (where m.status = 'failed' and m.failure_reason = 'recipient_not_in_max')::int as absent,
+             count(*) filter (where m.status in ('sent', 'delivered', 'read'))::int as ok
+        from messages m
+        join messenger_accounts a on a.id = m.account_id
+       where m.sent_at >= ${since}
+         and (a.health_since is null or m.sent_at >= a.health_since)
+         and a.status <> 'retired'
+         and (a.paused_until is null or a.paused_until <= ${now})
+       group by m.account_id
+    `);
+    return result.rows as { accountId: Id<'messengerAccount'>; absent: number; ok: number }[];
+  }
+
+  /** Сколько аккаунтов сейчас работают: вошли и не на паузе. */
+  async countWorking(now: Date): Promise<number> {
     const [row] = await this.database.db
       .select({ total: count() })
-      .from(messages)
-      .where(and(eq(messages.accountId, accountId), gte(messages.sentAt, since)));
+      .from(messengerAccounts)
+      .where(
+        and(
+          eq(messengerAccounts.status, 'active'),
+          or(isNull(messengerAccounts.pausedUntil), lt(messengerAccounts.pausedUntil, now)),
+        ),
+      );
     return row?.total ?? 0;
   }
 

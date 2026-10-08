@@ -9,7 +9,10 @@ import { MessengerAccountStatus } from '@/components/messenger-status';
 import { BotPlatform } from './bot-platform';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -42,6 +45,11 @@ interface Account {
   readonly price: string | null;
   readonly limit_per_minute: number | null;
   readonly limit_per_day: number | null;
+  readonly warmup_enabled: boolean;
+  readonly warmup_day: number | null;
+  readonly paused_until: string | null;
+  readonly pause_reason: string | null;
+  readonly daily_limit_now: number | null;
   readonly state_reason: string | null;
   readonly state_checked_at: string | null;
   readonly partner_id: string;
@@ -72,6 +80,21 @@ function MessagingView() {
   const retire = useMutation({
     mutationFn: (id: string) =>
       request<undefined>(`/messenger/accounts/${id}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
+  });
+
+  const warmup = useMutation({
+    mutationFn: (input: { id: string; enabled: boolean }) =>
+      request<unknown>(`/messenger/accounts/${input.id}/warmup`, {
+        method: 'PATCH',
+        body: { enabled: input.enabled },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
+  });
+
+  const resume = useMutation({
+    mutationFn: (id: string) =>
+      request<unknown>(`/messenger/accounts/${id}/resume`, { method: 'POST' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
   });
 
@@ -108,7 +131,20 @@ function MessagingView() {
               <TableHead className="h-8">Аккаунт</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
               <TableHead className="h-8 text-right">Цена партнёра</TableHead>
-              <TableHead className="h-8 text-right">Лимиты</TableHead>
+              <TableHead className="h-8 text-right">
+                <span className="inline-flex items-center gap-1">
+                  Лимиты
+                  <Hint label="Что такое автопрогрев">
+                    <p>
+                      MAX блокирует новые номера, которые сразу шлют много. Автопрогрев начинает с
+                      12 сообщений в сутки, за неделю доходит до 100 и за месяц — до лимита в сутки
+                      из тарифа (нет лимита — 500). Сообщения уходят равномерно, а не пачкой, то,
+                      что не влезло, ждёт или идёт через другой аккаунт. Получил ограничение от MAX
+                      — прогрев начинается заново.
+                    </p>
+                  </Hint>
+                </span>
+              </TableHead>
               <TableHead className="h-8">Сверено</TableHead>
               <TableHead className="h-8" />
             </TableRow>
@@ -141,6 +177,24 @@ function MessagingView() {
                     reason={account.state_reason}
                     staff
                   />
+                  {account.paused_until !== null && (
+                    <span className="mt-1 block text-warn">
+                      Пауза до {moment(account.paused_until)}: много «нет MAX» после отправки
+                      {canChange && (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          className="ml-2"
+                          disabled={resume.isPending}
+                          onClick={() => {
+                            resume.mutate(account.id);
+                          }}
+                        >
+                          Снять паузу
+                        </Button>
+                      )}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className="num text-right">
                   {account.price === null ? (
@@ -156,8 +210,28 @@ function MessagingView() {
                       : `${String(account.limit_per_minute)}/мин`}
                   </span>
                   <span className="block text-faint">
-                    {account.limit_per_day === null ? '—' : `${String(account.limit_per_day)}/сут`}
+                    {account.daily_limit_now === null
+                      ? '—'
+                      : `${String(account.daily_limit_now)}/сут`}
                   </span>
+                  {account.warmup_day !== null && (
+                    <span className="block text-faint">
+                      прогрев, {String(account.warmup_day + 1)}-е сутки
+                    </span>
+                  )}
+                  {canChange && (
+                    <label className="mt-1 inline-flex items-center justify-end gap-2 text-muted-foreground">
+                      Автопрогрев
+                      <Switch
+                        aria-label={`Автопрогрев аккаунта «${account.label}»`}
+                        checked={account.warmup_enabled}
+                        disabled={warmup.isPending}
+                        onCheckedChange={(enabled) => {
+                          warmup.mutate({ id: account.id, enabled });
+                        }}
+                      />
+                    </label>
+                  )}
                 </TableCell>
                 <TableCell className="num text-muted-foreground">
                   {account.state_checked_at === null ? '—' : moment(account.state_checked_at)}

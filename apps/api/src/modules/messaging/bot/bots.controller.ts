@@ -3,18 +3,82 @@
  * ([ADR-0077](../../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)).
  */
 
-import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Put } from '@nestjs/common';
-import { parseId, permissionDenied } from '@zvonix/shared';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
+import {
+  BOT_GREETING_MAX,
+  BOT_INSERT_MAX,
+  Money,
+  parseId,
+  permissionDenied,
+  type MoneyAmount,
+} from '@zvonix/shared';
 import { z } from 'zod';
 import { Cabinets, Public, Roles } from '../../../http/auth.guard.js';
 import { CurrentUser } from '../../../http/request-context.js';
 import { zodBody } from '../../../http/zod.pipe.js';
 import { BillingService } from '../../billing/billing.service.js';
 import type { Principal } from '../../identity/identity.service.js';
-import { BotsService, type BotAdminView, type BotClientView } from './bots.service.js';
+import {
+  BotsService,
+  type BotAdminView,
+  type BotClientRow,
+  type BotClientView,
+} from './bots.service.js';
 
 const registerBotSchema = z.object({ token: z.string().trim().min(1).max(500) });
 const connectionSchema = z.object({ enabled: z.boolean() });
+
+/** Текст бота: пустой — вернуть стандартный; длина в пределах, которые держит и база. */
+const botText = (max: number) =>
+  z
+    .string()
+    .max(max, `не больше ${String(max)} знаков`)
+    .nullable()
+    .optional();
+
+/** Настройки бота клиента: тексты и запасной путь; что не названо — не меняется. */
+const botSettingsSchema = z
+  .object({
+    greeting: botText(BOT_GREETING_MAX),
+    textBefore: botText(BOT_INSERT_MAX),
+    textAfter: botText(BOT_INSERT_MAX),
+    fallbackAccounts: z.boolean().optional(),
+  })
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: 'Нечего менять',
+  });
+
+/** Сумма в рублях строкой, от 0 до предела: `0` — бесплатно, `null` — вернуть к общим условиям. */
+const price = (max: number) =>
+  z
+    .string()
+    .trim()
+    .regex(/^\d{1,7}(\.\d{1,6})?$/u, 'должна быть суммой, например 0.25')
+    .transform((raw): MoneyAmount => Money.fromMajorUnits(raw))
+    .refine(
+      (value) => Money.toMicros(value) <= BigInt(max) * 1_000_000n,
+      `не больше ${String(max)}`,
+    )
+    .nullable()
+    .optional();
+
+/** Свои условия клиента: что не названо — не меняется. */
+const termsSchema = z
+  .object({ messagePrice: price(1000), monthlyFee: price(100_000) })
+  .refine((body) => body.messagePrice !== undefined || body.monthlyFee !== undefined, {
+    message: 'Нечего менять',
+  });
 
 /** Событие платформы: берём нужное, остальное игнорируем (состав полей у MAX меняется). */
 const idLike = z.union([z.string(), z.number()]).optional();
@@ -58,6 +122,24 @@ export class StaffBotController {
     return this.bots.adminView();
   }
 
+  /** Подключённые к боту клиенты: условия (свои и действующие), подписчики, оплачен ли месяц. */
+  @Roles('admin', 'support')
+  @Get('bots/platform/clients')
+  clients(): Promise<{ clients: BotClientRow[] }> {
+    return this.bots.adminClients();
+  }
+
+  /** Свои условия клиента: цена сообщения и плата за месяц; `null` — как у всех. */
+  @Roles('admin')
+  @Patch('bots/platform/clients/:clientId')
+  setTerms(
+    @CurrentUser() actor: Principal,
+    @Param('clientId') clientId: string,
+    @Body(zodBody(termsSchema)) body: z.infer<typeof termsSchema>,
+  ): Promise<{ clients: BotClientRow[] }> {
+    return this.bots.setClientTerms(actor, parseId(clientId, 'client'), body);
+  }
+
   @Roles('admin')
   @Put('bots/platform')
   register(
@@ -82,7 +164,7 @@ export class StaffBotController {
   }
 }
 
-/** Бот в кабинете клиента: подключиться, получить ссылку, включить и выключить. */
+/** Бот в кабинете клиента: подключиться, получить ссылку, включить и выключить, подключить своего бота. */
 @Controller()
 export class ClientBotController {
   constructor(
@@ -102,6 +184,34 @@ export class ClientBotController {
   async connect(@CurrentUser() actor: Principal): Promise<BotClientView> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     return this.bots.connect(client.id);
+  }
+
+  /** Свой бот клиента: вставляет токен бота, созданного в «MAX для бизнеса». Токен никому не показывается. */
+  @Cabinets('client')
+  @Put('client/messages/bot/own')
+  async registerOwn(
+    @CurrentUser() actor: Principal,
+    @Body(zodBody(registerBotSchema)) body: z.infer<typeof registerBotSchema>,
+  ): Promise<BotClientView> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return this.bots.registerOwnBot(actor, client.id, body.token);
+  }
+
+  @Cabinets('client')
+  @Delete('client/messages/bot/own')
+  async removeOwn(@CurrentUser() actor: Principal): Promise<BotClientView> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return this.bots.removeOwnBot(actor, client.id);
+  }
+
+  @Cabinets('client')
+  @Patch('client/messages/bot/settings')
+  async updateSettings(
+    @CurrentUser() actor: Principal,
+    @Body(zodBody(botSettingsSchema)) body: z.infer<typeof botSettingsSchema>,
+  ): Promise<BotClientView> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return this.bots.updateSettings(actor, client.id, body);
   }
 
   @Cabinets('client')

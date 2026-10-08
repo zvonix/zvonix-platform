@@ -4,7 +4,7 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { notFound, parseId, validationFailed } from '@zvonix/shared';
+import { Money, notFound, parseId, validationFailed, type MoneyAmount } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { decryptSecret, encryptSecret, PLATFORM_SETTING_PURPOSE } from '../../infra/secret-box.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -166,6 +166,11 @@ export class SettingsService {
     readonly precheckEnabled: boolean;
     readonly precheckExistsDays: number;
     readonly precheckAbsentDays: number;
+    readonly accountsPerPartnerMax: number;
+    readonly healthEnabled: boolean;
+    readonly healthMinSample: number;
+    readonly healthMaxAbsentPercent: number;
+    readonly healthPauseHours: number;
     readonly maxWaitMinutes: number;
     readonly textDays: number;
   }> {
@@ -178,17 +183,35 @@ export class SettingsService {
       precheckEnabled: this.flag(values, 'messages.precheck_enabled'),
       precheckExistsDays: this.number(values, 'messages.precheck_exists_days'),
       precheckAbsentDays: this.number(values, 'messages.precheck_absent_days'),
+      accountsPerPartnerMax: this.number(values, 'messages.accounts_per_partner_max'),
+      healthEnabled: this.flag(values, 'messages.health_enabled'),
+      healthMinSample: this.number(values, 'messages.health_min_sample'),
+      healthMaxAbsentPercent: this.number(values, 'messages.health_max_absent_percent'),
+      healthPauseHours: this.number(values, 'messages.health_pause_hours'),
       maxWaitMinutes: this.number(values, 'messages.max_wait_minutes'),
       textDays: this.number(values, 'retention.messages_days'),
     };
   }
 
-  /** Бот MAX ([ADR-0077](../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)): включён ли и адрес API. */
-  async bot(): Promise<{ readonly enabled: boolean; readonly apiUrl: string }> {
+  /** Бот MAX ([ADR-0077](../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)): включён ли, адрес API и цена сообщения. */
+  async bot(): Promise<{
+    readonly enabled: boolean;
+    readonly apiUrl: string;
+    readonly messagePrice: MoneyAmount;
+    readonly monthlyFee: MoneyAmount;
+    readonly ownMessagePrice: MoneyAmount;
+    readonly ownMonthlyFee: MoneyAmount;
+  }> {
     const values = await this.values();
     return {
       enabled: this.flag(values, 'bot.enabled'),
       apiUrl: this.text(values, 'bot.api_url').replace(/\/+$/u, ''),
+      messagePrice: Money.fromMajorUnits(this.number(values, 'bot.message_price').toFixed(6)),
+      monthlyFee: Money.fromMajorUnits(this.number(values, 'bot.monthly_fee').toFixed(6)),
+      ownMessagePrice: Money.fromMajorUnits(
+        this.number(values, 'bot.own_message_price').toFixed(6),
+      ),
+      ownMonthlyFee: Money.fromMajorUnits(this.number(values, 'bot.own_monthly_fee').toFixed(6)),
     };
   }
 

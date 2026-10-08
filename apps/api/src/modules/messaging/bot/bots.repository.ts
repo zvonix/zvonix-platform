@@ -4,10 +4,10 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, count, eq, sql } from 'drizzle-orm';
+import { and, asc, count, eq, isNull, ne, or, sql } from 'drizzle-orm';
 import { toDatabaseError } from '@zvonix/db';
-import { botConnections, botSubscribers, messengerBots } from '@zvonix/db/schema';
-import { newId, type BotStatus, type Id } from '@zvonix/shared';
+import { botConnections, botSubscribers, clients, messengerBots } from '@zvonix/db/schema';
+import { newId, type BotKind, type BotStatus, type Id, type MoneyAmount } from '@zvonix/shared';
 import { DatabaseService } from '../../../infra/database.service.js';
 
 export type BotRow = typeof messengerBots.$inferSelect;
@@ -29,6 +29,49 @@ export class BotsRepository {
       .from(messengerBots)
       .where(eq(messengerBots.kind, 'platform'));
     return row;
+  }
+
+  /** Свой бот клиента (ADR-0077, этап 2): у клиента он не больше одного. */
+  async findClientBot(clientId: Id<'client'>): Promise<BotRow | undefined> {
+    const [row] = await this.database.db
+      .select()
+      .from(messengerBots)
+      .where(and(eq(messengerBots.kind, 'client'), eq(messengerBots.clientId, clientId)));
+    return row;
+  }
+
+  /** Записывает бота клиента: первый раз вставляет, потом заменяет токен и данные (тот же `id`). */
+  async saveClientBot(draft: {
+    id: BotId;
+    clientId: Id<'client'>;
+    token: string;
+    botUserId: string;
+    name: string;
+    username: string;
+  }): Promise<BotRow> {
+    try {
+      const [row] = await this.database.db
+        .insert(messengerBots)
+        .values({ ...draft, kind: 'client', status: 'active', lastCheckedAt: new Date() })
+        .onConflictDoUpdate({
+          target: messengerBots.id,
+          set: {
+            token: draft.token,
+            botUserId: draft.botUserId,
+            name: draft.name,
+            username: draft.username,
+            status: 'active',
+            lastError: null,
+            lastCheckedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+      if (row === undefined) throw new Error('Бот не записан');
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
   }
 
   async findBot(id: BotId): Promise<BotRow | undefined> {
@@ -106,6 +149,7 @@ export class BotsRepository {
     clientId: Id<'client'>;
     botId: BotId;
     code: string;
+    feePaidPeriod: string | null;
   }): Promise<BotConnectionRow> {
     try {
       const [row] = await this.database.db
@@ -117,6 +161,101 @@ export class BotsRepository {
     } catch (cause) {
       throw toDatabaseError(cause);
     }
+  }
+
+  /** Условия клиента: `undefined` — не трогать, `null` — вернуть к общим настройкам. */
+  async setConnectionPrices(
+    clientId: Id<'client'>,
+    patch: { messagePrice?: MoneyAmount | null; monthlyFee?: MoneyAmount | null },
+  ): Promise<BotConnectionRow | undefined> {
+    const [row] = await this.database.db
+      .update(botConnections)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(botConnections.clientId, clientId))
+      .returning();
+    return row;
+  }
+
+  /** Настройки бота клиента: `undefined` — не трогать, `null` у текста — вернуть стандартный. */
+  async setConnectionSettings(
+    clientId: Id<'client'>,
+    patch: {
+      greeting?: string | null;
+      textBefore?: string | null;
+      textAfter?: string | null;
+      fallbackAccounts?: boolean;
+    },
+  ): Promise<BotConnectionRow | undefined> {
+    const [row] = await this.database.db
+      .update(botConnections)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(botConnections.clientId, clientId))
+      .returning();
+    return row;
+  }
+
+  /** Подключение клиента теперь работает через другого бота (свой или площадки); включается. */
+  async setConnectionBot(
+    clientId: Id<'client'>,
+    botId: BotId,
+  ): Promise<BotConnectionRow | undefined> {
+    const [row] = await this.database.db
+      .update(botConnections)
+      .set({ botId, enabled: true, updatedAt: new Date() })
+      .where(eq(botConnections.clientId, clientId))
+      .returning();
+    return row;
+  }
+
+  /** Плата за этот месяц взята. */
+  async markFeePaid(clientId: Id<'client'>, period: string): Promise<void> {
+    await this.database.db
+      .update(botConnections)
+      .set({ feePaidPeriod: period, updatedAt: new Date() })
+      .where(eq(botConnections.clientId, clientId));
+  }
+
+  /** Включённые подключения, за которые плата за месяц ещё не взята: воркер пробует взять. */
+  async listFeeDue(
+    period: string,
+    limit: number,
+  ): Promise<{ connection: BotConnectionRow; kind: BotKind }[]> {
+    return this.database.db
+      .select({ connection: botConnections, kind: messengerBots.kind })
+      .from(botConnections)
+      .innerJoin(messengerBots, eq(messengerBots.id, botConnections.botId))
+      .where(
+        and(
+          eq(botConnections.enabled, true),
+          or(isNull(botConnections.feePaidPeriod), ne(botConnections.feePaidPeriod, period)),
+        ),
+      )
+      .orderBy(asc(botConnections.createdAt))
+      .limit(limit);
+  }
+
+  /** Подключения клиентов к ботам (площадки и свои) с названием клиента и числом подписчиков — для администратора. */
+  async listConnections(): Promise<
+    {
+      connection: BotConnectionRow;
+      clientName: string;
+      subscribers: number;
+      kind: BotKind;
+      username: string;
+    }[]
+  > {
+    return this.database.db
+      .select({
+        connection: botConnections,
+        clientName: clients.name,
+        kind: messengerBots.kind,
+        username: messengerBots.username,
+        subscribers: sql<number>`(select count(*) from bot_subscribers s where s.client_id = ${botConnections.clientId} and s.bot_id = ${botConnections.botId})::int`,
+      })
+      .from(botConnections)
+      .innerJoin(clients, eq(clients.id, botConnections.clientId))
+      .innerJoin(messengerBots, eq(messengerBots.id, botConnections.botId))
+      .orderBy(asc(clients.name));
   }
 
   async setConnectionEnabled(
@@ -180,6 +319,7 @@ export class BotsRepository {
   /** Живой подписчик клиента с этим номером: ему можно писать ботом. */
   async findReachable(
     clientId: Id<'client'>,
+    botId: BotId,
     phone: string,
   ): Promise<BotSubscriberRow | undefined> {
     const [row] = await this.database.db
@@ -188,6 +328,7 @@ export class BotsRepository {
       .where(
         and(
           eq(botSubscribers.clientId, clientId),
+          eq(botSubscribers.botId, botId),
           eq(botSubscribers.phone, phone),
           eq(botSubscribers.state, 'started'),
         ),
@@ -195,8 +336,19 @@ export class BotsRepository {
     return row;
   }
 
+  /** Подписчик перестал принимать сообщения бота (остановил бота в MAX): дальше ему не пишем. */
+  async stopSubscriber(id: BotSubscriberRow['id']): Promise<void> {
+    await this.database.db
+      .update(botSubscribers)
+      .set({ state: 'stopped', updatedAt: new Date() })
+      .where(eq(botSubscribers.id, id));
+  }
+
   /** Сколько у клиента подписчиков всего и сколько из них уже сообщили номер. */
-  async countFor(clientId: Id<'client'>): Promise<{ total: number; withPhone: number }> {
+  async countFor(
+    clientId: Id<'client'>,
+    botId?: BotId,
+  ): Promise<{ total: number; withPhone: number }> {
     const [row] = await this.database.db
       .select({
         total: count(),
@@ -206,7 +358,12 @@ export class BotsRepository {
           ),
       })
       .from(botSubscribers)
-      .where(eq(botSubscribers.clientId, clientId));
+      .where(
+        and(
+          eq(botSubscribers.clientId, clientId),
+          botId === undefined ? undefined : eq(botSubscribers.botId, botId),
+        ),
+      );
     return { total: row?.total ?? 0, withPhone: row?.withPhone ?? 0 };
   }
 

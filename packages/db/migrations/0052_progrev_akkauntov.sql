@@ -1,0 +1,2 @@
+ALTER TABLE "messenger_accounts" ADD COLUMN "warmup_enabled" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "messenger_accounts" ADD COLUMN "warmup_started_at" timestamp with time zone;

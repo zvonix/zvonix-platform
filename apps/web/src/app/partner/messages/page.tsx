@@ -222,6 +222,15 @@ function AccountRow({
         <span className="block text-faint">
           {account.limit_per_day === null ? '—' : `${String(account.limit_per_day)} в сутки`}
         </span>
+        {account.paused_until !== null && (
+          <span className="block text-warn">Пауза: много «нет MAX» после отправки</span>
+        )}
+        {account.warmup_day !== null && (
+          <span className="block text-faint">
+            Прогрев, {String(account.warmup_day + 1)}-е сутки: сегодня до{' '}
+            {String(account.daily_limit_now)}
+          </span>
+        )}
       </TableCell>
 
       <TableCell className="text-right">

@@ -10,7 +10,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
   dependencyUnavailable,
-  MESSENGER_ACCOUNTS_PER_PARTNER_MAX,
   notFound,
   parseId,
   rateLimited,
@@ -26,7 +25,11 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { AuditService } from '../audit/audit.service.js';
 import { BillingService } from '../billing/billing.service.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { MessagingRepository, type MessengerAccountRow } from './messaging.repository.js';
+import {
+  MessagingRepository,
+  type MessengerAccountId,
+  type MessengerAccountRow,
+} from './messaging.repository.js';
 import {
   MESSAGE_PROVIDER,
   type AccessCheck,
@@ -188,10 +191,9 @@ export class MessagingService {
     if (partner.status !== 'verified') {
       throw conflict('Аккаунты MAX заводит партнёр, допущенный к работе');
     }
-    if (
-      (await this.repository.countLiveOfPartner(partner.id)) >= MESSENGER_ACCOUNTS_PER_PARTNER_MAX
-    ) {
-      throw conflict(`Аккаунтов уже ${String(MESSENGER_ACCOUNTS_PER_PARTNER_MAX)} — это предел`);
+    const { accountsPerPartnerMax } = await this.settings.messaging();
+    if ((await this.repository.countLiveOfPartner(partner.id)) >= accountsPerPartnerMax) {
+      throw conflict(`Аккаунтов уже ${String(accountsPerPartnerMax)} — это предел`);
     }
 
     const ref = await this.provider.createAccount();
@@ -301,6 +303,10 @@ export class MessagingService {
         from: account.status,
         to: updated.status,
       });
+      // Ограничение или блокировка со стороны MAX: аккаунту нужен новый прогрев.
+      if (updated.status === 'unavailable' && updated.stateReason !== 'logged_out') {
+        await this.repository.restartWarmup(account.id, now);
+      }
       await this.audit.record({
         action: 'messenger_account.status_changed',
         entityType: 'messenger_account',
@@ -360,6 +366,70 @@ export class MessagingService {
   async retireOwn(actor: MessagingActor, id: string): Promise<void> {
     const { account } = await this.ownAccount(actor.userId, id);
     await this.retire(actor, account);
+  }
+
+  /** Администратор включает или выключает автопрогрев аккаунта. Решение сохраняется в журнале. */
+  async setWarmup(
+    actor: MessagingActor,
+    id: string,
+    enabled: boolean,
+  ): Promise<MessengerAccountRow> {
+    const account = await this.repository.findById(parseId(id, 'messengerAccount'));
+    if (account === undefined || account.status === 'retired') throw notFound('Аккаунт не найден');
+    const updated = await this.repository.setWarmupEnabled(account.id, enabled, new Date());
+    if (updated === undefined) throw notFound('Аккаунт не найден');
+    await this.audit.record({
+      action: 'messenger_account.warmup_changed',
+      entityType: 'messenger_account',
+      entityId: account.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { warmup_enabled: account.warmupEnabled },
+      after: { warmup_enabled: updated.warmupEnabled },
+    });
+    return updated;
+  }
+
+  /** Здоровье: аккаунт ставится на паузу. `false` — уже стоит на ней или списан. Пишется в журнал. */
+  async pauseForHealth(
+    id: MessengerAccountId,
+    now: Date,
+    until: Date,
+    figures: { absent: number; ok: number },
+  ): Promise<boolean> {
+    if (!(await this.repository.pause(id, 'absent_rate', until, now))) return false;
+    this.logger.warn('Аккаунт MAX поставлен на паузу: слишком много «нет MAX» после отправки', {
+      account_id: id,
+      absent: figures.absent,
+      sent: figures.ok,
+      until: until.toISOString(),
+    });
+    await this.audit.record({
+      action: 'messenger_account.paused',
+      entityType: 'messenger_account',
+      entityId: id,
+      before: { paused: false },
+      after: { paused_until: until.toISOString(), reason: 'absent_rate', ...figures },
+    });
+    return true;
+  }
+
+  /** Администратор снимает паузу раньше срока. */
+  async resume(actor: MessagingActor, id: string): Promise<MessengerAccountRow> {
+    const account = await this.repository.findById(parseId(id, 'messengerAccount'));
+    if (account === undefined || account.status === 'retired') throw notFound('Аккаунт не найден');
+    const updated = await this.repository.resume(account.id, new Date());
+    if (updated === undefined) throw notFound('Аккаунт не найден');
+    await this.audit.record({
+      action: 'messenger_account.resumed',
+      entityType: 'messenger_account',
+      entityId: account.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { paused_until: account.pausedUntil?.toISOString() ?? null },
+      after: { paused_until: null },
+    });
+    return updated;
   }
 
   async retireByAdmin(actor: MessagingActor, id: string): Promise<void> {

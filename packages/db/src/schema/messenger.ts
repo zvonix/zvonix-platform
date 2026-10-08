@@ -15,9 +15,13 @@ import {
   MESSAGE_STATUSES,
   MESSENGER_ACCOUNT_REASONS,
   MESSENGER_ACCOUNT_STATUSES,
+  MESSENGER_PAUSE_REASONS,
+  BOT_GREETING_MAX,
+  BOT_INSERT_MAX,
   BOT_KINDS,
   BOT_STATUSES,
   BOT_SUBSCRIBER_STATES,
+  MESSAGE_ROUTES,
   MESSENGER_PROVIDERS,
   SMPP_RECEIPT_ACTIONS,
   SMPP_RECEIPT_DEFAULTS,
@@ -26,9 +30,11 @@ import {
   type BotSubscriberState,
   type MessageChannel,
   type MessageFailureReason,
+  type MessageRoute,
   type MessageStatus,
   type MessengerAccountReason,
   type MessengerAccountStatus,
+  type MessengerPauseReason,
   type MessengerProviderId,
   type SmppReceiptAction,
 } from '@zvonix/shared';
@@ -127,6 +133,22 @@ export const messengerAccounts = pgTable(
     /** Когда аккаунт отправлял последний раз: от неё зависит пауза и порядок выбора. */
     lastUsedAt: timestamptz(),
 
+    /**
+     * Автопрогрев и равномерная отправка ([ADR-0078](../../../../docs/adr/0078-progrev-akkauntov-max.md)): лимит
+     * суток растёт с началом прогрева, а за час уходит не больше доли суток. Выключен — действуют только лимиты
+     * тарифа. Пусто в `warmupStartedAt` — прогрев закончен или не начинался (старые аккаунты).
+     */
+    warmupEnabled: boolean().notNull().default(true),
+    warmupStartedAt: timestamptz(),
+
+    /**
+     * Пауза здоровья ([ADR-0079](../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)): до этого
+     * времени сообщения на аккаунт не идут. `healthSince` — с какого момента считать долю «нет MAX» после отправки.
+     */
+    pausedUntil: timestamptz(),
+    pauseReason: text().$type<MessengerPauseReason>(),
+    healthSince: timestamptz(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -137,6 +159,10 @@ export const messengerAccounts = pgTable(
       sql`${t.stateReason} is null or ${oneOf(t.stateReason, MESSENGER_ACCOUNT_REASONS)}`,
     ),
     check('messenger_accounts_provider_check', oneOf(t.provider, MESSENGER_PROVIDERS)),
+    check(
+      'messenger_accounts_pause_reason_check',
+      sql`${t.pauseReason} is null or ${oneOf(t.pauseReason, MESSENGER_PAUSE_REASONS)}`,
+    ),
     check('messenger_accounts_price_positive', sql`${t.price} is null or ${t.price} > 0`),
     check(
       'messenger_accounts_limits_positive',
@@ -183,13 +209,15 @@ export const messages = pgTable(
     status: text().$type<MessageStatus>().notNull().default('queued'),
     failureReason: text().$type<MessageFailureReason>(),
 
-    /** Аккаунт и партнёр выбираются при приёме (по цене) и дальше не меняются. */
-    accountId: idRef<'messengerAccount'>()
-      .notNull()
-      .references(() => messengerAccounts.id, { onDelete: 'restrict' }),
-    partnerId: idRef<'partner'>()
-      .notNull()
-      .references(() => partners.id, { onDelete: 'restrict' }),
+    /** Путь отправки: `account` — через аккаунт партнёра, `bot` — ботом подписчику клиента (ADR-0077). */
+    route: text().$type<MessageRoute>().notNull().default('account'),
+    /** Аккаунт и партнёр выбираются при приёме (по цене) и дальше не меняются; у сообщения бота их нет. */
+    accountId: idRef<'messengerAccount'>().references(() => messengerAccounts.id, {
+      onDelete: 'restrict',
+    }),
+    partnerId: idRef<'partner'>().references(() => partners.id, { onDelete: 'restrict' }),
+    /** Бот, которым уходит сообщение; только при `route = 'bot'`. */
+    botId: idRef<'messengerBot'>().references(() => messengerBots.id, { onDelete: 'restrict' }),
 
     /** Идентификатор сообщения у провайдера; по нему приходят статусы доставки. */
     providerMessageId: text(),
@@ -230,9 +258,18 @@ export const messages = pgTable(
       'messages_failure_matches_status',
       sql`(${t.status} = 'failed') = (${t.failureReason} is not null)`,
     ),
+    check('messages_route_check', oneOf(t.route, MESSAGE_ROUTES)),
+    // Сообщение аккаунта держится на аккаунте и партнёре, сообщение бота — на боте (ADR-0077).
+    check(
+      'messages_route_owner_check',
+      sql`(${t.route} = 'account' and ${t.accountId} is not null and ${t.partnerId} is not null and ${t.botId} is null)
+        or (${t.route} = 'bot' and ${t.botId} is not null and ${t.accountId} is null and ${t.partnerId} is null)`,
+    ),
+    // Аккаунт: клиент платит = партнёру + наценка. Бот: партнёра нет, вся сумма — площадке (может быть нулевой).
     check(
       'messages_amounts_check',
-      sql`${t.partnerAmount} > 0 and ${t.commissionAmount} >= 0 and ${t.clientAmount} = ${t.partnerAmount} + ${t.commissionAmount}`,
+      sql`${t.commissionAmount} >= 0 and ${t.clientAmount} = ${t.partnerAmount} + ${t.commissionAmount}
+        and ((${t.route} = 'account' and ${t.partnerAmount} > 0) or (${t.route} = 'bot' and ${t.partnerAmount} = 0))`,
     ),
     uniqueIndex('messages_client_external_key')
       .on(t.clientId, t.externalId)
@@ -351,10 +388,37 @@ export const botConnections = pgTable(
     enabled: boolean().notNull().default(true),
     /** Публичный код клиента для ссылки бота. Случайный, без смысла: по нему нельзя узнать клиента. */
     code: text().notNull(),
+    /**
+     * Условия этого клиента, если отличаются от общих настроек (`bot.message_price`, `bot.monthly_fee`):
+     * пусто — как у всех, 0 — бесплатно (ADR-0077).
+     */
+    messagePrice: money(),
+    monthlyFee: money(),
+    /** Месяц (ГГГГ-ММ, UTC), за который плата уже взята; пусто — не бралась. Пока не взята — бот клиенту не отправляет. */
+    feePaidPeriod: text(),
+    /**
+     * Настройки бота клиента (ADR-0077, этап 3): приветствие при запуске (`{служба}` — название службы), вставки до и
+     * после каждого сообщения, и можно ли писать через аккаунты партнёров тем, кто не подписан на бота. Пусто — по
+     * умолчанию (наш текст; вставок нет).
+     */
+    greeting: text(),
+    textBefore: text(),
+    textAfter: text(),
+    fallbackAccounts: boolean().notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check(
+      'bot_connections_texts_check',
+      sql`(${t.greeting} is null or char_length(${t.greeting}) <= ${sql.raw(String(BOT_GREETING_MAX))})
+        and (${t.textBefore} is null or char_length(${t.textBefore}) <= ${sql.raw(String(BOT_INSERT_MAX))})
+        and (${t.textAfter} is null or char_length(${t.textAfter}) <= ${sql.raw(String(BOT_INSERT_MAX))})`,
+    ),
+    check(
+      'bot_connections_prices_check',
+      sql`(${t.messagePrice} is null or ${t.messagePrice} >= 0) and (${t.monthlyFee} is null or ${t.monthlyFee} >= 0)`,
+    ),
     uniqueIndex('bot_connections_client_key').on(t.clientId),
     uniqueIndex('bot_connections_code_key').on(t.code),
   ],
