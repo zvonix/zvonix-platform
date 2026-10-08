@@ -5,6 +5,7 @@ import { LIMIT_METRICS, LIMIT_WINDOWS, type LimitMetric, type LimitWindow } from
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { Hint } from '@/components/hint';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import {
@@ -158,17 +159,23 @@ export function LimitRules() {
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-3">
         <h2 className="text-[15px] font-semibold tracking-tight">Лимиты по окнам</h2>
+        <Hint label="Как считаются лимиты">
+          <p>
+            Окно календарное и в UTC, а не скользящее: видно, когда счётчик обнулится — в полночь, в
+            понедельник, первого числа.
+          </p>
+          <p className="mt-2">
+            Звонки считаются штуками, минуты — секундами: разговор в 90 секунд это не «полторы
+            минуты» и не «одна». Для SIM лимит важен: оператор блокирует карту за нечеловеческий
+            профиль трафика.
+          </p>
+        </Hint>
         {canChange && (
           <FormDialog label="Добавить лимит" title="Новый лимит" className="ml-auto">
             <NewLimitForm onCreate={(body) => add.mutateAsync(body)} />
           </FormDialog>
         )}
       </div>
-      <p className="text-muted-foreground">
-        Окно календарное и в UTC, а не скользящее: видно, когда счётчик обнулится — в полночь, в
-        понедельник, первого числа. Звонки считаются штуками, минуты — секундами: разговор в 90
-        секунд это не «полторы минуты» и не «одна».
-      </p>
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
@@ -197,9 +204,7 @@ export function LimitRules() {
             {list.data?.limits.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
-                  Лимитов нет — значит, не ограничен никто. Для SIM это заметно: оператор блокирует
-                  карту за нечеловеческий профиль трафика, а потерянная SIM означает потерянного
-                  партнёра.
+                  Лимитов нет — не ограничен никто.
                 </TableCell>
               </TableRow>
             )}

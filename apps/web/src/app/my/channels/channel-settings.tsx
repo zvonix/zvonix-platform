@@ -5,6 +5,7 @@ import type { TerminationKind } from '@zvonix/shared';
 import Link from 'next/link';
 import { useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
+import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
@@ -133,16 +134,17 @@ function PartnerOrder({ channelId }: { channelId: string }) {
 
   return (
     <section className="flex flex-col gap-2">
-      <h4 className="font-semibold">Порядок предложений</h4>
+      <div className="flex items-center gap-1">
+        <h4 className="font-semibold">Порядок предложений</h4>
+        <Hint label="Как работает порядок предложений">
+          Пустое поле — предложение в порядке не участвует. Если пусты все, площадка сама ставит
+          дешёвое раньше, и цена считается для того направления, куда идёт вызов, — это обычный
+          режим. Меньший номер — раньше; равные номера делят трафик поровну.
+        </Hint>
+      </div>
       <p className="text-muted-foreground">
-        Пустое поле — предложение в порядке не участвует. Если пусты все, площадка сама ставит
-        дешёвое раньше, и цена считается для того направления, куда идёт вызов, — это обычный режим.
-        Меньший номер — раньше; равные номера делят трафик поровну.
-      </p>
-      <p className="text-muted-foreground">
-        Цены — за вызов длительностью <span className="num">{seconds}</span> с, вместе с платой за
-        соединение. Сравнивать по ним осмысленно только вызовы такой длины: тарифы с разным шагом на
-        коротком вызове расходятся в разы. Полный состав — в разделе{' '}
+        Цены — за вызов в <span className="num">{seconds}</span> с, с платой за соединение. Полный
+        состав — в{' '}
         <Link href="/my/prices" className="underline underline-offset-2">
           «Мои цены»
         </Link>
