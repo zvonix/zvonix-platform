@@ -13,6 +13,7 @@ import {
   normalizeMsisdn,
   notFound,
   validationFailed,
+  type BotKind,
   type Id,
   type MoneyAmount,
 } from '@zvonix/shared';
@@ -92,6 +93,8 @@ interface BotAttachment {
 export interface BotClientRow {
   readonly client_id: string;
   readonly client_name: string;
+  /** Через какого бота работает клиент: `platform` — бот площадки, `own` — свой, с никнеймом. */
+  readonly bot: { readonly kind: 'platform' | 'own'; readonly username: string };
   readonly enabled: boolean;
   readonly subscribers: number;
   /** Свои условия клиента (`null` — как у всех) и действующие. */
@@ -120,16 +123,32 @@ interface BotTerms {
 }
 
 export interface BotClientView {
-  /** Бот доступен клиенту: продукт включён и бот площадки вписан и работает. */
+  /** Продукт включён: клиент видит блок «Бот MAX». */
   readonly available: boolean;
+  /** Бот площадки вписан и работает: к нему можно подключиться одной кнопкой. */
+  readonly platform_available: boolean;
   readonly connection: {
     readonly enabled: boolean;
+    /** Через какого бота идут сообщения: бот площадки или свой. */
+    readonly kind: 'platform' | 'own';
     readonly link: string;
     /** Плата за этот месяц взята (или её нет): пока `false`, бот клиенту не отправляет. */
     readonly fee_paid: boolean;
   } | null;
   /** Что платит клиент: общие условия площадки или свои, если администратор их задал. */
   readonly terms: BotTerms;
+  /** Общие условия бота площадки. */
+  readonly platform_terms: BotTerms;
+  /** Свой бот клиента (этап 2): данные бота без токена и условия для своих ботов. */
+  readonly own: {
+    readonly bot: {
+      readonly name: string;
+      readonly username: string;
+      readonly status: BotRow['status'];
+      readonly last_error: string | null;
+    } | null;
+    readonly terms: BotTerms;
+  };
   readonly subscribers: { readonly total: number; readonly with_phone: number };
 }
 
@@ -318,15 +337,17 @@ export class BotsService {
     return enabled && bot?.status === 'active' ? bot : undefined;
   }
 
-  /** Условия клиента: свои, если заданы администратором, иначе общие из настроек. */
-  private async termsOf(connection: BotConnectionRow | undefined): Promise<{
-    messagePrice: MoneyAmount;
-    monthlyFee: MoneyAmount;
-  }> {
+  /** Условия клиента: свои, если заданы администратором, иначе общие — для бота площадки или для своего бота клиента. */
+  private async termsOf(
+    connection: BotConnectionRow | undefined,
+    kind: BotKind,
+  ): Promise<{ messagePrice: MoneyAmount; monthlyFee: MoneyAmount }> {
     const settings = await this.settings.bot();
+    const own = kind === 'client';
     return {
-      messagePrice: connection?.messagePrice ?? settings.messagePrice,
-      monthlyFee: connection?.monthlyFee ?? settings.monthlyFee,
+      messagePrice:
+        connection?.messagePrice ?? (own ? settings.ownMessagePrice : settings.messagePrice),
+      monthlyFee: connection?.monthlyFee ?? (own ? settings.ownMonthlyFee : settings.monthlyFee),
     };
   }
 
@@ -340,25 +361,53 @@ export class BotsService {
   }
 
   async clientView(clientId: Id<'client'>, now: Date = new Date()): Promise<BotClientView> {
-    const [bot, connection, subscribers] = await Promise.all([
+    const [settings, platform, ownBot, connection] = await Promise.all([
+      this.settings.bot(),
       this.usablePlatformBot(),
+      this.repository.findClientBot(clientId),
       this.repository.findConnectionByClient(clientId),
-      this.repository.countFor(clientId),
     ]);
-    const terms = await this.termsOf(connection);
+    const connectedBot =
+      connection === undefined ? undefined : await this.repository.findBot(connection.botId);
+    const connectedKind: BotKind = connectedBot?.kind ?? 'platform';
+    const [terms, platformTerms, ownTerms, subscribers] = await Promise.all([
+      this.termsOf(connection, connectedKind),
+      this.termsOf(undefined, 'platform'),
+      this.termsOf(undefined, 'client'),
+      this.repository.countFor(clientId, connection?.botId),
+    ]);
+    const format = (value: { messagePrice: MoneyAmount; monthlyFee: MoneyAmount }): BotTerms => ({
+      message_price: Money.format(value.messagePrice),
+      monthly_fee: Money.format(value.monthlyFee),
+    });
     return {
-      available: bot !== undefined,
+      available: settings.enabled,
+      platform_available: platform !== undefined,
       connection:
-        connection === undefined || bot === undefined
+        connection === undefined || connectedBot === undefined
           ? null
           : {
               enabled: connection.enabled,
-              link: this.linkOf(bot, connection.code),
+              kind: connectedBot.kind === 'client' ? 'own' : 'platform',
+              link: this.linkOf(connectedBot, connection.code),
               fee_paid: this.feePaid(connection, terms, now),
             },
-      terms: {
-        message_price: Money.format(terms.messagePrice),
-        monthly_fee: Money.format(terms.monthlyFee),
+      terms:
+        connection === undefined
+          ? format(platform === undefined ? ownTerms : platformTerms)
+          : format(terms),
+      platform_terms: format(platformTerms),
+      own: {
+        bot:
+          ownBot === undefined
+            ? null
+            : {
+                name: ownBot.name,
+                username: ownBot.username,
+                status: ownBot.status,
+                last_error: ownBot.lastError,
+              },
+        terms: format(ownTerms),
       },
       subscribers: { total: subscribers.total, with_phone: subscribers.withPhone },
     };
@@ -370,9 +419,10 @@ export class BotsService {
    */
   private async ensureFeePaid(
     connection: BotConnectionRow,
+    kind: BotKind,
     now: Date,
   ): Promise<'paid' | 'insufficient'> {
-    const terms = await this.termsOf(connection);
+    const terms = await this.termsOf(connection, kind);
     const period = periodOf(now);
     if (Money.isZero(terms.monthlyFee) || connection.feePaidPeriod === period) return 'paid';
     try {
@@ -389,24 +439,29 @@ export class BotsService {
     return 'paid';
   }
 
-  /** Подключает клиента к боту площадки: берёт плату за месяц, создаёт код и ссылку. Повтор возвращает прежнее. */
-  async connect(clientId: Id<'client'>, now: Date = new Date()): Promise<BotClientView> {
-    const bot = await this.usablePlatformBot();
-    if (bot === undefined) throw conflict('Бот пока недоступен — обратитесь в поддержку');
+  /**
+   * Подключает клиента к боту: берёт плату за месяц (если за него ещё не брали), создаёт подключение с кодом либо
+   * переключает прежнее на этого бота. Не хватает денег — `409`, подключение не меняется.
+   */
+  private async attach(clientId: Id<'client'>, bot: BotRow, now: Date): Promise<void> {
     const existing = await this.repository.findConnectionByClient(clientId);
-    if (existing === undefined) {
-      const fee = (await this.settings.bot()).monthlyFee;
-      const period = periodOf(now);
-      if (!Money.isZero(fee)) {
-        try {
-          await this.billing.chargeBotFee({ clientId, period, amount: fee });
-        } catch (cause) {
-          if (isDomainError(cause) && cause.code === 'conflict') {
-            throw conflict(`Не хватает денег для платы за бота: ${Money.format(fee)} ₽ в месяц`);
-          }
-          throw cause;
+    const period = periodOf(now);
+    const terms = await this.termsOf(existing, bot.kind);
+    const payable = !Money.isZero(terms.monthlyFee) && existing?.feePaidPeriod !== period;
+    if (payable) {
+      try {
+        await this.billing.chargeBotFee({ clientId, period, amount: terms.monthlyFee });
+      } catch (cause) {
+        if (isDomainError(cause) && cause.code === 'conflict') {
+          throw conflict(
+            `Не хватает денег для платы за бота: ${Money.format(terms.monthlyFee)} ₽ в месяц`,
+          );
         }
+        throw cause;
       }
+    }
+    const paidPeriod = Money.isZero(terms.monthlyFee) ? null : period;
+    if (existing === undefined) {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const code = Array.from(
           { length: CODE_LENGTH },
@@ -417,11 +472,104 @@ export class BotsService {
           clientId,
           botId: bot.id,
           code,
-          feePaidPeriod: Money.isZero(fee) ? null : period,
+          feePaidPeriod: paidPeriod,
         });
-        break;
+        return;
       }
+      return;
     }
+    if (existing.botId !== bot.id) await this.repository.setConnectionBot(clientId, bot.id);
+    if (payable) await this.repository.markFeePaid(clientId, period);
+  }
+
+  /** Подключает клиента к боту площадки (повтор возвращает прежнее). */
+  async connect(clientId: Id<'client'>, now: Date = new Date()): Promise<BotClientView> {
+    const bot = await this.usablePlatformBot();
+    if (bot === undefined) throw conflict('Бот пока недоступен — обратитесь в поддержку');
+    const existing = await this.repository.findConnectionByClient(clientId);
+    if (existing?.botId !== bot.id) await this.attach(clientId, bot, now);
+    return this.clientView(clientId, now);
+  }
+
+  /**
+   * Свой бот клиента ([ADR-0077](../../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md), этап 2): клиент создал бота в
+   * «MAX для бизнеса» и вставляет его токен. Площадка проверяет токен у MAX, настраивает приём событий и переключает
+   * подключение клиента на этого бота. Токен никому не показывается. Повтор заменяет токен.
+   */
+  async registerOwnBot(
+    actor: Principal,
+    clientId: Id<'client'>,
+    token: string,
+    now: Date = new Date(),
+  ): Promise<BotClientView> {
+    const { enabled } = await this.settings.bot();
+    if (!enabled) throw conflict('Бот пока недоступен — обратитесь в поддержку');
+    const trimmed = token.trim();
+    if (trimmed === '') throw validationFailed('Токен бота не может быть пустым');
+    let identity;
+    try {
+      identity = await this.provider.me(trimmed);
+    } catch (cause) {
+      if (cause instanceof BotTokenRejectedError) {
+        throw validationFailed('MAX не принял токен бота. Проверьте, что скопировали его целиком');
+      }
+      throw cause;
+    }
+
+    const existing = await this.repository.findClientBot(clientId);
+    const id = existing?.id ?? this.repository.newBotId();
+    await this.provider.subscribe(trimmed, this.webhookUrl(id), this.webhookSecret(id));
+    // Токен другого бота: подписка прежнего больше не нужна.
+    if (existing !== undefined && existing.botUserId !== identity.userId) {
+      await this.provider
+        .unsubscribe(this.tokenOf(existing), this.webhookUrl(id))
+        .catch(() => undefined);
+    }
+    const saved = await this.repository.saveClientBot({
+      id,
+      clientId,
+      token: encryptSecret(trimmed, this.config.SECRET_KEY, MESSENGER_TOKEN_PURPOSE),
+      botUserId: identity.userId,
+      name: identity.name,
+      username: identity.username,
+    });
+    await this.audit.record({
+      action: 'messenger_bot.registered',
+      entityType: 'messenger_bot',
+      entityId: saved.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      after: { kind: 'client', client_id: clientId, username: saved.username },
+    });
+    await this.attach(clientId, saved, now);
+    return this.clientView(clientId, now);
+  }
+
+  /** Отключает своего бота клиента: подписка у MAX снимается, подключение выключается; токен остаётся зашифрованным. */
+  async removeOwnBot(
+    actor: Principal,
+    clientId: Id<'client'>,
+    now: Date = new Date(),
+  ): Promise<BotClientView> {
+    const own = await this.repository.findClientBot(clientId);
+    if (own === undefined) throw notFound('Свой бот не подключён');
+    await this.provider
+      .unsubscribe(this.tokenOf(own), this.webhookUrl(own.id))
+      .catch((cause: unknown) => {
+        this.logger.warn('Подписка бота клиента не снята', {
+          reason: cause instanceof Error ? cause.name : 'unknown',
+        });
+      });
+    await this.repository.setBotState(own.id, { status: 'disabled' });
+    const connection = await this.repository.findConnectionByClient(clientId);
+    if (connection?.botId === own.id) await this.repository.setConnectionEnabled(clientId, false);
+    await this.audit.record({
+      action: 'messenger_bot.disabled',
+      entityType: 'messenger_bot',
+      entityId: own.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+    });
     return this.clientView(clientId, now);
   }
 
@@ -433,7 +581,15 @@ export class BotsService {
   ): Promise<BotClientView> {
     const connection = await this.repository.setConnectionEnabled(clientId, enabled);
     if (connection === undefined) throw notFound('Клиент ещё не подключён к боту');
-    if (enabled && (await this.ensureFeePaid(connection, now)) === 'insufficient') {
+    const bot = await this.repository.findBot(connection.botId);
+    if (enabled && bot?.status !== 'active') {
+      await this.repository.setConnectionEnabled(clientId, false);
+      throw conflict('Бот сейчас недоступен — подключите бота заново');
+    }
+    if (
+      enabled &&
+      (await this.ensureFeePaid(connection, bot?.kind ?? 'platform', now)) === 'insufficient'
+    ) {
       await this.repository.setConnectionEnabled(clientId, false);
       throw conflict('Не хватает денег для платы за бота. Пополните счёт и включите снова');
     }
@@ -448,9 +604,9 @@ export class BotsService {
   async chargeFees(now: Date = new Date()): Promise<number> {
     const period = periodOf(now);
     let charged = 0;
-    for (const connection of await this.repository.listFeeDue(period, FEE_BATCH)) {
+    for (const { connection, kind } of await this.repository.listFeeDue(period, FEE_BATCH)) {
       try {
-        if ((await this.ensureFeePaid(connection, now)) === 'paid') {
+        if ((await this.ensureFeePaid(connection, kind, now)) === 'paid') {
           // Бесплатное подключение тоже отмечается: проход не вернётся к строке до следующего месяца.
           if (connection.feePaidPeriod !== period) {
             await this.repository.markFeePaid(connection.clientId, period);
@@ -467,15 +623,14 @@ export class BotsService {
   // --- Администратор: условия клиентов -----------------------------------------------------------
 
   async adminClients(now: Date = new Date()): Promise<{ clients: BotClientRow[] }> {
-    const bot = await this.repository.findPlatformBot();
-    if (bot === undefined) return { clients: [] };
-    const rows = await this.repository.listConnections(bot.id);
+    const rows = await this.repository.listConnections();
     const clients: BotClientRow[] = [];
-    for (const { connection, clientName, subscribers } of rows) {
-      const terms = await this.termsOf(connection);
+    for (const { connection, clientName, subscribers, kind, username } of rows) {
+      const terms = await this.termsOf(connection, kind);
       clients.push({
         client_id: connection.clientId,
         client_name: clientName,
+        bot: { kind: kind === 'client' ? 'own' : 'platform', username },
         enabled: connection.enabled,
         subscribers,
         own: {
@@ -531,27 +686,48 @@ export class BotsService {
   // --- Отправка -----------------------------------------------------------------------------------
 
   /**
-   * Можно ли отправить сообщение на этот номер ботом клиента: продукт включён, бот работает, клиент к нему
-   * подключён, а у номера есть живой подписчик этого клиента. Возвращает бота и цену сообщения; `undefined` —
-   * сообщение пойдёт через аккаунты.
+   * Можно ли отправить сообщение на этот номер ботом клиента (площадки или своим): продукт включён, клиент подключён,
+   * бот работает, плата за месяц взята, а у номера есть живой подписчик этого клиента в этом боте. Возвращает бота и
+   * цену сообщения; `undefined` — сообщение пойдёт через аккаунты.
    */
   async routeFor(
     clientId: Id<'client'>,
     recipient: string,
     now: Date = new Date(),
   ): Promise<{ botId: BotId; price: MoneyAmount } | undefined> {
-    const [settings, bot, connection] = await Promise.all([
+    const [settings, connection] = await Promise.all([
       this.settings.bot(),
-      this.repository.findPlatformBot(),
       this.repository.findConnectionByClient(clientId),
     ]);
-    if (!settings.enabled || bot?.status !== 'active') return undefined;
-    if (connection?.enabled !== true || connection.botId !== bot.id) return undefined;
-    const terms = await this.termsOf(connection);
+    if (!settings.enabled || connection?.enabled !== true) return undefined;
+    const bot = await this.repository.findBot(connection.botId);
+    if (bot?.status !== 'active') return undefined;
+    const terms = await this.termsOf(connection, bot.kind);
     // Плата за месяц не взята — бот клиенту не отправляет, сообщения идут через аккаунты.
     if (!this.feePaid(connection, terms, now)) return undefined;
-    if ((await this.repository.findReachable(clientId, recipient)) === undefined) return undefined;
+    if ((await this.repository.findReachable(clientId, bot.id, recipient)) === undefined) {
+      return undefined;
+    }
     return { botId: bot.id, price: terms.messagePrice };
+  }
+
+  /**
+   * Цена сообщения бота клиента, если бот сейчас может отправлять (продукт включён, подключение включено, бот работает,
+   * плата за месяц взята); иначе `undefined`. Для показа цены в форме отправки, когда аккаунтов партнёров нет.
+   */
+  async connectedPrice(
+    clientId: Id<'client'>,
+    now: Date = new Date(),
+  ): Promise<MoneyAmount | undefined> {
+    const [settings, connection] = await Promise.all([
+      this.settings.bot(),
+      this.repository.findConnectionByClient(clientId),
+    ]);
+    if (!settings.enabled || connection?.enabled !== true) return undefined;
+    const bot = await this.repository.findBot(connection.botId);
+    if (bot?.status !== 'active') return undefined;
+    const terms = await this.termsOf(connection, bot.kind);
+    return this.feePaid(connection, terms, now) ? terms.messagePrice : undefined;
   }
 
   /**
@@ -566,7 +742,7 @@ export class BotsService {
   ): Promise<{ messageId: string }> {
     const bot = await this.repository.findBot(botId);
     if (bot?.status !== 'active') throw dependencyUnavailable('Бот сейчас недоступен');
-    const subscriber = await this.repository.findReachable(clientId, recipient);
+    const subscriber = await this.repository.findReachable(clientId, bot.id, recipient);
     if (subscriber === undefined) throw new BotRecipientRejectedError('нет подписчика');
     try {
       return await this.provider.send(this.tokenOf(bot), subscriber.chatId, text);

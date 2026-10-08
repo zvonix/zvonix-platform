@@ -575,8 +575,8 @@ test.describe('бот MAX (ADR-0077)', () => {
       page.getByText(/^https:\/\/max\.ru\/e2ebot_bot\?start=[a-z0-9]{10}$/u),
     ).toBeVisible();
     await expect(page.getByText(/Подписчиков/u)).toBeVisible();
-    await expect(page.getByText('Цена сообщения')).toBeVisible();
-    await expect(page.getByText('Плата в месяц')).toBeVisible();
+    await expect(page.getByText('Условия', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Работает через/u)).toBeVisible();
 
     // Администратор видит клиента среди подключённых и задаёт ему свою цену сообщения.
     await admin.goto('/messaging');
@@ -586,8 +586,52 @@ test.describe('бот MAX (ADR-0077)', () => {
     await admin.getByRole('button', { name: 'Сохранить' }).click();
     await expect(admin.getByText('своя')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Отключить', exact: true }).click();
-    await expect(page.getByText('Отключено')).toBeVisible();
+    // Блок бота отдельно: «Отключено» бывает и у подключения SMPP того же клиента.
+    const botBlock = page.locator('section', {
+      has: page.getByRole('heading', { name: 'Бот MAX', exact: true }),
+    });
+    await botBlock.getByRole('button', { name: 'Отключить', exact: true }).click();
+    await expect(botBlock.getByText('Отключено')).toBeVisible();
+
+    await adminContext.close();
+    await clientContext.close();
+  });
+});
+
+test.describe('свой бот клиента (ADR-0077, этап 2)', () => {
+  test('клиент вставляет токен своего бота: бот подключён, ссылка с его именем; токен нигде не показан', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const admin = await adminContext.newPage();
+    await signIn(admin, PEOPLE.admin);
+    const enabled = await admin.request.put('/api/settings', {
+      headers: { 'X-Zvonix-Web': '1' },
+      data: { settings: { 'messaging.enabled': true, 'bot.enabled': true } },
+    });
+    expect(enabled.ok()).toBe(true);
+
+    const clientContext = await browser.newContext();
+    const page = await clientContext.newPage();
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/messages');
+
+    await page.getByRole('button', { name: 'Подключить своего бота', exact: true }).click();
+    // Негодный токен — отказ в окне, бота нет.
+    await page.getByLabel('Токен бота').fill('не-токен');
+    await page.getByRole('button', { name: 'Подключить', exact: true }).click();
+    await expect(page.getByText(/не принял токен/u)).toBeVisible();
+
+    await page.getByLabel('Токен бота').fill('ok-ownbot');
+    await page.getByRole('button', { name: 'Подключить', exact: true }).click();
+    await expect(page.getByText('@ownbot_bot').first()).toBeVisible();
+    await expect(page.getByText(/ваш бот @ownbot_bot/u)).toBeVisible();
+    await expect(page.getByText(/https:\/\/max\.ru\/ownbot_bot\?start=/u)).toBeVisible();
+    await expect(page.getByText('ok-ownbot')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Отключить бота' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Отключить' }).click();
+    await expect(page.getByText('Отключён')).toBeVisible();
 
     await adminContext.close();
     await clientContext.close();

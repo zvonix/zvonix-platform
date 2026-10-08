@@ -189,6 +189,8 @@ export class SettingsService {
     readonly apiUrl: string;
     readonly messagePrice: MoneyAmount;
     readonly monthlyFee: MoneyAmount;
+    readonly ownMessagePrice: MoneyAmount;
+    readonly ownMonthlyFee: MoneyAmount;
   }> {
     const values = await this.values();
     return {
@@ -196,6 +198,10 @@ export class SettingsService {
       apiUrl: this.text(values, 'bot.api_url').replace(/\/+$/u, ''),
       messagePrice: Money.fromMajorUnits(this.number(values, 'bot.message_price').toFixed(6)),
       monthlyFee: Money.fromMajorUnits(this.number(values, 'bot.monthly_fee').toFixed(6)),
+      ownMessagePrice: Money.fromMajorUnits(
+        this.number(values, 'bot.own_message_price').toFixed(6),
+      ),
+      ownMonthlyFee: Money.fromMajorUnits(this.number(values, 'bot.own_monthly_fee').toFixed(6)),
     };
   }
 

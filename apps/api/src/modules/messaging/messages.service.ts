@@ -119,10 +119,17 @@ export class MessagesService {
     };
   }
 
-  /** Сколько стоит одно сообщение этому клиенту сейчас; `undefined` — принять некуда. */
+  /**
+   * Сколько стоит одно сообщение этому клиенту сейчас; `undefined` — принять некуда. Нет ни одного аккаунта, но у
+   * клиента работает бот — называется цена бота: подписчикам клиент отправлять может (ADR-0077).
+   */
   async quote(clientId: Id<'client'>): Promise<Quote | undefined> {
     const account = await this.pickAccount();
-    return account === undefined ? undefined : this.quoteFor(account, clientId);
+    if (account !== undefined) return this.quoteFor(account, clientId);
+    const price = await this.bots.connectedPrice(clientId);
+    return price === undefined
+      ? undefined
+      : { partnerAmount: Money.ZERO, commissionAmount: price, clientAmount: price };
   }
 
   /**

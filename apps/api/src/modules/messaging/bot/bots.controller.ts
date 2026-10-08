@@ -3,7 +3,18 @@
  * ([ADR-0077](../../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)).
  */
 
-import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { Money, parseId, permissionDenied, type MoneyAmount } from '@zvonix/shared';
 import { z } from 'zod';
 import { Cabinets, Public, Roles } from '../../../http/auth.guard.js';
@@ -126,7 +137,7 @@ export class StaffBotController {
   }
 }
 
-/** Бот в кабинете клиента: подключиться, получить ссылку, включить и выключить. */
+/** Бот в кабинете клиента: подключиться, получить ссылку, включить и выключить, подключить своего бота. */
 @Controller()
 export class ClientBotController {
   constructor(
@@ -146,6 +157,24 @@ export class ClientBotController {
   async connect(@CurrentUser() actor: Principal): Promise<BotClientView> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     return this.bots.connect(client.id);
+  }
+
+  /** Свой бот клиента: вставляет токен бота, созданного в «MAX для бизнеса». Токен никому не показывается. */
+  @Cabinets('client')
+  @Put('client/messages/bot/own')
+  async registerOwn(
+    @CurrentUser() actor: Principal,
+    @Body(zodBody(registerBotSchema)) body: z.infer<typeof registerBotSchema>,
+  ): Promise<BotClientView> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return this.bots.registerOwnBot(actor, client.id, body.token);
+  }
+
+  @Cabinets('client')
+  @Delete('client/messages/bot/own')
+  async removeOwn(@CurrentUser() actor: Principal): Promise<BotClientView> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return this.bots.removeOwnBot(actor, client.id);
   }
 
   @Cabinets('client')

@@ -152,7 +152,11 @@ describe('бот в кабинете клиента', () => {
 
   it('пока бота нет или продукт выключен — недоступен; потом подключается, ссылка не меняется, выключается', async () => {
     const client = await fx.clientWithMoney('1');
-    expect((await view(client.token)).json<{ available: boolean }>().available).toBe(false);
+    const before = (await view(client.token)).json<{
+      available: boolean;
+      platform_available: boolean;
+    }>();
+    expect(before).toMatchObject({ available: true, platform_available: false });
     expect(
       (
         await api().inject({
