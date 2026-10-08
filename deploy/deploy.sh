@@ -164,14 +164,51 @@ update_local_node() {
   echo "ВНИМАНИЕ: узел АТС не обновлён — площадка работает; повторите zvonix-node-update" >&2
 }
 
+# Пока фоновая команда работает, раз в `interval` секунд печатает строку о ходе: человек в кабинете видит, что
+# обновление идёт, а не зависло (2026-10-08: десять минут тишины на медленном канале). `describe` получает
+# прошедшие секунды и печатает строку; ждёт процесс и возвращает его код.
+watch_progress() {
+  local pid="$1" interval="$2" describe="$3" started now
+  started="$(date +%s)"
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep "$interval"
+    kill -0 "$pid" 2>/dev/null || break
+    now="$(date +%s)"
+    "$describe" "$((now - started))"
+  done
+  wait "$pid"
+}
+
+# Строка хода скачивания: сколько получено, процент, скорость и сколько осталось. Размер и файл — в переменных
+# DOWNLOAD_*: функции `watch_progress` аргументы нужны только временные.
+describe_download() {
+  local elapsed="$1" size speed left
+  size="$(stat -c %s "$DOWNLOAD_OUT" 2>/dev/null || echo 0)"
+  speed=$(((size - DOWNLOAD_LAST) / ${DOWNLOAD_INTERVAL}))
+  DOWNLOAD_LAST="$size"
+  if [ "$DOWNLOAD_TOTAL" -gt 0 ]; then
+    left=""
+    [ "$speed" -gt 0 ] && left=", осталось около $(((DOWNLOAD_TOTAL - size) / speed)) с"
+    printf '  скачано %s из %s КБ (%s%%), %s КБ/с%s\n' "$((size / 1024))" "$((DOWNLOAD_TOTAL / 1024))" \
+      "$((size * 100 / DOWNLOAD_TOTAL))" "$((speed / 1024))" "$left"
+  else
+    printf '  скачано %s КБ, %s КБ/с, прошло %s с\n' "$((size / 1024))" "$((speed / 1024))" "$elapsed"
+  fi
+}
+
 # Канал сервера до GitHub бывает очень медленным (2026-10-06: около 11 КБ/с, архив в 15 МБ не
 # укладывался в десять минут). Поэтому каждая попытка продолжает файл с места обрыва, а не
-# начинает заново, и попыток несколько. Строки попыток видны в журнале обновления из кабинета.
+# начинает заново, и попыток несколько. Ход скачивания — строка каждые десять секунд; строки попыток
+# видны в журнале обновления из кабинета.
 fetch_resumable() {
-  local out="$1" url="$2" headers="$3" attempt
+  local out="$1" url="$2" headers="$3" total="${4:-0}" attempt pid
+  DOWNLOAD_OUT="$out" DOWNLOAD_TOTAL="$total" DOWNLOAD_INTERVAL=10
   for attempt in 1 2 3 4 5 6; do
-    if curl -fsSL -C - --max-time 600 -H @"$headers" -H 'Accept: application/octet-stream' \
-      -o "$out" "$url"; then
+    DOWNLOAD_LAST="$(stat -c %s "$out" 2>/dev/null || echo 0)"
+    curl -fsSL -C - --max-time 600 -H @"$headers" -H 'Accept: application/octet-stream' \
+      -o "$out" "$url" &
+    pid=$!
+    if watch_progress "$pid" "$DOWNLOAD_INTERVAL" describe_download; then
       return 0
     fi
     echo "скачивание не завершилось (попытка ${attempt} из 6), продолжаю с места обрыва: $(du -h "$out" 2>/dev/null | cut -f1)" >&2
@@ -180,9 +217,16 @@ fetch_resumable() {
   return 1
 }
 
+# Долгая команда с отметкой «идёт N с» раз в 15 секунд: установка зависимостей молчит минутами.
+describe_elapsed() { printf '  идёт, прошло %s с\n' "$1"; }
+run_with_heartbeat() {
+  "$@" &
+  watch_progress "$!" 15 describe_elapsed
+}
+
 # Скачивание выпуска по токену только на чтение (ADR-0049).
 download() {
-  local tag="$1" env_file="${ETC}/github.env" headers api name id release_id
+  local tag="$1" env_file="${ETC}/github.env" headers api name id size release_id
   [ -r "$env_file" ] || die "нет ${env_file} — см. deploy/README.md, «Токен GitHub»"
   # shellcheck source=/dev/null
   . "$env_file"
@@ -211,18 +255,22 @@ download() {
     || die "не удалось получить список файлов выпуска ${tag}"
 
   for name in "zvonix-${tag}.tgz" "zvonix-${tag}.tgz.sha256"; do
+    # «идентификатор размер» файла в выпуске; размер нужен для процента скачивания.
     id="$(python3 - "$name" "${WORK}/assets.json" <<'PY'
 import json, sys
 name, path = sys.argv[1], sys.argv[2]
 with open(path, encoding='utf-8') as source:
     assets = json.load(source)
-print(next((str(asset['id']) for asset in assets if asset.get('name') == name), ''))
+found = next((asset for asset in assets if asset.get('name') == name), None)
+print('' if found is None else '%s %s' % (found['id'], found.get('size', 0)))
 PY
 )"
     [ -n "$id" ] || die "в выпуске ${tag} нет файла ${name}"
+    size="${id#* }"
+    id="${id%% *}"
     # Файл отдаёт хранилище GitHub переадресацией; заголовок авторизации curl на чужой
     # адрес не переносит.
-    fetch_resumable "${WORK}/${name}" "${api}/releases/assets/${id}" "$headers" \
+    fetch_resumable "${WORK}/${name}" "${api}/releases/assets/${id}" "$headers" "$size" \
       || die "не удалось скачать ${name}"
   done
 
@@ -237,13 +285,13 @@ unpack_release() {
 
   step "Распаковка в ${release}"
   install -d -o zvonix -g zvonix -m 0750 "$RELEASES" "$release"
-  tar -xzf "$archive" -C "$release" --strip-components=1
+  run_with_heartbeat tar -xzf "$archive" -C "$release" --strip-components=1
   [ -f "${release}/RELEASE" ] || die "в архиве нет файла RELEASE — это не выпуск площадки"
   chown -R zvonix:zvonix "$release"
 
   step "Зависимости API и воркера"
   # Версию pnpm берёт corepack из `packageManager` выпуска.
-  sudo -u zvonix -H env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true \
+  run_with_heartbeat sudo -u zvonix -H env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true \
     sh -c 'cd "$0" && pnpm install --frozen-lockfile --prod --filter "@zvonix/api..." --filter "@zvonix/worker..."' \
     "$release"
   RELEASE_DIR="$release"
