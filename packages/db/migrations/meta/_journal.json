@@ -372,6 +372,13 @@
       "when": 1791450679413,
       "tag": "0052_progrev_akkauntov",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1791454728512,
+      "tag": "0053_pauza_akkaunta",
+      "breakpoints": true
     }
   ]
 }

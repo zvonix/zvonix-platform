@@ -4,6 +4,7 @@ import {
   WARMUP_DEFAULT_CEILING,
   warmupDailyLimit,
 } from '@zvonix/shared';
+import type { AccountLoad } from './messages.repository.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
 
 /** Что аккаунту разрешено сейчас сверх лимита в минуту ([ADR-0078](../../../../../docs/adr/0078-progrev-akkauntov-max.md)). */
@@ -39,4 +40,48 @@ export function effectiveLimits(
     hourly: spreadHourlyLimit(daily),
     warmupDay: day !== null && day < WARMUP_DAYS ? day : null,
   };
+}
+
+/** Через сколько повторять, если аккаунт упёрся в предел: минуту — коротко, час — реже, сутки — ещё реже. */
+const RETRY_MS = { minute: 10_000, hour: 120_000, day: 300_000 } as const;
+
+/**
+ * Когда аккаунт сможет отправить следующее сообщение; `undefined` — может сейчас. Проверяются по порядку: пауза
+ * здоровья, пауза между сообщениями, лимит в минуту (тариф), в час и в сутки (прогрев, ADR-0078).
+ * `backlog` — сколько сообщений уже стоит за аккаунтом: при приёме они считаются отправленными (запас под новое),
+ * при отправке — нет, ведь ждущее сообщение само одно из них.
+ */
+export function accountReadyAt(
+  account: Pick<
+    MessengerAccountRow,
+    | 'warmupEnabled'
+    | 'warmupStartedAt'
+    | 'limitPerDay'
+    | 'limitPerMinute'
+    | 'lastUsedAt'
+    | 'pausedUntil'
+  >,
+  load: AccountLoad,
+  now: Date,
+  options: { paceSeconds: number; withBacklog: boolean },
+): Date | undefined {
+  const at = now.getTime();
+  if (account.pausedUntil !== null && account.pausedUntil.getTime() > at)
+    return account.pausedUntil;
+  if (options.paceSeconds > 0 && account.lastUsedAt !== null) {
+    const ready = account.lastUsedAt.getTime() + options.paceSeconds * 1000;
+    if (ready > at) return new Date(ready);
+  }
+  const queue = options.withBacklog ? load.backlog : 0;
+  if (account.limitPerMinute !== null && load.minute + queue >= account.limitPerMinute) {
+    return new Date(at + RETRY_MS.minute);
+  }
+  const limits = effectiveLimits(account, now);
+  if (limits.hourly !== null && load.hour + queue >= limits.hourly) {
+    return new Date(at + RETRY_MS.hour);
+  }
+  if (limits.daily !== null && load.day + queue >= limits.daily) {
+    return new Date(at + RETRY_MS.day);
+  }
+  return undefined;
 }

@@ -97,13 +97,12 @@ export function fixtures(api: () => NestFastifyApplication, adminToken: () => st
       return (result.rows[0] as { instance: string }).instance;
     });
     if (!warmup) {
-      const off = await api().inject({
-        method: 'PATCH',
-        url: `/messenger/accounts/${accountId}/warmup`,
-        headers: bearer(adminToken()),
-        payload: { enabled: false },
+      // Напрямую в базе: лишний вызов администратора съедал бы его предел изменений в минуту (ADR-0041).
+      await withDatabase(async (execute) => {
+        await execute(
+          sql`update messenger_accounts set warmup_enabled = false where id = ${accountId}`,
+        );
       });
-      expect(off.statusCode).toBe(200);
     }
     simulateAccountState(instance, 'authorized', '79990001122');
     // Состояние обновляется сверкой: QR-запрос с `authorized` делает её сразу.

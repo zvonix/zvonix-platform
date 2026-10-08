@@ -172,6 +172,8 @@ describe('заведение аккаунта', () => {
       'label',
       'limit_per_day',
       'limit_per_minute',
+      'pause_reason',
+      'paused_until',
       'phone',
       'price',
       'state_checked_at',

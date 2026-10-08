@@ -166,6 +166,11 @@ export class SettingsService {
     readonly precheckEnabled: boolean;
     readonly precheckExistsDays: number;
     readonly precheckAbsentDays: number;
+    readonly accountsPerPartnerMax: number;
+    readonly healthEnabled: boolean;
+    readonly healthMinSample: number;
+    readonly healthMaxAbsentPercent: number;
+    readonly healthPauseHours: number;
     readonly maxWaitMinutes: number;
     readonly textDays: number;
   }> {
@@ -178,6 +183,11 @@ export class SettingsService {
       precheckEnabled: this.flag(values, 'messages.precheck_enabled'),
       precheckExistsDays: this.number(values, 'messages.precheck_exists_days'),
       precheckAbsentDays: this.number(values, 'messages.precheck_absent_days'),
+      accountsPerPartnerMax: this.number(values, 'messages.accounts_per_partner_max'),
+      healthEnabled: this.flag(values, 'messages.health_enabled'),
+      healthMinSample: this.number(values, 'messages.health_min_sample'),
+      healthMaxAbsentPercent: this.number(values, 'messages.health_max_absent_percent'),
+      healthPauseHours: this.number(values, 'messages.health_pause_hours'),
       maxWaitMinutes: this.number(values, 'messages.max_wait_minutes'),
       textDays: this.number(values, 'retention.messages_days'),
     };

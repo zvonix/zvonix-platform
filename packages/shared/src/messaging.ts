@@ -42,9 +42,6 @@ export const MESSAGE_PRICE_MAX_RUBLES = '100';
 /** Предел значения лимита аккаунта (в минуту, в сутки): выше — опечатка, а не лимит. */
 export const MESSENGER_LIMIT_MAX = 1_000_000;
 
-/** Аккаунтов MAX у одного партнёра — столько же, сколько у него шлюзов по умолчанию. */
-export const MESSENGER_ACCOUNTS_PER_PARTNER_MAX = 20;
-
 /**
  * Состояние сообщения.
  *
@@ -144,6 +141,10 @@ export const BOT_INSERT_MAX = 150;
 export const SMPP_ALLOWED_IPS_MAX = 20;
 
 // --- Прогрев аккаунта и равномерная отправка ([ADR-0078](../../../docs/adr/0078-progrev-akkauntov-max.md)) ---
+
+/** Почему аккаунт стоит на паузе ([ADR-0079](../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)): MAX часто сообщает «нет аккаунта» уже после отправки. */
+export const MESSENGER_PAUSE_REASONS = ['absent_rate'] as const;
+export type MessengerPauseReason = (typeof MESSENGER_PAUSE_REASONS)[number];
 
 /** Сколько суток новый аккаунт набирает силу; потом действует потолок из тарифа. */
 export const WARMUP_DAYS = 28;

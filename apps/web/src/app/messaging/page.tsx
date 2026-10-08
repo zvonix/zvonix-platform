@@ -10,6 +10,7 @@ import { BotPlatform } from './bot-platform';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -46,6 +47,8 @@ interface Account {
   readonly limit_per_day: number | null;
   readonly warmup_enabled: boolean;
   readonly warmup_day: number | null;
+  readonly paused_until: string | null;
+  readonly pause_reason: string | null;
   readonly daily_limit_now: number | null;
   readonly state_reason: string | null;
   readonly state_checked_at: string | null;
@@ -86,6 +89,12 @@ function MessagingView() {
         method: 'PATCH',
         body: { enabled: input.enabled },
       }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
+  });
+
+  const resume = useMutation({
+    mutationFn: (id: string) =>
+      request<unknown>(`/messenger/accounts/${id}/resume`, { method: 'POST' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: KEY }),
   });
 
@@ -168,6 +177,24 @@ function MessagingView() {
                     reason={account.state_reason}
                     staff
                   />
+                  {account.paused_until !== null && (
+                    <span className="mt-1 block text-warn">
+                      Пауза до {moment(account.paused_until)}: много «нет MAX» после отправки
+                      {canChange && (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          className="ml-2"
+                          disabled={resume.isPending}
+                          onClick={() => {
+                            resume.mutate(account.id);
+                          }}
+                        >
+                          Снять паузу
+                        </Button>
+                      )}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className="num text-right">
                   {account.price === null ? (

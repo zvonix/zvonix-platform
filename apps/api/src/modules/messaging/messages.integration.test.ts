@@ -354,6 +354,167 @@ describe('автопрогрев и равномерная отправка (ADR
   });
 });
 
+describe('распределение и здоровье аккаунтов (ADR-0079)', () => {
+  /** Ещё один рабочий аккаунт того же партнёра: идёт за его тарифом по умолчанию, прогрев выключен. */
+  async function addAccount(partner: { ownerToken: string }) {
+    const made = await api().inject({
+      method: 'POST',
+      url: '/partner/messenger/accounts',
+      headers: bearer(partner.ownerToken),
+      payload: { label: 'Дополнительный' },
+    });
+    expect(made.statusCode).toBe(201);
+    const accountId = made.json<{ account: { id: string } }>().account.id;
+    const instance = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select provider_instance_id as instance from messenger_accounts where id = ${accountId}`,
+      );
+      return (result.rows[0] as { instance: string }).instance;
+    });
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update messenger_accounts set warmup_enabled = false where id = ${accountId}`,
+      );
+    });
+    simulateAccountState(instance, 'authorized', '79990003344');
+    await api().inject({
+      method: 'GET',
+      url: `/partner/messenger/accounts/${accountId}/qr`,
+      headers: bearer(partner.ownerToken),
+    });
+    return { accountId, instance };
+  }
+
+  const accountsOf = async (ids: string[]) =>
+    withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select account_id as id, count(*)::int as n from messages where id in (${sql.join(
+          ids.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )}) group by account_id order by n desc`,
+      );
+      return result.rows as { id: string; n: number }[];
+    });
+
+  it('поток делится поровну между равными аккаунтами партнёра', async () => {
+    await put(adminToken, { 'messages.pace_seconds': 0 });
+    const partner = await partnerWithAccount('0.45');
+    await addAccount(partner);
+    await addAccount(partner);
+    const client = await clientWithMoney('10');
+    const ids: string[] = [];
+    for (let n = 0; n < 6; n += 1) {
+      ids.push(
+        (await send(client.token, { to: `7900555006${String(n)}`, text: 'Р' })).json<{
+          message: MessageView;
+        }>().message.id,
+      );
+    }
+    expect((await accountsOf(ids)).map((row) => row.n)).toEqual([2, 2, 2]);
+  });
+
+  it('аккаунт упёрся в лимит, а у соседа того же партнёра есть запас: сообщение переносится и уходит', async () => {
+    await put(adminToken, { 'messages.pace_seconds': 0 });
+    const partner = await partnerWithAccount('0.45', { limitPerMinute: 1 });
+    const client = await clientWithMoney('10');
+    const first = (await send(client.token, { to: '79005550071', text: 'А' })).json<{
+      message: MessageView;
+    }>().message.id;
+    const second = (await send(client.token, { to: '79005550072', text: 'Б' })).json<{
+      message: MessageView;
+    }>().message.id;
+    // Оба встали на единственный аккаунт; сосед появился позже.
+    expect((await accountsOf([first, second])).map((row) => row.n)).toEqual([2]);
+    const neighbour = await addAccount(partner);
+
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect((await messageOf(client.token, first))?.status).toBe('sent');
+    expect((await messageOf(client.token, second))?.status).toBe('sent');
+    expect(simulatedSent.find((item) => item.recipient === '79005550072')?.instanceId).toBe(
+      neighbour.instance,
+    );
+    expect((await accountsOf([first, second])).map((row) => row.n)).toEqual([1, 1]);
+  });
+
+  it('много «нет MAX» после отправки: аккаунт встаёт на паузу, но последний рабочий не трогается', async () => {
+    await put(adminToken, {
+      'messages.pace_seconds': 0,
+      'messages.health_min_sample': 5,
+      'messages.health_max_absent_percent': 30,
+    });
+    const partner = await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const secret = api().get(MessagingService).webhookSecret();
+    const ids: string[] = [];
+    for (let n = 0; n < 6; n += 1) {
+      ids.push(
+        (await send(client.token, { to: `7900555008${String(n)}`, text: 'З' })).json<{
+          message: MessageView;
+        }>().message.id,
+      );
+    }
+    await api().get(MessagesService).dispatchDue(new Date());
+    for (const id of ids.slice(0, 4)) {
+      const providerId = await withDatabase(async (execute) => {
+        const result = await execute(
+          sql`select provider_message_id as id from messages where id = ${id}`,
+        );
+        return (result.rows[0] as { id: string }).id;
+      });
+      await api().inject({
+        method: 'POST',
+        url: `/webhooks/messenger/${secret}`,
+        payload: {
+          typeWebhook: 'outgoingMessageStatus',
+          idMessage: providerId,
+          status: 'noAccount',
+          instanceData: { idInstance: partner.instance },
+        },
+      });
+    }
+
+    const service = api().get(MessagesService);
+    // Аккаунт единственный: пауза означала бы остановку всей отправки.
+    expect(await service.checkHealth(new Date())).toBe(0);
+
+    await addAccount(partner);
+    expect(await service.checkHealth(new Date())).toBe(1);
+    const view = (
+      await api().inject({ method: 'GET', url: '/messenger/accounts', headers: bearer(adminToken) })
+    )
+      .json<{
+        accounts: { id: string; paused_until: string | null; pause_reason: string | null }[];
+      }>()
+      .accounts.find((account) => account.id === partner.accountId);
+    expect(view?.pause_reason).toBe('absent_rate');
+    expect(view?.paused_until).not.toBeNull();
+    // Повторно та же статистика не ставит паузу второй раз.
+    expect(await service.checkHealth(new Date())).toBe(0);
+
+    // Новое сообщение идёт мимо аккаунта на паузе.
+    const next = (await send(client.token, { to: '79005550099', text: 'Н' })).json<{
+      message: MessageView;
+    }>().message.id;
+    expect((await accountsOf([next]))[0]?.id).not.toBe(partner.accountId);
+
+    // Администратор снимает паузу; партнёру менять нельзя.
+    const denied = await api().inject({
+      method: 'POST',
+      url: `/messenger/accounts/${partner.accountId}/resume`,
+      headers: bearer(partner.ownerToken),
+    });
+    expect(denied.statusCode).toBe(403);
+    const resumed = await api().inject({
+      method: 'POST',
+      url: `/messenger/accounts/${partner.accountId}/resume`,
+      headers: bearer(adminToken),
+    });
+    expect(
+      resumed.json<{ account: { paused_until: string | null } }>().account.paused_until,
+    ).toBeNull();
+  });
+});
+
 describe('не ушло — деньги возвращаются', () => {
   it('у номера нет MAX: сообщение отклонено с нашей причиной, клиенту вернули всё, партнёру ничего не причитается', async () => {
     const partner = await partnerWithAccount('0.45');

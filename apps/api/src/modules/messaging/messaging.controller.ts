@@ -43,6 +43,9 @@ interface AccountView {
   readonly warmup_day: number | null;
   /** Сколько сообщений за сутки аккаунту разрешено сейчас; пусто — без ограничения. */
   readonly daily_limit_now: number | null;
+  /** Пауза здоровья до этого времени (MAX часто сообщает «нет аккаунта» после отправки); пусто — не на паузе. */
+  readonly paused_until: string | null;
+  readonly pause_reason: string | null;
   readonly state_checked_at: string | null;
   readonly created_at: string;
 }
@@ -60,6 +63,9 @@ const toView = (row: MessengerAccountRow, now: Date = new Date()): AccountView =
   warmup_enabled: row.warmupEnabled,
   warmup_day: effectiveLimits(row, now).warmupDay,
   daily_limit_now: effectiveLimits(row, now).daily,
+  paused_until:
+    row.pausedUntil !== null && row.pausedUntil > now ? row.pausedUntil.toISOString() : null,
+  pause_reason: row.pausedUntil !== null && row.pausedUntil > now ? row.pauseReason : null,
   state_checked_at: row.stateCheckedAt?.toISOString() ?? null,
   created_at: row.createdAt.toISOString(),
 });
@@ -210,6 +216,18 @@ export class MessagingController {
         apiUrl: body.apiUrl,
       },
     );
+    return { account: toView(row) };
+  }
+
+  /** Снять паузу здоровья раньше срока (ADR-0079). */
+  @Roles('admin')
+  @Post('messenger/accounts/:id/resume')
+  @HttpCode(200)
+  async resume(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+  ): Promise<{ account: AccountView }> {
+    const row = await this.messaging.resume({ userId: actor.userId, role: actor.role }, id);
     return { account: toView(row) };
   }
 

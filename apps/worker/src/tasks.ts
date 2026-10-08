@@ -337,6 +337,11 @@ export class BackgroundTasks {
         run: (now) => this.messageService.purgeTexts(now),
       },
       {
+        name: 'messages.check-health',
+        everySeconds: MESSENGER_CHECK_SECONDS * 5,
+        run: (now) => this.messageService.checkHealth(now),
+      },
+      {
         name: 'messaging.refresh-accounts',
         everySeconds: MESSENGER_CHECK_SECONDS,
         run: (now) => this.messaging.refreshDue(now),

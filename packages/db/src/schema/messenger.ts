@@ -15,6 +15,7 @@ import {
   MESSAGE_STATUSES,
   MESSENGER_ACCOUNT_REASONS,
   MESSENGER_ACCOUNT_STATUSES,
+  MESSENGER_PAUSE_REASONS,
   BOT_GREETING_MAX,
   BOT_INSERT_MAX,
   BOT_KINDS,
@@ -33,6 +34,7 @@ import {
   type MessageStatus,
   type MessengerAccountReason,
   type MessengerAccountStatus,
+  type MessengerPauseReason,
   type MessengerProviderId,
   type SmppReceiptAction,
 } from '@zvonix/shared';
@@ -139,6 +141,14 @@ export const messengerAccounts = pgTable(
     warmupEnabled: boolean().notNull().default(true),
     warmupStartedAt: timestamptz(),
 
+    /**
+     * Пауза здоровья ([ADR-0079](../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)): до этого
+     * времени сообщения на аккаунт не идут. `healthSince` — с какого момента считать долю «нет MAX» после отправки.
+     */
+    pausedUntil: timestamptz(),
+    pauseReason: text().$type<MessengerPauseReason>(),
+    healthSince: timestamptz(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -149,6 +159,10 @@ export const messengerAccounts = pgTable(
       sql`${t.stateReason} is null or ${oneOf(t.stateReason, MESSENGER_ACCOUNT_REASONS)}`,
     ),
     check('messenger_accounts_provider_check', oneOf(t.provider, MESSENGER_PROVIDERS)),
+    check(
+      'messenger_accounts_pause_reason_check',
+      sql`${t.pauseReason} is null or ${oneOf(t.pauseReason, MESSENGER_PAUSE_REASONS)}`,
+    ),
     check('messenger_accounts_price_positive', sql`${t.price} is null or ${t.price} > 0`),
     check(
       'messenger_accounts_limits_positive',

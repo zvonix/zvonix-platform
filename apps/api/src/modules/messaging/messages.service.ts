@@ -32,8 +32,13 @@ import type { MessengerAccountRow } from './messaging.repository.js';
 import { BotsService } from './bot/bots.service.js';
 import { BotRecipientRejectedError } from './bot/bot.provider.js';
 import { MessagingService } from './messaging.service.js';
-import { effectiveLimits } from './warmup.js';
-import { MessagesRepository, type MessageFilter, type MessageRow } from './messages.repository.js';
+import { accountReadyAt } from './warmup.js';
+import {
+  MessagesRepository,
+  type AccountLoad,
+  type MessageFilter,
+  type MessageRow,
+} from './messages.repository.js';
 import {
   MESSAGE_PROVIDER,
   RecipientRejectedError,
@@ -43,6 +48,13 @@ import {
 
 /** Сколько сообщений воркер берёт за проход: с запасом на паузы, но без многоминутного прохода. */
 const DISPATCH_BATCH = 50;
+
+/** Сколько давно не работавших аккаунтов смотрится при выборе: хватает, чтобы найти свободный, и не читает все. */
+const CANDIDATES = 12;
+/** Сколько раз выбор повторяется, исключая недопущенных партнёров. */
+const MAX_PICK_ROUNDS = 5;
+const EMPTY_LOAD: AccountLoad = { minute: 0, hour: 0, day: 0, backlog: 0 };
+const HEALTH_WINDOW_MS = 86_400_000;
 
 /** Повтор после временного сбоя: 1, 2, 4, 8 минут — и возврат. */
 const BACKOFF_BASE_SECONDS = 60;
@@ -95,16 +107,68 @@ export class MessagesService {
     this.logger = logger.child('messages');
   }
 
-  /** Самый дешёвый рабочий аккаунт допущенного партнёра, а при равной цене — давно не работавший. */
-  private async pickAccount(): Promise<MessengerAccountRow | undefined> {
-    const verified = new Map<string, boolean>();
-    for (const account of await this.repository.listEligibleAccounts()) {
-      let ok = verified.get(account.partnerId);
-      if (ok === undefined) {
-        ok = (await this.billing.partnerWithBalance(account.partnerId)).status === 'verified';
-        verified.set(account.partnerId, ok);
+  /**
+   * Аккаунт под сообщение ([ADR-0079](../../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)):
+   * из самой дешёвой цены берутся давно не работавшие аккаунты допущенных партнёров, первый из них с запасом под лимиты
+   * (с учётом очереди за ним) — он и берётся. Запаса нет ни у кого — первый по давности: сообщение подождёт, а цена
+   * не прыгнет на дорогой аккаунт. `scope` — перевыбор при отправке: тот же партнёр и цена, без исключённого,
+   * и только с запасом (иначе `undefined`).
+   */
+  private async pickAccount(
+    now: Date = new Date(),
+    scope?: {
+      partnerId: Id<'partner'>;
+      price: MoneyAmount;
+      exceptId: Id<'messengerAccount'>;
+      paceSeconds: number;
+    },
+  ): Promise<MessengerAccountRow | undefined> {
+    const verified = new Set<string>();
+    const excluded: Id<'partner'>[] = [];
+    // Недопущенный партнёр исключается из запроса и выбор повторяется: тысячи его аккаунтов не читаются.
+    for (let round = 0; round < MAX_PICK_ROUNDS; round += 1) {
+      const candidates = await this.repository.listCandidates({
+        now,
+        limit: CANDIDATES,
+        exceptPartners: excluded,
+        ...(scope === undefined
+          ? {}
+          : { partnerId: scope.partnerId, price: scope.price, exceptId: scope.exceptId }),
+      });
+      if (candidates.length === 0) return undefined;
+      const usable: MessengerAccountRow[] = [];
+      for (const account of candidates) {
+        if (!verified.has(account.partnerId)) {
+          const status = (await this.billing.partnerWithBalance(account.partnerId)).status;
+          if (status !== 'verified') {
+            if (!excluded.includes(account.partnerId)) excluded.push(account.partnerId);
+            continue;
+          }
+          verified.add(account.partnerId);
+        }
+        usable.push(account);
       }
-      if (ok) return account;
+      if (usable.length === 0) continue;
+      const loads = await this.repository.loadOf(
+        usable.map((account) => account.id),
+        now,
+      );
+      // Среди свободных — с самой короткой очередью (при равной — давно не работавший): поток делится поровну.
+      let best: MessengerAccountRow | undefined;
+      let bestBacklog = Number.POSITIVE_INFINITY;
+      for (const account of usable) {
+        const load = loads.get(account.id) ?? EMPTY_LOAD;
+        const free =
+          accountReadyAt(account, load, now, {
+            paceSeconds: scope?.paceSeconds ?? 0,
+            withBacklog: true,
+          }) === undefined;
+        if (free && load.backlog < bestBacklog) {
+          best = account;
+          bestBacklog = load.backlog;
+        }
+      }
+      return best ?? (scope === undefined ? usable[0] : undefined);
     }
     return undefined;
   }
@@ -402,60 +466,47 @@ export class MessagesService {
     precheck: PrecheckMemory | null,
   ): Promise<boolean> {
     if (message.route === 'bot') return this.dispatchBot(message, now);
-    const account =
+    let account =
       message.accountId === null ? undefined : await this.repository.findAccount(message.accountId);
     if (account === undefined || account.status === 'retired') {
       await this.fail(message, 'account_unavailable', now);
       return false;
     }
-    // Не вошёл или нет связи: ждёт возвращения аккаунта, пока не истечёт срок ожидания.
-    if (account.status !== 'active') {
-      await this.repository.requeue(message.id, new Date(now.getTime() + 30_000), true);
-      return false;
-    }
 
-    // Пауза между сообщениями аккаунта — защита от блокировки мессенджером.
-    if (paceSeconds > 0 && account.lastUsedAt !== null) {
-      const ready = account.lastUsedAt.getTime() + paceSeconds * 1000;
-      if (ready > now.getTime()) {
+    // Когда аккаунт сможет отправить: не вошёл или нет связи — ждёт возвращения (пока не истечёт срок ожидания); иначе
+    // пауза здоровья, пауза между сообщениями, лимиты в минуту, час и сутки: сверх них сообщение ждёт, а не отклоняется.
+    const readyAt =
+      account.status !== 'active'
+        ? new Date(now.getTime() + 30_000)
+        : accountReadyAt(
+            account,
+            (await this.repository.loadOf([account.id], now)).get(account.id) ?? EMPTY_LOAD,
+            now,
+            { paceSeconds, withBacklog: false },
+          );
+    if (readyAt !== undefined) {
+      // Не может сейчас — сначала сосед того же партнёра и той же цены со свободным запасом (ADR-0079).
+      const neighbour =
+        message.partnerId === null || account.price === null
+          ? undefined
+          : await this.pickAccount(now, {
+              partnerId: message.partnerId,
+              price: account.price,
+              exceptId: account.id,
+              paceSeconds,
+            });
+      if (neighbour === undefined) {
         const jitter = Math.floor(Math.random() * 1000);
-        await this.repository.requeue(message.id, new Date(ready + jitter), true);
+        await this.repository.requeue(message.id, new Date(readyAt.getTime() + jitter), true);
         return false;
       }
-    }
-
-    // Лимиты партнёра: сверх них сообщение ждёт, а не отклоняется.
-    if (account.limitPerMinute !== null) {
-      const sentLastMinute = await this.repository.countSentSince(
-        account.id,
-        new Date(now.getTime() - 60_000),
-      );
-      if (sentLastMinute >= account.limitPerMinute) {
-        await this.repository.requeue(message.id, new Date(now.getTime() + 10_000), true);
-        return false;
-      }
-    }
-    // Сутки и час: при автопрогреве предел суток растёт по дням, а час не даёт отправить сутки пачкой.
-    const limits = effectiveLimits(account, now);
-    if (limits.hourly !== null) {
-      const sentLastHour = await this.repository.countSentSince(
-        account.id,
-        new Date(now.getTime() - 3_600_000),
-      );
-      if (sentLastHour >= limits.hourly) {
-        await this.repository.requeue(message.id, new Date(now.getTime() + 120_000), true);
-        return false;
-      }
-    }
-    if (limits.daily !== null) {
-      const sentLastDay = await this.repository.countSentSince(
-        account.id,
-        new Date(now.getTime() - 86_400_000),
-      );
-      if (sentLastDay >= limits.daily) {
-        await this.repository.requeue(message.id, new Date(now.getTime() + 300_000), true);
-        return false;
-      }
+      await this.repository.reassign(message.id, neighbour.id);
+      this.logger.info('Сообщение перенесено на другой аккаунт', {
+        message_id: message.id,
+        from: account.id,
+        to: neighbour.id,
+      });
+      account = neighbour;
     }
 
     if (
@@ -510,6 +561,51 @@ export class MessagesService {
       message_id: message.id,
       reason,
     });
+  }
+
+  /**
+   * Здоровье аккаунтов ([ADR-0079](../../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)):
+   * доля сообщений, у которых MAX после отправки сообщил «нет аккаунта». Слишком высокая — аккаунт на паузу, пока
+   * мессенджер не заблокировал его. Последний рабочий аккаунт площадки не трогается. Возвращает, сколько поставлено.
+   */
+  async checkHealth(now: Date = new Date()): Promise<number> {
+    const settings = await this.settings.messaging();
+    if (!settings.healthEnabled) return 0;
+    const outcomes = await this.repository.healthOutcomes(
+      new Date(now.getTime() - HEALTH_WINDOW_MS),
+      now,
+    );
+    const unhealthy = outcomes
+      .filter(
+        (row) =>
+          row.absent + row.ok >= settings.healthMinSample &&
+          row.absent * 100 >= settings.healthMaxAbsentPercent * (row.absent + row.ok),
+      )
+      .sort((a, b) => b.absent / (b.absent + b.ok) - a.absent / (a.absent + a.ok));
+    let paused = 0;
+    for (const row of unhealthy) {
+      if ((await this.repository.countWorking(now)) <= 1) {
+        this.logger.warn(
+          'Аккаунт с частыми «нет MAX» не поставлен на паузу: он последний рабочий',
+          {
+            account_id: row.accountId,
+            absent: row.absent,
+            sent: row.ok,
+          },
+        );
+        break;
+      }
+      const until = new Date(now.getTime() + settings.healthPauseHours * 3_600_000);
+      if (
+        await this.messaging.pauseForHealth(row.accountId, now, until, {
+          absent: row.absent,
+          ok: row.ok,
+        })
+      ) {
+        paused += 1;
+      }
+    }
+    return paused;
   }
 
   /** Ждавшие дольше допустимого отклоняются с возвратом. Догоняющая проверка по сроку. */

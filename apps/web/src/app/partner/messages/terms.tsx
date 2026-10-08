@@ -41,6 +41,7 @@ export interface Account {
   readonly limit_per_day: number | null;
   readonly warmup_enabled: boolean;
   readonly warmup_day: number | null;
+  readonly paused_until: string | null;
   readonly daily_limit_now: number | null;
 }
 
