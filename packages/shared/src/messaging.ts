@@ -142,3 +142,37 @@ export const BOT_INSERT_MAX = 150;
 
 /** Сколько адресов можно разрешить учётной записи SMPP: больше — это уже «любые». */
 export const SMPP_ALLOWED_IPS_MAX = 20;
+
+// --- Прогрев аккаунта и равномерная отправка ([ADR-0078](../../../docs/adr/0078-progrev-akkauntov-max.md)) ---
+
+/** Сколько суток новый аккаунт набирает силу; потом действует потолок из тарифа. */
+export const WARMUP_DAYS = 28;
+/** Первые сутки: столько сообщений можно отправить с нового аккаунта. */
+export const WARMUP_FIRST_DAY_LIMIT = 12;
+/** К концу первой недели (седьмые сутки) аккаунт доходит до этого числа сообщений в сутки. */
+export const WARMUP_WEEK_LIMIT = 100;
+/** Потолок суток, когда в тарифе лимит в сутки не задан. */
+export const WARMUP_DEFAULT_CEILING = 500;
+
+/**
+ * Сколько сообщений аккаунт может отправить за скользящие сутки сейчас. `day` — номер суток с начала прогрева
+ * (с нуля). Первая неделя — от 12 до 100, остальное время — линейно до потолка, с 29-х суток потолок целиком.
+ */
+export function warmupDailyLimit(day: number, ceiling: number): number {
+  if (day >= WARMUP_DAYS) return ceiling;
+  const base =
+    day <= 6
+      ? WARMUP_FIRST_DAY_LIMIT +
+        Math.round(((WARMUP_WEEK_LIMIT - WARMUP_FIRST_DAY_LIMIT) * day) / 6)
+      : WARMUP_WEEK_LIMIT +
+        Math.round(
+          ((Math.max(ceiling, WARMUP_WEEK_LIMIT) - WARMUP_WEEK_LIMIT) * (day - 6)) /
+            (WARMUP_DAYS - 6),
+        );
+  return Math.max(1, Math.min(ceiling, base));
+}
+
+/** Равномерность: за скользящий час уходит не больше двойной часовой доли суточного лимита, но не меньше одного. */
+export function spreadHourlyLimit(daily: number): number {
+  return Math.max(1, Math.ceil((daily * 2) / 24));
+}

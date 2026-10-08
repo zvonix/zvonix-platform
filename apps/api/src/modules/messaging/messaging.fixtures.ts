@@ -23,6 +23,8 @@ export interface Fixtures {
   partnerWithAccount: (
     price?: string,
     limits?: Record<string, number | null>,
+    /** Автопрогрев оставлен включённым (в тестах по умолчанию выключен: он режет поток до 1 сообщения в час). */
+    warmup?: boolean,
   ) => Promise<{ partnerId: string; ownerToken: string; accountId: string; instance: string }>;
   /** Клиент, допущенный к работе и с деньгами на счёте. */
   clientWithMoney: (amount?: string) => Promise<{ clientId: string; token: string }>;
@@ -56,7 +58,11 @@ export function fixtures(api: () => NestFastifyApplication, adminToken: () => st
       payload: { settings },
     });
 
-  async function partnerWithAccount(price = '0.45', limits: Record<string, number | null> = {}) {
+  async function partnerWithAccount(
+    price = '0.45',
+    limits: Record<string, number | null> = {},
+    warmup = false,
+  ) {
     const owner = await user('partner');
     const created = await api().inject({
       method: 'POST',
@@ -90,6 +96,15 @@ export function fixtures(api: () => NestFastifyApplication, adminToken: () => st
       );
       return (result.rows[0] as { instance: string }).instance;
     });
+    if (!warmup) {
+      const off = await api().inject({
+        method: 'PATCH',
+        url: `/messenger/accounts/${accountId}/warmup`,
+        headers: bearer(adminToken()),
+        payload: { enabled: false },
+      });
+      expect(off.statusCode).toBe(200);
+    }
     simulateAccountState(instance, 'authorized', '79990001122');
     // Состояние обновляется сверкой: QR-запрос с `authorized` делает её сразу.
     await api().inject({

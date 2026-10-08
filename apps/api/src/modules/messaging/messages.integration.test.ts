@@ -231,6 +231,129 @@ describe('отправка воркером', () => {
   });
 });
 
+describe('автопрогрев и равномерная отправка (ADR-0078)', () => {
+  const accountView = async (id: string) =>
+    (await api().inject({ method: 'GET', url: '/messenger/accounts', headers: bearer(adminToken) }))
+      .json<{
+        accounts: {
+          id: string;
+          warmup_enabled: boolean;
+          warmup_day: number | null;
+          daily_limit_now: number | null;
+        }[];
+      }>()
+      .accounts.find((account) => account.id === id);
+
+  it('новый аккаунт в первые сутки отправляет по одному сообщению в час: остальное ждёт, не отклоняется', async () => {
+    const partner = await partnerWithAccount('0.45', {}, true);
+    const client = await clientWithMoney('10');
+    const a = (await send(client.token, { to: '79005550041', text: 'А' })).json<{
+      message: MessageView;
+    }>().message.id;
+    const b = (await send(client.token, { to: '79005550042', text: 'Б' })).json<{
+      message: MessageView;
+    }>().message.id;
+    const service = api().get(MessagesService);
+
+    expect(await accountView(partner.accountId)).toMatchObject({
+      warmup_enabled: true,
+      warmup_day: 0,
+      daily_limit_now: 12,
+    });
+    const now = new Date();
+    await service.dispatchDue(now);
+    await service.dispatchDue(new Date(now.getTime() + 5 * MINUTE));
+    const states = [
+      (await messageOf(client.token, a))?.status,
+      (await messageOf(client.token, b))?.status,
+    ];
+    expect(states.sort()).toEqual(['queued', 'sent']);
+
+    await service.dispatchDue(new Date(now.getTime() + 61 * MINUTE));
+    expect((await messageOf(client.token, a))?.status).toBe('sent');
+    expect((await messageOf(client.token, b))?.status).toBe('sent');
+  });
+
+  it('суточный предел прогрева: после 12 сообщений за сутки следующее ждёт, даже если часовая доля свободна', async () => {
+    const partner = await partnerWithAccount('0.45', {}, true);
+    // Прогрев закончился давно: потолок 500 в сутки, 42 в час. Ставим предел суток 3 тарифом.
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update messenger_accounts set warmup_started_at = now() - interval '40 days', limit_per_day = 3 where id = ${partner.accountId}`,
+      );
+    });
+    const client = await clientWithMoney('10');
+    const ids: string[] = [];
+    for (let n = 0; n < 4; n += 1) {
+      ids.push(
+        (await send(client.token, { to: `7900555005${String(n)}`, text: 'Т' })).json<{
+          message: MessageView;
+        }>().message.id,
+      );
+    }
+    const service = api().get(MessagesService);
+    const now = new Date();
+    // Часовая доля при 3 в сутки — одно сообщение: каждый час уходит по одному, на четвёртое суточный предел.
+    for (let hour = 0; hour < 4; hour += 1) {
+      await service.dispatchDue(new Date(now.getTime() + (hour * 61 + 1) * MINUTE));
+    }
+    const statuses = await Promise.all(
+      ids.map(async (id) => (await messageOf(client.token, id))?.status),
+    );
+    expect(statuses.filter((status) => status === 'sent')).toHaveLength(3);
+    expect(statuses.filter((status) => status === 'queued')).toHaveLength(1);
+  });
+
+  it('выключенный прогрев оставляет только лимиты тарифа; решение администратора пишется в журнал', async () => {
+    const partner = await partnerWithAccount('0.45', {}, true);
+    const off = await api().inject({
+      method: 'PATCH',
+      url: `/messenger/accounts/${partner.accountId}/warmup`,
+      headers: bearer(adminToken),
+      payload: { enabled: false },
+    });
+    expect(off.statusCode).toBe(200);
+    expect(await accountView(partner.accountId)).toMatchObject({
+      warmup_enabled: false,
+      warmup_day: null,
+      daily_limit_now: null,
+    });
+    const audit = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select count(*)::int as n from audit_log where action = 'messenger_account.warmup_changed' and entity_id = ${partner.accountId}`,
+      );
+      return (result.rows[0] as { n: number }).n;
+    });
+    expect(audit).toBe(1);
+
+    // Партнёру и поддержке менять нельзя.
+    const forbidden = await api().inject({
+      method: 'PATCH',
+      url: `/messenger/accounts/${partner.accountId}/warmup`,
+      headers: bearer(partner.ownerToken),
+      payload: { enabled: true },
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
+
+  it('аккаунт получил ограничение от MAX: прогрев начинается заново', async () => {
+    const partner = await partnerWithAccount('0.45', {}, true);
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update messenger_accounts set warmup_started_at = now() - interval '10 days' where id = ${partner.accountId}`,
+      );
+    });
+    expect((await accountView(partner.accountId))?.warmup_day).toBe(10);
+
+    const messaging = api().get(MessagingService);
+    simulateAccountState(partner.instance, 'suspended', '79990001122');
+    await messaging.refreshDue(new Date(Date.now() + 2 * MINUTE));
+    simulateAccountState(partner.instance, 'authorized', '79990001122');
+    await messaging.refreshDue(new Date(Date.now() + 4 * MINUTE));
+    expect((await accountView(partner.accountId))?.warmup_day).toBe(0);
+  });
+});
+
 describe('не ушло — деньги возвращаются', () => {
   it('у номера нет MAX: сообщение отклонено с нашей причиной, клиенту вернули всё, партнёру ничего не причитается', async () => {
     const partner = await partnerWithAccount('0.45');

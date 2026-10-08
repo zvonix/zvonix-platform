@@ -301,6 +301,10 @@ export class MessagingService {
         from: account.status,
         to: updated.status,
       });
+      // Ограничение или блокировка со стороны MAX: аккаунту нужен новый прогрев.
+      if (updated.status === 'unavailable' && updated.stateReason !== 'logged_out') {
+        await this.repository.restartWarmup(account.id, now);
+      }
       await this.audit.record({
         action: 'messenger_account.status_changed',
         entityType: 'messenger_account',
@@ -360,6 +364,28 @@ export class MessagingService {
   async retireOwn(actor: MessagingActor, id: string): Promise<void> {
     const { account } = await this.ownAccount(actor.userId, id);
     await this.retire(actor, account);
+  }
+
+  /** Администратор включает или выключает автопрогрев аккаунта. Решение сохраняется в журнале. */
+  async setWarmup(
+    actor: MessagingActor,
+    id: string,
+    enabled: boolean,
+  ): Promise<MessengerAccountRow> {
+    const account = await this.repository.findById(parseId(id, 'messengerAccount'));
+    if (account === undefined || account.status === 'retired') throw notFound('Аккаунт не найден');
+    const updated = await this.repository.setWarmupEnabled(account.id, enabled, new Date());
+    if (updated === undefined) throw notFound('Аккаунт не найден');
+    await this.audit.record({
+      action: 'messenger_account.warmup_changed',
+      entityType: 'messenger_account',
+      entityId: account.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { warmup_enabled: account.warmupEnabled },
+      after: { warmup_enabled: updated.warmupEnabled },
+    });
+    return updated;
   }
 
   async retireByAdmin(actor: MessagingActor, id: string): Promise<void> {

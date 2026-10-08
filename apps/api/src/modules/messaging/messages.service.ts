@@ -32,6 +32,7 @@ import type { MessengerAccountRow } from './messaging.repository.js';
 import { BotsService } from './bot/bots.service.js';
 import { BotRecipientRejectedError } from './bot/bot.provider.js';
 import { MessagingService } from './messaging.service.js';
+import { effectiveLimits } from './warmup.js';
 import { MessagesRepository, type MessageFilter, type MessageRow } from './messages.repository.js';
 import {
   MESSAGE_PROVIDER,
@@ -434,12 +435,24 @@ export class MessagesService {
         return false;
       }
     }
-    if (account.limitPerDay !== null) {
+    // Сутки и час: при автопрогреве предел суток растёт по дням, а час не даёт отправить сутки пачкой.
+    const limits = effectiveLimits(account, now);
+    if (limits.hourly !== null) {
+      const sentLastHour = await this.repository.countSentSince(
+        account.id,
+        new Date(now.getTime() - 3_600_000),
+      );
+      if (sentLastHour >= limits.hourly) {
+        await this.repository.requeue(message.id, new Date(now.getTime() + 120_000), true);
+        return false;
+      }
+    }
+    if (limits.daily !== null) {
       const sentLastDay = await this.repository.countSentSince(
         account.id,
         new Date(now.getTime() - 86_400_000),
       );
-      if (sentLastDay >= account.limitPerDay) {
+      if (sentLastDay >= limits.daily) {
         await this.repository.requeue(message.id, new Date(now.getTime() + 300_000), true);
         return false;
       }

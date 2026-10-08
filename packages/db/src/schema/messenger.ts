@@ -131,6 +131,14 @@ export const messengerAccounts = pgTable(
     /** Когда аккаунт отправлял последний раз: от неё зависит пауза и порядок выбора. */
     lastUsedAt: timestamptz(),
 
+    /**
+     * Автопрогрев и равномерная отправка ([ADR-0078](../../../../docs/adr/0078-progrev-akkauntov-max.md)): лимит
+     * суток растёт с началом прогрева, а за час уходит не больше доли суток. Выключен — действуют только лимиты
+     * тарифа. Пусто в `warmupStartedAt` — прогрев закончен или не начинался (старые аккаунты).
+     */
+    warmupEnabled: boolean().notNull().default(true),
+    warmupStartedAt: timestamptz(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

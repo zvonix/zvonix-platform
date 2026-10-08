@@ -23,6 +23,9 @@ export const sendPasswordSchema = z.object({
 /** Что партнёр меняет у аккаунта: только название. Цена и лимиты — в тарифе ([ADR-0075](../../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)). */
 export const updateAccountSchema = z.object({ label });
 
+/** Автопрогрев аккаунта: включить или выключить. */
+export const warmupSchema = z.object({ enabled: z.boolean() });
+
 const tariffName = z.string().trim().min(1, 'слишком короткое').max(60, 'слишком длинное');
 const tariffLimit = limit;
 

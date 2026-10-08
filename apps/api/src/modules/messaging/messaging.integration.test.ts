@@ -167,6 +167,7 @@ describe('заведение аккаунта', () => {
     // Что партнёру положено знать — и ничего от провайдера.
     expect(Object.keys(view).sort()).toEqual([
       'created_at',
+      'daily_limit_now',
       'id',
       'label',
       'limit_per_day',
@@ -177,6 +178,8 @@ describe('заведение аккаунта', () => {
       'state_reason',
       'status',
       'tariff_id',
+      'warmup_day',
+      'warmup_enabled',
     ]);
     expect(created.body).not.toMatch(/provider|instance|token|green/iu);
 

@@ -39,6 +39,9 @@ export interface Account {
   readonly price: string | null;
   readonly limit_per_minute: number | null;
   readonly limit_per_day: number | null;
+  readonly warmup_enabled: boolean;
+  readonly warmup_day: number | null;
+  readonly daily_limit_now: number | null;
 }
 
 export interface AccountsResponse {
