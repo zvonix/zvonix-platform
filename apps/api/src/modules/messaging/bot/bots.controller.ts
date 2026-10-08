@@ -4,17 +4,43 @@
  */
 
 import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Put } from '@nestjs/common';
-import { parseId, permissionDenied } from '@zvonix/shared';
+import { Money, parseId, permissionDenied, type MoneyAmount } from '@zvonix/shared';
 import { z } from 'zod';
 import { Cabinets, Public, Roles } from '../../../http/auth.guard.js';
 import { CurrentUser } from '../../../http/request-context.js';
 import { zodBody } from '../../../http/zod.pipe.js';
 import { BillingService } from '../../billing/billing.service.js';
 import type { Principal } from '../../identity/identity.service.js';
-import { BotsService, type BotAdminView, type BotClientView } from './bots.service.js';
+import {
+  BotsService,
+  type BotAdminView,
+  type BotClientRow,
+  type BotClientView,
+} from './bots.service.js';
 
 const registerBotSchema = z.object({ token: z.string().trim().min(1).max(500) });
 const connectionSchema = z.object({ enabled: z.boolean() });
+
+/** Сумма в рублях строкой, от 0 до предела: `0` — бесплатно, `null` — вернуть к общим условиям. */
+const price = (max: number) =>
+  z
+    .string()
+    .trim()
+    .regex(/^\d{1,7}(\.\d{1,6})?$/u, 'должна быть суммой, например 0.25')
+    .transform((raw): MoneyAmount => Money.fromMajorUnits(raw))
+    .refine(
+      (value) => Money.toMicros(value) <= BigInt(max) * 1_000_000n,
+      `не больше ${String(max)}`,
+    )
+    .nullable()
+    .optional();
+
+/** Свои условия клиента: что не названо — не меняется. */
+const termsSchema = z
+  .object({ messagePrice: price(1000), monthlyFee: price(100_000) })
+  .refine((body) => body.messagePrice !== undefined || body.monthlyFee !== undefined, {
+    message: 'Нечего менять',
+  });
 
 /** Событие платформы: берём нужное, остальное игнорируем (состав полей у MAX меняется). */
 const idLike = z.union([z.string(), z.number()]).optional();
@@ -56,6 +82,24 @@ export class StaffBotController {
   @Get('bots/platform')
   state(): Promise<BotAdminView> {
     return this.bots.adminView();
+  }
+
+  /** Подключённые к боту клиенты: условия (свои и действующие), подписчики, оплачен ли месяц. */
+  @Roles('admin', 'support')
+  @Get('bots/platform/clients')
+  clients(): Promise<{ clients: BotClientRow[] }> {
+    return this.bots.adminClients();
+  }
+
+  /** Свои условия клиента: цена сообщения и плата за месяц; `null` — как у всех. */
+  @Roles('admin')
+  @Patch('bots/platform/clients/:clientId')
+  setTerms(
+    @CurrentUser() actor: Principal,
+    @Param('clientId') clientId: string,
+    @Body(zodBody(termsSchema)) body: z.infer<typeof termsSchema>,
+  ): Promise<{ clients: BotClientRow[] }> {
+    return this.bots.setClientTerms(actor, parseId(clientId, 'client'), body);
   }
 
   @Roles('admin')

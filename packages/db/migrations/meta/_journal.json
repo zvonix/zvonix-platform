@@ -351,6 +351,13 @@
       "when": 1791432001805,
       "tag": "0049_soobscheniya_bota",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791434983358,
+      "tag": "0050_plata_za_bota",
+      "breakpoints": true
     }
   ]
 }

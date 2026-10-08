@@ -4,10 +4,10 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, count, eq, sql } from 'drizzle-orm';
+import { and, asc, count, eq, isNull, ne, or, sql } from 'drizzle-orm';
 import { toDatabaseError } from '@zvonix/db';
-import { botConnections, botSubscribers, messengerBots } from '@zvonix/db/schema';
-import { newId, type BotStatus, type Id } from '@zvonix/shared';
+import { botConnections, botSubscribers, clients, messengerBots } from '@zvonix/db/schema';
+import { newId, type BotStatus, type Id, type MoneyAmount } from '@zvonix/shared';
 import { DatabaseService } from '../../../infra/database.service.js';
 
 export type BotRow = typeof messengerBots.$inferSelect;
@@ -106,6 +106,7 @@ export class BotsRepository {
     clientId: Id<'client'>;
     botId: BotId;
     code: string;
+    feePaidPeriod: string | null;
   }): Promise<BotConnectionRow> {
     try {
       const [row] = await this.database.db
@@ -117,6 +118,63 @@ export class BotsRepository {
     } catch (cause) {
       throw toDatabaseError(cause);
     }
+  }
+
+  /** Условия клиента: `undefined` — не трогать, `null` — вернуть к общим настройкам. */
+  async setConnectionPrices(
+    clientId: Id<'client'>,
+    patch: { messagePrice?: MoneyAmount | null; monthlyFee?: MoneyAmount | null },
+  ): Promise<BotConnectionRow | undefined> {
+    const [row] = await this.database.db
+      .update(botConnections)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(botConnections.clientId, clientId))
+      .returning();
+    return row;
+  }
+
+  /** Плата за этот месяц взята. */
+  async markFeePaid(clientId: Id<'client'>, period: string): Promise<void> {
+    await this.database.db
+      .update(botConnections)
+      .set({ feePaidPeriod: period, updatedAt: new Date() })
+      .where(eq(botConnections.clientId, clientId));
+  }
+
+  /** Включённые подключения, за которые плата за месяц ещё не взята: воркер пробует взять. */
+  async listFeeDue(period: string, limit: number): Promise<BotConnectionRow[]> {
+    return this.database.db
+      .select()
+      .from(botConnections)
+      .where(
+        and(
+          eq(botConnections.enabled, true),
+          or(isNull(botConnections.feePaidPeriod), ne(botConnections.feePaidPeriod, period)),
+        ),
+      )
+      .orderBy(asc(botConnections.createdAt))
+      .limit(limit);
+  }
+
+  /** Подключения клиентов к боту с названием клиента и числом подписчиков — для администратора. */
+  async listConnections(botId: BotId): Promise<
+    {
+      connection: BotConnectionRow;
+      clientName: string;
+      subscribers: number;
+    }[]
+  > {
+    const rows = await this.database.db
+      .select({
+        connection: botConnections,
+        clientName: clients.name,
+        subscribers: sql<number>`(select count(*) from bot_subscribers s where s.client_id = ${botConnections.clientId} and s.bot_id = ${botConnections.botId})::int`,
+      })
+      .from(botConnections)
+      .innerJoin(clients, eq(clients.id, botConnections.clientId))
+      .where(eq(botConnections.botId, botId))
+      .orderBy(asc(clients.name));
+    return rows;
   }
 
   async setConnectionEnabled(

@@ -575,6 +575,16 @@ test.describe('бот MAX (ADR-0077)', () => {
       page.getByText(/^https:\/\/max\.ru\/e2ebot_bot\?start=[a-z0-9]{10}$/u),
     ).toBeVisible();
     await expect(page.getByText(/Подписчиков/u)).toBeVisible();
+    await expect(page.getByText('Цена сообщения')).toBeVisible();
+    await expect(page.getByText('Плата в месяц')).toBeVisible();
+
+    // Администратор видит клиента среди подключённых и задаёт ему свою цену сообщения.
+    await admin.goto('/messaging');
+    await expect(admin.getByRole('heading', { name: 'Клиенты бота' })).toBeVisible();
+    await admin.getByRole('button', { name: 'Условия' }).click();
+    await admin.getByLabel(/Цена сообщения/u).fill('0,5');
+    await admin.getByRole('button', { name: 'Сохранить' }).click();
+    await expect(admin.getByText('своя')).toBeVisible();
 
     await page.getByRole('button', { name: 'Отключить', exact: true }).click();
     await expect(page.getByText('Отключено')).toBeVisible();

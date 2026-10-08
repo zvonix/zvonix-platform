@@ -6,10 +6,16 @@ import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
+import { money } from '@/lib/money';
 
 interface BotState {
   readonly available: boolean;
-  readonly connection: { readonly enabled: boolean; readonly link: string } | null;
+  readonly connection: {
+    readonly enabled: boolean;
+    readonly link: string;
+    readonly fee_paid: boolean;
+  } | null;
+  readonly terms: { readonly message_price: string; readonly monthly_fee: string };
   readonly subscribers: { readonly total: number; readonly with_phone: number };
 }
 
@@ -42,7 +48,7 @@ export function BotConnection() {
   const data = state.data;
   if (data === undefined || !data.available) return null;
 
-  const { connection, subscribers } = data;
+  const { connection, subscribers, terms } = data;
   const error = [connect.error, toggle.error, state.error].find(
     (candidate): candidate is ApiError => candidate instanceof ApiError,
   );
@@ -81,11 +87,22 @@ export function BotConnection() {
             <dd className="num select-all break-all" translate="no">
               {connection.link}
             </dd>
+            <dt className="text-muted-foreground">Цена сообщения</dt>
+            <dd className="num">{money(terms.message_price)}</dd>
+            <dt className="text-muted-foreground">Плата в месяц</dt>
+            <dd className="num">{money(terms.monthly_fee)}</dd>
             <dt className="text-muted-foreground">Подписчиков</dt>
             <dd className="num">
               {subscribers.total}, с номером — {subscribers.with_phone}
             </dd>
           </dl>
+
+          {connection.enabled && !connection.fee_paid && (
+            <p className="text-warn">
+              Плата за месяц не взята: не хватает денег на счёте. Пока она не взята, сообщения идут
+              обычным путём.
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <Button

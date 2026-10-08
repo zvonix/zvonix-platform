@@ -50,6 +50,7 @@ const LABELS: Record<string, string> = {
   'messaging.provider_partner_token': 'Ключ партнёрского доступа провайдера',
   'bot.enabled': 'Бот MAX (второй канал сообщений)',
   'bot.message_price': 'Цена сообщения бота для клиента, ₽',
+  'bot.monthly_fee': 'Плата клиента за бота в месяц, ₽',
   'bot.api_url': 'Адрес API ботов MAX',
   'messages.pace_seconds': 'Пауза между сообщениями аккаунта, секунд',
   'messages.precheck_enabled': 'Проверять наличие MAX у номера перед отправкой',

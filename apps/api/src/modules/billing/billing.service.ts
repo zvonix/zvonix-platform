@@ -731,6 +731,34 @@ export class BillingService {
     });
   }
 
+  /**
+   * Ежемесячная плата за бота MAX ([ADR-0077](../../../../../docs/adr/0077-bot-max-vtoroy-kanal.md)): клиент →
+   * доход площадки. Ключ `bot_fee:<клиент>:<ГГГГ-ММ>` — за один месяц плата не спишется дважды, сколько бы раз ни
+   * вызывали (воркер повторяет проход). Нет денег — `409`, как у любого списания; бесплатное сюда не попадает.
+   */
+  async chargeBotFee(input: {
+    clientId: ClientId;
+    period: string;
+    amount: MoneyAmount;
+  }): Promise<PostedTransaction> {
+    if (Money.compare(input.amount, Money.ZERO) <= 0) {
+      throw validationFailed('Плата за бота — только положительная сумма');
+    }
+    const clientAccount = await this.accountOf('client', input.clientId);
+    const revenue = await this.accountOf('revenue', null);
+    return this.post({
+      kind: 'charge',
+      idempotencyKey: `bot_fee:${input.clientId}:${input.period}`,
+      description: `Плата за бота MAX за ${input.period}`,
+      referenceType: 'bot_fee',
+      referenceId: input.clientId,
+      lines: [
+        { accountId: clientAccount.id, amount: Money.negate(input.amount) },
+        { accountId: revenue.id, amount: input.amount },
+      ],
+    });
+  }
+
   /** Возврат за сообщение бота, которое не ушло: обратная проводка с тем же ключом, что у сообщения аккаунта. */
   async refundBotMessage(input: {
     messageId: string;

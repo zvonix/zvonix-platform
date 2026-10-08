@@ -8,6 +8,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
   dependencyUnavailable,
+  isDomainError,
+  Money,
   normalizeMsisdn,
   notFound,
   validationFailed,
@@ -40,6 +42,9 @@ import {
 /** Алфавит кода клиента для ссылки: без похожих знаков, чтобы код можно было продиктовать. */
 const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 const CODE_LENGTH = 10;
+
+/** Сколько подключений воркер обрабатывает за проход платы. */
+const FEE_BATCH = 200;
 
 /** Тексты бота людям: готовые, с названием службы (настраиваемые — этап 3 ADR-0077). */
 const TEXT = {
@@ -84,6 +89,17 @@ interface BotAttachment {
     | undefined;
 }
 
+export interface BotClientRow {
+  readonly client_id: string;
+  readonly client_name: string;
+  readonly enabled: boolean;
+  readonly subscribers: number;
+  /** Свои условия клиента (`null` — как у всех) и действующие. */
+  readonly own: { readonly message_price: string | null; readonly monthly_fee: string | null };
+  readonly terms: BotTerms;
+  readonly fee_paid: boolean;
+}
+
 export interface BotAdminView {
   readonly enabled: boolean;
   readonly bot: {
@@ -97,12 +113,28 @@ export interface BotAdminView {
   } | null;
 }
 
+/** Условия клиента: цена сообщения и плата за месяц, рубли строкой. */
+interface BotTerms {
+  readonly message_price: string;
+  readonly monthly_fee: string;
+}
+
 export interface BotClientView {
   /** Бот доступен клиенту: продукт включён и бот площадки вписан и работает. */
   readonly available: boolean;
-  readonly connection: { readonly enabled: boolean; readonly link: string } | null;
+  readonly connection: {
+    readonly enabled: boolean;
+    readonly link: string;
+    /** Плата за этот месяц взята (или её нет): пока `false`, бот клиенту не отправляет. */
+    readonly fee_paid: boolean;
+  } | null;
+  /** Что платит клиент: общие условия площадки или свои, если администратор их задал. */
+  readonly terms: BotTerms;
   readonly subscribers: { readonly total: number; readonly with_phone: number };
 }
+
+/** Месяц по часам UTC, ГГГГ-ММ: за него берётся ежемесячная плата. */
+const periodOf = (now: Date): string => now.toISOString().slice(0, 7);
 
 @Injectable()
 export class BotsService {
@@ -286,48 +318,214 @@ export class BotsService {
     return enabled && bot?.status === 'active' ? bot : undefined;
   }
 
-  async clientView(clientId: Id<'client'>): Promise<BotClientView> {
+  /** Условия клиента: свои, если заданы администратором, иначе общие из настроек. */
+  private async termsOf(connection: BotConnectionRow | undefined): Promise<{
+    messagePrice: MoneyAmount;
+    monthlyFee: MoneyAmount;
+  }> {
+    const settings = await this.settings.bot();
+    return {
+      messagePrice: connection?.messagePrice ?? settings.messagePrice,
+      monthlyFee: connection?.monthlyFee ?? settings.monthlyFee,
+    };
+  }
+
+  /** Плата взята за этот месяц, либо её нет вовсе. */
+  private feePaid(
+    connection: BotConnectionRow,
+    terms: { monthlyFee: MoneyAmount },
+    now: Date,
+  ): boolean {
+    return Money.isZero(terms.monthlyFee) || connection.feePaidPeriod === periodOf(now);
+  }
+
+  async clientView(clientId: Id<'client'>, now: Date = new Date()): Promise<BotClientView> {
     const [bot, connection, subscribers] = await Promise.all([
       this.usablePlatformBot(),
       this.repository.findConnectionByClient(clientId),
       this.repository.countFor(clientId),
     ]);
-    const linked =
-      connection === undefined || bot === undefined ? null : this.connectionView(bot, connection);
+    const terms = await this.termsOf(connection);
     return {
       available: bot !== undefined,
-      connection: linked,
+      connection:
+        connection === undefined || bot === undefined
+          ? null
+          : {
+              enabled: connection.enabled,
+              link: this.linkOf(bot, connection.code),
+              fee_paid: this.feePaid(connection, terms, now),
+            },
+      terms: {
+        message_price: Money.format(terms.messagePrice),
+        monthly_fee: Money.format(terms.monthlyFee),
+      },
       subscribers: { total: subscribers.total, with_phone: subscribers.withPhone },
     };
   }
 
-  private connectionView(bot: BotRow, connection: BotConnectionRow) {
-    return { enabled: connection.enabled, link: this.linkOf(bot, connection.code) };
+  /**
+   * Берёт плату за месяц, если она положена и ещё не взята. Не хватило денег — `insufficient` (у биллинга это
+   * `409`); любая другая ошибка пробрасывается. Повтор безопасен: ключ проводки — клиент и месяц.
+   */
+  private async ensureFeePaid(
+    connection: BotConnectionRow,
+    now: Date,
+  ): Promise<'paid' | 'insufficient'> {
+    const terms = await this.termsOf(connection);
+    const period = periodOf(now);
+    if (Money.isZero(terms.monthlyFee) || connection.feePaidPeriod === period) return 'paid';
+    try {
+      await this.billing.chargeBotFee({
+        clientId: connection.clientId,
+        period,
+        amount: terms.monthlyFee,
+      });
+    } catch (cause) {
+      if (isDomainError(cause) && cause.code === 'conflict') return 'insufficient';
+      throw cause;
+    }
+    await this.repository.markFeePaid(connection.clientId, period);
+    return 'paid';
   }
 
-  /** Подключает клиента к боту площадки: создаёт его код и ссылку. Повтор возвращает то, что уже есть. */
-  async connect(clientId: Id<'client'>): Promise<BotClientView> {
+  /** Подключает клиента к боту площадки: берёт плату за месяц, создаёт код и ссылку. Повтор возвращает прежнее. */
+  async connect(clientId: Id<'client'>, now: Date = new Date()): Promise<BotClientView> {
     const bot = await this.usablePlatformBot();
     if (bot === undefined) throw conflict('Бот пока недоступен — обратитесь в поддержку');
-    if ((await this.repository.findConnectionByClient(clientId)) === undefined) {
+    const existing = await this.repository.findConnectionByClient(clientId);
+    if (existing === undefined) {
+      const fee = (await this.settings.bot()).monthlyFee;
+      const period = periodOf(now);
+      if (!Money.isZero(fee)) {
+        try {
+          await this.billing.chargeBotFee({ clientId, period, amount: fee });
+        } catch (cause) {
+          if (isDomainError(cause) && cause.code === 'conflict') {
+            throw conflict(`Не хватает денег для платы за бота: ${Money.format(fee)} ₽ в месяц`);
+          }
+          throw cause;
+        }
+      }
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const code = Array.from(
           { length: CODE_LENGTH },
           () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)],
         ).join('');
         if ((await this.repository.findConnectionByCode(code)) !== undefined) continue;
-        await this.repository.insertConnection({ clientId, botId: bot.id, code });
+        await this.repository.insertConnection({
+          clientId,
+          botId: bot.id,
+          code,
+          feePaidPeriod: Money.isZero(fee) ? null : period,
+        });
         break;
       }
     }
-    return this.clientView(clientId);
+    return this.clientView(clientId, now);
   }
 
-  async setEnabled(clientId: Id<'client'>, enabled: boolean): Promise<BotClientView> {
-    if ((await this.repository.setConnectionEnabled(clientId, enabled)) === undefined) {
-      throw notFound('Клиент ещё не подключён к боту');
+  /** Включает или выключает бота клиента. Включение берёт плату за месяц, если за него ещё не брали. */
+  async setEnabled(
+    clientId: Id<'client'>,
+    enabled: boolean,
+    now: Date = new Date(),
+  ): Promise<BotClientView> {
+    const connection = await this.repository.setConnectionEnabled(clientId, enabled);
+    if (connection === undefined) throw notFound('Клиент ещё не подключён к боту');
+    if (enabled && (await this.ensureFeePaid(connection, now)) === 'insufficient') {
+      await this.repository.setConnectionEnabled(clientId, false);
+      throw conflict('Не хватает денег для платы за бота. Пополните счёт и включите снова');
     }
-    return this.clientView(clientId);
+    return this.clientView(clientId, now);
+  }
+
+  /**
+   * Проход воркера (ADR-0020, догоняющий): берёт плату за текущий месяц у включённых подключений, за которые она ещё
+   * не взята. Не хватило денег — подключение остаётся без платы и бот ему не отправляет; следующий проход повторит,
+   * и после пополнения счёта плата будет взята сама. Возвращает, у скольких плата взята.
+   */
+  async chargeFees(now: Date = new Date()): Promise<number> {
+    const period = periodOf(now);
+    let charged = 0;
+    for (const connection of await this.repository.listFeeDue(period, FEE_BATCH)) {
+      try {
+        if ((await this.ensureFeePaid(connection, now)) === 'paid') {
+          // Бесплатное подключение тоже отмечается: проход не вернётся к строке до следующего месяца.
+          if (connection.feePaidPeriod !== period) {
+            await this.repository.markFeePaid(connection.clientId, period);
+          }
+          charged += 1;
+        }
+      } catch (cause) {
+        this.logger.error('Плата за бота не взята', cause, { client_id: connection.clientId });
+      }
+    }
+    return charged;
+  }
+
+  // --- Администратор: условия клиентов -----------------------------------------------------------
+
+  async adminClients(now: Date = new Date()): Promise<{ clients: BotClientRow[] }> {
+    const bot = await this.repository.findPlatformBot();
+    if (bot === undefined) return { clients: [] };
+    const rows = await this.repository.listConnections(bot.id);
+    const clients: BotClientRow[] = [];
+    for (const { connection, clientName, subscribers } of rows) {
+      const terms = await this.termsOf(connection);
+      clients.push({
+        client_id: connection.clientId,
+        client_name: clientName,
+        enabled: connection.enabled,
+        subscribers,
+        own: {
+          message_price:
+            connection.messagePrice === null ? null : Money.format(connection.messagePrice),
+          monthly_fee: connection.monthlyFee === null ? null : Money.format(connection.monthlyFee),
+        },
+        terms: {
+          message_price: Money.format(terms.messagePrice),
+          monthly_fee: Money.format(terms.monthlyFee),
+        },
+        fee_paid: this.feePaid(connection, terms, now),
+      });
+    }
+    return { clients };
+  }
+
+  /**
+   * Свои условия клиента: цена сообщения и плата за месяц. `undefined` — не менять, `null` — вернуть к общим.
+   * Новая плата действует со следующего месяца: за текущий она уже взята по прежней.
+   */
+  async setClientTerms(
+    actor: Principal,
+    clientId: Id<'client'>,
+    patch: {
+      messagePrice?: MoneyAmount | null | undefined;
+      monthlyFee?: MoneyAmount | null | undefined;
+    },
+  ): Promise<{ clients: BotClientRow[] }> {
+    const before = await this.repository.findConnectionByClient(clientId);
+    if (before === undefined) throw notFound('Клиент не подключён к боту');
+    const after = await this.repository.setConnectionPrices(clientId, {
+      ...(patch.messagePrice === undefined ? {} : { messagePrice: patch.messagePrice }),
+      ...(patch.monthlyFee === undefined ? {} : { monthlyFee: patch.monthlyFee }),
+    });
+    const format = (value: MoneyAmount | null | undefined): string | null =>
+      value === null || value === undefined ? null : Money.format(value);
+    await this.audit.record({
+      action: 'bot_connection.terms_changed',
+      entityType: 'bot_connection',
+      entityId: before.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: {
+        message_price: format(before.messagePrice),
+        monthly_fee: format(before.monthlyFee),
+      },
+      after: { message_price: format(after?.messagePrice), monthly_fee: format(after?.monthlyFee) },
+    });
+    return this.adminClients();
   }
 
   // --- Отправка -----------------------------------------------------------------------------------
@@ -340,6 +538,7 @@ export class BotsService {
   async routeFor(
     clientId: Id<'client'>,
     recipient: string,
+    now: Date = new Date(),
   ): Promise<{ botId: BotId; price: MoneyAmount } | undefined> {
     const [settings, bot, connection] = await Promise.all([
       this.settings.bot(),
@@ -348,8 +547,11 @@ export class BotsService {
     ]);
     if (!settings.enabled || bot?.status !== 'active') return undefined;
     if (connection?.enabled !== true || connection.botId !== bot.id) return undefined;
+    const terms = await this.termsOf(connection);
+    // Плата за месяц не взята — бот клиенту не отправляет, сообщения идут через аккаунты.
+    if (!this.feePaid(connection, terms, now)) return undefined;
     if ((await this.repository.findReachable(clientId, recipient)) === undefined) return undefined;
-    return { botId: bot.id, price: settings.messagePrice };
+    return { botId: bot.id, price: terms.messagePrice };
   }
 
   /**

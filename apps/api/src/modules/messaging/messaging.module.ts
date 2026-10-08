@@ -86,6 +86,6 @@ import { SmppService } from './smpp/smpp.service.js';
           : new GreenApiMessageProvider(settings, logger),
     },
   ],
-  exports: [MessagingService, MessagesService, SmppServer],
+  exports: [MessagingService, MessagesService, BotsService, SmppServer],
 })
 export class MessagingModule {}

@@ -364,10 +364,22 @@ export const botConnections = pgTable(
     enabled: boolean().notNull().default(true),
     /** Публичный код клиента для ссылки бота. Случайный, без смысла: по нему нельзя узнать клиента. */
     code: text().notNull(),
+    /**
+     * Условия этого клиента, если отличаются от общих настроек (`bot.message_price`, `bot.monthly_fee`):
+     * пусто — как у всех, 0 — бесплатно (ADR-0077).
+     */
+    messagePrice: money(),
+    monthlyFee: money(),
+    /** Месяц (ГГГГ-ММ, UTC), за который плата уже взята; пусто — не бралась. Пока не взята — бот клиенту не отправляет. */
+    feePaidPeriod: text(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check(
+      'bot_connections_prices_check',
+      sql`(${t.messagePrice} is null or ${t.messagePrice} >= 0) and (${t.monthlyFee} is null or ${t.monthlyFee} >= 0)`,
+    ),
     uniqueIndex('bot_connections_client_key').on(t.clientId),
     uniqueIndex('bot_connections_code_key').on(t.code),
   ],

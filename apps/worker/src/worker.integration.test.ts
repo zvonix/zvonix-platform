@@ -99,6 +99,7 @@ describe('реестр фоновых задач', () => {
       'notifications.payment-decisions',
       'notifications.partner-suspension',
       'messages.dispatch',
+      'bots.charge-fees',
       'messages.expire-waiting',
       'messages.purge-texts',
       'messaging.refresh-accounts',

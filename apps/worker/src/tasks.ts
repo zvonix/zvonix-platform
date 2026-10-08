@@ -26,6 +26,7 @@ import {
   LimitService,
   LowBalanceService,
   MailService,
+  BotsService,
   MessagesService,
   MessagingService,
   NodesService,
@@ -225,6 +226,7 @@ export class BackgroundTasks {
     private readonly suspensionNotice: SuspensionNoticeService,
     private readonly messaging: MessagingService,
     private readonly messageService: MessagesService,
+    private readonly bots: BotsService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -318,6 +320,11 @@ export class BackgroundTasks {
         name: 'messages.dispatch',
         everySeconds: MESSAGE_DISPATCH_SECONDS,
         run: (now) => this.messageService.dispatchDue(now),
+      },
+      {
+        name: 'bots.charge-fees',
+        everySeconds: MESSENGER_CHECK_SECONDS * 10,
+        run: (now) => this.bots.chargeFees(now),
       },
       {
         name: 'messages.expire-waiting',
