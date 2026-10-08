@@ -4,13 +4,18 @@
 
 name: CI
 
+# Минуты Actions конечны, поэтому лишнего не гоняем: после слияния проверка на `main` не повторяется — слияние
+# проверено на самом запросе (GitHub гоняет слитый вид ветки), а выпуск перед сборкой всё равно проходит
+# этот же гейт (workflow_call ниже). Новая отправка в ту же ветку отменяет прежний, ещё не законченный прогон.
 on:
-  push:
-    branches: [main]
   pull_request:
   # Выпуск вызывает этот же процесс перед сборкой архива: выпуск без пройденного гейта
   # не собирается (ADR-0049).
   workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
