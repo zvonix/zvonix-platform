@@ -32,6 +32,7 @@ import type { MessengerAccountRow } from './messaging.repository.js';
 import { BotsService } from './bot/bots.service.js';
 import { BotRecipientRejectedError } from './bot/bot.provider.js';
 import { MessagingService } from './messaging.service.js';
+import { AccountPicker } from './account-picker.js';
 import { accountReadyAt } from './warmup.js';
 import {
   MessagesRepository,
@@ -49,10 +50,6 @@ import {
 /** Сколько сообщений воркер берёт за проход: с запасом на паузы, но без многоминутного прохода. */
 const DISPATCH_BATCH = 50;
 
-/** Сколько давно не работавших аккаунтов смотрится при выборе: хватает, чтобы найти свободный, и не читает все. */
-const CANDIDATES = 12;
-/** Сколько раз выбор повторяется, исключая недопущенных партнёров. */
-const MAX_PICK_ROUNDS = 5;
 const EMPTY_LOAD: AccountLoad = { minute: 0, hour: 0, day: 0, backlog: 0 };
 const HEALTH_WINDOW_MS = 86_400_000;
 
@@ -101,76 +98,11 @@ export class MessagesService {
     private readonly tariffs: TariffService,
     private readonly redis: RedisService,
     private readonly bots: BotsService,
+    private readonly picker: AccountPicker,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('messages');
-  }
-
-  /**
-   * Аккаунт под сообщение ([ADR-0079](../../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)):
-   * из самой дешёвой цены берутся давно не работавшие аккаунты допущенных партнёров, первый из них с запасом под лимиты
-   * (с учётом очереди за ним) — он и берётся. Запаса нет ни у кого — первый по давности: сообщение подождёт, а цена
-   * не прыгнет на дорогой аккаунт. `scope` — перевыбор при отправке: тот же партнёр и цена, без исключённого,
-   * и только с запасом (иначе `undefined`).
-   */
-  private async pickAccount(
-    now: Date = new Date(),
-    scope?: {
-      partnerId: Id<'partner'>;
-      price: MoneyAmount;
-      exceptId: Id<'messengerAccount'>;
-      paceSeconds: number;
-    },
-  ): Promise<MessengerAccountRow | undefined> {
-    const verified = new Set<string>();
-    const excluded: Id<'partner'>[] = [];
-    // Недопущенный партнёр исключается из запроса и выбор повторяется: тысячи его аккаунтов не читаются.
-    for (let round = 0; round < MAX_PICK_ROUNDS; round += 1) {
-      const candidates = await this.repository.listCandidates({
-        now,
-        limit: CANDIDATES,
-        exceptPartners: excluded,
-        ...(scope === undefined
-          ? {}
-          : { partnerId: scope.partnerId, price: scope.price, exceptId: scope.exceptId }),
-      });
-      if (candidates.length === 0) return undefined;
-      const usable: MessengerAccountRow[] = [];
-      for (const account of candidates) {
-        if (!verified.has(account.partnerId)) {
-          const status = (await this.billing.partnerWithBalance(account.partnerId)).status;
-          if (status !== 'verified') {
-            if (!excluded.includes(account.partnerId)) excluded.push(account.partnerId);
-            continue;
-          }
-          verified.add(account.partnerId);
-        }
-        usable.push(account);
-      }
-      if (usable.length === 0) continue;
-      const loads = await this.repository.loadOf(
-        usable.map((account) => account.id),
-        now,
-      );
-      // Среди свободных — с самой короткой очередью (при равной — давно не работавший): поток делится поровну.
-      let best: MessengerAccountRow | undefined;
-      let bestBacklog = Number.POSITIVE_INFINITY;
-      for (const account of usable) {
-        const load = loads.get(account.id) ?? EMPTY_LOAD;
-        const free =
-          accountReadyAt(account, load, now, {
-            paceSeconds: scope?.paceSeconds ?? 0,
-            withBacklog: true,
-          }) === undefined;
-        if (free && load.backlog < bestBacklog) {
-          best = account;
-          bestBacklog = load.backlog;
-        }
-      }
-      return best ?? (scope === undefined ? usable[0] : undefined);
-    }
-    return undefined;
   }
 
   private async quoteFor(account: MessengerAccountRow, clientId: Id<'client'>): Promise<Quote> {
@@ -189,7 +121,7 @@ export class MessagesService {
    * клиента работает бот — называется цена бота: подписчикам клиент отправлять может (ADR-0077).
    */
   async quote(clientId: Id<'client'>): Promise<Quote | undefined> {
-    const account = await this.pickAccount();
+    const account = await this.picker.pick(new Date());
     if (account !== undefined) return this.quoteFor(account, clientId);
     const price = await this.bots.connectedPrice(clientId);
     return price === undefined
@@ -232,7 +164,10 @@ export class MessagesService {
     if (viaBot === undefined && (await this.bots.fallbackForbidden(clientId))) {
       throw validationFailed('Получатель не подписан на бота этого клиента');
     }
-    const account = viaBot === undefined ? await this.pickAccount() : undefined;
+    const account =
+      viaBot === undefined
+        ? await this.picker.pick(new Date(), { sticky: { clientId, recipient } })
+        : undefined;
     if (viaBot === undefined && account === undefined) {
       throw dependencyUnavailable('Сейчас нет доступных аккаунтов для отправки — повторите позже');
     }
@@ -475,25 +410,30 @@ export class MessagesService {
 
     // Когда аккаунт сможет отправить: не вошёл или нет связи — ждёт возвращения (пока не истечёт срок ожидания); иначе
     // пауза здоровья, пауза между сообщениями, лимиты в минуту, час и сутки: сверх них сообщение ждёт, а не отклоняется.
+    const quietUntil =
+      account.status === 'active' ? await this.picker.quietEnd(account, now) : undefined;
     const readyAt =
       account.status !== 'active'
         ? new Date(now.getTime() + 30_000)
-        : accountReadyAt(
+        : (quietUntil ??
+          accountReadyAt(
             account,
             (await this.repository.loadOf([account.id], now)).get(account.id) ?? EMPTY_LOAD,
             now,
             { paceSeconds, withBacklog: false },
-          );
+          ));
     if (readyAt !== undefined) {
       // Не может сейчас — сначала сосед того же партнёра и той же цены со свободным запасом (ADR-0079).
       const neighbour =
         message.partnerId === null || account.price === null
           ? undefined
-          : await this.pickAccount(now, {
-              partnerId: message.partnerId,
-              price: account.price,
-              exceptId: account.id,
-              paceSeconds,
+          : await this.picker.pick(now, {
+              scope: {
+                partnerId: message.partnerId,
+                price: account.price,
+                exceptId: account.id,
+                paceSeconds,
+              },
             });
       if (neighbour === undefined) {
         const jitter = Math.floor(Math.random() * 1000);

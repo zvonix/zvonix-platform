@@ -25,6 +25,7 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { AuditService } from '../audit/audit.service.js';
 import { BillingService } from '../billing/billing.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { DEFAULT_DISTRIBUTION, type DistributionSettings } from './distribution.js';
 import {
   MessagingRepository,
   type MessengerAccountId,
@@ -387,6 +388,56 @@ export class MessagingService {
       before: { warmup_enabled: account.warmupEnabled },
       after: { warmup_enabled: updated.warmupEnabled },
     });
+    return updated;
+  }
+
+  // --- Распределение (ADR-0080) ----------------------------------------------------------------
+
+  /** Настройка распределения партнёра для сообщений и его аккаунты с весом и приоритетом. */
+  async distributionOwn(userId: Id<'user'>): Promise<{
+    settings: DistributionSettings;
+    accounts: MessengerAccountRow[];
+  }> {
+    await this.assertEnabled();
+    const partner = await this.billing.requirePartnerOwnedBy(userId);
+    const row = (await this.repository.distributionsOf([partner.id], 'message')).get(partner.id);
+    return {
+      settings: row ?? DEFAULT_DISTRIBUTION,
+      accounts: await this.repository.listOfPartner(partner.id),
+    };
+  }
+
+  async setDistributionOwn(
+    actor: MessagingActor,
+    values: DistributionSettings,
+  ): Promise<DistributionSettings> {
+    await this.assertEnabled();
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const before = (await this.repository.distributionsOf([partner.id], 'message')).get(partner.id);
+    const saved = await this.repository.upsertDistribution(partner.id, 'message', values);
+    await this.audit.record({
+      action: 'partner_distribution.changed',
+      entityType: 'partner',
+      entityId: partner.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { mode: before?.mode ?? DEFAULT_DISTRIBUTION.mode },
+      after: { product: 'message', mode: saved.mode, reserve_percent: saved.reservePercent },
+    });
+    return saved;
+  }
+
+  async setRankOwn(
+    userId: Id<'user'>,
+    id: string,
+    rank: { weight?: number | undefined; priority?: number | undefined },
+  ): Promise<MessengerAccountRow> {
+    const { account } = await this.ownAccount(userId, id);
+    const updated = await this.repository.setRank(account.id, {
+      ...(rank.weight === undefined ? {} : { weight: rank.weight }),
+      ...(rank.priority === undefined ? {} : { priority: rank.priority }),
+    });
+    if (updated === undefined) throw notFound('Аккаунт не найден');
     return updated;
   }
 

@@ -14,6 +14,10 @@ import {
   MESSAGE_FAILURE_REASONS,
   MESSAGE_STATUSES,
   MESSENGER_ACCOUNT_REASONS,
+  DISTRIBUTION_MODES,
+  DISTRIBUTION_PRODUCTS,
+  DISTRIBUTION_RANK_MAX,
+  DISTRIBUTION_RESERVE_MAX,
   MESSENGER_ACCOUNT_STATUSES,
   MESSENGER_PAUSE_REASONS,
   BOT_GREETING_MAX,
@@ -28,6 +32,8 @@ import {
   type BotKind,
   type BotStatus,
   type BotSubscriberState,
+  type DistributionMode,
+  type DistributionProduct,
   type MessageChannel,
   type MessageFailureReason,
   type MessageRoute,
@@ -145,6 +151,10 @@ export const messengerAccounts = pgTable(
      * Пауза здоровья ([ADR-0079](../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)): до этого
      * времени сообщения на аккаунт не идут. `healthSince` — с какого момента считать долю «нет MAX» после отправки.
      */
+    /** Вес и приоритет в распределении партнёра (ADR-0080): доля трафика и место в очереди. */
+    distributionWeight: integer().notNull().default(1),
+    distributionPriority: integer().notNull().default(1),
+
     pausedUntil: timestamptz(),
     pauseReason: text().$type<MessengerPauseReason>(),
     healthSince: timestamptz(),
@@ -159,6 +169,10 @@ export const messengerAccounts = pgTable(
       sql`${t.stateReason} is null or ${oneOf(t.stateReason, MESSENGER_ACCOUNT_REASONS)}`,
     ),
     check('messenger_accounts_provider_check', oneOf(t.provider, MESSENGER_PROVIDERS)),
+    check(
+      'messenger_accounts_distribution_check',
+      sql`${t.distributionWeight} between 1 and ${sql.raw(String(DISTRIBUTION_RANK_MAX))} and ${t.distributionPriority} between 1 and ${sql.raw(String(DISTRIBUTION_RANK_MAX))}`,
+    ),
     check(
       'messenger_accounts_pause_reason_check',
       sql`${t.pauseReason} is null or ${oneOf(t.pauseReason, MESSENGER_PAUSE_REASONS)}`,
@@ -283,6 +297,8 @@ export const messages = pgTable(
       .on(t.clientId, t.createdAt)
       .where(sql`${t.channel} = 'smpp'`),
     index('messages_account_sent_idx').on(t.accountId, t.sentAt),
+    // «Один получатель — один аккаунт» (ADR-0080): последнее сообщение клиента этому номеру.
+    index('messages_recipient_idx').on(t.clientId, t.recipient, t.createdAt),
     // Очередь воркера: что ждёт отправки.
     index('messages_queue_idx')
       .on(t.nextAttemptAt)
@@ -454,5 +470,49 @@ export const botSubscribers = pgTable(
     index('bot_subscribers_phone_idx')
       .on(t.clientId, t.phone)
       .where(sql`${t.phone} is not null and ${t.state} = 'started'`),
+  ],
+);
+
+/**
+ * Как партнёр хочет распределять трафик между своими картами и аккаунтами ([ADR-0080](../../../../docs/adr/0080-edinye-limity-i-raspredelenie.md)):
+ * одна запись на партнёра и направление. Нет записи — режим «поровну» без параметров.
+ */
+export const partnerDistributions = pgTable(
+  'partner_distributions',
+  {
+    id: primaryId<'partnerDistribution'>(),
+    partnerId: idRef<'partner'>()
+      .notNull()
+      .references(() => partners.id, { onDelete: 'cascade' }),
+    product: text().$type<DistributionProduct>().notNull(),
+    mode: text().$type<DistributionMode>().notNull().default('equal'),
+
+    /** Доля лимита, которую не расходовать, %: остаётся на непредвиденное. */
+    reservePercent: integer().notNull().default(0),
+
+    /** Тихие часы — минуты от полуночи по `timezone`; обе пусты — их нет. Окно может переходить через полночь. */
+    quietFromMinute: integer(),
+    quietToMinute: integer(),
+    timezone: text().notNull().default('Europe/Moscow'),
+
+    /** Повторные сообщения одному получателю идут с того же аккаунта (только MAX). */
+    stickyRecipient: boolean().notNull().default(false),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check('partner_distributions_product_check', oneOf(t.product, DISTRIBUTION_PRODUCTS)),
+    check('partner_distributions_mode_check', oneOf(t.mode, DISTRIBUTION_MODES)),
+    check(
+      'partner_distributions_reserve_check',
+      sql`${t.reservePercent} between 0 and ${sql.raw(String(DISTRIBUTION_RESERVE_MAX))}`,
+    ),
+    check(
+      'partner_distributions_quiet_check',
+      sql`(${t.quietFromMinute} is null) = (${t.quietToMinute} is null)
+        and (${t.quietFromMinute} is null or (${t.quietFromMinute} between 0 and 1439 and ${t.quietToMinute} between 0 and 1439 and ${t.quietFromMinute} <> ${t.quietToMinute}))`,
+    ),
+    uniqueIndex('partner_distributions_partner_product_idx').on(t.partnerId, t.product),
   ],
 );

@@ -379,6 +379,13 @@
       "when": 1791454728512,
       "tag": "0053_pauza_akkaunta",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1791511606477,
+      "tag": "0054_raspredelenie_partnyora",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,7 @@ import {
   count,
   desc,
   eq,
+  getTableColumns,
   gte,
   inArray,
   isNotNull,
@@ -21,7 +22,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
-import { messages, messengerAccounts, smppAccounts } from '@zvonix/db/schema';
+import { messages, messengerAccounts, partnerDistributions, smppAccounts } from '@zvonix/db/schema';
 import {
   newId,
   type Id,
@@ -139,6 +140,7 @@ export class MessagesRepository {
     price?: MoneyAmount;
     exceptId?: Id<'messengerAccount'>;
     exceptPartners: readonly Id<'partner'>[];
+    offset?: number;
   }): Promise<MessengerAccountRow[]> {
     const conditions = [
       eq(messengerAccounts.status, 'active'),
@@ -159,12 +161,24 @@ export class MessagesRepository {
       .from(messengerAccounts)
       .where(and(...conditions));
     if (cheapest?.price === null || cheapest?.price === undefined) return [];
+    // Порядок задаёт партнёр (ADR-0080): «по порядку» и «по приоритету» — по номеру в списке, остальные режимы —
+    // давно не работавшие первыми. Без настройки — давно не работавшие.
+    const ranked = sql`case when ${partnerDistributions.mode} in ('sequential', 'priority') then ${messengerAccounts.distributionPriority} else 0 end`;
+    const recency = sql`case when ${partnerDistributions.mode} = 'sequential' then null else ${messengerAccounts.lastUsedAt} end`;
     return this.database.db
-      .select()
+      .select(getTableColumns(messengerAccounts))
       .from(messengerAccounts)
+      .leftJoin(
+        partnerDistributions,
+        and(
+          eq(partnerDistributions.partnerId, messengerAccounts.partnerId),
+          eq(partnerDistributions.product, 'message'),
+        ),
+      )
       .where(and(...conditions, eq(messengerAccounts.price, cheapest.price)))
-      .orderBy(sql`${messengerAccounts.lastUsedAt} asc nulls first`, asc(messengerAccounts.id))
-      .limit(filter.limit);
+      .orderBy(asc(ranked), sql`${recency} asc nulls first`, asc(messengerAccounts.id))
+      .limit(filter.limit)
+      .offset(filter.offset ?? 0);
   }
 
   /** Отправки аккаунтов за минуту, час и сутки и очередь за ними — для лимитов. Одним запросом на всех кандидатов. */
@@ -206,6 +220,29 @@ export class MessagesRepository {
       if (load !== undefined) Object.assign(load, { backlog: row.backlog });
     }
     return result;
+  }
+
+  /** С какого аккаунта клиент последний раз писал этому номеру (после `since`); `undefined` — не писал. */
+  async lastAccountFor(
+    clientId: Id<'client'>,
+    recipient: string,
+    since: Date,
+  ): Promise<Id<'messengerAccount'> | undefined> {
+    const [row] = await this.database.db
+      .select({ accountId: messages.accountId })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.clientId, clientId),
+          eq(messages.recipient, recipient),
+          eq(messages.route, 'account'),
+          isNotNull(messages.accountId),
+          gte(messages.createdAt, since),
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(1);
+    return row?.accountId ?? undefined;
   }
 
   /** Сообщение переносится на другой аккаунт того же партнёра и той же цены, пока оно «в работе». */

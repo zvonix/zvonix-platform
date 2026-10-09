@@ -63,7 +63,7 @@ export function accountReadyAt(
   >,
   load: AccountLoad,
   now: Date,
-  options: { paceSeconds: number; withBacklog: boolean },
+  options: { paceSeconds: number; withBacklog: boolean; reservePercent?: number },
 ): Date | undefined {
   const at = now.getTime();
   if (account.pausedUntil !== null && account.pausedUntil.getTime() > at)
@@ -73,14 +73,17 @@ export function accountReadyAt(
     if (ready > at) return new Date(ready);
   }
   const queue = options.withBacklog ? load.backlog : 0;
-  if (account.limitPerMinute !== null && load.minute + queue >= account.limitPerMinute) {
+  // Запас партнёра (ADR-0080): последняя доля лимита не расходуется, но один звонок/сообщение в окне всегда доступен.
+  const keep = (limit: number): number =>
+    Math.max(1, Math.floor((limit * (100 - (options.reservePercent ?? 0))) / 100));
+  if (account.limitPerMinute !== null && load.minute + queue >= keep(account.limitPerMinute)) {
     return new Date(at + RETRY_MS.minute);
   }
   const limits = effectiveLimits(account, now);
-  if (limits.hourly !== null && load.hour + queue >= limits.hourly) {
+  if (limits.hourly !== null && load.hour + queue >= keep(limits.hourly)) {
     return new Date(at + RETRY_MS.hour);
   }
-  if (limits.daily !== null && load.day + queue >= limits.daily) {
+  if (limits.daily !== null && load.day + queue >= keep(limits.daily)) {
     return new Date(at + RETRY_MS.day);
   }
   return undefined;
