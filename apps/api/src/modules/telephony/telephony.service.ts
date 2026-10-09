@@ -1665,6 +1665,19 @@ export class TelephonyService {
     return gateway;
   }
 
+  /** Вес и приоритет карты; карта уже проверена как своя. */
+  async setSimRank(
+    id: SimCardId,
+    rank: { weight?: number | undefined; priority?: number | undefined },
+  ): Promise<SimCardRow> {
+    const sim = await this.repository.setSimRank(id, {
+      ...(rank.weight === undefined ? {} : { weight: rank.weight }),
+      ...(rank.priority === undefined ? {} : { priority: rank.priority }),
+    });
+    if (sim === undefined) throw notFound('SIM не найдена');
+    return sim;
+  }
+
   async requireOwnSim(id: SimCardId, partnerId: PartnerId): Promise<SimCardRow> {
     const sim = await this.repository.findSim(id);
     if (sim === undefined || sim.partnerId !== partnerId) throw notFound('SIM не найдена');

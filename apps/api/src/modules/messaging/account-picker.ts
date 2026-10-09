@@ -9,14 +9,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { DistributionProduct, Id, MoneyAmount } from '@zvonix/shared';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { BillingService } from '../billing/billing.service.js';
-import {
-  chooseByMode,
-  DEFAULT_DISTRIBUTION,
-  isFree,
-  quietEndsAt,
-  type Candidate,
-  type DistributionSettings,
-} from './distribution.js';
+import { DistributionService } from '../limits/distribution.service.js';
+import { DEFAULT_DISTRIBUTION, quietEndsAt, type DistributionSettings } from '@zvonix/shared';
+import { chooseByMode, isFree, type Candidate } from './distribution.js';
 import { MessagesRepository, type AccountLoad } from './messages.repository.js';
 import { MessagingRepository, type MessengerAccountRow } from './messaging.repository.js';
 
@@ -45,6 +40,7 @@ export class AccountPicker {
     private readonly messages: MessagesRepository,
     private readonly accounts: MessagingRepository,
     private readonly billing: BillingService,
+    private readonly distribution: DistributionService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('account-picker');
@@ -52,8 +48,7 @@ export class AccountPicker {
 
   /** Настройка партнёра для сообщений; нет записи — «поровну» без параметров. */
   async settingsOf(partnerId: Id<'partner'>): Promise<DistributionSettings> {
-    const row = (await this.accounts.distributionsOf([partnerId], PRODUCT)).get(partnerId);
-    return row ?? DEFAULT_DISTRIBUTION;
+    return this.distribution.get(partnerId, PRODUCT);
   }
 
   /** Когда у аккаунта кончатся тихие часы партнёра; `undefined` — сейчас не тихие часы. */
@@ -119,7 +114,7 @@ export class AccountPicker {
         usable.map((account) => account.id),
         now,
       );
-      const settings = await this.accounts.distributionsOf(
+      const settings = await this.distribution.forPartners(
         [...new Set(usable.map((account) => account.partnerId))],
         PRODUCT,
       );

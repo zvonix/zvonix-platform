@@ -9,6 +9,7 @@ import {
 } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
+import { CallsAndMax } from '../messages/terms';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
@@ -34,39 +35,92 @@ interface Settings {
   readonly sticky_recipient: boolean;
 }
 
-interface RankedAccount {
+/** Карта (звонки) или аккаунт (сообщения MAX) с весом и приоритетом в распределении. */
+interface RankedItem {
   readonly id: string;
   readonly label: string;
-  readonly status: string;
   readonly weight: number;
   readonly priority: number;
 }
 
 interface Distribution {
   readonly settings: Settings;
-  readonly accounts: RankedAccount[];
+  readonly items: RankedItem[];
 }
 
-const KEY = ['partner', 'distribution', 'messages'] as const;
+type Product = 'calls' | 'messages';
+
+interface RawDistribution {
+  readonly settings: Settings;
+  readonly accounts?: { id: string; label: string; weight: number; priority: number }[];
+  readonly sims?: { id: string; msisdn: string; weight: number; priority: number }[];
+}
+
+/** Что отличает звонки от сообщений: адреса, названия, список и есть ли «один получатель — один аккаунт». */
+const PRODUCTS: Record<
+  Product,
+  {
+    readonly heading: string;
+    readonly itemsHeading: string;
+    readonly itemName: string;
+    readonly rankUrl: (id: string) => string;
+    readonly sticky: boolean;
+  }
+> = {
+  calls: {
+    heading: 'Звонки: как выбирать карту',
+    itemsHeading: 'карт',
+    itemName: 'карты',
+    rankUrl: (id) => `/partner/sims/${id}/distribution`,
+    sticky: false,
+  },
+  messages: {
+    heading: 'Сообщения MAX: как выбирать аккаунт',
+    itemsHeading: 'аккаунтов',
+    itemName: 'аккаунта',
+    rankUrl: (id) => `/partner/messenger/accounts/${id}/distribution`,
+    sticky: true,
+  },
+};
+
+const keyOf = (product: Product) => ['partner', 'distribution', product] as const;
 
 /** Название режима и одна строка о том, как он выбирает следующий аккаунт. */
-const MODE_TEXT: Record<DistributionMode, { name: string; note: string }> = {
-  equal: { name: 'Поровну', note: 'Первым идёт аккаунт, который дольше всех не работал' },
+const MODE_TEXT: Record<DistributionMode, { name: string; note: Record<Product, string> }> = {
+  equal: {
+    name: 'Поровну',
+    note: {
+      calls: 'Первой идёт карта, которая дольше всех не работала',
+      messages: 'Первым идёт аккаунт, который дольше всех не работал',
+    },
+  },
   remaining: {
     name: 'По остатку лимита',
-    note: 'Первым идёт тот, у кого больше всего осталось на сутки',
+    note: {
+      calls: 'Первой идёт карта, у которой больше всего осталось лимита',
+      messages: 'Первым идёт аккаунт, у которого больше всего осталось на сутки',
+    },
   },
   sequential: {
     name: 'По очереди',
-    note: 'Один аккаунт до предела, потом следующий — по порядку в списке',
+    note: {
+      calls: 'Одна карта до предела, потом следующая — по порядку в списке',
+      messages: 'Один аккаунт до предела, потом следующий — по порядку в списке',
+    },
   },
   weighted: {
     name: 'По весам',
-    note: 'Доля сообщений пропорциональна весу аккаунта, например 3 : 1',
+    note: {
+      calls: 'Доля звонков пропорциональна весу карты, например 3 : 1',
+      messages: 'Доля сообщений пропорциональна весу аккаунта, например 3 : 1',
+    },
   },
   priority: {
     name: 'По приоритету',
-    note: 'Сначала аккаунты с меньшим номером; внутри одного номера — поровну',
+    note: {
+      calls: 'Сначала карты с меньшим номером; внутри одного номера — поровну',
+      messages: 'Сначала аккаунты с меньшим номером; внутри одного номера — поровну',
+    },
   },
 };
 
@@ -98,7 +152,12 @@ const fromTime = (value: string): number | null => {
 export default function PartnerDistributionPage() {
   return (
     <ConsoleShell title="Распределение" cabinet="partner">
-      {() => <DistributionView />}
+      {() => (
+        <CallsAndMax
+          calls={<DistributionView product="calls" />}
+          max={<DistributionView product="messages" />}
+        />
+      )}
     </ConsoleShell>
   );
 }
@@ -108,18 +167,24 @@ export default function PartnerDistributionPage() {
  * ([ADR-0080](../../../../../../docs/adr/0080-edinye-limity-i-raspredelenie.md)). Цена, приоритеты клиента и лимиты
  * площадки остаются первыми: настройка меняет порядок только внутри допустимых аккаунтов.
  */
-function DistributionView() {
+function DistributionView({ product }: { product: Product }) {
   const query = useQuery({
-    queryKey: KEY,
-    queryFn: ({ signal }) => request<Distribution>('/partner/distribution/messages', { signal }),
+    queryKey: keyOf(product),
+    queryFn: async ({ signal }): Promise<Distribution> => {
+      const raw = await request<RawDistribution>(`/partner/distribution/${product}`, { signal });
+      const items = raw.sims?.map((sim) => ({ ...sim, label: sim.msisdn })) ?? raw.accounts ?? [];
+      return { settings: raw.settings, items };
+    },
   });
   if (query.error instanceof ApiError) return <ErrorNote error={query.error} />;
   if (query.data === undefined) return <p className="text-muted-foreground">Загружаем…</p>;
   // Форма заводится заново, когда с сервера пришли свежие значения: ключ — сохранённые настройки.
-  return <Editor key={JSON.stringify(query.data.settings)} data={query.data} />;
+  return <Editor key={JSON.stringify(query.data.settings)} product={product} data={query.data} />;
 }
 
-function Editor({ data }: { data: Distribution }) {
+function Editor({ product, data }: { product: Product; data: Distribution }) {
+  const text = PRODUCTS[product];
+  const KEY = keyOf(product);
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<DistributionMode>(data.settings.mode);
   const [reserve, setReserve] = useState(String(data.settings.reserve_percent));
@@ -131,7 +196,7 @@ function Editor({ data }: { data: Distribution }) {
 
   const save = useMutation({
     mutationFn: () =>
-      request<unknown>('/partner/distribution/messages', {
+      request<unknown>(`/partner/distribution/${product}`, {
         method: 'PUT',
         body: {
           mode,
@@ -147,7 +212,7 @@ function Editor({ data }: { data: Distribution }) {
 
   const rank = useMutation({
     mutationFn: (input: { id: string; weight?: number; priority?: number }) =>
-      request<unknown>(`/partner/messenger/accounts/${input.id}/distribution`, {
+      request<unknown>(text.rankUrl(input.id), {
         method: 'PATCH',
         body: { weight: input.weight, priority: input.priority },
       }),
@@ -175,11 +240,11 @@ function Editor({ data }: { data: Distribution }) {
 
       <section aria-label="Режим" className="flex flex-col gap-2">
         <h2 className="flex items-center gap-1 font-semibold">
-          Сообщения MAX: как выбирать аккаунт
+          {text.heading}
           <Hint label="Что делает распределение">
             <p>
               Цена, приоритеты клиента и лимиты площадки остаются первыми. Здесь вы выбираете только
-              порядок внутри ваших аккаунтов, которым можно отправлять прямо сейчас.
+              порядок внутри ваших {text.itemsHeading}, которым можно работать прямо сейчас.
             </p>
           </Hint>
         </h2>
@@ -203,7 +268,9 @@ function Editor({ data }: { data: Distribution }) {
               />
               <span>
                 <span className="block font-medium">{MODE_TEXT[value].name}</span>
-                <span className="block text-muted-foreground">{MODE_TEXT[value].note}</span>
+                <span className="block text-muted-foreground">
+                  {MODE_TEXT[value].note[product]}
+                </span>
               </span>
             </label>
           ))}
@@ -244,10 +311,18 @@ function Editor({ data }: { data: Distribution }) {
             <span className="flex items-center gap-1">
               Тихие часы
               <Hint label="Что такое тихие часы">
-                <p>
-                  В это время аккаунты не отправляют: ночной отдых снижает риск блокировки.
-                  Сообщения ждут утра или уходят через другой аккаунт.
-                </p>
+                {product === 'calls' ? (
+                  <p>
+                    В это время карты получают вызовы в последнюю очередь: ночной отдых снижает риск
+                    блокировки оператором. Звонок ждать не может, поэтому, если других карт нет,
+                    вызов пойдёт через них.
+                  </p>
+                ) : (
+                  <p>
+                    В это время аккаунты не отправляют: ночной отдых снижает риск блокировки.
+                    Сообщения ждут утра или уходят через другой аккаунт.
+                  </p>
+                )}
               </Hint>
             </span>
           </label>
@@ -300,22 +375,24 @@ function Editor({ data }: { data: Distribution }) {
           )}
         </div>
 
-        <label className="flex items-center gap-3">
-          <Switch
-            checked={sticky}
-            onCheckedChange={setSticky}
-            aria-label="Один получатель — один аккаунт"
-          />
-          <span className="flex items-center gap-1">
-            Один получатель — один аккаунт
-            <Hint label="Зачем это нужно">
-              <p>
-                Повторные сообщения одному человеку идут с того же аккаунта. Переписка выглядит
-                естественно, жалоб меньше — риск блокировки ниже.
-              </p>
-            </Hint>
-          </span>
-        </label>
+        {text.sticky && (
+          <label className="flex items-center gap-3">
+            <Switch
+              checked={sticky}
+              onCheckedChange={setSticky}
+              aria-label="Один получатель — один аккаунт"
+            />
+            <span className="flex items-center gap-1">
+              Один получатель — один аккаунт
+              <Hint label="Зачем это нужно">
+                <p>
+                  Повторные сообщения одному человеку идут с того же аккаунта. Переписка выглядит
+                  естественно, жалоб меньше — риск блокировки ниже.
+                </p>
+              </Hint>
+            </span>
+          </label>
+        )}
 
         <div>
           <Button
@@ -330,32 +407,34 @@ function Editor({ data }: { data: Distribution }) {
       </section>
 
       {(showWeight || showPriority) && (
-        <section aria-label="Аккаунты" className="flex flex-col gap-2">
-          <h2 className="font-semibold">{showWeight ? 'Вес аккаунтов' : 'Порядок аккаунтов'}</h2>
+        <section aria-label="Список" className="flex flex-col gap-2">
+          <h2 className="font-semibold">
+            {showWeight ? `Вес ${text.itemsHeading}` : `Порядок ${text.itemsHeading}`}
+          </h2>
           <div className="rounded-lg border border-border bg-card">
             <Table>
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">
-                  <TableHead className="h-8">Аккаунт</TableHead>
+                  <TableHead className="h-8">{product === 'calls' ? 'Карта' : 'Аккаунт'}</TableHead>
                   <TableHead className="h-8 text-right">
                     {showWeight ? 'Вес' : 'Номер в списке'}
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.accounts.length === 0 && (
+                {data.items.length === 0 && (
                   <TableRow className="hover:bg-transparent">
                     <TableCell colSpan={2} className="text-muted-foreground">
-                      Аккаунтов нет.
+                      {product === 'calls' ? 'Карт нет.' : 'Аккаунтов нет.'}
                     </TableCell>
                   </TableRow>
                 )}
-                {data.accounts.map((account) => (
+                {data.items.map((account) => (
                   <TableRow key={account.id}>
                     <TableCell>{account.label}</TableCell>
                     <TableCell className="text-right">
                       <RankInput
-                        label={`${showWeight ? 'Вес' : 'Номер в списке'} аккаунта «${account.label}»`}
+                        label={`${showWeight ? 'Вес' : 'Номер в списке'} ${text.itemName} «${account.label}»`}
                         value={showWeight ? account.weight : account.priority}
                         onCommit={(value) => {
                           rank.mutate({

@@ -832,6 +832,22 @@ export class TelephonyRepository {
       : query.where(eq(simCards.partnerId, partnerId)).orderBy(asc(simCards.msisdn));
   }
 
+  /** Вес и приоритет карты в распределении партнёра (ADR-0080). */
+  async setSimRank(
+    id: SimCardId,
+    rank: { weight?: number; priority?: number },
+  ): Promise<SimCardRow | undefined> {
+    const [row] = await this.db
+      .update(simCards)
+      .set({
+        ...(rank.weight === undefined ? {} : { distributionWeight: rank.weight }),
+        ...(rank.priority === undefined ? {} : { distributionPriority: rank.priority }),
+      })
+      .where(eq(simCards.id, id))
+      .returning();
+    return row;
+  }
+
   async setSimStatus(id: SimCardId, status: SimStatus): Promise<SimCardRow | undefined> {
     const [row] = await this.db
       .update(simCards)
@@ -1282,6 +1298,15 @@ export class TelephonyRepository {
           eq(channelPartnerPriorities.terminationKind, terminationKind),
         ),
       );
+  }
+
+  /**
+   * Карте выдали вызов: по отметке партнёр распределяет вызовы между своими картами
+   * ([ADR-0080](../../../../../docs/adr/0080-edinye-limity-i-raspredelenie.md)). Той же транзакцией, что занимает место:
+   * строка карты там уже заперта, лишней блокировки нет.
+   */
+  async markSimRouted(simCardId: SimCardId, at: Date, executor: Executor = this.db): Promise<void> {
+    await executor.update(simCards).set({ lastRoutedAt: at }).where(eq(simCards.id, simCardId));
   }
 
   /** Список партнёров канала в порядке приоритета. */

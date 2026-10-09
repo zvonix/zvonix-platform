@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  chooseByMode,
   DEFAULT_DISTRIBUTION,
   minuteOfDay,
   quietEndsAt,
-  type Candidate,
   type DistributionSettings,
-} from './distribution.js';
+} from '@zvonix/shared';
+import { chooseByMode, type Candidate } from './distribution.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
 
 const NOW = new Date('2026-10-09T12:00:00Z'); // 15:00 по Москве
