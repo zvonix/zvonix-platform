@@ -49,6 +49,7 @@ export {
   botConnections,
   botSubscribers,
   messengerAccounts,
+  partnerDistributions,
   messengerBots,
   messengerTariffs,
   messages,

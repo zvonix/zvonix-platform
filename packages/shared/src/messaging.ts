@@ -146,6 +146,31 @@ export const SMPP_ALLOWED_IPS_MAX = 20;
 export const MESSENGER_PAUSE_REASONS = ['absent_rate'] as const;
 export type MessengerPauseReason = (typeof MESSENGER_PAUSE_REASONS)[number];
 
+// --- Распределение, которое выбирает партнёр ([ADR-0080](../../../docs/adr/0080-edinye-limity-i-raspredelenie.md)) ---
+
+/** К чему относится настройка: звонки (`call`) или сообщения MAX (`message`). */
+export const DISTRIBUTION_PRODUCTS = ['call', 'message'] as const;
+export type DistributionProduct = (typeof DISTRIBUTION_PRODUCTS)[number];
+
+/**
+ * Как выбирается следующая карта или аккаунт среди допустимых: `equal` — давно не работавшая; `remaining` — с
+ * наибольшим остатком суточного лимита; `sequential` — по порядку в списке, пока не упрётся в предел; `weighted` —
+ * доли трафика по весам; `priority` — по приоритету, внутри одного — поровну.
+ */
+export const DISTRIBUTION_MODES = [
+  'equal',
+  'remaining',
+  'sequential',
+  'weighted',
+  'priority',
+] as const;
+export type DistributionMode = (typeof DISTRIBUTION_MODES)[number];
+
+/** Запас лимита, который не расходуется, не больше этого процента. */
+export const DISTRIBUTION_RESERVE_MAX = 50;
+/** Вес и приоритет аккаунта: целые от 1 до этого числа. */
+export const DISTRIBUTION_RANK_MAX = 100;
+
 /** Сколько суток новый аккаунт набирает силу; потом действует потолок из тарифа. */
 export const WARMUP_DAYS = 28;
 /** Первые сутки: столько сообщений можно отправить с нового аккаунта. */

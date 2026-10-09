@@ -28,11 +28,23 @@ const PEOPLE = {
 
 async function signIn(page: Page, email: string): Promise<void> {
   await page.goto('/login');
-  await page.getByLabel('Адрес почты').fill(email);
-  await page.getByLabel('Пароль').fill(PASSWORD);
-  await page.getByRole('button', { name: 'Войти' }).click();
-  // Вход завершён, когда страница входа сменилась: у каждой роли свой первый раздел.
-  await expect(page).not.toHaveURL(/\/login/u);
+  // Нажатие до того, как страница ожила, отправляет форму средствами браузера (адрес становится `/login?`): вход не
+  // происходит, а тест падает через раз. Ждём, пока загрузка стихнет, и при таком срыве нажимаем ещё раз.
+  await page.waitForLoadState('networkidle');
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await page.getByLabel('Адрес почты').fill(email);
+    await page.getByLabel('Пароль').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Войти' }).click();
+    // Вход завершён, когда страница входа сменилась: у каждой роли свой первый раздел.
+    try {
+      await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 5_000 });
+      return;
+    } catch (error) {
+      if (attempt === 3) throw error;
+      await page.goto('/login');
+      await page.waitForLoadState('networkidle');
+    }
+  }
 }
 
 test.describe('вход', () => {
@@ -352,6 +364,14 @@ test.describe('сообщения MAX (ADR-0071)', () => {
     // Названия провайдера нет ни в кабинете партнёра, ни в кабинете администратора.
     await expect(partner.getByText(/green/iu)).toHaveCount(0);
     await expect(admin.getByText(/green/iu)).toHaveCount(0);
+
+    // Распределение (ADR-0080): режим выбирается, сохраняется и переживает перезагрузку; веса видны в списке аккаунтов.
+    await partner.goto('/partner/distribution');
+    await partner.getByRole('radio', { name: /По весам/u }).check();
+    await expect(partner.getByLabel(/Вес аккаунта «Основной»/u)).toBeVisible();
+    await partner.getByRole('button', { name: 'Сохранить' }).click();
+    await partner.reload();
+    await expect(partner.getByRole('radio', { name: /По весам/u })).toBeChecked();
 
     await adminContext.close();
     await partnerContext.close();

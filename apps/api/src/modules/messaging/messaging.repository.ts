@@ -3,11 +3,12 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, eq, lt, ne, or, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, lt, ne, or, isNull, sql } from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
-import { messengerAccounts } from '@zvonix/db/schema';
+import { messengerAccounts, partnerDistributions } from '@zvonix/db/schema';
 import {
   newId,
+  type DistributionProduct,
   type Id,
   type MessengerAccountReason,
   type MessengerAccountStatus,
@@ -17,6 +18,7 @@ import { DatabaseService } from '../../infra/database.service.js';
 
 export type MessengerAccountRow = typeof messengerAccounts.$inferSelect;
 export type MessengerAccountId = Id<'messengerAccount'>;
+export type DistributionRow = typeof partnerDistributions.$inferSelect;
 
 @Injectable()
 export class MessagingRepository {
@@ -134,6 +136,63 @@ export class MessagingRepository {
         stateReason: state.reason,
         phone: state.phone,
         stateCheckedAt: state.checkedAt,
+      })
+      .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
+      .returning();
+    return row;
+  }
+
+  /** Настройки распределения партнёров (ADR-0080) для направления; нет записи — режим по умолчанию. */
+  async distributionsOf(
+    partnerIds: readonly Id<'partner'>[],
+    product: DistributionProduct,
+  ): Promise<Map<string, DistributionRow>> {
+    const result = new Map<string, DistributionRow>();
+    if (partnerIds.length === 0) return result;
+    const rows = await this.database.db
+      .select()
+      .from(partnerDistributions)
+      .where(
+        and(
+          inArray(partnerDistributions.partnerId, [...partnerIds]),
+          eq(partnerDistributions.product, product),
+        ),
+      );
+    for (const row of rows) result.set(row.partnerId, row);
+    return result;
+  }
+
+  async upsertDistribution(
+    partnerId: Id<'partner'>,
+    product: DistributionProduct,
+    values: Omit<DistributionRow, 'id' | 'partnerId' | 'product' | 'createdAt' | 'updatedAt'>,
+  ): Promise<DistributionRow> {
+    try {
+      const [row] = await this.database.db
+        .insert(partnerDistributions)
+        .values({ id: newId<'partnerDistribution'>(), partnerId, product, ...values })
+        .onConflictDoUpdate({
+          target: [partnerDistributions.partnerId, partnerDistributions.product],
+          set: { ...values, updatedAt: new Date() },
+        })
+        .returning();
+      if (row === undefined) throw new Error('Настройки распределения не записаны');
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /** Вес и приоритет аккаунта в распределении партнёра. */
+  async setRank(
+    id: MessengerAccountId,
+    rank: { weight?: number; priority?: number },
+  ): Promise<MessengerAccountRow | undefined> {
+    const [row] = await this.database.db
+      .update(messengerAccounts)
+      .set({
+        ...(rank.weight === undefined ? {} : { distributionWeight: rank.weight }),
+        ...(rank.priority === undefined ? {} : { distributionPriority: rank.priority }),
       })
       .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
       .returning();

@@ -23,6 +23,8 @@ import {
   StaffMessagesController,
 } from './messages.controller.js';
 import { MessagesRepository } from './messages.repository.js';
+import { AccountPicker } from './account-picker.js';
+import { DistributionController } from './distribution.controller.js';
 import { MessagesService } from './messages.service.js';
 import { MessagingController } from './messaging.controller.js';
 import { MessagingRepository } from './messaging.repository.js';
@@ -46,6 +48,7 @@ import { SmppService } from './smpp/smpp.service.js';
   imports: [AuditModule, BillingModule, CatalogModule, SettingsModule],
   controllers: [
     MessagingController,
+    DistributionController,
     MessengerTariffsController,
     ClientMessagesController,
     ClientApiMessagesController,
@@ -62,6 +65,7 @@ import { SmppService } from './smpp/smpp.service.js';
     MessagingRepository,
     MessengerTariffsService,
     MessengerTariffsRepository,
+    AccountPicker,
     MessagesService,
     MessagesRepository,
     SmppRepository,
