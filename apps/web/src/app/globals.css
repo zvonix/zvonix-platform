@@ -338,3 +338,32 @@ table[data-hide~='23'] > :is(thead, tbody) > tr > :is(th, td):nth-child(23):not(
 table[data-hide~='24'] > :is(thead, tbody) > tr > :is(th, td):nth-child(24):not([colspan]) {
   display: none;
 }
+
+/*
+ * Тень у краёв прокручиваемой вбок таблицы: показывает, что за краем есть ещё столбцы. Белые «заглушки» (local)
+ * закрывают тень, когда прокрутка дошла до края; цвет берётся из токенов, поэтому работает в обеих темах.
+ */
+.scroll-shadow-x {
+  background:
+    linear-gradient(to right, var(--card) 30%, transparent) left center,
+    linear-gradient(to left, var(--card) 30%, transparent) right center,
+    radial-gradient(
+        farthest-side at 0 50%,
+        color-mix(in srgb, var(--foreground) 28%, transparent),
+        transparent
+      )
+      left center,
+    radial-gradient(
+        farthest-side at 100% 50%,
+        color-mix(in srgb, var(--foreground) 28%, transparent),
+        transparent
+      )
+      right center;
+  background-repeat: no-repeat;
+  background-size:
+    40px 100%,
+    40px 100%,
+    14px 100%,
+    14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}

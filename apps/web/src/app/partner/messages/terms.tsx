@@ -7,6 +7,8 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { SectionTabs, type SectionTab } from '@/components/section-tabs';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -323,13 +325,15 @@ export function MaxTariffs() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <FormDialog label="Создать тариф" title="Новый тариф MAX">
+        <FormDialog label="Новый тариф" title="Новый тариф MAX" variant="outline">
           <TariffForm />
         </FormDialog>
-        <p className="text-muted-foreground">
-          Тариф — цена за сообщение и лимиты. Назначается аккаунту; без своего тарифа аккаунт идёт
-          за тарифом по умолчанию.
-        </p>
+        <Hint label="Что такое тариф MAX">
+          <p>
+            Тариф — цена за сообщение и лимиты. Назначается аккаунту; без своего тарифа аккаунт идёт
+            за тарифом по умолчанию.
+          </p>
+        </Hint>
       </div>
       {makeDefault.error instanceof ApiError && <ErrorNote error={makeDefault.error} />}
 
@@ -425,12 +429,16 @@ export function MaxLimits() {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-muted-foreground">
-        Лимиты задаются в тарифе. Лишнее сверх лимита не теряется, а ждёт в очереди.{' '}
-        <Link href="/partner/prices?tab=max" className="underline underline-offset-2">
-          Изменить в тарифах
-        </Link>
-      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button asChild variant="outline">
+          <Link href="/partner/prices?tab=max">Изменить в тарифах</Link>
+        </Button>
+        <Hint label="Как работают лимиты MAX">
+          <p>
+            Лимиты сообщений задаются в тарифе. Лишнее сверх лимита не теряется, а ждёт в очереди.
+          </p>
+        </Hint>
+      </div>
       <div className="rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>

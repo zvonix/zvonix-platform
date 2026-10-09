@@ -333,7 +333,7 @@ test.describe('сообщения MAX (ADR-0071)', () => {
     // Цена — в тарифе (ADR-0075): без тарифа аккаунту предлагают его создать.
     await expect(row.getByRole('link', { name: 'Создайте тариф' })).toBeVisible();
     await partner.goto('/partner/prices?tab=max');
-    await partner.getByRole('button', { name: 'Создать тариф' }).click();
+    await partner.getByRole('button', { name: 'Новый тариф' }).click();
     await partner.getByLabel('Название').fill('Основной');
     await partner.getByLabel('Цена за сообщение, ₽').fill('0,45');
     await partner.getByRole('button', { name: 'Создать', exact: true }).click();
