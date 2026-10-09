@@ -36,6 +36,7 @@ import {
 } from '@zvonix/shared';
 import { createdAt, idRef, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 import { clients, partners } from './billing.js';
+import { partnerTariffs } from './tariffs.js';
 import { channels, simCards } from './telephony.js';
 
 /**
@@ -45,7 +46,7 @@ import { channels, simCards } from './telephony.js';
  * кроме владельца, а владелец есть в каждой строке. «Политика» — это просто набор строк
  * у субъекта (ADR-0026).
  *
- * Владелец — четыре колонки, из которых заполнена ровно одна. Полиморфная пара «тип
+ * Владелец — пять колонок, из которых заполнена ровно одна. Полиморфная пара «тип
  * плюс идентификатор» лишила бы ссылку целостности и каскадного удаления: лимит
  * удалённого канала иначе остался бы висеть и продолжил считаться.
  */
@@ -58,6 +59,13 @@ export const limitRules = pgTable(
     channelId: idRef<'channel'>().references(() => channels.id, { onDelete: 'cascade' }),
     partnerId: idRef<'partner'>().references(() => partners.id, { onDelete: 'cascade' }),
     simCardId: idRef<'simCard'>().references(() => simCards.id, { onDelete: 'cascade' }),
+
+    /**
+     * Лимит в тарифе партнёра ([ADR-0080](../../../docs/adr/0080-edinye-limity-i-raspredelenie.md)):
+     * действует на **каждую карту**, к которой применён тариф (SIM → шлюз → тариф по умолчанию),
+     * счётчик у каждой карты свой, поэтому `per_sim` у такого правила всегда истина.
+     */
+    tariffId: idRef<'partnerTariff'>().references(() => partnerTariffs.id, { onDelete: 'cascade' }),
 
     window: text().$type<LimitWindow>().notNull(),
     metric: text().$type<LimitMetric>().notNull(),
@@ -95,7 +103,12 @@ export const limitRules = pgTable(
     // Округлять звонки нечего; «на каждую карту» бывает только у правила партнёра;
     // день обновления — только у месячного окна.
     check('limit_rules_rounding_minutes', sql`${t.metric} = 'minutes' or ${t.rounding} = 'second'`),
-    check('limit_rules_per_sim_partner', sql`not ${t.perSim} or ${t.partnerId} is not null`),
+    check(
+      'limit_rules_per_sim_owner',
+      sql`not ${t.perSim} or ${t.partnerId} is not null or ${t.tariffId} is not null`,
+    ),
+    // Лимит тарифа — всегда «на каждую карту»: общего счётчика у тарифа нет.
+    check('limit_rules_tariff_per_sim', sql`${t.tariffId} is null or ${t.perSim}`),
     check(
       'limit_rules_period_start_day',
       sql`${t.periodStartDay} is null or (${t.window} = 'month' and ${t.periodStartDay} between 1 and ${sql.raw(String(LIMIT_PERIOD_START_DAY_MAX))})`,
@@ -103,24 +116,35 @@ export const limitRules = pgTable(
     // Партнёр видит правила площадки, а своё задаёт рядом, не стирая чужого.
     check(
       'limit_rules_partner_sets_own',
-      sql`${t.setBy} = 'platform' or ${t.partnerId} is not null or ${t.simCardId} is not null`,
+      sql`${t.setBy} = 'platform' or ${t.partnerId} is not null or ${t.simCardId} is not null or ${t.tariffId} is not null`,
     ),
     check(
       'limit_rules_single_subject',
-      sql`(${t.clientId} is not null)::int + (${t.channelId} is not null)::int + (${t.partnerId} is not null)::int + (${t.simCardId} is not null)::int = 1`,
+      sql`(${t.clientId} is not null)::int + (${t.channelId} is not null)::int + (${t.partnerId} is not null)::int + (${t.simCardId} is not null)::int + (${t.tariffId} is not null)::int = 1`,
     ),
     // Два одинаковых окна с одной метрикой у одного субъекта означали бы, что предел
     // зависит от того, какую строку прочитали первой.
     // «На каждую карту» и «всего по партнёру» — разные правила; площадка и партнёр —
     // тоже: оба предела действуют (ADR-0057).
     unique('limit_rules_subject_key')
-      .on(t.clientId, t.channelId, t.partnerId, t.simCardId, t.window, t.metric, t.perSim, t.setBy)
+      .on(
+        t.clientId,
+        t.channelId,
+        t.partnerId,
+        t.simCardId,
+        t.tariffId,
+        t.window,
+        t.metric,
+        t.perSim,
+        t.setBy,
+      )
       .nullsNotDistinct(),
     // Горячий путь: все лимиты субъекта одним чтением.
     index('limit_rules_client_idx').on(t.clientId),
     index('limit_rules_channel_idx').on(t.channelId),
     index('limit_rules_partner_idx').on(t.partnerId),
     index('limit_rules_sim_idx').on(t.simCardId),
+    index('limit_rules_tariff_idx').on(t.tariffId),
   ],
 );
 

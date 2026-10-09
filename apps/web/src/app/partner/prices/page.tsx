@@ -29,6 +29,7 @@ import {
 } from '@/lib/tariffs';
 import { CallsAndMax, MaxTariffs } from '../messages/terms';
 import { SetPrice } from './set-price';
+import { TariffLimits } from './tariff-limits';
 
 export default function PartnerPricesPage() {
   return (
@@ -213,6 +214,7 @@ function TariffCard({
           </TableBody>
         </Table>
       </div>
+      <TariffLimits tariffId={tariff.id} />
     </section>
   );
 }

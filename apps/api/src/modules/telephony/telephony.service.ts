@@ -991,6 +991,18 @@ export class TelephonyService {
     return this.repository.listSims(partnerId);
   }
 
+  /**
+   * Тариф, по которому работает каждая карта партнёра: её собственный, иначе тариф шлюза,
+   * иначе тариф партнёра по умолчанию (ADR-0056). По нему действуют лимиты тарифа (ADR-0080).
+   */
+  async simTariffs(partnerId: Id<'partner'>): Promise<Map<string, Id<'partnerTariff'>>> {
+    const [own, fallback] = await Promise.all([
+      this.repository.simTariffs(partnerId),
+      this.tariffs.defaultTariff(partnerId),
+    ]);
+    return new Map([...own].map(([simId, tariffId]) => [simId, tariffId ?? fallback.id]));
+  }
+
   // --- Порты -------------------------------------------------------------------
 
   async addPort(

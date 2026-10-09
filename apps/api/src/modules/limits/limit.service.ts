@@ -58,6 +58,8 @@ export interface LimitUsage {
 export interface PartnerSim {
   readonly partnerId: Id<'partner'>;
   readonly simCardId: Id<'simCard'>;
+  /** Тариф, по которому карта работает (SIM → шлюз → по умолчанию); по нему действуют лимиты тарифа. */
+  readonly tariffId?: Id<'partnerTariff'> | null;
 }
 
 /** Кто меняет правило: для журнала и для проверки «партнёр — только свои». */
@@ -190,6 +192,8 @@ export class LimitService {
       channelId: Id<'channel'> | null;
       partnerId: Id<'partner'> | null;
       simCardId: Id<'simCard'> | null;
+      /** Лимит в тарифе партнёра; действует на каждую карту тарифа (ADR-0080). */
+      tariffId?: Id<'partnerTariff'> | null;
       window: LimitWindow;
       metric: LimitMetric;
       value: number;
@@ -201,17 +205,25 @@ export class LimitService {
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<LimitRuleRow> {
-    const named = [input.clientId, input.channelId, input.partnerId, input.simCardId].filter(
-      (value) => value !== null,
-    );
+    const named = [
+      input.clientId,
+      input.channelId,
+      input.partnerId,
+      input.simCardId,
+      input.tariffId ?? null,
+    ].filter((value) => value !== null);
     // То же ограничение стоит в базе. Здесь — ради внятного сообщения: лимит без субъекта
     // не относится ни к кому, а лимит на двоих сразу непонятно кого ограничивает.
     if (named.length !== 1) {
-      throw validationFailed('Лимит задаётся ровно одному: клиенту, каналу, партнёру или SIM');
+      throw validationFailed(
+        'Лимит задаётся ровно одному: клиенту, каналу, партнёру, SIM или тарифу',
+      );
     }
     const draft = {
       ...input,
-      perSim: input.perSim ?? false,
+      tariffId: input.tariffId ?? null,
+      // У лимита тарифа общего счётчика нет: он считается у каждой карты (ADR-0080).
+      perSim: input.tariffId == null ? (input.perSim ?? false) : true,
       rounding: input.rounding ?? 'second',
       periodStartDay: input.periodStartDay ?? null,
       setBy: input.setBy ?? 'platform',
@@ -345,8 +357,13 @@ export class LimitService {
       if (!rule.perSim) return [entry(null)];
       // «На каждую карту»: названные карты партнёра — все, даже без счётчика; прочие
       // — те, у кого счётчик в окне уже есть (разбор у администратора).
+      // Правило тарифа — карты, работающие по этому тарифу.
       const named = sims
-        .filter((sim) => sim.partnerId === rule.partnerId)
+        .filter((sim) =>
+          rule.tariffId === null
+            ? sim.partnerId === rule.partnerId
+            : sim.tariffId === rule.tariffId,
+        )
         .map((sim) => sim.simCardId);
       const counted = counters
         .filter((row) => row.ruleId === rule.id && row.simCardId !== null)
@@ -363,14 +380,15 @@ export class LimitService {
  */
 function assertShape(rule: {
   partnerId: Id<'partner'> | null;
+  tariffId: Id<'partnerTariff'> | null;
   window: LimitWindow;
   metric: LimitMetric;
   perSim: boolean;
   rounding: LimitRounding;
   periodStartDay: number | null;
 }): void {
-  if (rule.perSim && rule.partnerId === null) {
-    throw validationFailed('«На каждую карту» задаётся только партнёру');
+  if (rule.perSim && rule.partnerId === null && rule.tariffId === null) {
+    throw validationFailed('«На каждую карту» задаётся только партнёру или его тарифу');
   }
   if (rule.rounding !== 'second' && rule.metric !== 'minutes') {
     throw validationFailed('Поминутный счёт бывает только у минут');
@@ -386,6 +404,7 @@ function subjectOf(row: LimitRuleRow): Record<string, unknown> {
     channel_id: row.channelId,
     partner_id: row.partnerId,
     sim_card_id: row.simCardId,
+    tariff_id: row.tariffId,
     window: row.window,
     metric: row.metric,
     value: row.value,
