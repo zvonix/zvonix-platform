@@ -9,9 +9,9 @@ import { Cabinets } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
-import type { DistributionSettings } from './distribution.js';
+import type { DistributionSettings } from '@zvonix/shared';
 import { MessagingService } from './messaging.service.js';
-import { accountRankSchema, distributionSchema } from './schemas.js';
+import { distributionSchema, rankSchema } from '../limits/distribution.schemas.js';
 
 interface DistributionView {
   readonly mode: string;
@@ -81,7 +81,7 @@ export class DistributionController {
   async rank(
     @CurrentUser() actor: Principal,
     @Param('id') id: string,
-    @Body(zodBody(accountRankSchema)) body: z.infer<typeof accountRankSchema>,
+    @Body(zodBody(rankSchema)) body: z.infer<typeof rankSchema>,
   ): Promise<{ account: RankedAccountView }> {
     const account = await this.messaging.setRankOwn(actor.userId, id, body);
     return {

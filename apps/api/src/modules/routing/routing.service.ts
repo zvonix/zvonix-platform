@@ -9,6 +9,7 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  DEFAULT_DISTRIBUTION,
   DomainError,
   dialledDigits,
   type CallDestination,
@@ -23,7 +24,9 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { ReservationService } from '../billing/reservation.service.js';
 import { BlockedNumberService } from '../catalog/blocked-numbers.service.js';
 import type { LimitRuleRow } from '../limits/limit.repository.js';
-import { LimitBreach, LimitService } from '../limits/limit.service.js';
+import { DistributionService } from '../limits/distribution.service.js';
+import { LimitBreach, LimitService, type LimitUsage } from '../limits/limit.service.js';
+import { arrangeByDistribution } from './call-distribution.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { CallRepository, type CallRow, type Executor } from '../telephony/call.repository.js';
@@ -81,6 +84,7 @@ export class RoutingService {
     private readonly resolver: OperatorResolverService,
     private readonly blocked: BlockedNumberService,
     private readonly limits: LimitService,
+    private readonly distribution: DistributionService,
     private readonly tariffs: TariffService,
     private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
@@ -271,6 +275,28 @@ export class RoutingService {
       return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
     }
 
+    // 6. Распределение партнёра (ADR-0080): внутри одинакового приоритета, цены и партнёра карты переставляются
+    //    по его режиму. Клиентский приоритет и цена остаются первыми, лимиты уже отсеяли исчерпанное.
+    const settings = await this.distribution.forPartners(
+      [...new Set(ordered.map(({ candidate }) => candidate.gateway.partnerId))],
+      'call',
+    );
+    const remaining = remainingOfSims(candidateLimits);
+    const arranged = arrangeByDistribution(
+      ordered,
+      ({ candidate, price }) => ({
+        partnerId: candidate.gateway.partnerId,
+        kind: candidate.kind,
+        group: `${String(candidate.priority ?? '-')}|${String(price)}|${candidate.gateway.partnerId}`,
+        lastRoutedAt: candidate.kind === 'sim' ? candidate.sim.lastRoutedAt : null,
+        weight: candidate.kind === 'sim' ? candidate.sim.distributionWeight : 1,
+        priority: candidate.kind === 'sim' ? candidate.sim.distributionPriority : 1,
+        remaining: candidate.kind === 'sim' ? (remaining.get(candidate.sim.id) ?? 1) : 1,
+      }),
+      (partnerId) => settings.get(partnerId as Id<'partner'>) ?? DEFAULT_DISTRIBUTION,
+      at,
+    );
+
     // По одному разу каждое правило: у правила «на каждую карту» строк израсходованного
     // столько, сколько карт (ADR-0057), и повтор увеличил бы счётчик вызова дважды.
     const applicableLimits = [
@@ -284,7 +310,7 @@ export class RoutingService {
     let claimed:
       { call: CallRow; candidate: TerminationCandidate; rateId: Id<'partnerRate'> } | undefined;
     try {
-      claimed = await this.claimSim(request, destination, channel, operatorId, region, ordered, {
+      claimed = await this.claimSim(request, destination, channel, operatorId, region, arranged, {
         rules: applicableLimits,
         at,
       });
@@ -301,7 +327,7 @@ export class RoutingService {
             channel,
             operatorId,
             region,
-            ordered,
+            arranged,
             {
               rules: applicableLimits,
               at,
@@ -527,6 +553,10 @@ export class RoutingService {
           call.startedAt,
           tx,
         );
+        // И карте: по этой отметке партнёр распределяет вызовы между своими картами (ADR-0080).
+        if (candidate.kind === 'sim') {
+          await this.telephony.markSimRouted(candidate.sim.id, call.startedAt, tx);
+        }
 
         // Той же транзакцией: счётчик и вызов не должны расходиться ни в одну сторону,
         // а повторная проверка после инкремента — единственное, что держит лимит
@@ -736,6 +766,18 @@ interface PricedCandidate {
   readonly candidate: TerminationCandidate;
   readonly price: MoneyAmount;
   readonly rateId: Id<'partnerRate'>;
+}
+
+/** Доля остатка самого строгого лимита каждой карты (0–1). Лимит партнёра на всех карт не различает — не считается. */
+function remainingOfSims(usages: readonly LimitUsage[]): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const usage of usages) {
+    if (usage.simCardId === null || usage.limit <= 0) continue;
+    const share = Math.max(0, usage.limit - usage.used) / usage.limit;
+    const known = result.get(usage.simCardId);
+    if (known === undefined || share < known) result.set(usage.simCardId, share);
+  }
+  return result;
 }
 
 function compareCandidates(left: PricedCandidate, right: PricedCandidate): number {

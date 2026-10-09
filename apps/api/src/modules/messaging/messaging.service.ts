@@ -24,8 +24,9 @@ import { decryptSecret, encryptSecret, MESSENGER_TOKEN_PURPOSE } from '../../inf
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingService } from '../billing/billing.service.js';
+import { DistributionService } from '../limits/distribution.service.js';
 import { SettingsService } from '../settings/settings.service.js';
-import { DEFAULT_DISTRIBUTION, type DistributionSettings } from './distribution.js';
+import type { DistributionSettings } from '@zvonix/shared';
 import {
   MessagingRepository,
   type MessengerAccountId,
@@ -89,6 +90,7 @@ export class MessagingService {
     private readonly billing: BillingService,
     private readonly audit: AuditService,
     private readonly settings: SettingsService,
+    private readonly distribution: DistributionService,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
@@ -400,9 +402,8 @@ export class MessagingService {
   }> {
     await this.assertEnabled();
     const partner = await this.billing.requirePartnerOwnedBy(userId);
-    const row = (await this.repository.distributionsOf([partner.id], 'message')).get(partner.id);
     return {
-      settings: row ?? DEFAULT_DISTRIBUTION,
+      settings: await this.distribution.get(partner.id, 'message'),
       accounts: await this.repository.listOfPartner(partner.id),
     };
   }
@@ -413,17 +414,7 @@ export class MessagingService {
   ): Promise<DistributionSettings> {
     await this.assertEnabled();
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
-    const before = (await this.repository.distributionsOf([partner.id], 'message')).get(partner.id);
-    const saved = await this.repository.upsertDistribution(partner.id, 'message', values);
-    await this.audit.record({
-      action: 'partner_distribution.changed',
-      entityType: 'partner',
-      entityId: partner.id,
-      actorUserId: actor.userId,
-      actorRole: actor.role,
-      before: { mode: before?.mode ?? DEFAULT_DISTRIBUTION.mode },
-      after: { product: 'message', mode: saved.mode, reserve_percent: saved.reservePercent },
-    });
+    const saved = await this.distribution.save(actor, partner.id, 'message', values);
     return saved;
   }
 

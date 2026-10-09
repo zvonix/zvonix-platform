@@ -14,6 +14,7 @@
 import { sql } from 'drizzle-orm';
 import { boolean, check, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import {
+  DISTRIBUTION_RANK_MAX,
   CHANNEL_STATUSES,
   DEFAULT_MAX_CONCURRENT_CALLS,
   GATEWAY_PORT_STATES,
@@ -258,12 +259,24 @@ export const simCards = pgTable(
     /** Дата активации у оператора. По ней считается возраст SIM в антифроде. */
     activatedAt: timestamptz(),
 
+    /**
+     * Распределение партнёра ([ADR-0080](../../../../docs/adr/0080-edinye-limity-i-raspredelenie.md)): когда карте в последний
+     * раз выдали вызов (той же транзакцией, что занимает место на ней), вес и номер в списке приоритетов.
+     */
+    lastRoutedAt: timestamptz(),
+    distributionWeight: integer().notNull().default(1),
+    distributionPriority: integer().notNull().default(1),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     check('sim_cards_status_check', oneOf(t.status, SIM_STATUSES)),
     check('sim_cards_network_scope_check', oneOf(t.networkScope, SIM_NETWORK_SCOPES)),
+    check(
+      'sim_cards_distribution_check',
+      sql`${t.distributionWeight} between 1 and ${sql.raw(String(DISTRIBUTION_RANK_MAX))} and ${t.distributionPriority} between 1 and ${sql.raw(String(DISTRIBUTION_RANK_MAX))}`,
+    ),
     check('sim_cards_msisdn_format', sql`${t.msisdn} ~ '^7[0-9]{10}$'`),
     check(
       'sim_cards_max_concurrent_calls_range',

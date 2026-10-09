@@ -367,10 +367,14 @@ test.describe('сообщения MAX (ADR-0071)', () => {
 
     // Распределение (ADR-0080): режим выбирается, сохраняется и переживает перезагрузку; веса видны в списке аккаунтов.
     await partner.goto('/partner/distribution');
+    // Вкладка «Звонки» открыта сама: режим выбирается и там, и у MAX.
+    await expect(partner.getByText('Звонки: как выбирать карту')).toBeVisible();
+    await partner.getByRole('tab', { name: 'Сообщения MAX' }).click();
     await partner.getByRole('radio', { name: /По весам/u }).check();
     await expect(partner.getByLabel(/Вес аккаунта «Основной»/u)).toBeVisible();
     await partner.getByRole('button', { name: 'Сохранить' }).click();
     await partner.reload();
+    await partner.getByRole('tab', { name: 'Сообщения MAX' }).click();
     await expect(partner.getByRole('radio', { name: /По весам/u })).toBeChecked();
 
     await adminContext.close();

@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module.js';
+import { DistributionRepository } from './distribution.repository.js';
+import { DistributionService } from './distribution.service.js';
 import { LimitController } from './limit.controller.js';
 import { LimitRepository } from './limit.repository.js';
 import { LimitService } from './limit.service.js';
@@ -19,7 +21,13 @@ import { RateLimitService } from './rate-limit.service.js';
 @Module({
   imports: [AuditModule],
   controllers: [LimitController],
-  providers: [RateLimitService, LimitService, LimitRepository],
-  exports: [RateLimitService, LimitService],
+  providers: [
+    RateLimitService,
+    LimitService,
+    LimitRepository,
+    DistributionRepository,
+    DistributionService,
+  ],
+  exports: [RateLimitService, LimitService, DistributionService],
 })
 export class LimitsModule {}
