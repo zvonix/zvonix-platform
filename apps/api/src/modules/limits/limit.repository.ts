@@ -35,6 +35,8 @@ export interface LimitSubjects {
   readonly channelId?: Id<'channel'>;
   readonly partnerIds?: readonly Id<'partner'>[];
   readonly simCardIds?: readonly Id<'simCard'>[];
+  /** Тарифы партнёров: их лимиты действуют на каждую карту с этим тарифом (ADR-0080). */
+  readonly tariffIds?: readonly Id<'partnerTariff'>[];
 }
 
 /** Начало окна у конкретного правила: вычисляется вызывающим одной и той же функцией. */
@@ -90,6 +92,9 @@ export class LimitRepository {
     }
     if (subjects.simCardIds !== undefined && subjects.simCardIds.length > 0) {
       conditions.push(inArray(limitRules.simCardId, [...subjects.simCardIds]));
+    }
+    if (subjects.tariffIds !== undefined && subjects.tariffIds.length > 0) {
+      conditions.push(inArray(limitRules.tariffId, [...subjects.tariffIds]));
     }
     if (conditions.length === 0) return [];
 
@@ -185,6 +190,7 @@ export class LimitRepository {
     channelId: Id<'channel'> | null;
     partnerId: Id<'partner'> | null;
     simCardId: Id<'simCard'> | null;
+    tariffId: Id<'partnerTariff'> | null;
     window: LimitWindow;
     metric: LimitMetric;
     value: number;
@@ -247,7 +253,8 @@ export class LimitRepository {
       subject.clientId !== undefined ||
       subject.channelId !== undefined ||
       (subject.partnerIds?.length ?? 0) > 0 ||
-      (subject.simCardIds?.length ?? 0) > 0;
+      (subject.simCardIds?.length ?? 0) > 0 ||
+      (subject.tariffIds?.length ?? 0) > 0;
 
     if (!hasSubject) {
       return this.db.select().from(limitRules).orderBy(asc(limitRules.createdAt));

@@ -21,6 +21,7 @@ import { BillingService } from '../billing/billing.service.js';
 import type { PartnerRow } from '../billing/billing.repository.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { LimitRuleRow } from '../limits/limit.repository.js';
+import { TariffService } from '../catalog/tariff.service.js';
 import { LimitService } from '../limits/limit.service.js';
 import { changeLimitSchema, partnerLimitSchema } from '../limits/schemas.js';
 import { toLimitView, toUsageView, type LimitUsageView, type LimitView } from '../limits/views.js';
@@ -32,30 +33,57 @@ export class PartnerLimitsController {
     private readonly limits: LimitService,
     private readonly telephony: TelephonyService,
     private readonly billing: BillingService,
+    private readonly tariffs: TariffService,
   ) {}
 
   /**
    * Свои лимиты и лимиты площадки — с израсходованным и моментом обнуления.
-   * У правила «на каждую карту» — по строке на каждую карту партнёра.
+   * У правила «на каждую карту» и у лимита в тарифе — по строке на каждую карту.
    */
   @Cabinets('partner')
   @Get('partner/limits')
   async list(@CurrentUser() actor: Principal): Promise<{
     limits: LimitUsageView[];
-    sims: { id: string; msisdn: string }[];
+    /** Сами лимиты тарифов — и тех, где пока нет карт: строк остатков у них нет. */
+    tariff_limits: LimitView[];
+    sims: { id: string; msisdn: string; tariff_id: string }[];
+    tariffs: { id: string; name: string; is_default: boolean }[];
   }> {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
-    const sims = (await this.telephony.listSims(partner.id)).filter(
-      (sim) => sim.status !== 'retired',
-    );
+    const [allSims, tariffOfSim, tariffs] = await Promise.all([
+      this.telephony.listSims(partner.id),
+      this.telephony.simTariffs(partner.id),
+      this.tariffs.listTariffs(partner.id),
+    ]);
+    const sims = allSims.filter((sim) => sim.status !== 'retired');
+    const tariffRules = await this.limits.rules({ tariffIds: tariffs.map((tariff) => tariff.id) });
     const usage = await this.limits.usage(
-      { partnerIds: [partner.id], simCardIds: sims.map((sim) => sim.id) },
+      {
+        partnerIds: [partner.id],
+        simCardIds: sims.map((sim) => sim.id),
+        tariffIds: tariffs.map((tariff) => tariff.id),
+      },
       new Date(),
-      sims.map((sim) => ({ partnerId: partner.id, simCardId: sim.id })),
+      sims.map((sim) => ({
+        partnerId: partner.id,
+        simCardId: sim.id,
+        tariffId: tariffOfSim.get(sim.id) ?? null,
+      })),
     );
     return {
       limits: usage.map(toUsageView),
-      sims: sims.map((sim) => ({ id: sim.id, msisdn: sim.msisdn })),
+      tariff_limits: tariffRules.map(toLimitView),
+      sims: sims.flatMap((sim) => {
+        const tariffId = tariffOfSim.get(sim.id);
+        return tariffId === undefined
+          ? []
+          : [{ id: sim.id, msisdn: sim.msisdn, tariff_id: tariffId }];
+      }),
+      tariffs: tariffs.map((tariff) => ({
+        id: tariff.id,
+        name: tariff.name,
+        is_default: tariff.isDefault,
+      })),
     };
   }
 
@@ -71,12 +99,22 @@ export class PartnerLimitsController {
       simCardId = parseId(body.simCardId, 'simCard');
       await this.telephony.requireOwnSim(simCardId, partner.id);
     }
+    // Лимит в тарифе: тариф должен быть этого партнёра, иначе это лимит на чужие карты.
+    let tariffId: Id<'partnerTariff'> | null = null;
+    if (body.scope === 'tariff' && body.tariffId !== undefined) {
+      const tariff = await this.tariffs.requireTariffOf(
+        partner.id,
+        parseId(body.tariffId, 'partnerTariff'),
+      );
+      tariffId = tariff.id;
+    }
     const row = await this.limits.add(
       {
         clientId: null,
         channelId: null,
-        partnerId: body.scope === 'sim' ? null : partner.id,
+        partnerId: body.scope === 'sim' || body.scope === 'tariff' ? null : partner.id,
         simCardId,
+        tariffId,
         window: body.window,
         metric: body.metric,
         value: body.value,
@@ -116,11 +154,18 @@ export class PartnerLimitsController {
     await this.limits.remove(parseId(id, 'limitRule'), actor, await this.ownerCheck(partner));
   }
 
-  /** Своё правило — на себя или на свою карту. Чужое для партнёра не существует. */
+  /** Своё правило — на себя, на свою карту или в своём тарифе. Чужое для партнёра не существует. */
   private async ownerCheck(partner: PartnerRow): Promise<(rule: LimitRuleRow) => boolean> {
-    const own = new Set<string>((await this.telephony.listSims(partner.id)).map((sim) => sim.id));
+    const [sims, tariffs] = await Promise.all([
+      this.telephony.listSims(partner.id),
+      this.tariffs.listTariffs(partner.id),
+    ]);
+    const ownSims = new Set<string>(sims.map((sim) => sim.id));
+    const ownTariffs = new Set<string>(tariffs.map((tariff) => tariff.id));
     return (rule) =>
-      rule.partnerId === partner.id || (rule.simCardId !== null && own.has(rule.simCardId));
+      rule.partnerId === partner.id ||
+      (rule.simCardId !== null && ownSims.has(rule.simCardId)) ||
+      (rule.tariffId !== null && ownTariffs.has(rule.tariffId));
   }
 
   /** Закрытый партнёр не меняет ничего: запись осталась бы от участника, которого нет. */

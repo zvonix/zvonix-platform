@@ -832,6 +832,20 @@ export class TelephonyRepository {
       : query.where(eq(simCards.partnerId, partnerId)).orderBy(asc(simCards.msisdn));
   }
 
+  /**
+   * Тарифы карт партнёра: свой у карты, иначе тариф шлюза, в порт которого она вставлена.
+   * Пусто в обоих — действует тариф партнёра по умолчанию (ADR-0056); его подставляет сервис.
+   */
+  async simTariffs(partnerId: Id<'partner'>): Promise<Map<string, Id<'partnerTariff'> | null>> {
+    const rows = await this.db
+      .select({ id: simCards.id, own: simCards.tariffId, gateway: gateways.tariffId })
+      .from(simCards)
+      .leftJoin(gatewayPorts, eq(gatewayPorts.simCardId, simCards.id))
+      .leftJoin(gateways, eq(gateways.id, gatewayPorts.gatewayId))
+      .where(eq(simCards.partnerId, partnerId));
+    return new Map(rows.map((row) => [row.id, row.own ?? row.gateway]));
+  }
+
   /** Вес и приоритет карты в распределении партнёра (ADR-0080). */
   async setSimRank(
     id: SimCardId,

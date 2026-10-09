@@ -1012,6 +1012,31 @@ test.describe('вкладки «Звонки» и «Сообщения MAX» у 
     await expect(page).not.toHaveURL(/tab=/u);
     await context.close();
   });
+
+  test('лимит звонков заводится в тарифе и виден на странице «Лимиты» по картам (ADR-0080)', async ({
+    browser,
+  }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await signIn(page, PEOPLE.partner);
+
+    await page.goto('/partner/prices');
+    await page.getByRole('button', { name: 'Добавить лимит' }).first().click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Звонков, не больше').fill('77');
+    await dialog.getByRole('button', { name: 'Добавить лимит' }).click();
+    await expect(page.getByText('77 звонков в сутки')).toBeVisible();
+
+    // Лимит переживает перезагрузку, даже когда у тарифа ещё нет карт.
+    await page.reload();
+    await expect(page.getByText('77 звонков в сутки')).toBeVisible();
+
+    // «Лимиты» — обзор остатков: лимиты заводятся в тарифе, здесь только ссылка на него.
+    await page.goto('/partner/limits');
+    await expect(page.getByRole('link', { name: 'Изменить в тарифах' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Добавить лимит' })).toHaveCount(0);
+    await context.close();
+  });
 });
 
 test.describe('обновление из кабинета (ADR-0074)', () => {

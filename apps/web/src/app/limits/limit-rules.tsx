@@ -36,6 +36,8 @@ interface Rule {
   readonly channel_id: string | null;
   readonly partner_id: string | null;
   readonly sim_card_id: string | null;
+  /** Лимит в тарифе партнёра: его завёл партнёр, он действует на каждую карту тарифа (ADR-0080). */
+  readonly tariff_id: string | null;
   readonly window: LimitWindow;
   readonly metric: LimitMetric;
   readonly value: number;
@@ -59,16 +61,19 @@ const SUBJECT_FIELD = {
   sim: 'simCardId',
 } as const;
 
-type SubjectKind = keyof typeof SUBJECT_FIELD;
+/** Лимит тарифа заводит только партнёр, поэтому в форме заведения этого вида нет. */
+type FormSubjectKind = keyof typeof SUBJECT_FIELD;
+type SubjectKind = FormSubjectKind | 'tariff';
 
 const SUBJECT_NAME: Record<SubjectKind, string> = {
   client: 'Клиент',
   channel: 'Канал',
   partner: 'Партнёр',
   sim: 'SIM',
+  tariff: 'Тариф',
 };
 
-const isSubjectKind = (value: string): value is SubjectKind => value in SUBJECT_FIELD;
+const isSubjectKind = (value: string): value is FormSubjectKind => value in SUBJECT_FIELD;
 
 const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
@@ -149,6 +154,7 @@ export function LimitRules() {
     if (rule.partner_id !== null) {
       return { kind: 'partner', name: partners.nameOf(rule.partner_id) ?? rule.partner_id };
     }
+    if (rule.tariff_id !== null) return { kind: 'tariff', name: 'тариф партнёра' };
     return {
       kind: 'sim',
       name: rule.sim_card_id === null ? '—' : (sims.nameOf(rule.sim_card_id) ?? rule.sim_card_id),

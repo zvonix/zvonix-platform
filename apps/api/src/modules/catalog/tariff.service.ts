@@ -122,6 +122,8 @@ export interface Direction {
 /** Правила, применённые к вызову. Попадают в CDR целиком: прошлое не переоценивается. */
 export interface AppliedTariff {
   readonly rateId: Id<'partnerRate'>;
+  /** Тариф строки цены: по нему действуют лимиты тарифа (ADR-0080). */
+  readonly tariffId: Id<'partnerTariff'> | null;
   readonly commissionRuleId: Id<'commissionRule'>;
   readonly rule: TariffRule;
   readonly commission: CommissionRule;
@@ -216,6 +218,7 @@ export class TariffService {
 
     return {
       rateId: rate.id,
+      tariffId: rate.tariffId,
       commissionRuleId: commission.id,
       rule: toTariffRule(rate),
       commission: toCommissionRule(commission),
@@ -293,6 +296,7 @@ export class TariffService {
     }
     return {
       rateId: rate.id,
+      tariffId: rate.tariffId,
       commissionRuleId: commission.id,
       rule: toTariffRule(rate),
       commission: toCommissionRule(commission),

@@ -141,6 +141,8 @@ export class CdrService {
       channelId: call.channelId,
       partnerIds: [gateway.partnerId],
       ...(call.simCardId === null ? {} : { simCardIds: [call.simCardId] }),
+      // Лимиты тарифа, по которому вызов пошёл (ADR-0080): тариф берётся из строки цены вызова.
+      ...(priced.applied.tariffId === null ? {} : { tariffIds: [priced.applied.tariffId] }),
     });
 
     const posted = await this.billing.chargeCall({

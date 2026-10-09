@@ -60,13 +60,21 @@ export const changeLimitSchema = z.object({
 });
 
 /**
- * Лимит, который партнёр задаёт себе сам (ADR-0057). Субъект — он сам (`partner`),
- * каждая его карта (`each_sim`) или одна карта (`sim` с `simCardId`); партнёр — из сессии.
+ * Лимит, который партнёр задаёт себе сам (ADR-0057, ADR-0080). Основной путь — `tariff`:
+ * лимит в тарифе действует на каждую карту этого тарифа. Прежние виды (`partner` — все карты
+ * вместе, `each_sim`, `sim`) остаются, пока их не перенесли в тарифы; партнёр — из сессии.
  */
 export const partnerLimitSchema = addLimitSchema
   .omit({ clientId: true, channelId: true, partnerId: true, perSim: true })
-  .extend({ scope: z.enum(['partner', 'each_sim', 'sim']) })
+  .extend({
+    scope: z.enum(['partner', 'each_sim', 'sim', 'tariff']),
+    tariffId: z.uuid('должен быть идентификатором').optional(),
+  })
   .refine((body) => (body.scope === 'sim') === (body.simCardId !== undefined), {
     message: 'карта называется ровно тогда, когда лимит — на одну карту',
     path: ['simCardId'],
+  })
+  .refine((body) => (body.scope === 'tariff') === (body.tariffId !== undefined), {
+    message: 'тариф называется ровно тогда, когда лимит — в тарифе',
+    path: ['tariffId'],
   });

@@ -237,17 +237,29 @@ export class RoutingService {
 
     // 5в. Лимиты партнёров и SIM отсеивают кандидатов, а не отклоняют вызов: лимит
     //    партнёра — защита его SIM, и он не должен мешать позвонить через другого.
-    const candidateSims = priced
-      .map((entry) => entry.candidate)
-      .filter((candidate) => candidate.kind === 'sim')
-      .map((candidate) => ({
-        partnerId: candidate.gateway.partnerId,
-        simCardId: candidate.sim.id,
-      }));
+    const candidateSims = priced.flatMap((entry) =>
+      entry.candidate.kind === 'sim'
+        ? [
+            {
+              partnerId: entry.candidate.gateway.partnerId,
+              simCardId: entry.candidate.sim.id,
+              tariffId: entry.tariffId,
+            },
+          ]
+        : [],
+    );
     const candidateLimits = await this.limits.usage(
       {
         partnerIds: [...new Set(priced.map((entry) => entry.candidate.gateway.partnerId))],
         simCardIds: [...new Set(candidateSims.map((sim) => sim.simCardId))],
+        // Лимиты тарифов, по которым пойдут вызовы (ADR-0080): тариф карты → шлюза → по умолчанию.
+        tariffIds: [
+          ...new Set(
+            priced
+              .map((entry) => entry.tariffId)
+              .filter((id): id is Id<'partnerTariff'> => id !== null),
+          ),
+        ],
       },
       at,
       // Правило «на каждую карту» (ADR-0057) считается у каждой кандидатки отдельно.
@@ -441,7 +453,9 @@ export class RoutingService {
 
     const priced = candidates.flatMap((candidate, index) => {
       const rate = rates[index];
-      return rate === undefined ? [] : [{ candidate, price: rate.pricePerMinute, rateId: rate.id }];
+      return rate === undefined
+        ? []
+        : [{ candidate, price: rate.pricePerMinute, rateId: rate.id, tariffId: rate.tariffId }];
     });
 
     // Устойчивая сортировка: при полном равенстве остаётся порядок, заданный запросом,
@@ -515,7 +529,7 @@ export class RoutingService {
   > {
     const channelId = channel.id;
     return this.callsRepository.db.transaction(async (tx) => {
-      for (const { candidate, rateId } of candidates) {
+      for (const { candidate, rateId, tariffId } of candidates) {
         // Ёмкость у SIM и транка своя, но правило одно: блокировка строки, потом счёт
         // открытых вызовов. У SIM предел ставит оператор, у транка — договор
         // с провайдером, и превышение обоих одинаково кончается сорванными вызовами.
@@ -562,7 +576,7 @@ export class RoutingService {
         // а повторная проверка после инкремента — единственное, что держит лимит
         // при одновременных заявках (ADR-0026).
         await this.limits.consume(
-          limitsFor(candidate, limits.rules),
+          limitsFor(candidate, tariffId, limits.rules),
           'calls',
           { seconds: 0, simCardId: candidate.kind === 'sim' ? candidate.sim.id : null },
           limits.at,
@@ -722,12 +736,15 @@ function failureReasonFor(cause: unknown): CallFailureReason {
  */
 function limitsFor(
   candidate: TerminationCandidate,
+  tariffId: Id<'partnerTariff'> | null,
   rules: readonly LimitRuleRow[],
 ): LimitRuleRow[] {
   return rules.filter(
     (rule) =>
       rule.clientId !== null ||
       rule.channelId !== null ||
+      // Лимит тарифа считается у каждой карты этого тарифа; у транка карты нет (ADR-0080).
+      (rule.tariffId !== null && candidate.kind === 'sim' && rule.tariffId === tariffId) ||
       // «На каждую карту» у транка не считается: карты у него нет (ADR-0057).
       (rule.partnerId === candidate.gateway.partnerId &&
         (!rule.perSim || candidate.kind === 'sim')) ||
@@ -766,6 +783,8 @@ interface PricedCandidate {
   readonly candidate: TerminationCandidate;
   readonly price: MoneyAmount;
   readonly rateId: Id<'partnerRate'>;
+  /** Тариф строки цены: по нему к карте применяются лимиты тарифа (ADR-0080). */
+  readonly tariffId: Id<'partnerTariff'> | null;
 }
 
 /** Доля остатка самого строгого лимита каждой карты (0–1). Лимит партнёра на всех карт не различает — не считается. */

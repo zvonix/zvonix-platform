@@ -974,6 +974,83 @@ describe('лимиты партнёра (ADR-0057)', () => {
     );
     expect(alien.statusCode).toBe(404);
   }, 60_000);
+
+  it('лимит в тарифе: заводится, меняется, удаляется; чужой тариф и чужой лимит тарифа не существуют', async () => {
+    const tariffs = (await get('/partner/rates', as(mine.token))).json<RatesResponse>().tariffs;
+    const tariff = tariffs[0]?.id;
+    expect(tariff).toBeDefined();
+
+    const created = await post(
+      '/partner/limits',
+      { scope: 'tariff', tariffId: tariff, window: 'hour', metric: 'calls', value: 7 },
+      as(mine.token),
+    );
+    expect(created.statusCode).toBe(201);
+    const limit = created.json<{ limit: { id: string; tariff_id: string; per_sim: boolean } }>()
+      .limit;
+    // Лимит тарифа всегда считается у каждой карты.
+    expect(limit).toMatchObject({ tariff_id: tariff, per_sim: true });
+
+    // Тот же предел тому же тарифу дважды — не бывает.
+    const twice = await post(
+      '/partner/limits',
+      { scope: 'tariff', tariffId: tariff, window: 'hour', metric: 'calls', value: 9 },
+      as(mine.token),
+    );
+    expect(twice.statusCode).toBe(409);
+
+    const changed = await api().inject({
+      method: 'PATCH',
+      url: `/partner/limits/${limit.id}`,
+      headers: as(mine.token),
+      payload: { value: 5 },
+    });
+    expect(changed.statusCode).toBe(200);
+
+    // Видно по каждой карте, что работает по этому тарифу.
+    const body = await limitsOf(mine.token);
+    expect(body.limits.filter((row) => row.id === limit.id).length).toBeGreaterThan(0);
+
+    // Сосед не меняет и не видит лимит чужого тарифа и не вешает лимит на чужой тариф.
+    expect(
+      (
+        await api().inject({
+          method: 'PATCH',
+          url: `/partner/limits/${limit.id}`,
+          headers: as(neighbour.token),
+          payload: { value: 1 },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect((await limitsOf(neighbour.token)).limits.map((row) => row.id)).not.toContain(limit.id);
+    expect(
+      (
+        await post(
+          '/partner/limits',
+          { scope: 'tariff', tariffId: tariff, window: 'day', metric: 'calls', value: 3 },
+          as(neighbour.token),
+        )
+      ).statusCode,
+    ).toBe(404);
+
+    // Тариф без названия, а не-тариф с названием — отказ при разборе тела.
+    expect(
+      (
+        await post(
+          '/partner/limits',
+          { scope: 'tariff', window: 'day', metric: 'calls', value: 3 },
+          as(mine.token),
+        )
+      ).statusCode,
+    ).toBe(400);
+
+    const removed = await api().inject({
+      method: 'DELETE',
+      url: `/partner/limits/${limit.id}`,
+      headers: as(mine.token),
+    });
+    expect(removed.statusCode).toBe(204);
+  }, 60_000);
 });
 
 describe('границы контура', () => {

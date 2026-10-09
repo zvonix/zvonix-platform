@@ -14,6 +14,8 @@ export interface LimitView {
   readonly channel_id: string | null;
   readonly partner_id: string | null;
   readonly sim_card_id: string | null;
+  /** Лимит в тарифе партнёра: действует на каждую карту этого тарифа. */
+  readonly tariff_id: string | null;
   readonly window: LimitWindow;
   readonly metric: LimitMetric;
   readonly value: number;
@@ -49,6 +51,7 @@ export function toLimitView(row: LimitRuleRow): LimitView {
     channel_id: row.channelId,
     partner_id: row.partnerId,
     sim_card_id: row.simCardId,
+    tariff_id: row.tariffId,
     window: row.window,
     metric: row.metric,
     value: row.value,
