@@ -14,6 +14,7 @@
  *      работающим и ничего не делает, хуже упавшего: его никто не чинит.
  */
 
+import './local-env.mjs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import path from 'node:path';
