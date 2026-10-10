@@ -23,6 +23,7 @@
  * таймауты, управление дочерними процессами и HTTP одинаково на Windows и Ubuntu.
  */
 
+import './local-env.mjs';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
