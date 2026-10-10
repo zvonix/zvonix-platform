@@ -140,6 +140,8 @@ export class MessagesRepository {
     price?: MoneyAmount;
     exceptId?: Id<'messengerAccount'>;
     exceptPartners: readonly Id<'partner'>[];
+    /** Только эти партнёры — одна цифра списка клиента (ADR-0081). */
+    onlyPartners?: readonly Id<'partner'>[];
     offset?: number;
   }): Promise<MessengerAccountRow[]> {
     const conditions = [
@@ -154,6 +156,9 @@ export class MessagesRepository {
       filter.exceptPartners.length === 0
         ? undefined
         : notInArray(messengerAccounts.partnerId, [...filter.exceptPartners]),
+      filter.onlyPartners === undefined
+        ? undefined
+        : inArray(messengerAccounts.partnerId, [...filter.onlyPartners]),
     ];
     // Самая дешёвая цена среди подходящих: только её группа — цена клиента не прыгает на дорогой аккаунт.
     const [cheapest] = await this.database.db

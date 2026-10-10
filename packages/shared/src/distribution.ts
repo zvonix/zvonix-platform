@@ -5,6 +5,16 @@
 
 import type { DistributionMode } from './messaging.js';
 
+/**
+ * Приоритеты партнёров у клиента ([ADR-0081](../../../docs/adr/0081-prioritety-partnyorov-u-klienta.md)).
+ * Предложение: звонок через SIM, звонок через SIP-транк или сообщение MAX.
+ */
+export const CLIENT_PRIORITY_OFFERS = ['sim', 'sip', 'message'] as const;
+export type ClientPriorityOffer = (typeof CLIENT_PRIORITY_OFFERS)[number];
+
+/** Цифра приоритета: 1 — первыми; одинаковая у нескольких — поочерёдно. */
+export const CLIENT_PRIORITY_MAX = 99;
+
 /** Настройка партнёра; значения по умолчанию — «поровну» без параметров. */
 export interface DistributionSettings {
   readonly mode: DistributionMode;

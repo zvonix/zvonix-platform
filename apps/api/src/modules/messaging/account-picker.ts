@@ -10,6 +10,7 @@ import type { DistributionProduct, Id, MoneyAmount } from '@zvonix/shared';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { BillingService } from '../billing/billing.service.js';
 import { DistributionService } from '../limits/distribution.service.js';
+import { PrioritiesService } from '../priorities/priorities.service.js';
 import { DEFAULT_DISTRIBUTION, quietEndsAt, type DistributionSettings } from '@zvonix/shared';
 import { chooseByMode, isFree, type Candidate } from './distribution.js';
 import { MessagesRepository, type AccountLoad } from './messages.repository.js';
@@ -41,6 +42,7 @@ export class AccountPicker {
     private readonly accounts: MessagingRepository,
     private readonly billing: BillingService,
     private readonly distribution: DistributionService,
+    private readonly priorities: PrioritiesService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('account-picker');
@@ -60,20 +62,48 @@ export class AccountPicker {
    * Аккаунт под сообщение. Без `scope` — приём: свободного нет — первый по давности из самой дешёвой цены (сообщение
    * подождёт, цена клиенту не прыгает). С `scope` — перевыбор при отправке: только свободный, иначе `undefined`.
    * `sticky` — клиент и получатель: если партнёр включил «один получатель — один аккаунт» и прежний аккаунт свободен,
-   * берётся он.
+   * берётся он. `clientId` — приоритеты партнёров клиента (ADR-0081): сначала партнёры с цифрой 1, нет свободного
+   * аккаунта — следующая цифра, затем партнёры, которых в списке нет; «не использовать» исключает партнёра.
    */
   async pick(
     now: Date,
     options: {
       scope?: PickScope;
       sticky?: { clientId: Id<'client'>; recipient: string };
+      clientId?: Id<'client'>;
       paceSeconds?: number;
     } = {},
   ): Promise<MessengerAccountRow | undefined> {
     const { scope, sticky } = options;
     const paceSeconds = scope?.paceSeconds ?? options.paceSeconds ?? 0;
+    // Перевыбор среди соседей одного партнёра списка клиента не касается: партнёр уже выбран.
+    const clientId = scope === undefined ? (options.clientId ?? sticky?.clientId) : undefined;
+    const tiers =
+      clientId === undefined ? [{}] : tiersOf(await this.priorities.forMessages(clientId));
+
+    let fallback: MessengerAccountRow | undefined;
+    for (const [index, tier] of tiers.entries()) {
+      const found = await this.pickIn(now, { scope, sticky, paceSeconds }, tier, index === 0);
+      if (found.account !== undefined) return found.account;
+      fallback ??= found.fallback;
+    }
+    return scope === undefined ? fallback : undefined;
+  }
+
+  /** Один заход по цифре списка клиента: свободный аккаунт или первый по давности. */
+  private async pickIn(
+    now: Date,
+    options: {
+      scope: PickScope | undefined;
+      sticky: { clientId: Id<'client'>; recipient: string } | undefined;
+      paceSeconds: number;
+    },
+    tier: Tier,
+    first: boolean,
+  ): Promise<{ account?: MessengerAccountRow; fallback?: MessengerAccountRow }> {
+    const { scope, sticky, paceSeconds } = options;
     const verified = new Set<string>();
-    const excluded: Id<'partner'>[] = [];
+    const excluded: Id<'partner'>[] = [...(tier.exceptPartners ?? [])];
     let offset = 0;
     let fallback: MessengerAccountRow | undefined;
 
@@ -83,6 +113,7 @@ export class AccountPicker {
         limit: CANDIDATES,
         offset,
         exceptPartners: excluded,
+        ...(tier.onlyPartners === undefined ? {} : { onlyPartners: tier.onlyPartners }),
         ...(scope === undefined
           ? {}
           : { partnerId: scope.partnerId, price: scope.price, exceptId: scope.exceptId }),
@@ -119,9 +150,12 @@ export class AccountPicker {
         PRODUCT,
       );
 
-      if (sticky !== undefined && round === 0) {
+      if (sticky !== undefined && first && round === 0) {
         const remembered = await this.stickyAccount(sticky, usable, settings, now, paceSeconds);
-        if (remembered !== undefined) return remembered;
+        // Прежний аккаунт партнёра, которого клиент отключил («не использовать»), не берётся.
+        if (remembered !== undefined && !excluded.includes(remembered.partnerId)) {
+          return { account: remembered };
+        }
       }
 
       // Лучший у каждого партнёра по его режиму; между партнёрами — с короткой очередью, при равенстве — ранний.
@@ -146,10 +180,10 @@ export class AccountPicker {
           best = chosen;
         }
       }
-      if (best !== undefined) return best.account;
+      if (best !== undefined) return { account: best.account };
       // Свободных на этой странице нет — следующая страница (режимы «по порядку» и «по приоритету» идут по списку).
     }
-    return scope === undefined ? fallback : undefined;
+    return fallback === undefined ? {} : { fallback };
   }
 
   /** Прежний аккаунт этого клиента для этого номера, если он из выбранной цены, свободен и партнёр это включил. */
@@ -184,4 +218,34 @@ export class AccountPicker {
     this.logger.debug('Получателю подобран прежний аккаунт', { account_id: previous.id });
     return previous;
   }
+}
+
+/** Одна цифра списка клиента: кого брать (`onlyPartners`) и кого нет (`exceptPartners`); без полей — всех. */
+interface Tier {
+  readonly onlyPartners?: Id<'partner'>[];
+  readonly exceptPartners?: Id<'partner'>[];
+}
+
+/**
+ * Очерёдность партнёров из списка клиента (ADR-0081): по цифрам от меньшей; последняя очередь — партнёры, которых в списке
+ * нет; «не использовать» исключается везде. Списка нет вовсе — одна очередь без ограничений.
+ */
+function tiersOf(list: { byPartner: ReadonlyMap<string, number | null> }): Tier[] {
+  if (list.byPartner.size === 0) return [{}];
+  const banned: Id<'partner'>[] = [];
+  const byNumber = new Map<number, Id<'partner'>[]>();
+  for (const [partnerId, priority] of list.byPartner) {
+    if (priority === null) {
+      banned.push(partnerId as Id<'partner'>);
+      continue;
+    }
+    byNumber.set(priority, [...(byNumber.get(priority) ?? []), partnerId as Id<'partner'>]);
+  }
+  const listed = [...byNumber.values()].flat();
+  return [
+    ...[...byNumber.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, partners]) => ({ onlyPartners: partners, exceptPartners: banned })),
+    { exceptPartners: [...banned, ...listed] },
+  ];
 }

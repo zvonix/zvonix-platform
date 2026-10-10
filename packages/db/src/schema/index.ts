@@ -32,6 +32,7 @@ export {
   simCards,
   gatewayPorts,
   channelPartnerPriorities,
+  clientPartnerPriorities,
   channelAllowedOperators,
   partnerCoverage,
   testCalls,

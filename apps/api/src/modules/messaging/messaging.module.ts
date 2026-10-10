@@ -4,6 +4,7 @@ import { AuditModule } from '../audit/audit.module.js';
 import { BillingModule } from '../billing/billing.module.js';
 import { CatalogModule } from '../catalog/catalog.module.js';
 import { LimitsModule } from '../limits/limits.module.js';
+import { PrioritiesModule } from '../priorities/priorities.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { BOT_PROVIDER, type BotProvider } from './bot/bot.provider.js';
@@ -46,7 +47,14 @@ import { SmppService } from './smpp/smpp.service.js';
  * Провайдер выбирается здесь и только здесь: единственное место, где он назван поимённо.
  */
 @Module({
-  imports: [AuditModule, BillingModule, CatalogModule, LimitsModule, SettingsModule],
+  imports: [
+    AuditModule,
+    BillingModule,
+    CatalogModule,
+    LimitsModule,
+    PrioritiesModule,
+    SettingsModule,
+  ],
   controllers: [
     MessagingController,
     DistributionController,
