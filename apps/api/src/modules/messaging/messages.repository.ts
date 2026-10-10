@@ -15,6 +15,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  max,
   min,
   ne,
   notInArray,
@@ -184,6 +185,35 @@ export class MessagesRepository {
       .orderBy(asc(ranked), sql`${recency} asc nulls first`, asc(messengerAccounts.id))
       .limit(filter.limit)
       .offset(filter.offset ?? 0);
+  }
+
+  /**
+   * Цена партнёров за сообщение: от и до по их рабочим аккаунтам с ценой (ADR-0081). Нужна клиенту, чтобы расставить
+   * приоритеты, видя цену; цену клиента строит сервис — с наценкой.
+   */
+  async partnerPriceRanges(
+    now: Date,
+  ): Promise<{ partnerId: Id<'partner'>; min: MoneyAmount; max: MoneyAmount }[]> {
+    const rows = await this.database.db
+      .select({
+        partnerId: messengerAccounts.partnerId,
+        min: min(messengerAccounts.price),
+        max: max(messengerAccounts.price),
+      })
+      .from(messengerAccounts)
+      .where(
+        and(
+          eq(messengerAccounts.status, 'active'),
+          isNotNull(messengerAccounts.price),
+          or(isNull(messengerAccounts.pausedUntil), lt(messengerAccounts.pausedUntil, now)),
+        ),
+      )
+      .groupBy(messengerAccounts.partnerId);
+    return rows.flatMap((row) =>
+      row.min === null || row.max === null
+        ? []
+        : [{ partnerId: row.partnerId, min: row.min, max: row.max }],
+    );
   }
 
   /** Отправки аккаунтов за минуту, час и сутки и очередь за ними — для лимитов. Одним запросом на всех кандидатов. */

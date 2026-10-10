@@ -25,6 +25,7 @@ import {
 } from '@zvonix/shared';
 import { RedisService } from '../../infra/redis.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import { BillingRepository } from '../billing/billing.repository.js';
 import { BillingService } from '../billing/billing.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -94,6 +95,7 @@ export class MessagesService {
     private readonly repository: MessagesRepository,
     private readonly messaging: MessagingService,
     private readonly billing: BillingService,
+    private readonly aliases: BillingRepository,
     private readonly settings: SettingsService,
     private readonly tariffs: TariffService,
     private readonly redis: RedisService,
@@ -114,6 +116,38 @@ export class MessagesService {
       commissionAmount,
       clientAmount: Money.add(partnerAmount, commissionAmount),
     };
+  }
+
+  /**
+   * Партнёры, через которых можно отправить сообщение, и цена для клиента (с наценкой): диапазон по их аккаунтам.
+   * Только подтверждённые партнёры и только псевдонимы (ADR-0014): по этим строкам клиент расставляет приоритеты.
+   */
+  async offers(
+    clientId: Id<'client'>,
+  ): Promise<{ aliasId: string; displayName: string; min: MoneyAmount; max: MoneyAmount }[]> {
+    const now = new Date();
+    const [ranges, rule] = await Promise.all([
+      this.repository.partnerPriceRanges(now),
+      this.tariffs.messageCommission(clientId, now),
+    ]);
+    const aliases = await this.aliases.listAliasesByPartners(
+      ranges.map((range) => range.partnerId),
+    );
+    const byPartner = new Map(aliases.map((alias) => [alias.partnerId, alias]));
+    const result: { aliasId: string; displayName: string; min: MoneyAmount; max: MoneyAmount }[] =
+      [];
+    for (const range of ranges) {
+      const alias = byPartner.get(range.partnerId);
+      if (alias === undefined) continue;
+      if ((await this.billing.partnerWithBalance(range.partnerId)).status !== 'verified') continue;
+      result.push({
+        aliasId: alias.id,
+        displayName: alias.displayName,
+        min: Money.add(range.min, commissionOf(range.min, rule)),
+        max: Money.add(range.max, commissionOf(range.max, rule)),
+      });
+    }
+    return result.sort((left, right) => left.displayName.localeCompare(right.displayName, 'ru'));
   }
 
   /**

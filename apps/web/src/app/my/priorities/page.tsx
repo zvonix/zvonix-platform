@@ -46,6 +46,10 @@ interface Stored {
 /** Значение поля: пусто — партнёра в списке нет (идёт после названных), «x» — не использовать. */
 const BANNED = 'x';
 
+/** Цена или диапазон цен: одинаковые границы — одним числом. */
+const priceRange = (low: string, high: string): string =>
+  low === high ? money(low) : `${money(low)} — ${money(high)}`;
+
 const keyOf = (offer: Pick<Offer, 'aliasId' | 'offer'>) => `${offer.aliasId}:${offer.offer}`;
 
 /** «Звонки» и «Сообщения MAX» — вкладками; вторая есть, только если сообщения включены на площадке. */
@@ -84,14 +88,19 @@ function Priorities({ product }: { product: 'calls' | 'messages' }) {
     queryKey: ['my', 'priorities', 'offers', product],
     queryFn: async (): Promise<Offer[]> => {
       if (product === 'messages') {
-        const { partners } = await request<{
-          partners: { alias_id: string; display_name: string }[];
-        }>('/partner-aliases');
-        return partners.map((partner) => ({
-          aliasId: partner.alias_id,
-          name: partner.display_name,
+        const { offers: rows } = await request<{
+          offers: {
+            alias_id: string;
+            display_name: string;
+            min_price: string;
+            max_price: string;
+          }[];
+        }>('/client/messages/offers');
+        return rows.map((row) => ({
+          aliasId: row.alias_id,
+          name: row.display_name,
           offer: 'message',
-          price: null,
+          price: priceRange(row.min_price, row.max_price),
         }));
       }
       const { offers: rows } = await request<{
@@ -107,10 +116,7 @@ function Priorities({ product }: { product: 'calls' | 'messages' }) {
         aliasId: row.alias_id,
         name: row.display_name,
         offer: row.termination_kind,
-        price:
-          row.min_price === row.max_price
-            ? money(row.min_price)
-            : `${money(row.min_price)} — ${money(row.max_price)}`,
+        price: priceRange(row.min_price, row.max_price),
       }));
     },
     staleTime: 5 * 60_000,
@@ -258,7 +264,9 @@ function Priorities({ product }: { product: 'calls' | 'messages' }) {
               </TableHead>
               <TableHead className="h-8">Партнёр</TableHead>
               {product === 'calls' && <TableHead className="h-8">Через что</TableHead>}
-              {product === 'calls' && <TableHead className="h-8 text-right">Цена</TableHead>}
+              <TableHead className="h-8 text-right">
+                {product === 'calls' ? 'Цена за вызов' : 'Цена за сообщение'}
+              </TableHead>
               <TableHead className="h-8">Цифра</TableHead>
             </TableRow>
           </TableHeader>
@@ -301,9 +309,7 @@ function Priorities({ product }: { product: 'calls' | 'messages' }) {
                       {offer.offer === 'message' ? '' : TERMINATION_KIND_NAME[offer.offer]}
                     </TableCell>
                   )}
-                  {product === 'calls' && (
-                    <TableCell className="num text-right">{offer.price ?? '—'}</TableCell>
-                  )}
+                  <TableCell className="num text-right">{offer.price ?? '—'}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Input
