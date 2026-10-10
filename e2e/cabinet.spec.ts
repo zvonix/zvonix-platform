@@ -1229,6 +1229,18 @@ test.describe('чужой раздел', () => {
 });
 
 test.describe('кабинет клиента', () => {
+  test('приоритеты партнёров: раздел есть в меню и открывается списком (ADR-0081)', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.client);
+    await page.getByRole('link', { name: 'Приоритеты' }).click();
+
+    await expect(page.getByRole('columnheader', { name: 'Цифра' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Найти партнёра' })).toBeVisible();
+    // Без партнёров с ценой список пуст и говорит об этом, а не молчит.
+    await expect(page.getByRole('button', { name: 'Сохранить список' })).toBeDisabled();
+  });
+
   test('свои линии перечисляются — до этого их взять было неоткуда', async ({ page }) => {
     await signIn(page, PEOPLE.client);
     await page.goto('/my/channels');

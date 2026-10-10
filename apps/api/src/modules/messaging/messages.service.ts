@@ -121,7 +121,7 @@ export class MessagesService {
    * клиента работает бот — называется цена бота: подписчикам клиент отправлять может (ADR-0077).
    */
   async quote(clientId: Id<'client'>): Promise<Quote | undefined> {
-    const account = await this.picker.pick(new Date());
+    const account = await this.picker.pick(new Date(), { clientId });
     if (account !== undefined) return this.quoteFor(account, clientId);
     const price = await this.bots.connectedPrice(clientId);
     return price === undefined

@@ -400,6 +400,13 @@
       "when": 1791546408592,
       "tag": "0056_limity_v_tarife",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1791601158141,
+      "tag": "0057_prioritety_klienta",
+      "breakpoints": true
     }
   ]
 }

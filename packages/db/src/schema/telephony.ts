@@ -16,6 +16,8 @@ import { boolean, check, index, integer, pgTable, text, uniqueIndex } from 'driz
 import {
   DISTRIBUTION_RANK_MAX,
   CHANNEL_STATUSES,
+  CLIENT_PRIORITY_MAX,
+  CLIENT_PRIORITY_OFFERS,
   DEFAULT_MAX_CONCURRENT_CALLS,
   GATEWAY_PORT_STATES,
   GATEWAY_REGISTRATION_MODES,
@@ -30,6 +32,7 @@ import {
   TERMINATION_KINDS,
   TEST_CALL_STATUSES,
   type ChannelStatus,
+  type ClientPriorityOffer,
   type GatewayPortState,
   type GatewayRegistrationMode,
   type GatewayStatus,
@@ -439,6 +442,42 @@ export const channelPartnerPriorities = pgTable(
     ),
     // Горячий путь: отбор кандидатов сразу в нужном порядке.
     index('channel_partner_priorities_order_idx').on(t.channelId, t.priority, t.lastRoutedAt),
+  ],
+);
+
+/**
+ * Приоритеты партнёров у клиента — один список на клиента, звонки и сообщения MAX
+ * ([ADR-0081](../../../docs/adr/0081-prioritety-partnyorov-u-klienta.md)).
+ *
+ * Список **открытый**: партнёр, которого в нём нет, используется после всех названных. Отказаться от партнёра —
+ * строка без цифры (`priority` пусто). У линии может быть свой закрытый список (`channel_partner_priorities`),
+ * и тогда он главнее. Предложение — SIM, транк или сообщение MAX.
+ */
+export const clientPartnerPriorities = pgTable(
+  'client_partner_priorities',
+  {
+    id: primaryId<'clientPartnerPriority'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    partnerId: idRef<'partner'>()
+      .notNull()
+      .references(() => partners.id, { onDelete: 'restrict' }),
+    offer: text().$type<ClientPriorityOffer>().notNull(),
+    /** Меньше — раньше; пусто — «не использовать». */
+    priority: integer(),
+    /** Когда партнёру в последний раз выдали маршрут по этому списку: равные цифры идут по очереди (ADR-0021). */
+    lastRoutedAt: timestamptz(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check('client_partner_priorities_offer_check', oneOf(t.offer, CLIENT_PRIORITY_OFFERS)),
+    check(
+      'client_partner_priorities_priority_range',
+      sql`${t.priority} is null or ${t.priority} between 1 and ${sql.raw(String(CLIENT_PRIORITY_MAX))}`,
+    ),
+    uniqueIndex('client_partner_priorities_key').on(t.clientId, t.partnerId, t.offer),
   ],
 );
 

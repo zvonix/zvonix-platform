@@ -21,6 +21,7 @@ import { orderByText, toDatabaseError, type Database, type Executor } from '@zvo
 import {
   channelAllowedOperators,
   channelPartnerPriorities,
+  clientPartnerPriorities,
   channels,
   clients,
   gatewayPorts,
@@ -652,6 +653,7 @@ export class TelephonyRepository {
     options: { channelId?: ChannelId; region?: string | null } = {},
   ): Promise<TrunkCandidate[]> {
     const { channelId } = options;
+    const priorities = priorityScope(channelId, 'sip', gateways.partnerId);
     const conditions: SQL[] = [
       eq(gateways.type, 'sip_trunk'),
       eq(gateways.status, 'active'),
@@ -662,9 +664,7 @@ export class TelephonyRepository {
       conditions.push(coversRegion(options.region, gateways.partnerId));
     }
     if (channelId !== undefined) {
-      conditions.push(
-        sql`(${channelPartnerPriorities.id} is not null or not exists (select 1 from ${channelPartnerPriorities} as configured where configured.channel_id = ${channelId}))`,
-      );
+      conditions.push(priorities.allowed);
       conditions.push(notOwnTermination(channelId));
     }
 
@@ -673,8 +673,8 @@ export class TelephonyRepository {
         kind: sql<'sip'>`'sip'`,
         trunk: sipTrunks,
         gateway: gateways,
-        priority: channelPartnerPriorities.priority,
-        lastRoutedAt: channelPartnerPriorities.lastRoutedAt,
+        priority: priorities.priority,
+        lastRoutedAt: priorities.lastRoutedAt,
       })
       .from(sipTrunks)
       .innerJoin(gateways, eq(gateways.id, sipTrunks.gatewayId))
@@ -689,10 +689,14 @@ export class TelephonyRepository {
               eq(channelPartnerPriorities.terminationKind, 'sip'),
             ),
       )
+      .leftJoin(
+        clientPartnerPriorities,
+        channelId === undefined ? sql`false` : priorities.clientJoin,
+      )
       .where(and(...conditions))
       .orderBy(
-        sql`coalesce(${channelPartnerPriorities.priority}, 2147483647) asc`,
-        sql`${channelPartnerPriorities.lastRoutedAt} asc nulls first`,
+        sql`coalesce(${priorities.priority}, 2147483647) asc`,
+        sql`${priorities.lastRoutedAt} asc nulls first`,
         orderByText(gateways.name),
       );
   }
@@ -1183,6 +1187,7 @@ export class TelephonyRepository {
     } = {},
   ): Promise<SimCandidate[]> {
     const channelId = options.channelId;
+    const priorities = priorityScope(channelId, 'sim', simCards.partnerId);
 
     // Оператора карты здесь нет: куда SIM звонит, решает цена в её тарифе
     // ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)) — отсев по цене
@@ -1220,9 +1225,7 @@ export class TelephonyRepository {
       // Тем же запросом, а не отдельным чтением до него: два чтения разъезжаются ровно
       // в тот момент, когда клиент правит список, и вызов уходит по порядку, которого
       // уже нет. Подзапрос не зависит от строки и вычисляется планировщиком один раз.
-      conditions.push(
-        sql`(${channelPartnerPriorities.id} is not null or not exists (select 1 from ${channelPartnerPriorities} as configured where configured.channel_id = ${channelId}))`,
-      );
+      conditions.push(priorities.allowed);
       conditions.push(notOwnTermination(channelId));
     }
 
@@ -1232,8 +1235,8 @@ export class TelephonyRepository {
         sim: simCards,
         port: gatewayPorts,
         gateway: gateways,
-        priority: channelPartnerPriorities.priority,
-        lastRoutedAt: channelPartnerPriorities.lastRoutedAt,
+        priority: priorities.priority,
+        lastRoutedAt: priorities.lastRoutedAt,
       })
       .from(simCards)
       .innerJoin(gatewayPorts, eq(gatewayPorts.simCardId, simCards.id))
@@ -1251,13 +1254,17 @@ export class TelephonyRepository {
               eq(channelPartnerPriorities.terminationKind, 'sim'),
             ),
       )
+      .leftJoin(
+        clientPartnerPriorities,
+        channelId === undefined ? sql`false` : priorities.clientJoin,
+      )
       .where(and(...conditions))
       .orderBy(
         // Без приоритета партнёр идёт последним, а не первым: `NULL` в сортировке
         // PostgreSQL по возрастанию оказался бы в конце и так, но полагаться на это
         // молча — значит поменять порядок при первом же `desc`.
-        sql`coalesce(${channelPartnerPriorities.priority}, 2147483647) asc`,
-        sql`${channelPartnerPriorities.lastRoutedAt} asc nulls first`,
+        sql`coalesce(${priorities.priority}, 2147483647) asc`,
+        sql`${priorities.lastRoutedAt} asc nulls first`,
         asc(simCards.msisdn),
       );
   }
@@ -1310,6 +1317,20 @@ export class TelephonyRepository {
           // Очередь стоит из предложений, а не из партнёров: отметить партнёра целиком
           // значило бы отправить в конец очереди и то предложение, которым не звонили.
           eq(channelPartnerPriorities.terminationKind, terminationKind),
+        ),
+      );
+    // И в списке клиента, если партнёр там назван: по этой отметке равные цифры идут по очереди (ADR-0081).
+    await executor
+      .update(clientPartnerPriorities)
+      .set({ lastRoutedAt: at })
+      .where(
+        and(
+          eq(
+            clientPartnerPriorities.clientId,
+            sql`(select ${channels.clientId} from ${channels} where ${channels.id} = ${channelId})`,
+          ),
+          eq(clientPartnerPriorities.partnerId, partnerId),
+          eq(clientPartnerPriorities.offer, terminationKind),
         ),
       );
   }
@@ -1557,6 +1578,46 @@ function coversRegion(
         )}]::text[]`;
 
   return sql`coalesce((select bool_or(${partnerCoverage.regionKey} = any(${wanted})) from ${partnerCoverage} where ${partnerCoverage.partnerId} = ${partnerColumn}), true)`;
+}
+
+/**
+ * Приоритеты партнёров для одного предложения ([ADR-0081](../../../../../docs/adr/0081-prioritety-partnyorov-u-klienta.md)).
+ *
+ * Если у линии есть свой список — он главнее и закрытый (кого в нём нет, тот не используется, ADR-0014). Иначе действует
+ * открытый список клиента: кого в нём нет, идёт после названных, «не использовать» (строка без цифры) исключает.
+ * Строки линии и клиента подключаются левыми соединениями, а какой список действует, решает выражение: так выбор
+ * не расходится с правкой списка между двумя чтениями.
+ */
+function priorityScope(channelId: ChannelId | undefined, offer: 'sim' | 'sip', partner: AnyColumn) {
+  if (channelId === undefined) {
+    return {
+      clientJoin: sql`false`,
+      allowed: sql`true`,
+      priority: sql<number | null>`null::integer`,
+      lastRoutedAt: sql<Date | null>`null::timestamptz`.mapWith(
+        channelPartnerPriorities.lastRoutedAt,
+      ),
+    };
+  }
+  const hasOwn = sql`exists (select 1 from ${channelPartnerPriorities} as configured where configured.channel_id = ${channelId})`;
+  return {
+    clientJoin: and(
+      eq(
+        clientPartnerPriorities.clientId,
+        sql`(select ${channels.clientId} from ${channels} where ${channels.id} = ${channelId})`,
+      ),
+      eq(clientPartnerPriorities.partnerId, partner),
+      eq(clientPartnerPriorities.offer, offer),
+    ) as SQL,
+    allowed: sql`case when ${hasOwn} then ${channelPartnerPriorities.id} is not null else (${clientPartnerPriorities.id} is null or ${clientPartnerPriorities.priority} is not null) end`,
+    priority: sql<
+      number | null
+    >`case when ${hasOwn} then ${channelPartnerPriorities.priority} else ${clientPartnerPriorities.priority} end`,
+    lastRoutedAt:
+      sql<Date | null>`case when ${hasOwn} then ${channelPartnerPriorities.lastRoutedAt} else ${clientPartnerPriorities.lastRoutedAt} end`.mapWith(
+        channelPartnerPriorities.lastRoutedAt,
+      ),
+  };
 }
 
 /**

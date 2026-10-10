@@ -12,6 +12,7 @@ import { CatalogModule } from './modules/catalog/catalog.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { LimitsModule } from './modules/limits/limits.module.js';
+import { PrioritiesModule } from './modules/priorities/priorities.module.js';
 import { MachineModule } from './modules/machine/machine.module.js';
 import { MessagingModule } from './modules/messaging/messaging.module.js';
 import { NodesModule } from './modules/nodes/nodes.module.js';
@@ -38,6 +39,7 @@ import { TelephonyModule } from './modules/telephony/telephony.module.js';
     // Понадобился корню ради предела частоты изменений: защитник глобальный,
     // и служба счётчиков должна быть видна в корневом внедрении (ADR-0041).
     LimitsModule,
+    PrioritiesModule,
     MessagingModule,
     NodesModule,
     TelephonyModule,

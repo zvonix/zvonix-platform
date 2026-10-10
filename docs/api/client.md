@@ -221,6 +221,13 @@
   по псевдониму вместе со способом терминации
   ([ADR-0040](../adr/0040-poryadok-terminacii-predlozhenie-i-cena.md),
   [routing.md](routing.md));
+- `GET|PUT /client/partner-priorities?product=calls|messages` — **один список приоритетов на клиента**
+  ([ADR-0081](../adr/0081-prioritety-partnyorov-u-klienta.md)). Тело `PUT`:
+  `{ "priorities": [ { "aliasId", "offer": "sim|sip|message", "priority": 1–99 | null } ] }` — заменяет список целиком;
+  `null` — «не использовать». `calls` — предложения `sim` и `sip`, `messages` — `message`. Ответ: строки
+  `{ alias_id, display_name, offer, priority }` — только псевдонимы. Цифра меньше — раньше; одна цифра у нескольких —
+  по очереди (сначала дешевле); нет свободных — следующая цифра; партнёр, которого в списке нет, идёт после названных.
+  Свой список линии (`/channels/:id/partner-priorities`) главнее и остаётся закрытым. Журнал: `client_partner_priorities.set`;
 - `GET|PUT /channels/:id/allowed-operators` — разрешённые операторы
   ([telephony.md](telephony.md));
 - `GET /partner-aliases` — из чего строится порядок;
