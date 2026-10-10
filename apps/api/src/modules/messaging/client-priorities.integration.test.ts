@@ -137,6 +137,44 @@ describe('список приоритетов клиента (ADR-0081)', () => 
   });
 });
 
+describe('партнёры с ценой сообщения (ADR-0081)', () => {
+  it('клиент видит псевдонимы и свою цену, партнёру и чужому кабинету список закрыт', async () => {
+    const dear = await fx.partnerWithAccount('0.60');
+    const cheap = await fx.partnerWithAccount('0.30');
+    const client = await fx.clientWithMoney('5');
+
+    const response = await api().inject({
+      method: 'GET',
+      url: '/client/messages/offers',
+      headers: bearer(client.token),
+    });
+    expect(response.statusCode).toBe(200);
+    const offers = response.json<{
+      offers: { alias_id: string; display_name: string; min_price: string; max_price: string }[];
+    }>().offers;
+    expect(offers.map((offer) => offer.alias_id).sort()).toEqual(
+      [await aliasOf(dear.partnerId), await aliasOf(cheap.partnerId)].sort(),
+    );
+    // Цена клиента — не меньше цены партнёра (наценка внутри), и у одного аккаунта границы равны.
+    const byAlias = new Map(offers.map((offer) => [offer.alias_id, offer]));
+    const cheapest = byAlias.get(await aliasOf(cheap.partnerId));
+    expect(Number(cheapest?.min_price)).toBeGreaterThanOrEqual(0.3);
+    expect(cheapest?.min_price).toBe(cheapest?.max_price);
+    // Ни идентификатора партнёра, ни его имени (ADR-0014).
+    expect(JSON.stringify(offers)).not.toContain(dear.partnerId);
+
+    expect(
+      (
+        await api().inject({
+          method: 'GET',
+          url: '/client/messages/offers',
+          headers: bearer(dear.ownerToken),
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+});
+
 describe('выбор аккаунта по приоритетам клиента', () => {
   it('без списка — самый дешёвый; цифра выше цены: первым идёт партнёр с цифрой 1, пока он свободен', async () => {
     const dear = await fx.partnerWithAccount('0.60', { limitPerDay: 1 });

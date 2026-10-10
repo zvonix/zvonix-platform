@@ -110,6 +110,25 @@ export class ClientMessagesController {
     return { enabled, price: quote === undefined ? null : Money.format(quote.clientAmount) };
   }
 
+  /** Партнёры с ценой сообщения для клиента — из чего строится список приоритетов (ADR-0081). */
+  @Cabinets('client')
+  @Get('client/messages/offers')
+  async offers(@CurrentUser() actor: Principal): Promise<{
+    offers: { alias_id: string; display_name: string; min_price: string; max_price: string }[];
+  }> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    if (!(await this.messaging.isEnabled())) return { offers: [] };
+    const rows = await this.messages.offers(client.id);
+    return {
+      offers: rows.map((row) => ({
+        alias_id: row.aliasId,
+        display_name: row.displayName,
+        min_price: Money.format(row.min),
+        max_price: Money.format(row.max),
+      })),
+    };
+  }
+
   @Cabinets('client')
   @Get('client/messages')
   async list(
