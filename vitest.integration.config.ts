@@ -1,3 +1,4 @@
+import './scripts/local-env.mjs';
 import swc from 'unplugin-swc';
 import { defineConfig } from 'vitest/config';
 import { workspaceAliases } from './vitest.shared.config.js';

@@ -21,6 +21,7 @@
  *    что зелёный результат относится уже не к нему.
  */
 
+import './local-env.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -33,6 +34,7 @@ import { TEST_DATABASE_URL } from './e2e-stack.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONNECT_TIMEOUT_MS = 2000;
+const START_WAIT_MS = 20_000;
 const LOCAL_SETUP = 'docs/adr/0007-lokalnaya-sreda.md, раздел «Ревизия»';
 
 /** Что нужно проверке снаружи. Адреса по умолчанию — те же, что у тестов (`harness.ts`). */
@@ -42,6 +44,7 @@ const SERVICES = [
     variable: 'TEST_DATABASE_URL',
     url: TEST_DATABASE_URL,
     defaultPort: 5432,
+    start: 'VERIFY_START_POSTGRES',
     section: '«Управление локальной базой»',
   },
   {
@@ -49,6 +52,7 @@ const SERVICES = [
     variable: 'TEST_REDIS_URL',
     url: process.env['TEST_REDIS_URL'] ?? 'redis://127.0.0.1:6379/15',
     defaultPort: 6379,
+    start: 'VERIFY_START_REDIS',
     section: '«Управление локальной Redis»',
   },
 ];
@@ -94,8 +98,26 @@ function reachable(host, port) {
   });
 }
 
+/**
+ * Служба не отвечает, а команда запуска задана (`VERIFY_START_POSTGRES` / `VERIFY_START_REDIS` в
+ * `.env.verify.local`, см. `local-env.mjs`) — запускает её и ждёт ответа до двадцати секунд. После перезагрузки
+ * машины обе службы выключены, и поднимать их руками перед каждой проверкой незачем.
+ */
+async function startIfConfigured(service, bash, host, port) {
+  const command = process.env[service.start];
+  if (command === undefined || command === '' || bash === null) return false;
+  console.log(`${service.name} не отвечает — запускаю (${service.start}).`);
+  const child = spawn(bash, ['-c', command], { cwd: ROOT, detached: true, stdio: 'ignore' });
+  child.unref();
+  for (let waited = 0; waited < START_WAIT_MS; waited += 1000) {
+    if (await reachable(host, port)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return reachable(host, port);
+}
+
 /** Строки отказа по недоступным службам; пустой список — всё отвечает. */
-async function unreachableServices() {
+async function unreachableServices(bash) {
   const problems = [];
   for (const service of SERVICES) {
     let url;
@@ -110,7 +132,7 @@ async function unreachableServices() {
     const host = url.hostname.replace(/^\[|\]$/gu, '');
     if (host === '') continue;
     const port = url.port === '' ? service.defaultPort : Number(url.port);
-    if (!(await reachable(host, port))) {
+    if (!(await reachable(host, port)) && !(await startIfConfigured(service, bash, host, port))) {
       // Адрес печатается без учётных данных: в нём бывает пароль.
       problems.push(
         `${service.name} не отвечает на ${host}:${String(port)} (${service.variable}). ` +
@@ -219,7 +241,7 @@ async function main() {
     return 1;
   }
 
-  const problems = await unreachableServices();
+  const problems = await unreachableServices(bash);
   if (problems.length > 0) {
     console.error('Проверка не начата: без этих служб пять шагов из четырнадцати красные заранее.');
     for (const problem of problems) console.error(`  - ${problem}`);

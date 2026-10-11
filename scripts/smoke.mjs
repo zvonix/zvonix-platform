@@ -16,6 +16,7 @@
  * убить процесс на этих системах различаются.
  */
 
+import './local-env.mjs';
 import { spawn } from 'node:child_process';
 import { connect, createServer } from 'node:net';
 import path from 'node:path';
