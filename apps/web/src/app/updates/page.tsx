@@ -558,7 +558,8 @@ function RunConsole({ runId }: { runId: string }) {
   const [text, setText] = useState('');
   const [run, setRun] = useState<Run | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
-  // Кнопка перезагрузки нужна, только если обновление закончилось на глазах: кабинет мог смениться.
+  // Кнопка перезагрузки нужна, только если обновление или откат закончились на глазах: кабинет мог смениться.
+  // Проверка выпуска и проверка обновлений ничего не меняют.
   const [sawRunning, setSawRunning] = useState(false);
   const paneRef = useRef<HTMLPreElement>(null);
   const followRef = useRef(true);
@@ -616,17 +617,19 @@ function RunConsole({ runId }: { runId: string }) {
         <h2 className="font-semibold">{run === null ? 'Ход обновления' : runTitle(run)}</h2>
         {run !== null && <span className={STATUS_TONE[run.status]}>{STATUS_NAME[run.status]}</span>}
         {reconnecting && <span className="text-warn">связь с площадкой прервалась — ждём её</span>}
-        {sawRunning && run?.status === 'succeeded' && run.action !== 'refresh' && (
-          <Button
-            size="sm"
-            className="ml-auto"
-            onClick={() => {
-              window.location.reload();
-            }}
-          >
-            Перезагрузить кабинет
-          </Button>
-        )}
+        {sawRunning &&
+          run?.status === 'succeeded' &&
+          (run.action === 'deploy' || run.action === 'rollback') && (
+            <Button
+              size="sm"
+              className="ml-auto"
+              onClick={() => {
+                window.location.reload();
+              }}
+            >
+              Перезагрузить кабинет
+            </Button>
+          )}
       </div>
 
       {steps.length > 0 && (
