@@ -148,7 +148,7 @@ step "Линтер"        pnpm lint
 step "Мёртвый код"   pnpm deadcode
 step "Миграции"      migrations_match_schema
 step "Тесты"         pnpm test
-step "Тесты с БД"    pnpm test:integration
+step "Тесты с БД"    node scripts/integration.mjs
 # Сборка кабинета заодно проверяет его типы: `next build` порождает next-env.d.ts
 # и объявления маршрутов, без которых отдельный `tsc` падает на чистом клоне.
 step "Сборка кабинета" pnpm --filter @zvonix/web build
