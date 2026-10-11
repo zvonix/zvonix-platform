@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { integerFromInput } from '@/lib/money';
+import { integerFromInput, moneyFromInput } from '@/lib/money';
 
 export interface SettingView {
   readonly key: string;
@@ -15,6 +16,8 @@ export interface SettingView {
   readonly value: string | number | boolean | null;
   readonly is_set: boolean;
   readonly updated_at: string | null;
+  readonly min: number | null;
+  readonly max: number | null;
 }
 
 export type DraftValue = string | number | boolean;
@@ -79,8 +82,31 @@ const LABELS: Record<string, string> = {
   'cabinets.client_may_add_partner': 'Клиент может стать партнёром',
 };
 
+/** Суммы в рублях: принимают копейки, остальные числа — только целые. */
+const MONEY_KEYS: ReadonlySet<string> = new Set([
+  'bot.message_price',
+  'bot.monthly_fee',
+  'bot.own_message_price',
+  'bot.own_monthly_fee',
+  'notifications.low_balance_amount',
+]);
+
 export function labelOf(key: string): string {
   return LABELS[key] ?? key;
+}
+
+/** Подпись поля и значок «?» с пояснением: длинный текст не стоит под каждым полем. */
+function FieldLabel({ id, label, hint }: { id: string; label: string; hint: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Label htmlFor={id}>{label}</Label>
+      {hint !== '' && (
+        <Hint label="Пояснение">
+          <p>{hint}</p>
+        </Hint>
+      )}
+    </span>
+  );
 }
 
 /**
@@ -118,10 +144,16 @@ export function SettingField({
           }}
         />
         <div className="min-w-0">
-          <Label htmlFor={id} className="font-normal">
-            {label}
-          </Label>
-          <p className="text-muted-foreground">{setting.hint}</p>
+          <span className="inline-flex items-center gap-1">
+            <Label htmlFor={id} className="font-normal">
+              {label}
+            </Label>
+            {setting.hint !== '' && (
+              <Hint label="Пояснение">
+                <p>{setting.hint}</p>
+              </Hint>
+            )}
+          </span>
         </div>
       </div>
     );
@@ -150,7 +182,7 @@ export function SettingField({
 
   return (
     <div className="flex flex-col gap-1 py-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <FieldLabel id={id} label={label} hint={setting.hint} />
       <Input
         id={id}
         autoComplete="off"
@@ -161,7 +193,6 @@ export function SettingField({
           onChange(next === stored ? undefined : next);
         }}
       />
-      <p className="text-muted-foreground">{setting.hint}</p>
     </div>
   );
 }
@@ -192,7 +223,7 @@ function SecretField({
   return (
     <div className="flex flex-col gap-1 py-1.5">
       <div className="flex flex-wrap items-baseline gap-2">
-        <Label htmlFor={id}>{label}</Label>
+        <FieldLabel id={id} label={label} hint={setting.hint} />
         <SecretState setting={setting} draft={draft} />
         {setting.is_set &&
           (clearing ? (
@@ -231,7 +262,6 @@ function SecretField({
           onChange(next.trim() === '' ? undefined : next);
         }}
       />
-      <p className="text-muted-foreground">{setting.hint}</p>
     </div>
   );
 }
@@ -256,29 +286,64 @@ function NumberField({
   onChange: (value: DraftValue | undefined) => void;
   onValidity: (valid: boolean) => void;
 }) {
+  const money = MONEY_KEYS.has(setting.key);
   const stored = setting.value === null ? '' : String(setting.value);
-  const [raw, setRaw] = useState(stored);
-  const invalid = raw !== stored && integerFromInput(raw) === undefined;
+  // Рубли показываются с запятой, как в остальном кабинете; в API уходит число.
+  const shownStored = money ? stored.replace('.', ',') : stored;
+  const [raw, setRaw] = useState(shownStored);
+  const parse = (text: string): number | undefined => {
+    if (!money) return integerFromInput(text);
+    const amount = moneyFromInput(text);
+    return amount === undefined ? undefined : Number(amount);
+  };
+  const parsedRaw = parse(raw);
+  const notNumber = raw !== shownStored && parsedRaw === undefined;
+  const outOfRange =
+    parsedRaw !== undefined &&
+    ((setting.min !== null && parsedRaw < setting.min) ||
+      (setting.max !== null && parsedRaw > setting.max));
+  const range =
+    setting.min !== null && setting.max !== null
+      ? `от ${String(setting.min)} до ${String(setting.max)}`
+      : setting.min !== null
+        ? `от ${String(setting.min)}`
+        : setting.max !== null
+          ? `до ${String(setting.max)}`
+          : '';
 
   return (
     <div className="flex flex-col gap-1 py-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        className="num max-w-[120px]"
-        inputMode="numeric"
-        autoComplete="off"
-        value={raw}
-        onChange={(event) => {
-          const next = event.target.value;
-          setRaw(next);
-          const parsed = integerFromInput(next);
-          onValidity(parsed !== undefined || next === stored);
-          onChange(parsed === undefined || String(parsed) === stored ? undefined : parsed);
-        }}
-      />
-      {invalid && <p className="text-warn">Нужно целое число — без знаков и дробной части.</p>}
-      <p className="text-muted-foreground">{setting.hint}</p>
+      <FieldLabel id={id} label={label} hint={setting.hint} />
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          className="num max-w-[120px]"
+          inputMode={money ? 'decimal' : 'numeric'}
+          autoComplete="off"
+          aria-invalid={notNumber || outOfRange}
+          value={raw}
+          onChange={(event) => {
+            const next = event.target.value;
+            setRaw(next);
+            const parsed = parse(next);
+            const inRange =
+              parsed !== undefined &&
+              (setting.min === null || parsed >= setting.min) &&
+              (setting.max === null || parsed <= setting.max);
+            onValidity(inRange || next === shownStored);
+            onChange(!inRange || String(parsed) === stored ? undefined : parsed);
+          }}
+        />
+        {range !== '' && <span className="text-muted-foreground">{range}</span>}
+      </div>
+      {notNumber && (
+        <p className="text-warn">
+          {money
+            ? 'Нужна сумма в рублях, например 0,25.'
+            : 'Нужно целое число — без знаков и дробной части.'}
+        </p>
+      )}
+      {outOfRange && <p className="text-warn">Допустимо {range}.</p>}
     </div>
   );
 }
