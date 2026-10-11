@@ -24,7 +24,15 @@
 import './local-env.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -176,6 +184,49 @@ function skippedSteps(summaryFile) {
     .map(([name]) => name);
 }
 
+/** Шаги check.sh с заданным исходом: строки `имя|секунды|исход`. */
+function stepsWith(summaryFile, outcomeName) {
+  if (!existsSync(summaryFile)) return [];
+  return readFileSync(summaryFile, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((row) => row.split('|'))
+    .filter(([, , outcome]) => outcome === outcomeName)
+    .map(([name]) => name);
+}
+
+/**
+ * Последняя строка проверки — крупно и цветом, чтобы итог не приходилось искать в таблице: зелёная — всё прошло, красная — нет.
+ * С временем окончания и версией: по строке видно, к какому выпуску и когда относится результат.
+ */
+function printVerdict(code, summaryFile, startedAt) {
+  const color = process.stdout.isTTY && process.env['NO_COLOR'] === undefined;
+  const esc = String.fromCharCode(27);
+  const paint = (text, open) => (color ? `${esc}[${open}m${text}${esc}[0m` : text);
+  const finished = new Date();
+  const when = finished.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'medium' });
+  const minutes = Math.floor((finished.getTime() - startedAt) / 60_000);
+  const seconds = Math.round(((finished.getTime() - startedAt) % 60_000) / 1000);
+  const version = git(['describe', '--tags', '--always', '--dirty'])?.trim() ?? 'без метки';
+  const commit = git(['rev-parse', '--short', 'HEAD'])?.trim() ?? '—';
+  const tail = `завершено ${when}, заняло ${String(minutes)} мин ${String(seconds)} с · версия ${version} (коммит ${commit})`;
+  const failed = stepsWith(summaryFile, 'ПРОВАЛ');
+  const skipped = stepsWith(summaryFile, 'НЕ ВЫПОЛНЕН');
+
+  console.log('');
+  if (code === 0 && skipped.length === 0) {
+    console.log(paint('✔ ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ УСПЕШНО', '1;32'));
+    console.log(paint(`  ${tail}`, '32'));
+  } else if (code === 0) {
+    console.log(paint(`⚠ Пройдено, но не выполнено: ${skipped.join(', ')}`, '1;33'));
+    console.log(paint(`  ${tail}`, '33'));
+  } else {
+    console.log(paint('✘ ПРОВЕРКА НЕ ПРОЙДЕНА', '1;31'));
+    if (failed.length > 0) console.log(paint(`  Провалены шаги: ${failed.join(', ')}`, '31'));
+    console.log(paint(`  ${tail}`, '31'));
+  }
+}
+
 function nextTag(previous) {
   if (previous === null) return 'v0.1.0';
   const match = /^v(\d+)\.(\d+)\.(\d+)$/u.exec(previous);
@@ -248,16 +299,60 @@ async function main() {
     return 1;
   }
 
+  // Две проверки разом делят одну тестовую базу: каждая сбрасывает схему под другой — оба прогона краснеют без причины.
+  const logDirForLock = path.join(ROOT, 'test-results');
+  mkdirSync(logDirForLock, { recursive: true });
+  const lockFile = path.join(logDirForLock, 'verify.lock');
+  if (existsSync(lockFile)) {
+    const other = Number(readFileSync(lockFile, 'utf8').trim());
+    let alive = false;
+    try {
+      process.kill(other, 0);
+      alive = Number.isInteger(other) && other > 0;
+    } catch {
+      alive = false;
+    }
+    if (alive) {
+      console.error(
+        `Проверка уже идёт (процесс ${String(other)}): две разом портят друг другу общую тестовую базу. ` +
+          'Дождитесь её окончания или закройте то окно.',
+      );
+      return 1;
+    }
+  }
+  writeFileSync(lockFile, String(process.pid));
+
   const before = snapshot();
+  const startedAt = Date.now();
   const workdir = mkdtempSync(path.join(tmpdir(), 'zvonix-verify-'));
   const summaryFile = path.join(workdir, 'summary');
+
+  // Весь вывод проверки пишется ещё и в файл: после красного итога его можно прочитать целиком, а не по прокрутке окна.
+  const logDir = path.join(ROOT, 'test-results');
+  mkdirSync(logDir, { recursive: true });
+  const logFile = path.join(logDir, 'verify-last.log');
+  const log = createWriteStream(logFile);
+  const say = console.log.bind(console);
+  console.log = (...args) => {
+    say(...args);
+    log.write(`${args.join(' ')}
+`);
+  };
 
   try {
     const code = await new Promise((resolve, reject) => {
       const child = spawn(bash, [path.join('scripts', 'check.sh')], {
         cwd: ROOT,
-        stdio: 'inherit',
+        stdio: ['inherit', 'pipe', 'pipe'],
         env: { ...process.env, CHECK_SUMMARY_FILE: summaryFile },
+      });
+      child.stdout.on('data', (chunk) => {
+        process.stdout.write(chunk);
+        log.write(chunk);
+      });
+      child.stderr.on('data', (chunk) => {
+        process.stderr.write(chunk);
+        log.write(chunk);
       });
       child.on('error', reject);
       child.on('close', (exitCode) => {
@@ -265,8 +360,13 @@ async function main() {
       });
     });
     if (code === 0) printRelease(before, snapshot(), skippedSteps(summaryFile));
+    printVerdict(code, summaryFile, startedAt);
+    say(`Полный вывод: ${path.relative(ROOT, logFile)}`);
     return code;
   } finally {
+    log.end();
+    console.log = say;
+    rmSync(lockFile, { force: true });
     rmSync(workdir, { recursive: true, force: true });
   }
 }
