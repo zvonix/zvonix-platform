@@ -413,6 +413,35 @@ test.describe('настройки площадки по разделам', () =>
     await nav.getByRole('button', { name: 'Почта' }).click();
     await expect(page.getByLabel('Узел SMTP')).toHaveValue('smtp.example.test');
   });
+
+  test('суммы принимают копейки, число за пределами не уходит в сохранение, пояснение — за «?»', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/settings?section=bot');
+    const price = page.getByLabel('Цена сообщения бота для клиента, ₽');
+    await price.fill('0,25');
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    await expect(page.getByText(/Сохранено в/u)).toBeVisible();
+    await page.reload();
+    await expect(price).toHaveValue('0,25');
+    // Пояснение не висит абзацем под полем, а открывается по значку.
+    await expect(page.getByText(/Деньги получает площадка/u)).toHaveCount(0);
+    const help = page.getByRole('button', { name: 'Пояснение' });
+    await page
+      .locator('div')
+      .filter({ has: price })
+      .filter({ has: help })
+      .last()
+      .getByRole('button', { name: 'Пояснение' })
+      .click();
+    await expect(page.getByText(/Деньги получает площадка/u)).toBeVisible();
+
+    await page.goto('/settings?section=messaging');
+    await page.getByLabel('Здоровье аккаунта: сообщений за сутки для оценки').fill('1');
+    await expect(page.getByText('Допустимо от 5 до 10000.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
+  });
 });
 
 test.describe('наценка на сообщения MAX (ADR-0073)', () => {

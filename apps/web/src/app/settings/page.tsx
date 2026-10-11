@@ -15,6 +15,57 @@ import { SettingField, labelOf, type DraftValue, type SettingView } from './sett
 
 const SETTINGS_QUERY_KEY = ['settings'] as const;
 
+/**
+ * Подзаголовки внутри раздела: у раздела на десяток полей без них не видно, что к чему относится.
+ * Настройка без подзаголовка идёт первой, без заголовка; порядок полей — как у площадки.
+ */
+const SUBGROUPS: Record<string, string> = {
+  'captcha.site_key': 'Ключи SmartCaptcha',
+  'captcha.server_key': 'Ключи SmartCaptcha',
+  'captcha.on_register': 'Где проверять',
+  'captcha.on_login': 'Где проверять',
+  'captcha.on_password_reset': 'Где проверять',
+  'notifications.low_balance_enabled': 'Клиенту',
+  'notifications.low_balance_amount': 'Клиенту',
+  'notifications.payment_decision_enabled': 'Клиенту',
+  'notifications.partner_suspension_enabled': 'Партнёру',
+  'notifications.alerts_enabled': 'Администраторам',
+  'messaging.enabled': 'Продукт',
+  'messaging.provider_partner_url': 'Провайдер',
+  'messaging.provider_partner_token': 'Провайдер',
+  'messages.pace_seconds': 'Отправка',
+  'messages.max_wait_minutes': 'Отправка',
+  'messages.precheck_enabled': 'Проверка номера перед отправкой',
+  'messages.precheck_exists_days': 'Проверка номера перед отправкой',
+  'messages.precheck_absent_days': 'Проверка номера перед отправкой',
+  'messages.accounts_per_partner_max': 'Аккаунты партнёров',
+  'messages.health_enabled': 'Здоровье аккаунта',
+  'messages.health_min_sample': 'Здоровье аккаунта',
+  'messages.health_max_absent_percent': 'Здоровье аккаунта',
+  'messages.health_pause_hours': 'Здоровье аккаунта',
+  'bot.enabled': 'Включение',
+  'bot.api_url': 'Включение',
+  'bot.message_price': 'Цены для клиента',
+  'bot.monthly_fee': 'Цены для клиента',
+  'bot.own_message_price': 'Цены для клиента',
+  'bot.own_monthly_fee': 'Цены для клиента',
+};
+
+/** Делит настройки раздела на подгруппы в порядке первого появления. */
+function subgroupsOf(
+  settings: readonly SettingView[],
+): { title: string | undefined; items: SettingView[] }[] {
+  const groups: { title: string | undefined; items: SettingView[] }[] = [];
+  for (const setting of settings) {
+    const title = SUBGROUPS[setting.key];
+    const existing = groups.find((group) => group.title === title);
+    if (existing === undefined) groups.push({ title, items: [setting] });
+    else existing.items.push(setting);
+  }
+  // Без заголовка — всегда первой: общие поля раздела идут выше его подгрупп.
+  return groups.sort((a, b) => Number(b.title === undefined) - Number(a.title === undefined));
+}
+
 interface SettingsResponse {
   readonly settings: SettingView[];
 }
@@ -101,6 +152,7 @@ function SettingsForm() {
     { title: 'Хранение', prefixes: ['retention.'] },
     { title: 'Записи разговоров', prefixes: ['recordings.'] },
     { title: 'Сообщения MAX', prefixes: ['messaging.', 'messages.'] },
+    { title: 'Бот MAX', prefixes: ['bot.'] },
     { title: 'Узлы', prefixes: ['nodes.'] },
     { title: 'Вход', prefixes: ['security.'] },
     { title: 'Цены партнёров', prefixes: ['pricing.'] },
@@ -208,7 +260,18 @@ function SettingsForm() {
             <h2 className="pb-2 font-semibold">{section.title}</h2>
             {/* Настройка, для которой ещё нет раздела, живёт в «Прочем»: лучше показать под ключом,
                 чем не показать вовсе — иначе новое поле пропадает молча. */}
-            <div className="divide-y divide-border-soft">{section.settings.map(field)}</div>
+            <div className="flex flex-col gap-4">
+              {subgroupsOf(section.settings).map((group) => (
+                <div key={group.title ?? ''}>
+                  {group.title !== undefined && (
+                    <h3 className="border-b border-border pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {group.title}
+                    </h3>
+                  )}
+                  <div className="divide-y divide-border-soft">{group.items.map(field)}</div>
+                </div>
+              ))}
+            </div>
             {section.prefix === 'mail.' && <TestLetter />}
             {section.prefix === 'captcha.' && <CaptchaWarning />}
             {section.prefix === 'messaging.' && <TestProviderKey />}

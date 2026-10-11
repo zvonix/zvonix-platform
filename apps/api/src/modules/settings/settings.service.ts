@@ -40,6 +40,9 @@ export interface SettingView {
   readonly value: string | number | boolean | null;
   readonly is_set: boolean;
   readonly updated_at: string | null;
+  /** Пределы числа, если заданы: кабинет проверяет их до отправки и не показывает ключ в отказе. */
+  readonly min: number | null;
+  readonly max: number | null;
 }
 
 export interface MailSettings {
@@ -283,6 +286,7 @@ export class SettingsService {
     return SETTING_KEYS.map((key) => {
       const secret = isSecret(key);
       const row = stored.get(key);
+      const definition: SettingDefinition = SETTINGS[key];
       return {
         key,
         kind: SETTINGS[key].kind,
@@ -291,6 +295,8 @@ export class SettingsService {
         value: secret ? null : (values.get(key) ?? null),
         is_set: row !== undefined && row.value !== '',
         updated_at: row?.updatedAt.toISOString() ?? null,
+        min: definition.min ?? null,
+        max: definition.max ?? null,
       };
     });
   }
