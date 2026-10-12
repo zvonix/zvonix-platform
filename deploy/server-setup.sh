@@ -8,6 +8,10 @@
 #     http://localhost:8080   стенд, кабинет через SSH-туннель
 #     cp.example.ru           домен (то же, что https://cp.example.ru) — сайт на 443,
 #                             сертификат Let's Encrypt выпускается и продлевается сам
+#     example.ru              основной домен (одна точка в имени, ADR-0082): кабинет — cp.example.ru,
+#                             а example.ru и www.example.ru ведут на кабинет, пока нет сайта; один
+#                             сертификат на три имени, запись A нужна каждому. Домен запоминается:
+#                             повторная подготовка с cp.example.ru или без адреса сайт не теряет
 #
 # Ставит Node 22, PostgreSQL 16, Redis 7 и nginx, заводит пользователя zvonix, базу
 # и секреты, включает файрвол. Панели управления нет: сервер описан этим скриптом.
@@ -47,6 +51,23 @@ WEB_ADDRESS="${WEB_ADDRESS%/}"
 # различают: CP.zvonix.com и cp.zvonix.com не должны стать двумя адресами.
 WEB_ADDRESS="$(printf '%s' "$WEB_ADDRESS" | tr '[:upper:]' '[:lower:]')"
 
+# Основной домен проекта (ADR-0082). В имени одна точка — это основной домен: кабинет ставится на
+# cp.<домен>, а сам домен и www получают сайт. Больше точек — кабинет на этом имени, чужой корень
+# не трогается (у example.ru может быть своя витрина в другом месте). Домен запоминается в
+# ${ETC}/site-domain.
+SITE_DOMAIN_FILE="${ETC}/site-domain"
+SITE_DOMAIN=""
+if [[ "$WEB_ADDRESS" =~ ^https://([a-z0-9-]+\.[a-z0-9-]+)$ ]]; then
+  SITE_DOMAIN="${BASH_REMATCH[1]}"
+  WEB_ADDRESS="https://cp.${SITE_DOMAIN}"
+elif [ -s "$SITE_DOMAIN_FILE" ]; then
+  recorded_domain="$(head -n1 "$SITE_DOMAIN_FILE" | tr -d '[:space:]')"
+  # Записанный домен действует, пока кабинет остаётся на cp.<домен>.
+  if [ "$WEB_ADDRESS" = "https://cp.${recorded_domain}" ]; then
+    SITE_DOMAIN="$recorded_domain"
+  fi
+fi
+
 # Адрес кабинета разбирается до любых изменений: ошибка в нём не должна оставить сервер
 # настроенным наполовину.
 case "$WEB_ADDRESS" in
@@ -73,7 +94,8 @@ case "$WEB_ADDRESS" in
 esac
 SITE_TEMPLATE="$(dirname "$0")/nginx/zvonix.conf"
 ACME_TEMPLATE="$(dirname "$0")/nginx/zvonix-acme.conf"
-[ -f "$SITE_TEMPLATE" ] && [ -f "$ACME_TEMPLATE" ] || die "нет шаблонов в $(dirname "$0")/nginx — запускайте из каталога deploy/ целиком"
+ROOT_TEMPLATE="$(dirname "$0")/nginx/zvonix-root.conf"
+[ -f "$SITE_TEMPLATE" ] && [ -f "$ACME_TEMPLATE" ] && [ -f "$ROOT_TEMPLATE" ] || die "нет шаблонов в $(dirname "$0")/nginx — запускайте из каталога deploy/ целиком"
 
 # shellcheck source=/dev/null
 . /etc/os-release
@@ -83,18 +105,33 @@ ACME_TEMPLATE="$(dirname "$0")/nginx/zvonix-acme.conf"
 # в DNS вовсе — дальше идти незачем, и это видно до любых изменений. Имя указывает не сюда —
 # предупреждение, а не отказ: сервер за NAT своего внешнего адреса не видит, и ответ
 # тогда даст сам выпуск сертификата.
+# Имена, которые закрывает сертификат: кабинет и, если задан основной домен, он сам и www.
+SITE_NAMES=("$SITE_NAME")
+if [ -n "$SITE_DOMAIN" ]; then
+  SITE_NAMES+=("$SITE_DOMAIN" "www.${SITE_DOMAIN}")
+fi
+
 if [ "$PUBLIC_SITE" = yes ]; then
-  step "DNS ${SITE_NAME}"
-  resolved="$(getent ahosts "$SITE_NAME" | awk '{ print $1 }' | sort -u | grep -Ev '^(127\.|::1$)' || true)"
-  [ -n "$resolved" ] || die "домен ${SITE_NAME} не найден в DNS — заведите запись A с адресом этого сервера; новая запись расходится от минут до часа"
   own="$(ip -o addr show scope global | awk '{ split($4, a, "/"); print a[1] }')"
-  for address in $resolved; do
-    if grep -qxF "$address" <<<"$own"; then
-      echo "${SITE_NAME} → ${address}: адрес этого сервера"
-    else
-      echo "ВНИМАНИЕ: ${SITE_NAME} → ${address}, а у сервера адреса: $(echo "$own" | tr '\n' ' ')— если сервер не за NAT, поправьте запись A (и AAAA: Let's Encrypt проверяет по ней первой)" >&2
+  missing=()
+  for name in "${SITE_NAMES[@]}"; do
+    step "DNS ${name}"
+    resolved="$(getent ahosts "$name" | awk '{ print $1 }' | sort -u | grep -Ev '^(127\.|::1$)' || true)"
+    if [ -z "$resolved" ]; then
+      echo "${name}: записи нет" >&2
+      missing+=("$name")
+      continue
     fi
+    for address in $resolved; do
+      if grep -qxF "$address" <<<"$own"; then
+        echo "${name} → ${address}: адрес этого сервера"
+      else
+        echo "ВНИМАНИЕ: ${name} → ${address}, а у сервера адреса: $(echo "$own" | tr '\n' ' ')— если сервер не за NAT, поправьте запись A (и AAAA: Let's Encrypt проверяет по ней первой)" >&2
+      fi
+    done
   done
+  [ "${#missing[@]}" -eq 0 ] \
+    || die "в DNS нет записей для: ${missing[*]} — заведите записи A с адресом этого сервера для каждого имени; новая запись расходится от минут до часа"
 fi
 
 step "Пакеты"
@@ -379,7 +416,7 @@ step "Сайт nginx"
 # Метки подставляются только вне комментариев: шаблон называет их в шапке, а подстановка
 # для https многострочная — её продолжение вышло бы из комментария директивами вне server.
 render_site() {
-  sed -e "/^[[:space:]]*#/!{s|@@LISTEN@@|${SITE_LISTEN}|;s|@@SERVER_NAME@@|${SITE_NAME}|g}" "$1" \
+  sed -e "/^[[:space:]]*#/!{s|@@LISTEN@@|${SITE_LISTEN}|;s|@@SERVER_NAMES@@|${SITE_NAMES[*]}|g;s|@@SERVER_NAME@@|${SITE_NAME}|g;s|@@SITE_NAMES@@|${SITE_NAMES[*]:1}|g}" "$1" \
     >"/etc/nginx/sites-available/$2"
   ln -sfn "/etc/nginx/sites-available/$2" "/etc/nginx/sites-enabled/$2"
 }
@@ -392,25 +429,44 @@ reload_nginx() {
 rm -f /etc/nginx/sites-enabled/default
 
 if [ "$PUBLIC_SITE" = no ]; then
-  rm -f /etc/nginx/sites-enabled/zvonix-acme
+  rm -f /etc/nginx/sites-enabled/zvonix-acme /etc/nginx/sites-enabled/zvonix-root
   render_site "$SITE_TEMPLATE" zvonix
   reload_nginx
 else
   install -d -m 0755 "$ACME_ROOT"
   render_site "$ACME_TEMPLATE" zvonix-acme
-  if [ ! -s "${CERT_DIR}/fullchain.pem" ]; then
+  # Сертификат есть, но закрывает не все имена (был один кабинет, а основной домен добавили) —
+  # выпускается заново с расширением, а не остаётся молча неполным.
+  cert_covers_all() {
+    [ -s "${CERT_DIR}/fullchain.pem" ] || return 1
+    local alt name
+    alt="$(openssl x509 -in "${CERT_DIR}/fullchain.pem" -noout -ext subjectAltName 2>/dev/null || true)"
+    for name in "${SITE_NAMES[@]}"; do
+      grep -qF "DNS:${name}" <<<"$alt" || return 1
+    done
+  }
+  if ! cert_covers_all; then
     # Прежний сайт (например, туннель) не трогается, пока сертификата нет: не выпустится —
     # сервер останется таким, каким был.
     reload_nginx
-    step "Сертификат ${SITE_NAME}"
+    step "Сертификат ${SITE_NAMES[*]}"
+    domains=()
+    for name in "${SITE_NAMES[@]}"; do domains+=(-d "$name"); done
     # Письма об истечении Let's Encrypt не рассылает с 2025 года, а продление автоматическое —
     # адрес почты ему не нужен.
-    certbot certonly --webroot -w "$ACME_ROOT" -d "$SITE_NAME" \
+    certbot certonly --webroot -w "$ACME_ROOT" --cert-name "$SITE_NAME" "${domains[@]}" --expand \
       --non-interactive --agree-tos --register-unsafely-without-email \
       --deploy-hook 'systemctl reload nginx' \
-      || die "Let's Encrypt не выпустил сертификат для ${SITE_NAME}. Обычно это запись DNS: A (и AAAA, если есть) должна указывать на этот сервер, а новая запись расходится до часа. Сайт остался прежним; поправьте и запустите установку снова"
+      || die "Let's Encrypt не выпустил сертификат для ${SITE_NAMES[*]}. Обычно это запись DNS: A (и AAAA, если есть) должна указывать на этот сервер у каждого имени, а новая запись расходится до часа. Сайт остался прежним; поправьте и запустите установку снова"
   fi
   render_site "$SITE_TEMPLATE" zvonix
+  # Основной домен и www (ADR-0082): пока сайта нет — на кабинет. Нет основного домена — нет и сайта.
+  if [ -n "$SITE_DOMAIN" ]; then
+    render_site "$ROOT_TEMPLATE" zvonix-root
+    printf '%s\n' "$SITE_DOMAIN" >"$SITE_DOMAIN_FILE"
+  else
+    rm -f /etc/nginx/sites-enabled/zvonix-root
+  fi
   reload_nginx
   # Продление — таймер пакета certbot, дважды в сутки; сайт на 80 для него остаётся.
   systemctl enable --now certbot.timer >/dev/null 2>&1 \
@@ -433,4 +489,5 @@ redis-server --version
 nginx -v
 echo
 echo "Кабинет: ${WEB_ADDRESS}"
+[ -z "$SITE_DOMAIN" ] || echo "Основной домен: ${SITE_DOMAIN} (и www) — ведёт на кабинет, пока нет сайта"
 echo "SETUP_OK. Дальше: токен в ${GITHUB_ENV_FILE}, выпуск — zvonix-deploy <метка> (deploy/README.md)"

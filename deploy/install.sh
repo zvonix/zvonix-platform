@@ -65,8 +65,10 @@ ask_address() {
   drain_tty
   {
     echo
-    echo "Адрес кабинета — домен, например cp.zvonix.com: любой, чья запись A в DNS уже"
-    echo "указывает на этот сервер. Сертификат https выпускается сразу."
+    echo "Основной домен, например zvonix.com: кабинет встанет на cp.zvonix.com, а сам домен и"
+    echo "www.zvonix.com поведут на кабинет (позже — на сайт). Нужны записи A на этот сервер для"
+    echo "всех трёх имён. Можно и готовое имя кабинета (cp.zvonix.com) — тогда без сайта."
+    echo "Сертификат https выпускается сразу, на все имена одним."
     echo "Пустой ответ — ${current:-без домена, кабинет только через SSH-туннель}."
   } >/dev/tty
   while :; do
@@ -95,7 +97,11 @@ ask_address() {
     if [[ "$answer" == http://* ]]; then
       confirm "Кабинет будет только через SSH-туннель, ${answer}. Верно? [Д/н] " yes || continue
     else
-      confirm "Кабинет будет на https://${name}. Верно? [Д/н] " yes || continue
+      if [[ "$name" =~ ^[A-Za-z0-9-]+\.[A-Za-z0-9-]+$ ]]; then
+        confirm "Кабинет будет на https://cp.${name}, а ${name} и www.${name} поведут на него. Верно? [Д/н] " yes || continue
+      else
+        confirm "Кабинет будет на https://${name}. Верно? [Д/н] " yes || continue
+      fi
     fi
     ADDRESS_ARGS=("$answer")
     return 0
