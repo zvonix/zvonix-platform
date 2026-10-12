@@ -1223,7 +1223,7 @@ test.describe('серверы (ADR-0065)', () => {
 
       await expect(page.getByRole('heading', { name: 'Площадка' })).toBeVisible();
       await expect(page.getByRole('meter', { name: 'Процессор' })).toBeVisible();
-      await expect(page.getByRole('img', { name: /нагрузка процессора/u })).toBeVisible();
+      await expect(page.getByRole('img', { name: /загрузка процессора/u })).toBeVisible();
 
       await page.getByRole('button', { name: 'Неделя' }).click();
       await expect(page.getByRole('button', { name: 'Неделя' })).toHaveAttribute(
