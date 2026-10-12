@@ -312,6 +312,16 @@ describe('капча', () => {
   });
 });
 
+describe('публичные цены «от» без партнёров (ADR-0082)', () => {
+  it('цен нет — null, а не ноль: сайт пишет «по запросу»', async () => {
+    const response = await api().inject({ method: 'GET', url: '/public/prices' });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ call_from: unknown; message_from: unknown }>();
+    expect(body.call_from).toBeNull();
+    expect(body.message_from).toBeNull();
+  });
+});
+
 describe('контакты сайта (ADR-0082)', () => {
   it('открыты без входа; пустые — пустыми строками, заполненные появляются сразу', async () => {
     const before = await api().inject({ method: 'GET', url: '/public/site' });

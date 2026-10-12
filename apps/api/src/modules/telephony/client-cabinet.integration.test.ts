@@ -830,3 +830,37 @@ describe('доступ', () => {
     expect(response.statusCode).toBe(401);
   }, 120_000);
 });
+
+describe('публичные цены «от» (ADR-0082)', () => {
+  it('нет общей наценки — цены нет, а не ноль', async () => {
+    const response = await api().inject({ method: 'GET', url: '/public/prices' });
+    expect(response.json<{ call_from: string | null }>().call_from).toBeNull();
+  }, 120_000);
+
+  it('минута — самая низкая цена партнёра с общей наценкой, без единого имени', async () => {
+    // Общее правило — без клиента: у правила клиента из сценария выше своя наценка, посетителю она не принадлежит.
+    expect(
+      (
+        await post('/commission-rules', {
+          percentBasisPoints: 2000,
+          effectiveFrom: '2020-01-01T00:00:00.000Z',
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    // Прежний ответ держится в памяти минуты: проверяется отдельным вызовом ниже по времени, поэтому
+    // здесь читается новый процесс расчёта через сброс кеша приложения.
+    const { PublicPricesController } = await import('../site/public-prices.controller.js');
+    api().get(PublicPricesController).resetCache();
+
+    const response = await api().inject({ method: 'GET', url: '/public/prices' });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).not.toContain(partnerName);
+
+    const body = response.json<{ call_from: string | null; message_from: string | null }>();
+    expect(Object.keys(body).sort()).toEqual(['call_from', 'message_from', 'updated_at']);
+    expect(body.message_from).toBeNull();
+    // Партнёр берёт 10 ₽ в минуту посекундно, общая наценка — 20 %.
+    expect(body.call_from).toBe('12');
+  }, 120_000);
+});

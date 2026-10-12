@@ -151,6 +151,26 @@ export class MessagesService {
   }
 
   /**
+   * Самая низкая цена сообщения для клиента по общей наценке — для публичного «от» (ADR-0082). Только подтверждённые
+   * партнёры, как у `offers`; ни партнёр, ни аккаунт наружу не попадают. Нет аккаунтов с ценой — `undefined`.
+   */
+  async cheapestPublic(): Promise<MoneyAmount | undefined> {
+    const now = new Date();
+    const [ranges, rule] = await Promise.all([
+      this.repository.partnerPriceRanges(now),
+      this.tariffs.generalMessageCommission(now),
+    ]);
+    let cheapest: MoneyAmount | undefined;
+    for (const range of ranges) {
+      if ((await this.billing.partnerWithBalance(range.partnerId)).status !== 'verified') continue;
+      const price = Money.add(range.min, commissionOf(range.min, rule));
+      if (Money.isZero(price)) continue;
+      if (cheapest === undefined || price < cheapest) cheapest = price;
+    }
+    return cheapest;
+  }
+
+  /**
    * Сколько стоит одно сообщение этому клиенту сейчас; `undefined` — принять некуда. Нет ни одного аккаунта, но у
    * клиента работает бот — называется цена бота: подписчикам клиент отправлять может (ADR-0077).
    */

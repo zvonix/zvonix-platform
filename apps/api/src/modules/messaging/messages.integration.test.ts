@@ -104,6 +104,22 @@ describe('приём сообщения и деньги', () => {
     expect(await owed(partner.partnerId)).toBe('0.45');
   });
 
+  it('публичное «от»: самая низкая цена для клиента с общей наценкой, без партнёра (ADR-0082)', async () => {
+    await partnerWithAccount('0.45');
+    const { PublicPricesController } = await import('../site/public-prices.controller.js');
+    api().get(PublicPricesController).resetCache();
+
+    const response = await api().inject({ method: 'GET', url: '/public/prices' });
+    expect(response.statusCode).toBe(200);
+    // 0,45 + 20 % общей наценки.
+    expect(response.json<{ message_from: string | null }>().message_from).toBe('0.54');
+    expect(Object.keys(response.json<Record<string, unknown>>()).sort()).toEqual([
+      'call_from',
+      'message_from',
+      'updated_at',
+    ]);
+  });
+
   it('повтор с тем же ключом возвращает прежнее и не списывает дважды; другое сообщение под тем же ключом — отказ', async () => {
     await partnerWithAccount('0.45');
     const client = await clientWithMoney('10');
