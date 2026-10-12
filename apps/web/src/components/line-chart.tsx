@@ -1,64 +1,66 @@
 export interface ChartPoint {
   /** Момент, мс от начала эпохи. */
   readonly t: number;
+  /** Значение в процентах, 0–100. */
   readonly v: number;
 }
 
-const WIDTH = 320;
-const HEIGHT = 72;
-const PAD_TOP = 4;
-const PAD_BOTTOM = 4;
+const PLOT_HEIGHT = 88;
+const TICKS = [100, 50, 0] as const;
+
+/** Ближайшая к моменту точка, если она не дальше полутора шагов; иначе `undefined` (там разрыв). */
+function pointNear(
+  points: readonly ChartPoint[],
+  t: number,
+  stepMs: number,
+): ChartPoint | undefined {
+  let best: ChartPoint | undefined;
+  for (const point of points) {
+    if (best === undefined || Math.abs(point.t - t) < Math.abs(best.t - t)) best = point;
+  }
+  return best !== undefined && Math.abs(best.t - t) <= stepMs * 1.5 ? best : undefined;
+}
 
 /**
- * Линия за период: площадь под ней, подписи наибольшего и наименьшего значения слева.
+ * График в процентах за период: шкала 0–100 %, время по краям, при наведении — вертикальная линия
+ * и значение на этот момент.
  *
  * Свой SVG без библиотеки графиков: нужна одна ломаная на несколько сотен точек
- * ([ADR-0065](../../../../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)). Разрыв в данных
- * (источник молчал дольше трёх шагов) не соединяется линией — иначе провал выглядел бы
- * плавным спуском, а молчание узла — спокойной работой.
+ * ([ADR-0065](../../../../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)). Подписи — обычным
+ * текстом, а не внутри SVG: линия растягивается по ширине, и текст в ней сплющился бы.
+ * Разрыв в данных (источник молчал дольше трёх шагов) не соединяется линией — иначе провал
+ * выглядел бы плавным спуском, а молчание узла — спокойной работой.
+ *
+ * Наведение общее у всех графиков сервера: момент хранит родитель (`hoverAt`), и линия встаёт
+ * на одно время на всех.
  */
 export function LineChart({
+  title,
   points,
   from,
   to,
   stepMs,
-  floor = 0,
-  ceiling,
-  format,
   label,
+  formatTime,
+  hoverAt,
+  onHover,
 }: {
+  title: string;
   points: readonly ChartPoint[];
   /** Границы окна по времени: график всегда занимает весь период, даже если данных мало. */
   from: number;
   to: number;
   /** Шаг корзины: больший промежуток между точками считается разрывом. */
   stepMs: number;
-  /** Нижняя граница шкалы; по умолчанию ноль. */
-  floor?: number;
-  /** Верхняя граница шкалы; по умолчанию — наибольшее значение. */
-  ceiling?: number;
-  format: (value: number) => string;
   /** Что показывает график — для чтения с экрана. */
   label: string;
+  formatTime: (t: number) => string;
+  hoverAt: number | null;
+  onHover: (t: number | null) => void;
 }) {
-  if (points.length === 0) {
-    return (
-      <div
-        className="flex h-[72px] items-center justify-center rounded-sm bg-muted text-muted-foreground"
-        role="img"
-        aria-label={`${label}: нет данных`}
-      >
-        нет данных
-      </div>
-    );
-  }
-
-  const top = ceiling ?? Math.max(...points.map((point) => point.v), floor + 1);
-  const span = Math.max(top - floor, 1);
-  const x = (t: number) => ((t - from) / Math.max(to - from, 1)) * WIDTH;
-  const y = (v: number) =>
-    PAD_TOP +
-    (1 - (Math.min(Math.max(v, floor), top) - floor) / span) * (HEIGHT - PAD_TOP - PAD_BOTTOM);
+  const span = Math.max(to - from, 1);
+  const xPercent = (t: number) => Math.min(100, Math.max(0, ((t - from) / span) * 100));
+  const yPercent = (v: number) => 100 - Math.min(100, Math.max(0, v));
 
   // Сегменты между разрывами: у каждого своя линия и своя площадь.
   const segments: ChartPoint[][] = [];
@@ -74,54 +76,146 @@ export function LineChart({
 
   const line = (segment: readonly ChartPoint[]) =>
     segment
-      .map((point, i) => `${i === 0 ? 'M' : 'L'}${x(point.t).toFixed(1)},${y(point.v).toFixed(1)}`)
+      .map(
+        (point, i) =>
+          `${i === 0 ? 'M' : 'L'}${xPercent(point.t).toFixed(2)},${yPercent(point.v).toFixed(2)}`,
+      )
       .join(' ');
   const area = (segment: readonly ChartPoint[]) => {
     const first = segment[0];
     const last = segment.at(-1);
     if (first === undefined || last === undefined) return '';
-    return `${line(segment)} L${x(last.t).toFixed(1)},${String(HEIGHT)} L${x(first.t).toFixed(1)},${String(HEIGHT)} Z`;
+    return `${line(segment)} L${xPercent(last.t).toFixed(2)},100 L${xPercent(first.t).toFixed(2)},100 Z`;
   };
 
-  const lowest = Math.min(...points.map((point) => point.v));
-  const highest = Math.max(...points.map((point) => point.v));
+  const shown = hoverAt === null ? points.at(-1) : pointNear(points, hoverAt, stepMs);
+  const hovered = hoverAt === null ? undefined : shown;
 
   return (
-    <div className="relative">
-      <svg
-        viewBox={`0 0 ${String(WIDTH)} ${String(HEIGHT)}`}
-        className="h-[72px] w-full text-primary"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={`${label}: от ${format(lowest)} до ${format(highest)}`}
-      >
-        <line x1="0" x2={WIDTH} y1={HEIGHT - 0.5} y2={HEIGHT - 0.5} className="stroke-border" />
-        {segments.map((segment) =>
-          segment.length > 1 ? (
-            <g key={segment[0]?.t}>
-              <path d={area(segment)} fill="currentColor" opacity="0.12" />
-              <path
-                d={line(segment)}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                vectorEffect="non-scaling-stroke"
+    <figure className="flex flex-col gap-1">
+      <figcaption className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <span className="font-medium">{title}</span>
+        <span className="num text-muted-foreground" aria-live="off">
+          {shown === undefined
+            ? hoverAt === null
+              ? 'нет данных'
+              : `${formatTime(hoverAt)} · нет замера`
+            : `${String(Math.round(shown.v))} %${hovered === undefined ? '' : ` · ${formatTime(hovered.t)}`}`}
+        </span>
+      </figcaption>
+
+      {points.length === 0 ? (
+        <div
+          className="flex items-center justify-center rounded-sm bg-muted text-muted-foreground"
+          style={{ height: PLOT_HEIGHT }}
+          role="img"
+          aria-label={`${label}: нет данных`}
+        >
+          нет данных
+        </div>
+      ) : (
+        <div className="flex gap-1.5">
+          <div
+            className="num flex w-11 shrink-0 flex-col justify-between whitespace-nowrap text-right text-muted-foreground"
+            style={{ height: PLOT_HEIGHT }}
+            aria-hidden
+          >
+            {TICKS.map((tick) => (
+              <span key={tick} className="leading-none">
+                {String(tick)} %
+              </span>
+            ))}
+          </div>
+          <div
+            className="relative min-w-0 flex-1 touch-pan-y"
+            style={{ height: PLOT_HEIGHT }}
+            onPointerMove={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              if (box.width <= 0) return;
+              const fraction = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+              onHover(from + fraction * span);
+            }}
+            onPointerLeave={() => {
+              onHover(null);
+            }}
+          >
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              className="absolute inset-0 h-full w-full text-primary"
+              role="img"
+              aria-label={`${label}: от ${String(Math.round(Math.min(...points.map((p) => p.v))))} до ${String(Math.round(Math.max(...points.map((p) => p.v))))} %`}
+            >
+              {TICKS.map((tick) => (
+                <line
+                  key={tick}
+                  x1="0"
+                  x2="100"
+                  y1={yPercent(tick)}
+                  y2={yPercent(tick)}
+                  className="stroke-border"
+                  strokeWidth="1"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              {segments.map((segment) =>
+                segment.length > 1 ? (
+                  <g key={segment[0]?.t}>
+                    <path d={area(segment)} fill="currentColor" opacity="0.12" />
+                    <path
+                      d={line(segment)}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinejoin="round"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </g>
+                ) : null,
+              )}
+              {hovered !== undefined && (
+                <line
+                  x1={xPercent(hovered.t)}
+                  x2={xPercent(hovered.t)}
+                  y1="0"
+                  y2="100"
+                  className="stroke-muted-foreground"
+                  strokeWidth="1"
+                  strokeDasharray="3 3"
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+            </svg>
+            {/* Одиночные точки (замер между разрывами) и маркер наведения — кружками поверх: в растянутом SVG они стали бы овалами. */}
+            {segments.map((segment) =>
+              segment.length === 1 && segment[0] !== undefined ? (
+                <span
+                  key={segment[0].t}
+                  className="pointer-events-none absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary"
+                  style={{
+                    left: `${String(xPercent(segment[0].t))}%`,
+                    top: `${String(yPercent(segment[0].v))}%`,
+                  }}
+                />
+              ) : null,
+            )}
+            {hovered !== undefined && (
+              <span
+                className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card bg-primary"
+                style={{
+                  left: `${String(xPercent(hovered.t))}%`,
+                  top: `${String(yPercent(hovered.v))}%`,
+                }}
               />
-            </g>
-          ) : (
-            <circle
-              key={segment[0]?.t}
-              cx={x(segment[0]?.t ?? 0)}
-              cy={y(segment[0]?.v ?? 0)}
-              r="2"
-              fill="currentColor"
-            />
-          ),
-        )}
-      </svg>
-      <span className="num pointer-events-none absolute left-1 top-0 text-muted-foreground">
-        {format(top)}
-      </span>
-    </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="num flex justify-between pl-[50px] text-muted-foreground" aria-hidden>
+        <span>{formatTime(from)}</span>
+        <span>{formatTime(to)}</span>
+      </div>
+    </figure>
   );
 }

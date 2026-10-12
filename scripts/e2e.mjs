@@ -86,15 +86,34 @@ async function main() {
   const stack = await startStack();
 
   try {
-    const result = await run(
-      process.execPath,
-      [path.join(ROOT, 'node_modules', '@playwright', 'test', 'cli.js'), 'test'],
-      {
-        cwd: ROOT,
-        stdio: 'inherit',
-        env: { ...process.env, E2E_BASE_URL: stack.baseUrl, E2E_PASSWORD },
-      },
-    );
+    const playwright = (extraArgs) =>
+      run(
+        process.execPath,
+        [path.join(ROOT, 'node_modules', '@playwright', 'test', 'cli.js'), 'test', ...extraArgs],
+        {
+          cwd: ROOT,
+          stdio: 'inherit',
+          env: { ...process.env, E2E_BASE_URL: stack.baseUrl, E2E_PASSWORD },
+        },
+      );
+
+    let result = await playwright([]);
+    if (result.code !== 0) {
+      // Один повтор **только упавшего** (`--last-failed`; без записи о прошлом прогоне — весь набор, если
+      // процесс погиб). На Windows при долгой проверке сетевые буферы кончаются (`ENOBUFS`), и страница не
+      // дозванивается до собственного стенда — не код, а окружение. Повтор печатается и называет число
+      // упавших; упавший второй раз тест — красный как раньше. Причина в `scripts/integration.mjs`: тот же
+      // приём для потерянных файлов тестов с базой.
+      process.stdout.write(
+        `\nПервый прогон завершился с кодом ${String(result.code)}. Повторяем упавшее один раз (сбои окружения Windows бывают разовыми).\n`,
+      );
+      result = await playwright(['--last-failed']);
+      if (result.code === 0) {
+        process.stdout.write(
+          '\nУпавшее при первом прогоне прошло при повторе: это сбой окружения, а не код. Первый вывод выше.\n',
+        );
+      }
+    }
     if (result.code !== 0) {
       // Код называется числом: у упавшей проверки он равен единице, а у снятого
       // процесса — коду сигнала. Это разные события, и различать их по молчанию

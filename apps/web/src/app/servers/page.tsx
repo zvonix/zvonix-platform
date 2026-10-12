@@ -119,8 +119,28 @@ function ServerCard({
 }) {
   const { current } = server;
 
-  const series = (pick: (point: Server['series'][number]) => number): ChartPoint[] =>
-    server.series.map((point) => ({ t: Date.parse(point.at), v: pick(point) }));
+  const [hoverAt, setHoverAt] = useState<number | null>(null);
+
+  // Все три графика в процентах занятого: шкала одна и читается без пересчёта.
+  const percentSeries = (used: (point: Server['series'][number]) => number): ChartPoint[] =>
+    server.series.map((point) => ({
+      t: Date.parse(point.at),
+      v: Math.min(100, used(point)),
+    }));
+  const cores = current?.cpu_cores ?? 1;
+  const memTotal = current?.mem_total_mb ?? 0;
+  const diskTotal = current?.disk_total_mb ?? 0;
+  const cpu = percentSeries((point) => usedPercent(point.load1, cores));
+  const memory = percentSeries((point) => usedPercent(memTotal - point.mem_available_mb, memTotal));
+  const disk = percentSeries((point) => usedPercent(diskTotal - point.disk_free_mb, diskTotal));
+  // За час хватает времени; за сутки и неделю добавляем дату, иначе концы оси выглядят одинаково.
+  const formatTime = (t: number): string => {
+    const date = new Date(t);
+    const clock = date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    return windowMs <= 3_600_000
+      ? clock
+      : `${date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })} ${clock}`;
+  };
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
@@ -167,41 +187,87 @@ function ServerCard({
             text={`свободно ${gigabytes(current.disk_free_mb)} из ${gigabytes(current.disk_total_mb)}`}
           />
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Chart title="Нагрузка">
-              <LineChart
-                points={series((point) => point.load1)}
-                from={now - windowMs}
-                to={now}
-                stepMs={stepMs}
-                ceiling={Math.max(current.cpu_cores, ...server.series.map((point) => point.load1))}
-                format={(value) => NUMBER.format(value)}
-                label={`${server.name}: нагрузка процессора`}
-              />
-            </Chart>
-            <Chart title="Свободная память">
-              <LineChart
-                points={series((point) => point.mem_available_mb)}
-                from={now - windowMs}
-                to={now}
-                stepMs={stepMs}
-                ceiling={current.mem_total_mb}
-                format={gigabytes}
-                label={`${server.name}: свободная память`}
-              />
-            </Chart>
-            <Chart title="Свободный диск">
-              <LineChart
-                points={series((point) => point.disk_free_mb)}
-                from={now - windowMs}
-                to={now}
-                stepMs={stepMs}
-                ceiling={current.disk_total_mb}
-                format={gigabytes}
-                label={`${server.name}: свободное место на диске`}
-              />
-            </Chart>
+          <div className="flex flex-col gap-3">
+            <LineChart
+              title="Процессор"
+              points={cpu}
+              from={now - windowMs}
+              to={now}
+              stepMs={stepMs}
+              label={`${server.name}: загрузка процессора, %`}
+              formatTime={formatTime}
+              hoverAt={hoverAt}
+              onHover={setHoverAt}
+            />
+            <LineChart
+              title="Память"
+              points={memory}
+              from={now - windowMs}
+              to={now}
+              stepMs={stepMs}
+              label={`${server.name}: занятая память, %`}
+              formatTime={formatTime}
+              hoverAt={hoverAt}
+              onHover={setHoverAt}
+            />
+            <LineChart
+              title="Диск"
+              points={disk}
+              from={now - windowMs}
+              to={now}
+              stepMs={stepMs}
+              label={`${server.name}: занятое место на диске, %`}
+              formatTime={formatTime}
+              hoverAt={hoverAt}
+              onHover={setHoverAt}
+            />
           </div>
+
+          <details>
+            <summary className="cursor-pointer text-muted-foreground">Показать таблицей</summary>
+            <div className="mt-2 max-h-64 overflow-auto">
+              <table className="num w-full text-left">
+                <thead className="sticky top-0 bg-card text-muted-foreground">
+                  <tr>
+                    <th className="py-1 pr-3 font-normal">Время</th>
+                    <th className="py-1 pr-3 font-normal">Процессор</th>
+                    <th className="py-1 pr-3 font-normal">Память</th>
+                    <th className="py-1 font-normal">Диск</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...server.series].reverse().map((point) => (
+                    <tr key={point.at} className="border-t border-border-soft">
+                      <td className="py-1 pr-3 text-muted-foreground">
+                        {formatTime(Date.parse(point.at))}
+                      </td>
+                      <td className="pr-3">
+                        {String(usedPercent(point.load1, current.cpu_cores))} %
+                      </td>
+                      <td className="pr-3">
+                        {String(
+                          usedPercent(
+                            current.mem_total_mb - point.mem_available_mb,
+                            current.mem_total_mb,
+                          ),
+                        )}{' '}
+                        %
+                      </td>
+                      <td>
+                        {String(
+                          usedPercent(
+                            current.disk_total_mb - point.disk_free_mb,
+                            current.disk_total_mb,
+                          ),
+                        )}{' '}
+                        %
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
         </>
       )}
     </section>
@@ -228,15 +294,6 @@ function Gauge({ title, used, text }: { title: string; used: number; text: strin
       >
         <div className={`h-full ${gaugeTone(clamped)}`} style={{ width: `${String(clamped)}%` }} />
       </div>
-    </div>
-  );
-}
-
-function Chart({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-muted-foreground">{title}</span>
-      {children}
     </div>
   );
 }
