@@ -80,6 +80,11 @@ const LABELS: Record<string, string> = {
   'pricing.price_bands_enabled': 'Проверять коридоры цен',
   'cabinets.partner_may_add_client': 'Партнёр может стать клиентом',
   'cabinets.client_may_add_partner': 'Клиент может стать партнёром',
+  'site.company_name': 'Название компании',
+  'site.contact_email': 'Почта для связи',
+  'site.contact_phone': 'Телефон',
+  'site.contact_telegram': 'Telegram',
+  'site.working_hours': 'График работы',
 };
 
 /** Суммы в рублях: принимают копейки, остальные числа — только целые. */
