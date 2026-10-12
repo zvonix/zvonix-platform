@@ -520,6 +520,29 @@ export class TariffRepository {
    * Тот же порядок, что у тарифов: сначала частный случай, потом свежесть. Новое общее
    * правило не должно отменять индивидуальную договорённость с клиентом.
    */
+  /**
+   * Общая наценка — правило без клиента, действующее на момент. Для публичных цен «от»: у посетителя
+   * сайта клиента нет, а правило конкретного клиента ему не принадлежит.
+   */
+  async findGeneralCommissionRule(
+    at: Date,
+    product: CommissionProduct,
+  ): Promise<CommissionRuleRow | undefined> {
+    const [row] = await this.db
+      .select()
+      .from(commissionRules)
+      .where(
+        and(
+          eq(commissionRules.product, product),
+          lte(commissionRules.effectiveFrom, at),
+          isNull(commissionRules.clientId),
+        ),
+      )
+      .orderBy(desc(commissionRules.effectiveFrom))
+      .limit(1);
+    return row;
+  }
+
   async findCommissionRule(
     clientId: Id<'client'>,
     at: Date,

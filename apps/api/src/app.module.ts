@@ -23,6 +23,7 @@ import { SettingsModule } from './modules/settings/settings.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
 import { ServersModule } from './modules/servers/servers.module.js';
+import { SiteModule } from './modules/site/site.module.js';
 import { ReportsModule } from './modules/reports/reports.module.js';
 import { UpdatesModule } from './modules/updates/updates.module.js';
 import { TelephonyModule } from './modules/telephony/telephony.module.js';
@@ -51,6 +52,7 @@ import { TelephonyModule } from './modules/telephony/telephony.module.js';
     NotificationsModule,
     PaymentsModule,
     ServersModule,
+    SiteModule,
     UpdatesModule,
     ApplicationsModule,
     HealthModule,

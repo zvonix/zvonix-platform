@@ -830,6 +830,36 @@ export class TariffService {
   }
 
   /** Наценка на сообщение для клиента сейчас: правило клиента, иначе общее; `undefined` — правил нет. */
+  /** Общая наценка на сообщения: без клиента, для публичных цен «от» (ADR-0082). */
+  async generalMessageCommission(at: Date): Promise<CommissionRule | undefined> {
+    const row = await this.repository.findGeneralCommissionRule(at, 'message');
+    return row === undefined ? undefined : toCommissionRule(row);
+  }
+
+  /**
+   * Самая низкая цена минуты для клиента по всем названным партнёрам — для публичного «от».
+   *
+   * Стоимость эталонного вызова в 60 секунд с общей наценкой, как у сравнения предложений
+   * ([ADR-0023](../../../../../docs/adr/0023-koridory-cen.md)). Нет общей наценки или ни у кого нет цены —
+   * `undefined`: сайт пишет «по запросу», а не ноль.
+   */
+  async cheapestCallMinute(
+    partnerIds: readonly Id<'partner'>[],
+    at: Date,
+  ): Promise<MoneyAmount | undefined> {
+    const commission = await this.repository.findGeneralCommissionRule(at, 'call');
+    if (commission === undefined) return undefined;
+    const rule = toCommissionRule(commission);
+    const rates = await this.repository.listEffectiveRates(partnerIds, undefined, at);
+    let cheapest: MoneyAmount | undefined;
+    for (const rate of rates) {
+      const cost = chargeForCall(60, toTariffRule(rate), rule).clientAmount;
+      if (Money.isZero(cost)) continue;
+      if (cheapest === undefined || cost < cheapest) cheapest = cost;
+    }
+    return cheapest;
+  }
+
   async messageCommission(clientId: Id<'client'>, at: Date): Promise<CommissionRule | undefined> {
     const row = await this.repository.findCommissionRule(clientId, at, 'message');
     return row === undefined ? undefined : toCommissionRule(row);
