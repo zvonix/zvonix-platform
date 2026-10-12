@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
@@ -187,19 +187,32 @@ function SettingsForm() {
 
   // Поле пересоздаётся после сохранения: у числового поля свой набранный текст,
   // и без этого он пережил бы смену сохранённого значения.
-  const field = (setting: SettingView) => (
-    <SettingField
-      key={`${setting.key}:${setting.updated_at ?? ''}`}
-      setting={setting}
-      draft={draft[setting.key]}
-      onChange={(value) => {
-        change(setting.key, value);
-      }}
-      onValidity={(valid) => {
-        validity(setting.key, valid);
-      }}
-    />
-  );
+  const field = (setting: SettingView) =>
+    setting.key === 'messaging.provider_partner_token' ? (
+      <ProviderKeyField
+        key={`${setting.key}:${setting.updated_at ?? ''}`}
+        setting={setting}
+        draft={draft[setting.key]}
+        onChange={(value) => {
+          change(setting.key, value);
+        }}
+        onValidity={(valid) => {
+          validity(setting.key, valid);
+        }}
+      />
+    ) : (
+      <SettingField
+        key={`${setting.key}:${setting.updated_at ?? ''}`}
+        setting={setting}
+        draft={draft[setting.key]}
+        onChange={(value) => {
+          change(setting.key, value);
+        }}
+        onValidity={(valid) => {
+          validity(setting.key, valid);
+        }}
+      />
+    );
 
   return (
     <div className="flex max-w-[1100px] flex-col gap-4">
@@ -269,10 +282,6 @@ function SettingsForm() {
                     </h3>
                   )}
                   <div className="divide-y divide-border-soft">{group.items.map(field)}</div>
-                  {/* Проверка ключа — сразу под полями ключа, а не в конце длинного раздела. */}
-                  {section.prefix === 'messaging.' && group.title === 'Провайдер' && (
-                    <TestProviderKey />
-                  )}
                 </div>
               ))}
             </div>
@@ -417,10 +426,10 @@ function TestLetter() {
 }
 
 /**
- * Проверка партнёрского ключа провайдера сообщений: ключ принят или нет и сколько аккаунтов заведено.
- * Проверяется сохранённое, а не набранное в полях, как и пробное письмо.
+ * Поле ключа провайдера сообщений с кнопкой проверки в одной строке: ключ принят или нет и сколько
+ * аккаунтов заведено. Проверяется сохранённое, а не набранное в полях, как и пробное письмо.
  */
-function TestProviderKey() {
+function ProviderKeyField(props: ComponentProps<typeof SettingField>) {
   const check = useMutation({
     mutationFn: () =>
       request<{ ok: boolean; message: string }>('/messenger/provider/test', { method: 'POST' }),
@@ -428,8 +437,9 @@ function TestProviderKey() {
   const failure = asApiError(check.error);
 
   return (
-    <div className="mt-3 flex flex-col gap-2 border-t border-border-soft pt-3">
-      <div>
+    <SettingField
+      {...props}
+      inlineAction={
         <Button
           type="button"
           variant="outline"
@@ -440,15 +450,19 @@ function TestProviderKey() {
         >
           {check.isPending ? 'Проверяем…' : 'Проверить ключ'}
         </Button>
-      </div>
-      {check.data?.ok === true && <p className="text-ok">{check.data.message}</p>}
-      {check.data?.ok === false && (
-        <p role="alert" className="text-crit">
-          {check.data.message}
-        </p>
-      )}
-      {failure !== undefined && <ErrorNote error={failure} />}
-    </div>
+      }
+      below={
+        <>
+          {check.data?.ok === true && <p className="text-ok">{check.data.message}</p>}
+          {check.data?.ok === false && (
+            <p role="alert" className="text-crit">
+              {check.data.message}
+            </p>
+          )}
+          {failure !== undefined && <ErrorNote error={failure} />}
+        </>
+      }
+    />
   );
 }
 

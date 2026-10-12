@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -122,12 +122,18 @@ export function SettingField({
   draft,
   onChange,
   onValidity,
+  inlineAction,
+  below,
 }: {
   setting: SettingView;
   draft: DraftValue | undefined;
   onChange: (value: DraftValue | undefined) => void;
   /** Годится ли набранное: негодное значение не уходит в черновик и держит сохранение. */
   onValidity: (valid: boolean) => void;
+  /** Только у секрета: кнопка в одной строке с полем (например, «Проверить ключ»). */
+  inlineAction?: ReactNode;
+  /** Только у секрета: что показать под полем — например, ответ на проверку. */
+  below?: ReactNode;
 }) {
   const id = `setting-${setting.key}`;
   const label = labelOf(setting.key);
@@ -161,7 +167,15 @@ export function SettingField({
 
   if (setting.secret) {
     return (
-      <SecretField id={id} label={label} setting={setting} draft={draft} onChange={onChange} />
+      <SecretField
+        id={id}
+        label={label}
+        setting={setting}
+        draft={draft}
+        onChange={onChange}
+        inlineAction={inlineAction}
+        below={below}
+      />
     );
   }
 
@@ -211,12 +225,16 @@ function SecretField({
   setting,
   draft,
   onChange,
+  inlineAction,
+  below,
 }: {
   id: string;
   label: string;
   setting: SettingView;
   draft: DraftValue | undefined;
   onChange: (value: DraftValue | undefined) => void;
+  inlineAction?: ReactNode;
+  below?: ReactNode;
 }) {
   const clearing = draft === '';
 
@@ -250,18 +268,22 @@ function SecretField({
             </Button>
           ))}
       </div>
-      <Input
-        id={id}
-        type="password"
-        autoComplete="new-password"
-        disabled={clearing}
-        value={typeof draft === 'string' ? draft : ''}
-        placeholder={setting.is_set ? '•'.repeat(12) : undefined}
-        onChange={(event) => {
-          const next = event.target.value;
-          onChange(next.trim() === '' ? undefined : next);
-        }}
-      />
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          type="password"
+          autoComplete="new-password"
+          disabled={clearing}
+          value={typeof draft === 'string' ? draft : ''}
+          placeholder={setting.is_set ? '•'.repeat(12) : undefined}
+          onChange={(event) => {
+            const next = event.target.value;
+            onChange(next.trim() === '' ? undefined : next);
+          }}
+        />
+        {inlineAction}
+      </div>
+      {below}
     </div>
   );
 }
