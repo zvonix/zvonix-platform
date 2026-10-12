@@ -269,12 +269,15 @@ function SettingsForm() {
                     </h3>
                   )}
                   <div className="divide-y divide-border-soft">{group.items.map(field)}</div>
+                  {/* Проверка ключа — сразу под полями ключа, а не в конце длинного раздела. */}
+                  {section.prefix === 'messaging.' && group.title === 'Провайдер' && (
+                    <TestProviderKey />
+                  )}
                 </div>
               ))}
             </div>
             {section.prefix === 'mail.' && <TestLetter />}
             {section.prefix === 'captcha.' && <CaptchaWarning />}
-            {section.prefix === 'messaging.' && <TestProviderKey />}
           </section>
         )}
       </div>
