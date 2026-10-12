@@ -45,6 +45,15 @@ export interface SettingView {
   readonly max: number | null;
 }
 
+/** Контакты, опубликованные на сайте проекта. */
+export interface SiteContacts {
+  readonly companyName: string;
+  readonly email: string;
+  readonly phone: string;
+  readonly telegram: string;
+  readonly workingHours: string;
+}
+
 export interface MailSettings {
   readonly host: string;
   readonly port: number;
@@ -266,6 +275,21 @@ export class SettingsService {
   async payments(): Promise<{ readonly manualInstructions: string }> {
     const values = await this.values();
     return { manualInstructions: this.text(values, 'payments.manual_instructions').trim() };
+  }
+
+  /**
+   * Контакты для открытого сайта (ADR-0082): то, что владелец сам решил опубликовать.
+   * Пустое значение отдаётся пустой строкой — сайт такое поле не показывает.
+   */
+  async site(): Promise<SiteContacts> {
+    const values = await this.values();
+    return {
+      companyName: this.text(values, 'site.company_name').trim(),
+      email: this.text(values, 'site.contact_email').trim(),
+      phone: this.text(values, 'site.contact_phone').trim(),
+      telegram: this.text(values, 'site.contact_telegram').trim(),
+      workingHours: this.text(values, 'site.working_hours').trim(),
+    };
   }
 
   /**

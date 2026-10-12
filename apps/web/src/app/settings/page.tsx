@@ -157,6 +157,7 @@ function SettingsForm() {
     { title: 'Вход', prefixes: ['security.'] },
     { title: 'Цены партнёров', prefixes: ['pricing.'] },
     { title: 'Кабинеты', prefixes: ['cabinets.'] },
+    { title: 'Сайт', prefixes: ['site.'] },
   ];
   const known = new Set(groups.flatMap((group) => group.prefixes));
   const rest = settings.data.settings.filter(

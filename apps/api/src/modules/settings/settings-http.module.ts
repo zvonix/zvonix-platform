@@ -7,10 +7,11 @@
 
 import { Module } from '@nestjs/common';
 import { MailModule } from '../mail/mail.module.js';
+import { PublicSiteController } from './public-site.controller.js';
 import { SettingsController } from './settings.controller.js';
 
 @Module({
   imports: [MailModule],
-  controllers: [SettingsController],
+  controllers: [SettingsController, PublicSiteController],
 })
 export class SettingsHttpModule {}

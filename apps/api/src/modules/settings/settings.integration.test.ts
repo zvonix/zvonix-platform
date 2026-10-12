@@ -311,3 +311,43 @@ describe('капча', () => {
     expect(response.statusCode).toBe(202);
   });
 });
+
+describe('контакты сайта (ADR-0082)', () => {
+  it('открыты без входа; пустые — пустыми строками, заполненные появляются сразу', async () => {
+    const before = await api().inject({ method: 'GET', url: '/public/site' });
+    expect(before.statusCode).toBe(200);
+    expect(before.json()).toEqual({
+      company_name: '',
+      email: '',
+      phone: '',
+      telegram: '',
+      working_hours: '',
+    });
+
+    const saved = await change({
+      'site.company_name': '  ООО «Звоникс»  ',
+      'site.contact_email': 'hello@zvonix.com',
+      'site.contact_telegram': '@zvonix',
+    });
+    expect(saved.statusCode).toBe(200);
+
+    const after = await api().inject({ method: 'GET', url: '/public/site' });
+    expect(after.json()).toMatchObject({
+      company_name: 'ООО «Звоникс»',
+      email: 'hello@zvonix.com',
+      phone: '',
+      telegram: '@zvonix',
+    });
+  });
+
+  it('отдаёт только контакты: без секретов и других настроек', async () => {
+    const response = await api().inject({ method: 'GET', url: '/public/site' });
+    expect(Object.keys(response.json<Record<string, unknown>>()).sort()).toEqual([
+      'company_name',
+      'email',
+      'phone',
+      'telegram',
+      'working_hours',
+    ]);
+  });
+});

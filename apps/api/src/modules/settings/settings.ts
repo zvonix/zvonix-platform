@@ -289,6 +289,33 @@ export const SETTINGS = {
     fallback: '',
     hint: 'Реквизиты для пополнения переводом: клиент видит этот текст в заявке. Пусто — приём заявок закрыт',
   },
+
+  // Контакты сайта проекта (ADR-0082). Значения публикуются на открытом сайте без входа.
+  'site.company_name': {
+    kind: 'string',
+    fallback: '',
+    hint: 'Название компании для подвала и страницы «Контакты». Публикуется на открытом сайте',
+  },
+  'site.contact_email': {
+    kind: 'string',
+    fallback: '',
+    hint: 'Почта для связи. Публикуется на открытом сайте. Пусто — не показывается',
+  },
+  'site.contact_phone': {
+    kind: 'string',
+    fallback: '',
+    hint: 'Телефон для связи. Публикуется на открытом сайте. Пусто — не показывается',
+  },
+  'site.contact_telegram': {
+    kind: 'string',
+    fallback: '',
+    hint: 'Telegram для связи: @имя или ссылка. Публикуется на открытом сайте. Пусто — не показывается',
+  },
+  'site.working_hours': {
+    kind: 'string',
+    fallback: '',
+    hint: 'График работы, например «ежедневно 10:00–20:00». Публикуется на открытом сайте',
+  },
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof SETTINGS;
