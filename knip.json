@@ -38,7 +38,10 @@
       "project": ["src/**/*.ts"]
     },
     "apps/web": {
-      "entry": ["src/app/**/{page,layout,not-found,error,loading}.tsx"],
+      "entry": [
+        "src/app/**/{page,layout,not-found,error,loading}.tsx",
+        "src/app/**/{robots,sitemap}.ts"
+      ],
       "project": ["src/**/*.{ts,tsx,css}"],
       "ignore": ["src/components/ui/**"]
     }

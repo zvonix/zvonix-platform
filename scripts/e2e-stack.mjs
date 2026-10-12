@@ -159,7 +159,16 @@ function startProxy({ port, apiPort, webPort, api, web }) {
   const server = http.createServer((request, response) => {
     const toApi = request.url !== undefined && request.url.startsWith('/api/');
     const target = toApi ? apiPort : webPort;
-    const url = toApi ? request.url.slice('/api'.length) : request.url;
+    let url = toApi ? request.url.slice('/api'.length) : request.url;
+    // Основной домен проекта (ADR-0082): так делает nginx (deploy/nginx/zvonix-root.conf) — страницы
+    // сайта лежат под /site, статика приложения общая. Домена на стенде нет, поэтому признак — заголовок.
+    if (
+      !toApi &&
+      request.headers['x-zvonix-site'] === '1' &&
+      !/^\/(_next\/|fonts\/|icon\.svg$)/u.test(url ?? '')
+    ) {
+      url = url === '/' ? '/site' : `/site${url ?? ''}`;
+    }
 
     const upstream = http.request(
       {
@@ -313,7 +322,12 @@ export async function startStack() {
     [NEXT_CLI, 'start', '--hostname', '127.0.0.1', '--port', String(webPort)],
     {
       cwd: WEB_DIR,
-      env: { ...process.env, NODE_ENV: 'production' },
+      // Сайт проекта (ADR-0082) читает контакты и цены у API на сервере — как в проде, по адресу рядом.
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        ZVONIX_API_ORIGIN: `http://127.0.0.1:${String(apiPort)}`,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );

@@ -326,7 +326,7 @@ describe('контакты сайта (ADR-0082)', () => {
   it('открыты без входа; пустые — пустыми строками, заполненные появляются сразу', async () => {
     const before = await api().inject({ method: 'GET', url: '/public/site' });
     expect(before.statusCode).toBe(200);
-    expect(before.json()).toEqual({
+    expect(before.json()).toMatchObject({
       company_name: '',
       email: '',
       phone: '',
@@ -353,9 +353,11 @@ describe('контакты сайта (ADR-0082)', () => {
   it('отдаёт только контакты: без секретов и других настроек', async () => {
     const response = await api().inject({ method: 'GET', url: '/public/site' });
     expect(Object.keys(response.json<Record<string, unknown>>()).sort()).toEqual([
+      'cabinet_url',
       'company_name',
       'email',
       'phone',
+      'site_url',
       'telegram',
       'working_hours',
     ]);
