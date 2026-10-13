@@ -109,10 +109,13 @@ export function CertificatePanel() {
   });
 
   if (certificate.isPending) return <p className="text-muted-foreground">Загружаем…</p>;
-  const loadError = certificate.error instanceof ApiError ? certificate.error : undefined;
-  if (loadError !== undefined) return <ErrorNote error={loadError} />;
   const data = certificate.data;
-  if (data === undefined) return null;
+  // Ошибку вместо раздела — только пока состояния нет вовсе. Во время выпуска nginx перезагружается,
+  // и один опрос может не дойти: прочитанное состояние при этом не стирается, как и в оболочке кабинета.
+  if (data === undefined) {
+    return certificate.error instanceof ApiError ? <ErrorNote error={certificate.error} /> : null;
+  }
+  const refreshError = certificate.isError && certificate.error instanceof ApiError;
 
   const chip = STATE[data.state];
   const note = STATE_NOTE[data.state];
@@ -127,6 +130,11 @@ export function CertificatePanel() {
       <div className="flex flex-wrap items-center gap-3">
         <span className={`rounded-sm px-2 py-0.5 font-medium ${chip.tone}`}>{chip.label}</span>
         {data.busy && <span className="text-warn">Выполняется…</span>}
+        {refreshError && (
+          <span className="text-muted-foreground">
+            Состояние не обновилось — повторим сами, если страница открыта.
+          </span>
+        )}
       </div>
       {note !== undefined && <p className="text-muted-foreground">{note}</p>}
       {data.problem !== null && <p className="text-warn">{data.problem}</p>}
