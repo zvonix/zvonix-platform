@@ -111,6 +111,12 @@ if [ -n "$SITE_DOMAIN" ]; then
   SITE_NAMES+=("$SITE_DOMAIN" "www.${SITE_DOMAIN}")
 fi
 
+# Открытый порт ведёт основной домен и www на них же по https, всё остальное — на кабинет.
+REDIRECT_MAP=""
+for name in "${SITE_NAMES[@]:1}"; do
+  REDIRECT_MAP+="${name} https://${name}; "
+done
+
 if [ "$PUBLIC_SITE" = yes ]; then
   own="$(ip -o addr show scope global | awk '{ split($4, a, "/"); print a[1] }')"
   missing=()
@@ -416,7 +422,7 @@ step "Сайт nginx"
 # Метки подставляются только вне комментариев: шаблон называет их в шапке, а подстановка
 # для https многострочная — её продолжение вышло бы из комментария директивами вне server.
 render_site() {
-  sed -e "/^[[:space:]]*#/!{s|@@LISTEN@@|${SITE_LISTEN}|;s|@@SERVER_NAMES@@|${SITE_NAMES[*]}|g;s|@@SERVER_NAME@@|${SITE_NAME}|g;s|@@SITE_NAMES@@|${SITE_NAMES[*]:1}|g}" "$1" \
+  sed -e "/^[[:space:]]*#/!{s|@@LISTEN@@|${SITE_LISTEN}|;s|@@SERVER_NAMES@@|${SITE_NAMES[*]}|g;s|@@SERVER_NAME@@|${SITE_NAME}|g;s|@@SITE_NAMES@@|${SITE_NAMES[*]:1}|g;s|@@REDIRECT_MAP@@|${REDIRECT_MAP}|g}" "$1" \
     >"/etc/nginx/sites-available/$2"
   ln -sfn "/etc/nginx/sites-available/$2" "/etc/nginx/sites-enabled/$2"
 }
