@@ -51,12 +51,21 @@ step() {
   echo "=== $name ==="
   memory=$(free_memory_gb)
   started=$(date +%s)
-  if "$@"; then
+  "$@"
+  code=$?
+  # Не 0 и не 1 — «процесс погиб» (на Windows рабочий процесс сборки умирает с кодом
+  # 0xC0000409, оболочка видит 127), а не «шаг нашёл ошибку». Такой шаг переигрывается
+  # один раз; упавший по делу (код 1) не повторяется: повтор скрыл бы нестабильность.
+  if [ $code -ne 0 ] && [ $code -ne 1 ]; then
+    echo "--- $name: процесс завершился с кодом $code (гибель процесса, а не найденная ошибка). Повторяем шаг один раз."
+    "$@"
+    code=$?
+  fi
+  if [ $code -eq 0 ]; then
     ended=$(date +%s)
     TIMINGS+=("$name|$((ended - started))|ok")
     echo "--- $name: ok"
   else
-    code=$?
     ended=$(date +%s)
     TIMINGS+=("$name|$((ended - started))|ПРОВАЛ")
     report_memory "$memory"
@@ -121,9 +130,23 @@ migrations_match_schema() {
 # Уязвимости в зависимостях. Требует доступа к реестру пакетов: без сети шаг
 # не выполняется, но и успехом не считается.
 dependency_audit() {
-  local output code
-  output=$(pnpm audit --audit-level moderate 2>&1)
-  code=$?
+  local output code attempt
+  for attempt in 1 2; do
+    output=$(pnpm audit --audit-level moderate 2>&1)
+    code=$?
+    # Аварийное завершение самой утилиты (на Windows — нехватка адресного пространства
+    # `VirtualAlloc failed`): она ничего не проверила, значит, повторяем, а если и повтор
+    # погиб — «не выполнен», а не «есть уязвимости».
+    if echo "$output" | grep -qE 'VirtualAlloc failed|low_level_alloc'; then
+      if [ $attempt -eq 1 ]; then
+        echo "Аудит аварийно завершился (нехватка памяти процесса). Повторяем один раз."
+        continue
+      fi
+      echo "Аудит аварийно завершился дважды — проверка не выполнена."
+      return 78
+    fi
+    break
+  done
   if [ $code -eq 0 ]; then
     echo "Известных уязвимостей уровня moderate и выше нет."
     return 0
