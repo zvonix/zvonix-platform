@@ -1557,12 +1557,19 @@ test.describe('партнёр добавляет своё оборудовани
       if (response.status() === 403) denied.push(response.url());
     });
 
+    // Имя с меткой времени: повтор упавшего теста идёт на той же базе, и одинаковое имя дало бы
+    // два шлюза и ложное «нашлось два элемента» вместо настоящей причины первого падения.
+    const gatewayName = `Шлюз под карту ${String(Date.now())}`;
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/equipment');
     await page.getByRole('button', { name: 'Добавить шлюз' }).click();
-    await page.getByLabel('Название').fill('Шлюз под карту');
+    await page.getByLabel('Название').fill(gatewayName);
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
-    await page.getByRole('link', { name: 'Шлюз под карту' }).click();
+    await page.getByRole('link', { name: gatewayName }).click();
+    // Без ожидания перехода нажатие попадало в кнопку «Вставить SIM» списка (там такие же),
+    // а переход потом закрывал окно: падение примерно в одном прогоне из десяти.
+    await expect(page).toHaveURL(/\/partner\/equipment\/[^/]+$/u);
+    await expect(page.getByRole('heading', { name: gatewayName, level: 2 })).toBeVisible();
 
     await page.getByRole('button', { name: 'Вставить SIM' }).first().click();
     const dialog = page.getByRole('dialog');
@@ -1583,9 +1590,10 @@ test.describe('партнёр добавляет своё оборудовани
     await page.goto('/partner/equipment');
 
     await page.getByRole('button', { name: 'Добавить шлюз' }).click();
-    await page.getByLabel('Название').fill('Шлюз на выключение');
+    const gatewayName = `Шлюз на выключение ${String(Date.now())}`;
+    await page.getByLabel('Название').fill(gatewayName);
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
-    await page.getByRole('link', { name: 'Шлюз на выключение' }).click();
+    await page.getByRole('link', { name: gatewayName }).click();
 
     // Невключённый шлюз не пускают даже с верными настройками — и страница говорит это прямо.
     // Раньше включение пряталось в окне за кнопкой «Состояние» (владелец, 2026-09-25).
