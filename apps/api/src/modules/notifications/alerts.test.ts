@@ -31,6 +31,7 @@ interface Setup {
     loadPerCore?: number;
   }[];
   messages?: { total: number; failed: number };
+  certificate?: Record<string, unknown>;
   payments?: {
     id: string;
     clientId: string;
@@ -71,6 +72,9 @@ function build(setup: Setup) {
       strained: () => Promise.resolve(setup.strained ?? []),
     } as never,
     { health: () => Promise.resolve(setup.messages ?? { total: 0, failed: 0 }) } as never,
+    {
+      status: () => Promise.resolve({ state: 'ok', domain: 'cp.zvonix.com', ...setup.certificate }),
+    } as never,
     logger(),
   );
   return { service, enqueue };
@@ -229,5 +233,35 @@ describe('тревоги администраторам', () => {
     });
     expect(await service.notify(NOW)).toBe(1);
     expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('сертификат скоро истекает, истёк или не выпущен — письмо; действующий и «не нужен» молчат', async () => {
+    const kindsFor = async (certificate: Record<string, unknown>): Promise<string[]> => {
+      const { service, enqueue } = build({ admins: [confirmed], certificate });
+      await service.notify(NOW);
+      return enqueue.mock.calls.map((call) => (call as unknown as [{ kind: string }])[0].kind);
+    };
+
+    expect(await kindsFor({ state: 'soon', days_left: 9, auto_renew: true })).toEqual([
+      'alert_certificate:soon',
+    ]);
+    expect(await kindsFor({ state: 'expired' })).toEqual(['alert_certificate:expired']);
+    expect(await kindsFor({ state: 'missing' })).toEqual(['alert_certificate:missing']);
+    expect(await kindsFor({ state: 'ok' })).toEqual([]);
+    expect(await kindsFor({ state: 'not_configured', domain: null })).toEqual([]);
+    expect(await kindsFor({ state: 'unknown', domain: null })).toEqual([]);
+  });
+
+  it('письмо о сертификате различает включённое и выключенное автопродление', async () => {
+    const bodyFor = async (autoRenew: boolean): Promise<string> => {
+      const { service, enqueue } = build({
+        admins: [confirmed],
+        certificate: { state: 'soon', days_left: 5, auto_renew: autoRenew },
+      });
+      await service.notify(NOW);
+      return (enqueue.mock.calls[0] as unknown as [{ body: string }])[0].body;
+    };
+    expect(await bodyFor(true)).toContain('не сработало');
+    expect(await bodyFor(false)).toContain('выключено');
   });
 });

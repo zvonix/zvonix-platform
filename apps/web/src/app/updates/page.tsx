@@ -25,7 +25,15 @@ import { moment } from '@/lib/format';
  * говорит об этом, а не показывает ошибку.
  */
 
-type Action = 'deploy' | 'prepare' | 'rollback' | 'refresh';
+type Action =
+  | 'deploy'
+  | 'prepare'
+  | 'rollback'
+  | 'refresh'
+  | 'cert-check'
+  | 'cert-issue'
+  | 'cert-auto-on'
+  | 'cert-auto-off';
 type Status = 'running' | 'succeeded' | 'failed';
 
 interface Release {
@@ -84,6 +92,10 @@ const ACTION_NAME: Record<Action, string> = {
   prepare: 'Проверка выпуска',
   rollback: 'Откат',
   refresh: 'Проверка обновлений',
+  'cert-check': 'Проверка сертификата',
+  'cert-issue': 'Выпуск сертификата',
+  'cert-auto-on': 'Автопродление сертификата: включено',
+  'cert-auto-off': 'Автопродление сертификата: выключено',
 };
 
 const STATUS_NAME: Record<Status, string> = {

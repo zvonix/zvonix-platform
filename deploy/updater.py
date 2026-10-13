@@ -11,6 +11,7 @@
   runs/<id>/state.json состояние заявки; пишет только root
   runs/<id>/log        вывод выкладки построчно
   releases.json        список выпусков из GitHub (токен — только у root)
+  certificate.json     состояние сертификата кабинета (ADR-0083): даты, имена, автопродление
 """
 import json
 import os
@@ -32,11 +33,24 @@ MAX_REQUEST = 4096
 KEEP_RUNS = 30
 TAG_PATTERN = re.compile(r'^v?[0-9A-Za-z][0-9A-Za-z._-]*$')
 ID_PATTERN = re.compile(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json')
-ACTIONS = ('deploy', 'prepare', 'rollback', 'refresh')
+ACTIONS = ('deploy', 'prepare', 'rollback', 'refresh', 'cert-check', 'cert-issue', 'cert-auto-on', 'cert-auto-off')
+
+# Сертификат кабинета (ADR-0083). Имена берутся из файлов root, а не из заявки: заявка не называет
+# домен, поэтому выпустить сертификат на чужое имя через неё нельзя.
+ENV_FILE = os.environ.get('ZVONIX_ENV_FILE', '/etc/zvonix/zvonix.env')
+SITE_DOMAIN_FILE = os.environ.get('ZVONIX_SITE_DOMAIN_FILE', '/etc/zvonix/site-domain')
+LETSENCRYPT_DIR = os.environ.get('ZVONIX_LETSENCRYPT_DIR', '/etc/letsencrypt')
+ACME_ROOT = os.environ.get('ZVONIX_ACME_ROOT', '/var/www/letsencrypt')
+CERTBOT = shlex.split(os.environ.get('ZVONIX_CERTBOT_CMD', 'certbot'))
+OPENSSL = shlex.split(os.environ.get('ZVONIX_OPENSSL_CMD', 'openssl'))
+SYSTEMCTL = shlex.split(os.environ.get('ZVONIX_SYSTEMCTL_CMD', 'systemctl'))
+HOST_PATTERN = re.compile(r'^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$')
+CERT_TIMER = 'certbot.timer'
 
 requests_dir = os.path.join(ROOT, 'requests')
 runs_dir = os.path.join(ROOT, 'runs')
 releases_file = os.path.join(ROOT, 'releases.json')
+certificate_file = os.path.join(ROOT, 'certificate.json')
 
 
 def now():
@@ -133,6 +147,9 @@ def run_request(request_id, path, request):
     if request['action'] == 'refresh':
         refresh_releases(log_path, run)
         return
+    if request['action'].startswith('cert-'):
+        run_certificate(request['action'], log_path, run)
+        return
 
     arguments = {'deploy': [request['tag']], 'prepare': ['--prepare', request['tag']], 'rollback': ['--rollback']}
     command = DEPLOY + arguments[request['action']]
@@ -194,6 +211,115 @@ def refresh_releases(log_path, run=None):
         print(message)
 
 
+def cert_names():
+    """(имя сертификата, все имена) из файлов root; (None, []) — кабинет не на домене (туннель)."""
+    try:
+        url = read_env(ENV_FILE).get('WEB_BASE_URL', '').strip().lower().rstrip('/')
+    except OSError:
+        return None, []
+    match = re.fullmatch(r'https://([a-z0-9.-]+)', url)
+    if match is None or not HOST_PATTERN.match(match.group(1)) or '.' not in match.group(1):
+        return None, []
+    name = match.group(1)
+    names = [name]
+    try:
+        with open(SITE_DOMAIN_FILE, encoding='utf-8') as handle:
+            domain = handle.readline().strip().lower()
+    except OSError:
+        domain = ''
+    # Основной домен действует, пока кабинет на cp.<домен> (как в deploy/server-setup.sh).
+    if domain and HOST_PATTERN.match(domain) and name == 'cp.' + domain:
+        names += [domain, 'www.' + domain]
+    return name, names
+
+
+def run_quiet(command):
+    """(код, вывод) команды; не найденная команда — (127, текст). Без оболочки, с ограничением по времени."""
+    try:
+        done = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                              timeout=60, env={**os.environ, 'LC_ALL': 'C'})
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return 127, str(error)
+    return done.returncode, done.stdout.decode('utf-8', 'replace')
+
+
+def parse_openssl_date(value):
+    try:
+        moment = datetime.strptime(value.strip(), '%b %d %H:%M:%S %Y %Z')
+    except ValueError:
+        return None
+    return moment.replace(tzinfo=timezone.utc).isoformat(timespec='seconds')
+
+
+def cert_status():
+    """Читает сертификат и таймер продления и пишет certificate.json. Сбой чтения — в поле, а не исключением."""
+    name, names = cert_names()
+    status = {'checked_at': now(), 'cert_name': name, 'expected_names': names, 'present': False,
+              'not_before': None, 'not_after': None, 'issuer': None, 'covered_names': [],
+              'auto_renew': None, 'auto_renew_active': None, 'problem': None}
+    if name is None:
+        status['problem'] = 'адрес кабинета не домен: сертификат не выпускается'
+    else:
+        path = os.path.join(LETSENCRYPT_DIR, 'live', name, 'fullchain.pem')
+        if os.path.exists(path):
+            code, output = run_quiet(OPENSSL + ['x509', '-in', path, '-noout', '-dates', '-issuer', '-ext', 'subjectAltName'])
+            if code == 0:
+                status['present'] = True
+                for line in output.splitlines():
+                    line = line.strip()
+                    if line.startswith('notBefore='):
+                        status['not_before'] = parse_openssl_date(line[len('notBefore='):])
+                    elif line.startswith('notAfter='):
+                        status['not_after'] = parse_openssl_date(line[len('notAfter='):])
+                    elif line.startswith('issuer='):
+                        match = re.search(r'O\s*=\s*([^,]+)', line)
+                        status['issuer'] = (match.group(1) if match else line[len('issuer='):]).strip()[:100]
+                    elif 'DNS:' in line:
+                        status['covered_names'] = [part.strip()[4:].lower() for part in line.split(',')
+                                                   if part.strip().startswith('DNS:')]
+            else:
+                status['problem'] = 'не удалось прочитать сертификат: ' + output.strip()[:200]
+    code, output = run_quiet(SYSTEMCTL + ['is-enabled', CERT_TIMER])
+    status['auto_renew'] = output.strip() == 'enabled' if code in (0, 1) else None
+    code, output = run_quiet(SYSTEMCTL + ['is-active', CERT_TIMER])
+    status['auto_renew_active'] = output.strip() == 'active' if code in (0, 3) else None
+    write_atomic(certificate_file, json.dumps(status, ensure_ascii=False))
+    return status
+
+
+def run_certificate(action, log_path, run):
+    """Действие над сертификатом: проверить, выпустить, включить или выключить автопродление."""
+    lines = []
+    code = 0
+    name, names = cert_names()
+    if action == 'cert-check':
+        lines.append('сертификат проверен')
+    elif action == 'cert-issue':
+        if name is None:
+            lines.append('адрес кабинета не домен — выпускать сертификат не на что')
+            code = 1
+        else:
+            command = CERTBOT + ['certonly', '--webroot', '-w', ACME_ROOT, '--cert-name', name]
+            for host in names:
+                command += ['-d', host]
+            command += ['--expand', '--force-renewal', '--non-interactive', '--agree-tos',
+                        '--register-unsafely-without-email', '--deploy-hook', 'systemctl reload nginx']
+            lines.append('$ certbot certonly ... ' + ' '.join('-d ' + host for host in names))
+            code, output = run_quiet(command)
+            lines.append(output.strip()[-3000:])
+    elif action in ('cert-auto-on', 'cert-auto-off'):
+        verb = ['enable', '--now'] if action == 'cert-auto-on' else ['disable', '--now']
+        lines.append('$ systemctl ' + ' '.join(verb) + ' ' + CERT_TIMER)
+        code, output = run_quiet(SYSTEMCTL + verb + [CERT_TIMER])
+        lines.append(output.strip()[-1000:])
+    with open(log_path, 'w', encoding='utf-8') as handle:
+        handle.write('\n'.join(line for line in lines if line) + '\n')
+    os.chmod(log_path, 0o644)
+    # Состояние пишется после действия: кабинет сразу видит новые даты и таймер.
+    cert_status()
+    write_state(run, status='succeeded' if code == 0 else 'failed', finished_at=now(), exit_code=code)
+
+
 def prune_runs():
     try:
         names = sorted(os.listdir(runs_dir), key=lambda n: os.lstat(os.path.join(runs_dir, n)).st_mtime)
@@ -227,6 +353,12 @@ def main():
         run_request(request_id, path, request)
     if releases_stale():
         refresh_releases(None)
+    # Состояние сертификата обновляется при каждом запуске (таймер — раз в десять минут): даты
+    # и таймер продления в кабинете не старше этого срока.
+    try:
+        cert_status()
+    except Exception as error:  # noqa: BLE001 — сбой чтения сертификата не должен ронять выкладку
+        print('состояние сертификата не записано: ' + str(error), file=sys.stderr)
     prune_runs()
 
 

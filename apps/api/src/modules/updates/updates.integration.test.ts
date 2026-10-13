@@ -6,7 +6,7 @@
  */
 
 import { mkdtempSync, rmSync } from 'node:fs';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { sql } from 'drizzle-orm';
@@ -265,5 +265,155 @@ describe('обновление из кабинета', () => {
       (await call('admin', 'GET', '/updates/22222222-2222-4222-8222-222222222222/log')).statusCode,
     ).toBe(404);
     expect((await call('admin', 'GET', '/updates/..%2F..%2Fetc/log')).statusCode).toBe(400);
+  });
+});
+
+describe('сертификат (ADR-0083)', () => {
+  const DAY = 86_400_000;
+  const certificate = (overrides: Record<string, unknown> = {}) => ({
+    checked_at: new Date().toISOString(),
+    cert_name: 'cp.zvonix.com',
+    expected_names: ['cp.zvonix.com', 'zvonix.com'],
+    covered_names: ['cp.zvonix.com', 'zvonix.com'],
+    present: true,
+    not_before: new Date(Date.now() - 30 * DAY).toISOString(),
+    not_after: new Date(Date.now() + 60 * DAY).toISOString(),
+    issuer: "Let's Encrypt",
+    auto_renew: true,
+    auto_renew_active: true,
+    problem: null,
+    ...overrides,
+  });
+
+  async function view() {
+    return (await call('admin', 'GET', '/certificate')).json<{
+      available: boolean;
+      state: string;
+      days_left: number | null;
+      missing_names: string[];
+      auto_renew: boolean | null;
+      busy: boolean;
+    }>();
+  }
+
+  async function clearRequests(): Promise<void> {
+    const dir = path.join(root, 'requests');
+    await mkdir(dir, { recursive: true });
+    for (const name of await readdir(dir)) await rm(path.join(dir, name));
+  }
+
+  it('закрыт для всех, кроме администратора', async () => {
+    expect((await api().inject({ method: 'GET', url: '/certificate' })).statusCode).toBe(401);
+    for (const role of ['support', 'client', 'partner'] as const) {
+      expect((await call(role, 'GET', '/certificate')).statusCode).toBe(403);
+      expect((await call(role, 'POST', '/certificate/issue')).statusCode).toBe(403);
+      expect((await call(role, 'POST', '/certificate/auto', { enabled: false })).statusCode).toBe(
+        403,
+      );
+    }
+  });
+
+  it('пока служба не прочитала сертификат — «нет данных», а не выдуманное состояние', async () => {
+    await rm(path.join(root, 'certificate.json'), { force: true });
+    const state = await view();
+    expect(state.available).toBe(false);
+    expect(state.state).toBe('unknown');
+  });
+
+  it('состояние считается по датам и по именам', async () => {
+    const file = path.join(root, 'certificate.json');
+
+    await writeFile(file, JSON.stringify(certificate()));
+    expect(await view()).toMatchObject({ available: true, state: 'ok', auto_renew: true });
+
+    await writeFile(file, JSON.stringify(certificate({ covered_names: ['cp.zvonix.com'] })));
+    expect(await view()).toMatchObject({ state: 'incomplete', missing_names: ['zvonix.com'] });
+
+    await writeFile(
+      file,
+      JSON.stringify(certificate({ not_after: new Date(Date.now() + 5 * DAY).toISOString() })),
+    );
+    const soon = await view();
+    expect(soon.state).toBe('soon');
+    expect(soon.days_left).toBeGreaterThanOrEqual(4);
+
+    await writeFile(
+      file,
+      JSON.stringify(certificate({ not_after: new Date(Date.now() - DAY).toISOString() })),
+    );
+    expect((await view()).state).toBe('expired');
+
+    await writeFile(file, JSON.stringify(certificate({ present: false, not_after: null })));
+    expect((await view()).state).toBe('missing');
+
+    await writeFile(
+      file,
+      JSON.stringify(certificate({ cert_name: null, expected_names: [], present: false })),
+    );
+    expect((await view()).state).toBe('not_configured');
+    // Туннель: выпускать сертификат не на что, и заявка не ставится.
+    expect((await call('admin', 'POST', '/certificate/issue')).statusCode).toBe(409);
+  });
+
+  it('выпуск ставится заявкой без имени домена; повтор, пока заявка ждёт, и сразу после — отказ', async () => {
+    await clearRequests();
+    await writeFile(path.join(root, 'certificate.json'), JSON.stringify(certificate()));
+
+    const first = await call('admin', 'POST', '/certificate/issue');
+    expect(first.statusCode).toBe(202);
+    const id = first.json<{ request: { id: string; action: string } }>().request.id;
+    const body = JSON.parse(
+      await readFile(path.join(root, 'requests', `${id}.json`), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(body['action']).toBe('cert-issue');
+    // В заявке нет ни домена, ни имён: их служба берёт из своих файлов.
+    expect(Object.keys(body).sort()).toEqual(['action', 'at', 'by', 'tag']);
+    expect((await view()).busy).toBe(true);
+
+    expect((await call('admin', 'POST', '/certificate/issue')).statusCode).toBe(409);
+    await clearRequests();
+
+    // Заявку приняли и выполнили минуту назад: у Let's Encrypt свои пределы, второй выпуск ждёт.
+    const done = '33333333-3333-4333-8333-333333333333';
+    await mkdir(path.join(root, 'runs', done), { recursive: true });
+    await writeFile(
+      path.join(root, 'runs', done, 'state.json'),
+      JSON.stringify({
+        id: done,
+        action: 'cert-issue',
+        tag: null,
+        by: 'admin@example.test',
+        requested_at: new Date().toISOString(),
+        status: 'succeeded',
+        started_at: new Date(Date.now() - 60_000).toISOString(),
+        finished_at: new Date().toISOString(),
+        exit_code: 0,
+      }),
+    );
+    expect((await call('admin', 'POST', '/certificate/issue')).statusCode).toBe(409);
+  });
+
+  it('автопродление включается и выключается заявкой; негодное тело отвергается', async () => {
+    await clearRequests();
+    const off = await call('admin', 'POST', '/certificate/auto', { enabled: false });
+    expect(off.statusCode).toBe(202);
+    expect(off.json<{ request: { action: string } }>().request.action).toBe('cert-auto-off');
+    await clearRequests();
+
+    const on = await call('admin', 'POST', '/certificate/auto', { enabled: true });
+    expect(on.json<{ request: { action: string } }>().request.action).toBe('cert-auto-on');
+    await clearRequests();
+
+    expect((await call('admin', 'POST', '/certificate/auto', { enabled: 'да' })).statusCode).toBe(
+      400,
+    );
+    expect(await readdir(path.join(root, 'requests'))).toEqual([]);
+  });
+
+  it('проверка — лёгкое действие: ставится, даже когда идёт выкладка', async () => {
+    await clearRequests();
+    expect((await call('admin', 'POST', '/updates/rollback')).statusCode).toBe(202);
+    expect((await call('admin', 'POST', '/certificate/check')).statusCode).toBe(202);
+    await clearRequests();
   });
 });

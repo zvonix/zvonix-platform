@@ -1106,6 +1106,46 @@ test.describe('обновление из кабинета (ADR-0074)', () => {
   });
 });
 
+test.describe('сертификат в настройках (ADR-0083)', () => {
+  test('состояние, имена и автопродление видны; выпуск ставится заявкой и закрывает кнопки', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/settings?section=certificate');
+
+    await expect(page.getByRole('heading', { name: 'Сертификат' })).toBeVisible();
+    await expect(page.getByText('Не на все адреса')).toBeVisible();
+    await expect(page.getByText('нет: www.zvonix.test')).toBeVisible();
+    await expect(page.getByText(/осталось 5\d дн|осталось 60 дней/u)).toBeVisible();
+    await expect(page.getByLabel('Продлевать автоматически')).toBeChecked();
+
+    await page.getByRole('button', { name: 'Выпустить сертификат' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('www.zvonix.test');
+    await dialog.getByRole('button', { name: 'Выпустить', exact: true }).click();
+
+    // Заявка ждёт службу, которой на стенде нет: кабинет показывает «Выполняется» и закрывает кнопки.
+    await expect(page.getByText('Выполняется…')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Выпустить сертификат' })).toBeDisabled();
+    await expect(page.getByLabel('Продлевать автоматически')).toBeDisabled();
+
+    // Уборка: заявка остаётся в общем каталоге стенда и мешала бы сценарию обновления.
+    const overview = await page.request.get('/api/updates');
+    const queue = ((await overview.json()) as { queue: { id: string }[] }).queue;
+    for (const item of queue) {
+      const cancelled = await page.request.post(`/api/updates/${item.id}/cancel`, {
+        headers: { 'X-Zvonix-Web': '1' },
+      });
+      expect(cancelled.status()).toBe(204);
+    }
+  });
+
+  test('раздел виден в списке настроек, а у поддержки настройки закрыты', async ({ page }) => {
+    await signIn(page, PEOPLE.support);
+    expect((await page.request.get('/api/certificate')).status()).toBe(403);
+  });
+});
+
 test.describe('шрифты со своего адреса', () => {
   test('IBM Plex загружается с площадки, а не с чужого сервера', async ({ page }) => {
     const foreign: string[] = [];

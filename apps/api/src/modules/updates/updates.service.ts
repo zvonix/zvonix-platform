@@ -16,7 +16,18 @@ import { readRelease, type ReleaseInfo } from '../../infra/release.js';
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 
-export type UpdateAction = 'deploy' | 'prepare' | 'rollback' | 'refresh';
+export type UpdateAction =
+  | 'deploy'
+  | 'prepare'
+  | 'rollback'
+  | 'refresh'
+  | 'cert-check'
+  | 'cert-issue'
+  | 'cert-auto-on'
+  | 'cert-auto-off';
+
+/** Лёгкие действия: чтение без изменений, не мешают идущей выкладке. */
+const LIGHT_ACTIONS: readonly UpdateAction[] = ['refresh', 'cert-check'];
 type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface ReleaseItem {
@@ -207,6 +218,18 @@ export class UpdatesService {
     return found.sort((a, b) => b.checked_at.localeCompare(a.checked_at));
   }
 
+  /** Ждущие заявки: для соседних разделов (сертификат), которым нужно знать, что служба занята. */
+  async queued(): Promise<QueuedRequest[]> {
+    if (!(await this.isAvailable())) return [];
+    return this.queue();
+  }
+
+  /** Последние запуски: то же, что видно в истории обновлений. */
+  async recentRuns(): Promise<RunView[]> {
+    if (!(await this.isAvailable())) return [];
+    return this.runs();
+  }
+
   private async queue(): Promise<QueuedRequest[]> {
     const found: QueuedRequest[] = [];
     for (const name of await readdir(this.requestsDir)) {
@@ -266,10 +289,12 @@ export class UpdatesService {
     if (!(await this.isAvailable())) {
       throw conflict('Обновление из кабинета на этой площадке не настроено');
     }
-    if (action !== 'refresh') {
+    if (!LIGHT_ACTIONS.includes(action)) {
       const busy =
-        (await this.queue()).some((item) => item.action !== 'refresh') ||
-        (await this.runs()).some((run) => run.status === 'running' && run.action !== 'refresh');
+        (await this.queue()).some((item) => !LIGHT_ACTIONS.includes(item.action)) ||
+        (await this.runs()).some(
+          (run) => run.status === 'running' && !LIGHT_ACTIONS.includes(run.action),
+        );
       if (busy) throw conflict('Уже идёт или ждёт другое обновление — дождитесь его окончания');
     }
     if (action === 'deploy' || action === 'prepare') {

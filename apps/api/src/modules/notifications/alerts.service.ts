@@ -25,6 +25,7 @@ import { PaymentsService } from '../payments/payments.service.js';
 import { ServersService } from '../servers/servers.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { QualityService, type QualityView } from '../telephony/quality.service.js';
+import { CertificateStatusService } from '../updates/certificate-status.service.js';
 
 /** Не чаще раза в полсуток по одному объекту: напоминание, а не поток. */
 const REPEAT_HOURS = 12;
@@ -79,6 +80,7 @@ export class AlertsService {
     private readonly billing: BillingService,
     private readonly servers: ServersService,
     private readonly messages: MessagesService,
+    private readonly certificate: CertificateStatusService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('alerts');
@@ -218,7 +220,68 @@ export class AlertsService {
       this.logger.error('Тревоги: сообщения не прочитаны', cause);
     }
 
+    try {
+      alerts.push(...(await this.certificateAlerts(now)));
+    } catch (cause) {
+      this.logger.error('Тревоги: сертификат не прочитан', cause);
+    }
+
     return alerts;
+  }
+
+  /**
+   * Сертификат кабинета скоро истечёт, истёк или не выпущен (ADR-0083). При работающем
+   * автопродлении письма не будет вовсе: оно нужно, когда продление тихо сломалось.
+   */
+  private async certificateAlerts(now: Date): Promise<Alert[]> {
+    const status = await this.certificate.status(now);
+    const name = status.domain ?? 'кабинета';
+    const hint = [
+      '',
+      'Откройте «Настройки площадки» → «Сертификат»: там видно причину и кнопка «Выпустить сертификат».',
+      'Если выпуск не получается, пришлите журнал из того же раздела.',
+    ];
+    switch (status.state) {
+      case 'soon':
+        return [
+          {
+            kind: 'alert_certificate:soon',
+            subject: `Zvonix: сертификат ${name} скоро истекает`,
+            body: [
+              `Сертификат ${name} действует ещё ${String(status.days_left ?? 0)} дн. (до ${status.not_after ?? 'неизвестно'}).`,
+              status.auto_renew === true
+                ? 'Автопродление включено, но не сработало: проверьте, что домен указывает на этот сервер и порт 80 открыт.'
+                : 'Автопродление выключено: сертификат сам не продлится.',
+              'После окончания браузеры начнут предупреждать посетителей и клиентов.',
+              ...hint,
+            ].join('\n'),
+          },
+        ];
+      case 'expired':
+        return [
+          {
+            kind: 'alert_certificate:expired',
+            subject: `Zvonix: сертификат ${name} истёк`,
+            body: [
+              `Срок сертификата ${name} истёк (${status.not_after ?? 'неизвестно'}). Браузеры предупреждают всех, кто открывает кабинет и сайт.`,
+              ...hint,
+            ].join('\n'),
+          },
+        ];
+      case 'missing':
+        return [
+          {
+            kind: 'alert_certificate:missing',
+            subject: `Zvonix: для ${name} нет сертификата`,
+            body: [
+              `На сервере нет сертификата для ${name}: соединение с кабинетом не защищено.`,
+              ...hint,
+            ].join('\n'),
+          },
+        ];
+      default:
+        return [];
+    }
   }
 
   /** Сообщения MAX, которые массово не уходят: за последний час не отправлено больше половины. */
