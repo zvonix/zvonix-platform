@@ -1,9 +1,10 @@
 'use client';
 
-import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { shouldRetryQuery } from '@/lib/query-retry';
+import { onSessionLost } from '@/lib/session-lost';
 
 /**
  * Общие настройки запросов.
@@ -16,9 +17,15 @@ import { shouldRetryQuery } from '@/lib/query-retry';
  */
 function createClient(): QueryClient {
   const client: QueryClient = new QueryClient({
+    queryCache: new QueryCache({
+      onError: (error, query) => {
+        onSessionLost(client, error, query.queryKey);
+      },
+    }),
     mutationCache: new MutationCache({
       onError: (error) => {
         if (error instanceof ApiError && error.timedOut) void client.invalidateQueries();
+        onSessionLost(client, error);
       },
     }),
     defaultOptions: {
