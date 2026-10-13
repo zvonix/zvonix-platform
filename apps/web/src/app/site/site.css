@@ -1,0 +1,138 @@
+/*
+ * Оформление сайта проекта (ADR-0082).
+ *
+ * Цвета — токены кабинета (`--background`, `--primary`, …): у сайта и кабинета один фирменный
+ * акцент и обе темы. Здесь только то, чего токенами не выразить: движение и фон героя.
+ * Всё движение отключается при `prefers-reduced-motion`.
+ */
+
+.site-hero {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Сетка — отдельным слоем с маской: маска на самом блоке гасила бы и текст внизу героя. */
+.site-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 48px 48px;
+  background-position: center top;
+  mask-image: linear-gradient(to bottom, #000 40%, transparent 100%);
+}
+
+.site-hero::before {
+  content: '';
+  position: absolute;
+  inset: -20% 0 auto 50%;
+  width: 70%;
+  height: 80%;
+  translate: -35% 0;
+  z-index: -1;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklab, var(--primary) 22%, transparent),
+    transparent
+  );
+  filter: blur(8px);
+}
+
+/* Появление при прокрутке: без скриптов блоки видны сразу. */
+[data-reveal] {
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s ease;
+}
+
+[data-reveal='pending'] {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+[data-reveal='shown'] {
+  opacity: 1;
+  transform: none;
+}
+
+/* Путь вызова: точка бежит по линии между узлами. */
+.site-flow-line {
+  position: relative;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.site-flow-line::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 28%;
+  background: linear-gradient(to right, transparent, var(--primary), transparent);
+  animation: site-flow 2.4s linear infinite;
+}
+
+.site-flow-line[data-step='2']::after {
+  animation-delay: 0.5s;
+}
+.site-flow-line[data-step='3']::after {
+  animation-delay: 1s;
+}
+.site-flow-line[data-step='4']::after {
+  animation-delay: 1.5s;
+}
+
+@keyframes site-flow {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(360%);
+  }
+}
+
+/* На телефоне линия вертикальная: точка бежит сверху вниз. */
+@media (max-width: 767px) {
+  .site-flow-line::after {
+    inset: 0 0 auto 0;
+    width: auto;
+    height: 28%;
+    background: linear-gradient(to bottom, transparent, var(--primary), transparent);
+    animation-name: site-flow-vertical;
+  }
+}
+
+@keyframes site-flow-vertical {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(360%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal],
+  [data-reveal='pending'] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .site-flow-line::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.25;
+  }
+}

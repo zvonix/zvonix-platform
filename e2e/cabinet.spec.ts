@@ -1988,3 +1988,42 @@ test.describe('первый запуск', () => {
     await expect(page).toHaveURL(/\/login$/u);
   });
 });
+
+test.describe('сайт проекта (ADR-0082)', () => {
+  test('основной домен отдаёт сайт от корня, страницы связаны ссылками, кабинет прежний', async ({
+    browser,
+  }) => {
+    // Стенд подменяет основной домен заголовком: его прокси переписывает путь, как nginx.
+    const context = await browser.newContext({ extraHTTPHeaders: { 'x-zvonix-site': '1' } });
+    const page = await context.newPage();
+
+    await page.goto('/');
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Звонки и сообщения в одном месте' }),
+    ).toBeVisible();
+    // Сайт открыт поисковикам, в отличие от кабинета.
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /index/u);
+    await expect(page.locator('meta[name="robots"]')).not.toHaveAttribute('content', /noindex/u);
+
+    await page
+      .getByRole('navigation', { name: 'Разделы сайта' })
+      .getByRole('link', { name: 'Цены' })
+      .click();
+    await expect(page).toHaveURL(/\/pricing$/u);
+    await expect(page.getByRole('heading', { name: 'Цены от' })).toBeVisible();
+
+    await page.goto('/faq');
+    await expect(page.getByRole('heading', { level: 1, name: 'Частые вопросы' })).toBeVisible();
+    await page.goto('/contacts');
+    await expect(page.getByRole('heading', { level: 1, name: 'Свяжитесь с нами' })).toBeVisible();
+    await context.close();
+  });
+
+  test('без заголовка тот же адрес — кабинет: вход, а не сайт', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/login/u);
+    await expect(
+      page.getByRole('heading', { name: 'Звонки и сообщения в одном месте' }),
+    ).toHaveCount(0);
+  });
+});
