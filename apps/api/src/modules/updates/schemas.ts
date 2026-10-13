@@ -11,3 +11,5 @@ export const deployRequestSchema = z.object({ tag: releaseTagSchema });
 export const logQuerySchema = z.object({
   offset: z.coerce.number().int('должно быть целым числом').min(0).default(0),
 });
+
+export const certificateAutoSchema = z.object({ enabled: z.boolean() });

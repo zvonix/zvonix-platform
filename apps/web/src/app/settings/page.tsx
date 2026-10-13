@@ -11,6 +11,7 @@ import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { useUrlState } from '@/lib/url-state';
 import { useSession } from '@/lib/session';
+import { CertificatePanel } from './certificate-panel';
 import { SettingField, labelOf, type DraftValue, type SettingView } from './setting-field';
 
 const SETTINGS_QUERY_KEY = ['settings'] as const;
@@ -174,6 +175,8 @@ function SettingsForm() {
       ),
       prefix: group.prefixes[0] ?? '',
     })),
+    // Сертификат — не настройка из списка, а состояние сервера с действиями (ADR-0083).
+    { key: 'certificate', title: 'Сертификат', settings: [], prefix: 'certificate' },
     ...(rest.length > 0 ? [{ key: 'other', title: 'Прочее', settings: rest, prefix: '' }] : []),
   ];
   const section = sections.find((candidate) => candidate.key === url.get('section')) ?? sections[0];
@@ -274,6 +277,7 @@ function SettingsForm() {
             <h2 className="pb-2 font-semibold">{section.title}</h2>
             {/* Настройка, для которой ещё нет раздела, живёт в «Прочем»: лучше показать под ключом,
                 чем не показать вовсе — иначе новое поле пропадает молча. */}
+            {section.key === 'certificate' && <CertificatePanel />}
             <div className="flex flex-col gap-4">
               {subgroupsOf(section.settings).map((group) => (
                 <div key={group.title ?? ''}>

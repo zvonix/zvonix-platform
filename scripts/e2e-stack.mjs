@@ -242,6 +242,24 @@ function prepareUpdaterDir() {
       ],
     }),
   );
+  // Состояние сертификата, как его оставила бы служба обновления (ADR-0083): не закрывает www.
+  const day = 86_400_000;
+  writeFileSync(
+    path.join(dir, 'certificate.json'),
+    JSON.stringify({
+      checked_at: new Date().toISOString(),
+      cert_name: 'cp.zvonix.test',
+      expected_names: ['cp.zvonix.test', 'zvonix.test', 'www.zvonix.test'],
+      covered_names: ['cp.zvonix.test', 'zvonix.test'],
+      present: true,
+      not_before: new Date(Date.now() - 30 * day).toISOString(),
+      not_after: new Date(Date.now() + 60 * day).toISOString(),
+      issuer: "Let's Encrypt",
+      auto_renew: true,
+      auto_renew_active: true,
+      problem: null,
+    }),
+  );
   writeFileSync(
     path.join(run, 'state.json'),
     JSON.stringify({

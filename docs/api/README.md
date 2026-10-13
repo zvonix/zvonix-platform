@@ -65,6 +65,8 @@
   Основание — [ADR-0071](../adr/0071-soobscheniya-max.md).
 - [servers.md](servers.md) — состояние серверов: нагрузка, память, диск площадки и узлов, история,
   сроки хранения. Основание — [ADR-0065](../adr/0065-sostoyanie-serverov-i-istoriya.md).
+- [certificate.md](certificate.md) — сертификат кабинета: даты, имена, выпуск, автопродление.
+  Основание — [ADR-0083](../adr/0083-sertifikat-v-nastroykah.md).
 - [public.md](public.md) — открытые данные для сайта проекта без входа: контакты и цены «от».
   Основание — [ADR-0082](../adr/0082-sayt-proekta.md).
 - [node.md](node.md) — узел АТС → control plane: учётные записи SIP, запрос маршрута
