@@ -8,6 +8,7 @@ import { PaymentsModule } from '../payments/payments.module.js';
 import { ServersModule } from '../servers/servers.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { TelephonyModule } from '../telephony/telephony.module.js';
+import { CertificateStatusModule } from '../updates/certificate-status.module.js';
 import { AlertsService } from './alerts.service.js';
 import { LowBalanceService } from './low-balance.service.js';
 import { PaymentNoticeService } from './payment-notice.service.js';
@@ -17,6 +18,7 @@ import { SuspensionNoticeService } from './suspension-notice.service.js';
 @Module({
   imports: [
     BillingModule,
+    CertificateStatusModule,
     IdentityModule,
     MailModule,
     MessagingModule,
