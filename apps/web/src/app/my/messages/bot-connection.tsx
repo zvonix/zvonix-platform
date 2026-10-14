@@ -134,7 +134,7 @@ export function BotConnection() {
                 ? `ваш бот @${own.bot.username}`
                 : 'бот площадки'}
             </dd>
-            <dt className="text-muted-foreground">Ссылка для пассажиров</dt>
+            <dt className="text-muted-foreground">Ссылка для ваших клиентов</dt>
             <dd className="num select-all break-all" translate="no">
               {connection.link}
             </dd>
@@ -146,7 +146,7 @@ export function BotConnection() {
             </dd>
           </dl>
 
-          <QrCode value={connection.link} label="QR-код ссылки для пассажиров" />
+          <QrCode value={connection.link} label="QR-код ссылки для ваших клиентов" />
 
           {connection.enabled && !connection.fee_paid && (
             <p className="text-warn">
@@ -387,7 +387,7 @@ function SettingsForm({
     >
       <TextField
         id="bot-greeting"
-        label="Приветствие, когда пассажир запускает бота"
+        label="Приветствие, когда ваш клиент запускает бота"
         value={greeting}
         max={BOT_GREETING_MAX}
         placeholder="Стандартное. {служба} — название вашей службы"
