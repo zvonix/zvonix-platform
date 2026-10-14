@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DialogField, DialogForm } from '@/components/form-dialog';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AllowedIpsField, parseAddresses } from './allowed-ips';
 
@@ -22,6 +23,13 @@ export function NewNodeForm({ onCreate }: { onCreate: (draft: NodeDraft) => Prom
   const [name, setName] = useState('');
   const [sipAddress, setSipAddress] = useState('');
   const [allowedIps, setAllowedIps] = useState('');
+  // Кабинет открыт по `cp.<домен>`, значит, адрес SIP по тому же соглашению — `sip.<домен>`: имя,
+  // а не IP, чтобы при смене сервера узла хватило одной записи DNS. Определяется в браузере.
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  useEffect(() => {
+    const match = /^cp\.(.+)$/u.exec(window.location.hostname);
+    if (match?.[1] !== undefined) setSuggestion(`sip.${match[1]}:5060`);
+  }, []);
 
   const trimmedName = name.trim();
   const trimmedSip = sipAddress.trim();
@@ -52,7 +60,7 @@ export function NewNodeForm({ onCreate }: { onCreate: (draft: NodeDraft) => Prom
       <DialogField label="Адрес SIP для партнёров">
         <Input
           className="num"
-          placeholder="sip.example.com:5060"
+          placeholder={suggestion ?? 'sip.example.com:5060'}
           value={sipAddress}
           onChange={(event) => {
             setSipAddress(event.target.value);
@@ -60,10 +68,27 @@ export function NewNodeForm({ onCreate }: { onCreate: (draft: NodeDraft) => Prom
         />
       </DialogField>
 
-      <p className="text-muted-foreground sm:col-span-2">
-        Адрес SIP — тот, на который партнёры направляют свои GOIP. Это <b>не</b> адрес, с которого
-        узел обращается к платформе.
-      </p>
+      <div className="flex flex-col gap-2 text-muted-foreground sm:col-span-2">
+        <p>
+          Адрес SIP — тот, на который партнёры направляют свои GOIP. Это <b>не</b> адрес, с которого
+          узел обращается к платформе. Лучше имя, чем IP: при смене сервера достаточно поменять
+          запись DNS, а партнёрам ничего перенастраивать не придётся.
+        </p>
+        {suggestion !== null && sipAddress === '' && (
+          <div>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={() => {
+                setSipAddress(suggestion);
+              }}
+            >
+              Подставить {suggestion}
+            </Button>
+          </div>
+        )}
+      </div>
 
       <AllowedIpsField
         value={allowedIps}
