@@ -36,6 +36,7 @@ interface AccountView {
   readonly tariff_id: string | null;
   readonly price: string | null;
   readonly limit_per_minute: number | null;
+  readonly limit_per_hour: number | null;
   readonly limit_per_day: number | null;
   /** Автопрогрев и равномерная отправка включены. */
   readonly warmup_enabled: boolean;
@@ -59,6 +60,7 @@ const toView = (row: MessengerAccountRow, now: Date = new Date()): AccountView =
   tariff_id: row.tariffId,
   price: row.price === null ? null : Money.format(row.price),
   limit_per_minute: row.limitPerMinute,
+  limit_per_hour: row.limitPerHour,
   limit_per_day: row.limitPerDay,
   warmup_enabled: row.warmupEnabled,
   warmup_day: effectiveLimits(row, now).warmupDay,

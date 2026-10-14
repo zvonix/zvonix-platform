@@ -15,6 +15,7 @@ export type MessengerTariffId = Id<'messengerTariff'>;
 export interface TariffTerms {
   readonly price: MoneyAmount;
   readonly limitPerMinute: number | null;
+  readonly limitPerHour: number | null;
   readonly limitPerDay: number | null;
 }
 
@@ -91,6 +92,7 @@ export class MessengerTariffsRepository {
       name?: string;
       price?: MoneyAmount;
       limitPerMinute?: number | null;
+      limitPerHour?: number | null;
       limitPerDay?: number | null;
     },
     executor: Executor,
@@ -101,6 +103,7 @@ export class MessengerTariffsRepository {
         ...(patch.name === undefined ? {} : { name: patch.name }),
         ...(patch.price === undefined ? {} : { price: patch.price }),
         ...(patch.limitPerMinute === undefined ? {} : { limitPerMinute: patch.limitPerMinute }),
+        ...(patch.limitPerHour === undefined ? {} : { limitPerHour: patch.limitPerHour }),
         ...(patch.limitPerDay === undefined ? {} : { limitPerDay: patch.limitPerDay }),
       })
       .where(eq(messengerTariffs.id, id))

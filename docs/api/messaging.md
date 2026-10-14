@@ -12,7 +12,7 @@
 {
   "id": "…", "label": "Основной", "status": "pending",
   "phone": null, "price": "0.45",
-  "limit_per_minute": 10, "limit_per_day": 500,
+  "limit_per_minute": 10, "limit_per_hour": 100, "limit_per_day": 500,
   "state_checked_at": "…", "created_at": "…"
 }
 ```
@@ -61,14 +61,14 @@ MAX либо нет связи; `retired` — списан (в списках е
 действуют из тарифа ([ADR-0075](../adr/0075-tarify-max-nabor-uslovij.md)). Вид аккаунта: `state_reason` — почему `unavailable`: `suspended` (работа приостановлена службой доставки: не оплачено,
 не активировано, временный запрет), `blocked` (MAX ограничил аккаунт), `logged_out` (вышел из MAX); у рабочего и ждущего
 входа — `null`; кабинет показывает его значком «?» рядом с состоянием. `tariff_id` — назначенный
-тариф (`null` — идёт за тарифом по умолчанию), `price`, `limit_per_minute`, `limit_per_day` — **действующие** условия
+тариф (`null` — идёт за тарифом по умолчанию), `price`, `limit_per_minute`, `limit_per_hour`, `limit_per_day` — **действующие** условия
 (из своего тарифа или из умолчания; `price: null` — тарифа нет, аккаунт сообщений не принимает). Журнал:
 `messenger_account.terms_changed`.
 
 ### `PUT /partner/messenger/accounts/:id/tariff`
 
 `{ "tariffId": "<uuid>" }` или `{ "tariffId": null }` (идти за умолчанием) → `200` с `tariff_id`, `price`,
-`limit_per_minute`, `limit_per_day` — действующими условиями. Чужой тариф или аккаунт — `404`. Журнал:
+`limit_per_minute`, `limit_per_hour`, `limit_per_day` — действующими условиями. Чужой тариф или аккаунт — `404`. Журнал:
 `messenger_account.tariff_assigned`.
 
 ## Тарифы MAX партнёра
@@ -78,18 +78,18 @@ MAX либо нет связи; `retired` — списан (в списках е
 
 ### `GET /partner/messenger/tariffs`
 
-`200` → `{ "tariffs": [ { "id", "name", "price": "0.45", "limit_per_minute", "limit_per_day", "is_default",
+`200` → `{ "tariffs": [ { "id", "name", "price": "0.45", "limit_per_minute", "limit_per_hour", "limit_per_day", "is_default",
 "accounts" } ] }`; `accounts` — сколько живых аккаунтов действует по тарифу (у умолчания — и идущие за ним).
 
 ### `POST /partner/messenger/tariffs`
 
-`{ "name": "Основной", "price": "0.45", "limitPerMinute": 10, "limitPerDay": 500, "isDefault": false }` → `201`.
+`{ "name": "Основной", "price": "0.45", "limitPerMinute": 10, "limitPerHour": 100, "limitPerDay": 500, "isDefault": false }` → `201`.
 Цена — от 0,01 до 100 ₽; лимиты — целые от 1 или `null`; в минуту не больше, чем в сутки (`400`). Имя уникально у
 партнёра без учёта регистра (`409`). Журнал: `messenger_tariff.created`.
 
 ### `PATCH /partner/messenger/tariffs/:id`
 
-Любые из `name`, `price`, `limitPerMinute`, `limitPerDay` (`null` у лимита — снять). Журнал: `messenger_tariff.changed`.
+Любые из `name`, `price`, `limitPerMinute`, `limitPerHour`, `limitPerDay` (`null` у лимита — снять). Журнал: `messenger_tariff.changed`.
 
 ### `POST /partner/messenger/tariffs/:id/default`
 
@@ -368,3 +368,9 @@ MAX либо нет связи; `retired` — списан (в списках е
 - **Отправка:** бот выбирается по подключению клиента; номер подписчика другого бота (площадки, когда клиент на своём)
   идёт через аккаунты. Форма отправки в кабинете (`GET /client/messages/price`) при отсутствии аккаунтов партнёров
   показывает цену бота, если он работает.
+
+**Лимит в час** (`limit_per_hour`, `limitPerHour`; пусто — без ограничения). Окна вложены: в минуту не больше, чем
+в час, в час — чем в сутки, иначе `400`. Сообщение сверх часового лимита не отклоняется, а ждёт в очереди, как и у
+остальных окон. При автопрогреве действует меньшее из заданного лимита и равномерной доли суток
+([ADR-0078](../adr/0078-progrev-akkauntov-max.md)).
+

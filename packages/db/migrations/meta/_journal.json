@@ -407,6 +407,13 @@
       "when": 1791601158141,
       "tag": "0057_prioritety_klienta",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1791937724534,
+      "tag": "0058_limit_max_v_chas",
+      "breakpoints": true
     }
   ]
 }

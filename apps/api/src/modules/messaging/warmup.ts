@@ -23,11 +23,14 @@ export interface EffectiveLimits {
  * чтобы сообщения не уходили пачкой.
  */
 export function effectiveLimits(
-  account: Pick<MessengerAccountRow, 'warmupEnabled' | 'warmupStartedAt' | 'limitPerDay'>,
+  account: Pick<
+    MessengerAccountRow,
+    'warmupEnabled' | 'warmupStartedAt' | 'limitPerDay' | 'limitPerHour'
+  >,
   now: Date,
 ): EffectiveLimits {
   if (!account.warmupEnabled) {
-    return { daily: account.limitPerDay, hourly: null, warmupDay: null };
+    return { daily: account.limitPerDay, hourly: account.limitPerHour, warmupDay: null };
   }
   const ceiling = account.limitPerDay ?? WARMUP_DEFAULT_CEILING;
   const day =
@@ -35,9 +38,11 @@ export function effectiveLimits(
       ? null
       : Math.max(0, Math.floor((now.getTime() - account.warmupStartedAt.getTime()) / 86_400_000));
   const daily = day === null ? ceiling : warmupDailyLimit(day, ceiling);
+  // Лимит в час из тарифа действует и во время прогрева: берётся меньшее из заданного и равномерной доли суток.
+  const spread = spreadHourlyLimit(daily);
   return {
     daily,
-    hourly: spreadHourlyLimit(daily),
+    hourly: account.limitPerHour === null ? spread : Math.min(account.limitPerHour, spread),
     warmupDay: day !== null && day < WARMUP_DAYS ? day : null,
   };
 }
@@ -57,6 +62,7 @@ export function accountReadyAt(
     | 'warmupEnabled'
     | 'warmupStartedAt'
     | 'limitPerDay'
+    | 'limitPerHour'
     | 'limitPerMinute'
     | 'lastUsedAt'
     | 'pausedUntil'

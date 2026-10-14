@@ -44,6 +44,7 @@ interface Account {
   readonly phone: string | null;
   readonly price: string | null;
   readonly limit_per_minute: number | null;
+  readonly limit_per_hour: number | null;
   readonly limit_per_day: number | null;
   readonly warmup_enabled: boolean;
   readonly warmup_day: number | null;
@@ -209,6 +210,9 @@ function MessagingView() {
                       ? '—'
                       : `${String(account.limit_per_minute)}/мин`}
                   </span>
+                  {account.limit_per_hour !== null && (
+                    <span className="block text-faint">{`${String(account.limit_per_hour)}/час`}</span>
+                  )}
                   <span className="block text-faint">
                     {account.daily_limit_now === null
                       ? '—'

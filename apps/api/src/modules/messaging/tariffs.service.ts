@@ -40,10 +40,11 @@ export interface TariffView {
   readonly accounts: number;
 }
 
-/** Условия тарифа: цена в границах продукта, лимиты положительные, минутный не больше суточного. */
+/** Условия тарифа: цена в границах продукта, лимиты положительные, минутный ≤ часового ≤ суточного. */
 function assertTariffTerms(terms: {
   price?: MoneyAmount;
   limitPerMinute?: number | null;
+  limitPerHour?: number | null;
   limitPerDay?: number | null;
 }): void {
   if (terms.price !== undefined) {
@@ -55,19 +56,21 @@ function assertTariffTerms(terms: {
       );
     }
   }
-  for (const limit of [terms.limitPerMinute, terms.limitPerDay]) {
+  for (const limit of [terms.limitPerMinute, terms.limitPerHour, terms.limitPerDay]) {
     if (limit !== undefined && limit !== null && (limit < 1 || limit > MESSENGER_LIMIT_MAX)) {
       throw validationFailed(`Лимит — от 1 до ${String(MESSENGER_LIMIT_MAX)}`);
     }
   }
-  if (
-    terms.limitPerMinute !== undefined &&
-    terms.limitPerMinute !== null &&
-    terms.limitPerDay !== undefined &&
-    terms.limitPerDay !== null &&
-    terms.limitPerMinute > terms.limitPerDay
-  ) {
-    throw validationFailed('Лимит в минуту не может быть больше лимита в сутки');
+  // Окна вложены друг в друга: в минуту не больше, чем в час, а в час — чем в сутки. Пустое окно не сравнивается.
+  const ordered: [string, number | null | undefined, string, number | null | undefined][] = [
+    ['в минуту', terms.limitPerMinute, 'в час', terms.limitPerHour],
+    ['в час', terms.limitPerHour, 'в сутки', terms.limitPerDay],
+    ['в минуту', terms.limitPerMinute, 'в сутки', terms.limitPerDay],
+  ];
+  for (const [smallName, small, bigName, big] of ordered) {
+    if (small !== undefined && small !== null && big !== undefined && big !== null && small > big) {
+      throw validationFailed(`Лимит ${smallName} не может быть больше лимита ${bigName}`);
+    }
   }
 }
 
@@ -76,6 +79,7 @@ function view(row: MessengerTariffRow) {
     name: row.name,
     price: Money.format(row.price),
     limit_per_minute: row.limitPerMinute,
+    limit_per_hour: row.limitPerHour,
     limit_per_day: row.limitPerDay,
     is_default: row.isDefault,
   };
@@ -142,6 +146,7 @@ export class MessengerTariffsService {
       name?: string;
       price?: MoneyAmount;
       limitPerMinute?: number | null;
+      limitPerHour?: number | null;
       limitPerDay?: number | null;
     },
   ): Promise<MessengerTariffRow> {
@@ -156,6 +161,7 @@ export class MessengerTariffsService {
         ...(patch.price === undefined ? {} : { price: patch.price }),
         limitPerMinute:
           patch.limitPerMinute === undefined ? before.limitPerMinute : patch.limitPerMinute,
+        limitPerHour: patch.limitPerHour === undefined ? before.limitPerHour : patch.limitPerHour,
         limitPerDay: patch.limitPerDay === undefined ? before.limitPerDay : patch.limitPerDay,
       });
       const after = await this.repository.update(tariffId, patch, tx);

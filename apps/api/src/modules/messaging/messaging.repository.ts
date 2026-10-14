@@ -248,9 +248,10 @@ export class MessagingRepository {
   ): Promise<void> {
     await executor.execute(sql`
       update messenger_accounts a
-      set price = e.price, limit_per_minute = e.limit_per_minute, limit_per_day = e.limit_per_day
+      set price = e.price, limit_per_minute = e.limit_per_minute,
+          limit_per_hour = e.limit_per_hour, limit_per_day = e.limit_per_day
       from (
-        select a2.id, t.price, t.limit_per_minute, t.limit_per_day
+        select a2.id, t.price, t.limit_per_minute, t.limit_per_hour, t.limit_per_day
         from messenger_accounts a2
         left join messenger_tariffs d on d.partner_id = a2.partner_id and d.is_default
         left join messenger_tariffs t on t.id = coalesce(a2.tariff_id, d.id)

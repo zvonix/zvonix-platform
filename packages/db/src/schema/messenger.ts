@@ -64,6 +64,7 @@ export const messengerTariffs = pgTable(
     price: money().notNull(),
     /** Лимиты отправки; пусто — без ограничения. Сообщение сверх лимита ждёт, а не отклоняется. */
     limitPerMinute: integer(),
+    limitPerHour: integer(),
     limitPerDay: integer(),
     isDefault: boolean().notNull().default(false),
     createdAt: createdAt(),
@@ -74,7 +75,7 @@ export const messengerTariffs = pgTable(
     check('messenger_tariffs_price_positive', sql`${t.price} > 0`),
     check(
       'messenger_tariffs_limits_positive',
-      sql`(${t.limitPerMinute} is null or ${t.limitPerMinute} > 0) and (${t.limitPerDay} is null or ${t.limitPerDay} > 0)`,
+      sql`(${t.limitPerMinute} is null or ${t.limitPerMinute} > 0) and (${t.limitPerHour} is null or ${t.limitPerHour} > 0) and (${t.limitPerDay} is null or ${t.limitPerDay} > 0)`,
     ),
     // Имя уникально у партнёра без учёта регистра; регистр приводится в локали ICU (ADR-0038).
     uniqueIndex('messenger_tariffs_partner_name_idx').on(
@@ -134,6 +135,7 @@ export const messengerAccounts = pgTable(
      */
     price: money(),
     limitPerMinute: integer(),
+    limitPerHour: integer(),
     limitPerDay: integer(),
 
     /** Когда аккаунт отправлял последний раз: от неё зависит пауза и порядок выбора. */
@@ -180,7 +182,7 @@ export const messengerAccounts = pgTable(
     check('messenger_accounts_price_positive', sql`${t.price} is null or ${t.price} > 0`),
     check(
       'messenger_accounts_limits_positive',
-      sql`(${t.limitPerMinute} is null or ${t.limitPerMinute} > 0) and (${t.limitPerDay} is null or ${t.limitPerDay} > 0)`,
+      sql`(${t.limitPerMinute} is null or ${t.limitPerMinute} > 0) and (${t.limitPerHour} is null or ${t.limitPerHour} > 0) and (${t.limitPerDay} is null or ${t.limitPerDay} > 0)`,
     ),
     uniqueIndex('messenger_accounts_instance_key').on(t.provider, t.providerInstanceId),
     index('messenger_accounts_partner_idx').on(t.partnerId),

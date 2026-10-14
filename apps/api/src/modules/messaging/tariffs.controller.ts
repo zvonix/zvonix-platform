@@ -19,6 +19,7 @@ interface TariffJson {
   readonly name: string;
   readonly price: string;
   readonly limit_per_minute: number | null;
+  readonly limit_per_hour: number | null;
   readonly limit_per_day: number | null;
   readonly is_default: boolean;
   /** Сколько живых аккаунтов действует по этому тарифу. */
@@ -30,6 +31,7 @@ const toJson = (row: MessengerTariffRow, accounts: number): TariffJson => ({
   name: row.name,
   price: Money.format(row.price),
   limit_per_minute: row.limitPerMinute,
+  limit_per_hour: row.limitPerHour,
   limit_per_day: row.limitPerDay,
   is_default: row.isDefault,
   accounts,
@@ -67,6 +69,7 @@ export class MessengerTariffsController {
       ...(body.name === undefined ? {} : { name: body.name }),
       ...(body.price === undefined ? {} : { price: body.price }),
       ...(body.limitPerMinute === undefined ? {} : { limitPerMinute: body.limitPerMinute }),
+      ...(body.limitPerHour === undefined ? {} : { limitPerHour: body.limitPerHour }),
       ...(body.limitPerDay === undefined ? {} : { limitPerDay: body.limitPerDay }),
     });
     return { tariff: toJson(row, 0) };
@@ -98,6 +101,7 @@ export class MessengerTariffsController {
     tariff_id: string | null;
     price: string | null;
     limit_per_minute: number | null;
+    limit_per_hour: number | null;
     limit_per_day: number | null;
   }> {
     const row = await this.tariffs.assign(
@@ -109,6 +113,7 @@ export class MessengerTariffsController {
       tariff_id: row.tariffId,
       price: row.price === null ? null : Money.format(row.price),
       limit_per_minute: row.limitPerMinute,
+      limit_per_hour: row.limitPerHour,
       limit_per_day: row.limitPerDay,
     };
   }
