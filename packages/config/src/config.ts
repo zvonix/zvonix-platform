@@ -564,7 +564,26 @@ export function loadConfig(
     throw new ConfigError(problems);
   }
 
-  return Object.freeze(result.data);
+  return Object.freeze({ ...result.data, PUBLIC_BASE_URL: controlPlaneUrl(result.data) });
+}
+
+/** Адрес control plane, который `PUBLIC_BASE_URL` получает по умолчанию (тот, что годится только узлу на этой же машине). */
+const LOOPBACK_CONTROL_PLANE = 'http://127.0.0.1:8000';
+
+/**
+ * Адрес площадки для узлов АТС и клиентов SMPP.
+ *
+ * Не задан (или остался значением по умолчанию — 127.0.0.1) при кабинете на https — берётся из адреса кабинета:
+ * `https://cp.example.com` → `https://cp.example.com/api`. Там API стоит за nginx под префиксом `/api`, а корень
+ * домена — кабинет, и `/install.sh` по нему не отдаётся. Прежде значение приходилось исправлять руками в файле:
+ * команда установки узла вела «на себя» (127.0.0.1 на машине узла — это сам узел). Заданное явно, иное — не трогается.
+ */
+function controlPlaneUrl(config: z.infer<typeof configSchema>): string {
+  const web = config.WEB_BASE_URL.replace(/\/+$/u, '');
+  if (config.PUBLIC_BASE_URL === LOOPBACK_CONTROL_PLANE && web.startsWith('https://')) {
+    return `${web}/api`;
+  }
+  return config.PUBLIC_BASE_URL;
 }
 
 /**

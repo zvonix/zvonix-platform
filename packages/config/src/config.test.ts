@@ -34,6 +34,45 @@ describe('загрузка конфигурации', () => {
     expect(loadConfig(validEnv({ APP_PORT: '3000' })).APP_PORT).toBe(3000);
   });
 
+  describe('адрес площадки для узлов', () => {
+    it('при кабинете на https выводится из его адреса с префиксом /api', () => {
+      const config = loadConfig(validEnv({ WEB_BASE_URL: 'https://cp.zvonix.com' }));
+      expect(config.PUBLIC_BASE_URL).toBe('https://cp.zvonix.com/api');
+    });
+
+    it('ведущие и завершающие слеши адреса кабинета не удваиваются', () => {
+      const config = loadConfig(validEnv({ WEB_BASE_URL: 'https://cp.zvonix.com/' }));
+      expect(config.PUBLIC_BASE_URL).toBe('https://cp.zvonix.com/api');
+    });
+
+    it('заданный явно адрес, отличный от 127.0.0.1, остаётся как есть', () => {
+      const config = loadConfig(
+        validEnv({
+          WEB_BASE_URL: 'https://cp.zvonix.com',
+          PUBLIC_BASE_URL: 'https://nodes.example.com/api',
+        }),
+      );
+      expect(config.PUBLIC_BASE_URL).toBe('https://nodes.example.com/api');
+    });
+
+    it('в туннеле (кабинет не на https) остаётся 127.0.0.1', () => {
+      expect(loadConfig(validEnv()).PUBLIC_BASE_URL).toBe('http://127.0.0.1:8000');
+      expect(loadConfig(validEnv({ WEB_BASE_URL: 'http://localhost:8080' })).PUBLIC_BASE_URL).toBe(
+        'http://127.0.0.1:8000',
+      );
+    });
+
+    it('старое значение 127.0.0.1, записанное установкой, при https-кабинете тоже заменяется', () => {
+      const config = loadConfig(
+        validEnv({
+          WEB_BASE_URL: 'https://cp.zvonix.com',
+          PUBLIC_BASE_URL: 'http://127.0.0.1:8000',
+        }),
+      );
+      expect(config.PUBLIC_BASE_URL).toBe('https://cp.zvonix.com/api');
+    });
+  });
+
   it('возвращает неизменяемый объект', () => {
     const config = loadConfig(validEnv());
     expect(Object.isFrozen(config)).toBe(true);
