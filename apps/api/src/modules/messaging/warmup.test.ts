@@ -1,0 +1,58 @@
+import { describe, expect, it } from 'vitest';
+import type { AccountLoad } from './messages.repository.js';
+import { accountReadyAt, effectiveLimits } from './warmup.js';
+
+const NOW = new Date('2026-10-14T10:00:00Z');
+const load = (overrides: Partial<AccountLoad>): AccountLoad => ({
+  minute: 0,
+  hour: 0,
+  day: 0,
+  backlog: 0,
+  ...overrides,
+});
+const account = (overrides: Record<string, unknown> = {}) => ({
+  warmupEnabled: false,
+  warmupStartedAt: null,
+  limitPerMinute: null,
+  limitPerHour: null,
+  limitPerDay: null,
+  lastUsedAt: null,
+  pausedUntil: null,
+  ...overrides,
+});
+const options = { paceSeconds: 0, withBacklog: false };
+
+describe('лимит сообщений в час (тариф MAX)', () => {
+  it('без прогрева лимит в час — ровно то, что задал тариф', () => {
+    expect(effectiveLimits(account({ limitPerHour: 40 }), NOW).hourly).toBe(40);
+    expect(effectiveLimits(account(), NOW).hourly).toBeNull();
+  });
+
+  it('при прогреве берётся меньшее из заданного и равномерной доли суток', () => {
+    const warming = {
+      warmupEnabled: true,
+      warmupStartedAt: new Date('2026-10-14T00:00:00Z'),
+      limitPerDay: 500,
+    };
+    // Первые сутки прогрева — 12 в сутки, равномерная доля — 1 в час.
+    expect(effectiveLimits(account({ ...warming, limitPerHour: 40 }), NOW).hourly).toBe(1);
+    // Заданный лимит ниже доли — действует заданный.
+    const later = new Date('2026-12-14T10:00:00Z');
+    expect(effectiveLimits(account({ ...warming, limitPerHour: 5 }), later).hourly).toBe(5);
+  });
+
+  it('исчерпанный час откладывает отправку, минута и сутки при этом не мешают', () => {
+    const acc = account({ limitPerMinute: 10, limitPerHour: 20, limitPerDay: 500 });
+    expect(accountReadyAt(acc, load({ hour: 19 }), NOW, options)).toBeUndefined();
+    const wait = accountReadyAt(acc, load({ hour: 20 }), NOW, options);
+    expect(wait).toBeDefined();
+    expect((wait?.getTime() ?? 0) - NOW.getTime()).toBe(120_000);
+  });
+
+  it('запас партнёра сокращает и часовой лимит, но один раз в окне — всегда', () => {
+    const acc = account({ limitPerHour: 10 });
+    const reserve = { ...options, reservePercent: 20 };
+    expect(accountReadyAt(acc, load({ hour: 7 }), NOW, reserve)).toBeUndefined();
+    expect(accountReadyAt(acc, load({ hour: 8 }), NOW, reserve)).toBeDefined();
+  });
+});

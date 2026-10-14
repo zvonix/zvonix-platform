@@ -34,6 +34,7 @@ export const createTariffSchema = z.object({
   name: tariffName,
   price: amount,
   limitPerMinute: tariffLimit.default(null),
+  limitPerHour: tariffLimit.default(null),
   limitPerDay: tariffLimit.default(null),
   isDefault: z.boolean().default(false),
 });
@@ -44,6 +45,7 @@ export const updateTariffSchema = z
     name: tariffName.optional(),
     price: amount.optional(),
     limitPerMinute: tariffLimit.optional(),
+    limitPerHour: tariffLimit.optional(),
     limitPerDay: tariffLimit.optional(),
   })
   .refine((body) => Object.values(body).some((value) => value !== undefined), {

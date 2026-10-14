@@ -40,6 +40,7 @@ export interface Account {
   /** Действующие условия (из своего тарифа или из умолчания). */
   readonly price: string | null;
   readonly limit_per_minute: number | null;
+  readonly limit_per_hour: number | null;
   readonly limit_per_day: number | null;
   readonly warmup_enabled: boolean;
   readonly warmup_day: number | null;
@@ -57,6 +58,7 @@ interface Tariff {
   readonly name: string;
   readonly price: string;
   readonly limit_per_minute: number | null;
+  readonly limit_per_hour: number | null;
   readonly limit_per_day: number | null;
   readonly is_default: boolean;
   readonly accounts: number;
@@ -84,9 +86,14 @@ function useMessengerTariffs() {
 }
 
 /** Лимиты словами: «10 в минуту, 500 в сутки» или «без ограничений». */
-function limitsText(perMinute: number | null, perDay: number | null): string {
+function limitsText(
+  perMinute: number | null,
+  perHour: number | null,
+  perDay: number | null,
+): string {
   const parts = [
     perMinute === null ? null : `${String(perMinute)} в минуту`,
+    perHour === null ? null : `${String(perHour)} в час`,
     perDay === null ? null : `${String(perDay)} в сутки`,
   ].filter((part): part is string => part !== null);
   return parts.length === 0 ? 'без ограничений' : parts.join(', ');
@@ -200,6 +207,9 @@ function TariffForm({ tariff }: { tariff?: Tariff }) {
       ? ''
       : String(tariff.limit_per_minute),
   );
+  const [perHour, setPerHour] = useState(
+    tariff?.limit_per_hour === null || tariff === undefined ? '' : String(tariff.limit_per_hour),
+  );
   const [perDay, setPerDay] = useState(
     tariff?.limit_per_day === null || tariff === undefined ? '' : String(tariff.limit_per_day),
   );
@@ -210,9 +220,14 @@ function TariffForm({ tariff }: { tariff?: Tariff }) {
   };
   const priceValid = moneyFromInput(price) !== undefined;
   const minuteLimit = parseLimit(perMinute);
+  const hourLimit = parseLimit(perHour);
   const dayLimit = parseLimit(perDay);
   const valid =
-    name.trim().length >= 1 && priceValid && minuteLimit !== undefined && dayLimit !== undefined;
+    name.trim().length >= 1 &&
+    priceValid &&
+    minuteLimit !== undefined &&
+    hourLimit !== undefined &&
+    dayLimit !== undefined;
 
   const save = useMutation({
     mutationFn: () => {
@@ -220,6 +235,7 @@ function TariffForm({ tariff }: { tariff?: Tariff }) {
         name: name.trim(),
         price: numberFromInput(price),
         limitPerMinute: minuteLimit,
+        limitPerHour: hourLimit,
         limitPerDay: dayLimit,
       };
       return tariff === undefined
@@ -272,6 +288,17 @@ function TariffForm({ tariff }: { tariff?: Tariff }) {
           value={perMinute}
           onChange={(event) => {
             setPerMinute(event.target.value);
+          }}
+        />
+      </DialogField>
+      <DialogField label="В час" hint="Пусто — без ограничения. Не больше, чем в сутки.">
+        <Input
+          className="num"
+          inputMode="numeric"
+          autoComplete="off"
+          value={perHour}
+          onChange={(event) => {
+            setPerHour(event.target.value);
           }}
         />
       </DialogField>
@@ -369,7 +396,7 @@ export function MaxTariffs() {
                 </TableCell>
                 <TableCell className="num text-right">{money(tariff.price)}</TableCell>
                 <TableCell className="num text-muted-foreground">
-                  {limitsText(tariff.limit_per_minute, tariff.limit_per_day)}
+                  {limitsText(tariff.limit_per_minute, tariff.limit_per_hour, tariff.limit_per_day)}
                 </TableCell>
                 <TableCell className="num text-right">{tariff.accounts}</TableCell>
                 <TableCell className="text-right">
@@ -446,13 +473,14 @@ export function MaxLimits() {
               <TableHead className="h-8">Аккаунт</TableHead>
               <TableHead className="h-8">Тариф</TableHead>
               <TableHead className="h-8 text-right">В минуту</TableHead>
+              <TableHead className="h-8 text-right">В час</TableHead>
               <TableHead className="h-8 text-right">В сутки</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {accounts.data.accounts.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={4} className="whitespace-normal text-muted-foreground">
+                <TableCell colSpan={5} className="whitespace-normal text-muted-foreground">
                   Аккаунтов MAX пока нет. Добавьте первый в разделе{' '}
                   <Link href="/partner/messages" className="underline underline-offset-2">
                     «Аккаунты MAX»
@@ -472,6 +500,7 @@ export function MaxLimits() {
                     : (names.get(account.tariff_id)?.name ?? '—')}
                 </TableCell>
                 <TableCell className="num text-right">{account.limit_per_minute ?? '—'}</TableCell>
+                <TableCell className="num text-right">{account.limit_per_hour ?? '—'}</TableCell>
                 <TableCell className="num text-right">{account.limit_per_day ?? '—'}</TableCell>
               </TableRow>
             ))}

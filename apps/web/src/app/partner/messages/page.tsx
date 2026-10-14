@@ -219,6 +219,9 @@ function AccountRow({
         <span className="block">
           {account.limit_per_minute === null ? '—' : `${String(account.limit_per_minute)} в минуту`}
         </span>
+        {account.limit_per_hour !== null && (
+          <span className="block text-faint">{`${String(account.limit_per_hour)} в час`}</span>
+        )}
         <span className="block text-faint">
           {account.limit_per_day === null ? '—' : `${String(account.limit_per_day)} в сутки`}
         </span>

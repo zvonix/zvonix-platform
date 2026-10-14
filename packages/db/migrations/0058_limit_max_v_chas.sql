@@ -1,0 +1,6 @@
+ALTER TABLE "messenger_accounts" DROP CONSTRAINT "messenger_accounts_limits_positive";--> statement-breakpoint
+ALTER TABLE "messenger_tariffs" DROP CONSTRAINT "messenger_tariffs_limits_positive";--> statement-breakpoint
+ALTER TABLE "messenger_accounts" ADD COLUMN "limit_per_hour" integer;--> statement-breakpoint
+ALTER TABLE "messenger_tariffs" ADD COLUMN "limit_per_hour" integer;--> statement-breakpoint
+ALTER TABLE "messenger_accounts" ADD CONSTRAINT "messenger_accounts_limits_positive" CHECK (("messenger_accounts"."limit_per_minute" is null or "messenger_accounts"."limit_per_minute" > 0) and ("messenger_accounts"."limit_per_hour" is null or "messenger_accounts"."limit_per_hour" > 0) and ("messenger_accounts"."limit_per_day" is null or "messenger_accounts"."limit_per_day" > 0));--> statement-breakpoint
+ALTER TABLE "messenger_tariffs" ADD CONSTRAINT "messenger_tariffs_limits_positive" CHECK (("messenger_tariffs"."limit_per_minute" is null or "messenger_tariffs"."limit_per_minute" > 0) and ("messenger_tariffs"."limit_per_hour" is null or "messenger_tariffs"."limit_per_hour" > 0) and ("messenger_tariffs"."limit_per_day" is null or "messenger_tariffs"."limit_per_day" > 0));

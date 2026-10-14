@@ -91,6 +91,7 @@ interface AccountView {
   phone: string | null;
   price: string | null;
   limit_per_minute: number | null;
+  limit_per_hour: number | null;
   limit_per_day: number | null;
 }
 
@@ -171,6 +172,7 @@ describe('заведение аккаунта', () => {
       'id',
       'label',
       'limit_per_day',
+      'limit_per_hour',
       'limit_per_minute',
       'pause_reason',
       'paused_until',
@@ -513,6 +515,41 @@ describe('тарифы MAX партнёра (ADR-0075)', () => {
       ['Основной', false, 0],
       ['Дорогой', true, 1],
     ]);
+  });
+
+  it('лимит в час: действует на аккаунты, правится, а окна должны быть вложены друг в друга', async () => {
+    const { partner, tariff, account } = await ownAccount();
+    const created = (
+      await tariff({
+        name: 'Часовой',
+        price: '0.45',
+        limitPerMinute: 5,
+        limitPerHour: 100,
+        limitPerDay: 500,
+      })
+    ).json<{ tariff: TariffJson }>().tariff;
+    expect(await account()).toMatchObject({
+      limit_per_minute: 5,
+      limit_per_hour: 100,
+      limit_per_day: 500,
+    });
+
+    // Окно в час не может быть меньше окна в минуту и больше окна в сутки.
+    const patch = (payload: Record<string, unknown>) =>
+      api().inject({
+        method: 'PATCH',
+        url: `/partner/messenger/tariffs/${created.id}`,
+        headers: bearer(partner.token),
+        payload,
+      });
+    expect((await patch({ limitPerHour: 3 })).statusCode).toBe(400);
+    expect((await patch({ limitPerHour: 600 })).statusCode).toBe(400);
+    expect((await patch({ limitPerHour: 50 })).statusCode).toBe(200);
+    expect(await account()).toMatchObject({ limit_per_hour: 50 });
+
+    // Снять лимит можно — пустое значение.
+    expect((await patch({ limitPerHour: null })).statusCode).toBe(200);
+    expect((await account()).limit_per_hour).toBeNull();
   });
 
   it('удаляется только неиспользуемый и не умолчание; чужой тариф и тариф с аккаунтом — отказ', async () => {
