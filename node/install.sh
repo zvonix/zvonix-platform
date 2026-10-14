@@ -106,6 +106,23 @@ case "$CONTROL_PLANE" in
   "" | *"$MARK"*) die "адрес control plane не подставлен" ;;
 esac
 [[ "$SIP_REALM" =~ ^[a-z0-9.-]+$ ]] || die "SIP-домен площадки не подставлен или недопустим: «${SIP_REALM}»"
+# Нет FreeSWITCH и нет репозитория пакетов — собираем из исходников скриптом площадки: так одна команда
+# ставит узел на чистую машину целиком. Долго (полчаса–час), поэтому до обмена токена: токен не сгорает.
+if ! command -v freeswitch >/dev/null 2>&1 && [ "$MODE" = install ]; then
+  case "$PACKAGE_REPO" in
+    "" | *"$MARK"*)
+      command -v curl >/dev/null 2>&1 || die "не найдена команда curl"
+      echo "Репозитория пакетов нет — собираю FreeSWITCH из исходников (30–60 минут, не прерывайте)"
+      BUILD_TMP="$(mktemp)"
+      curl -fsSL --max-time 60 "${CONTROL_PLANE}/install/build-freeswitch.sh" -o "$BUILD_TMP" \
+        || die "не удалось скачать скрипт сборки ${CONTROL_PLANE}/install/build-freeswitch.sh"
+      bash "$BUILD_TMP" || { rm -f "$BUILD_TMP"; die "сборка FreeSWITCH не удалась — журнал выше; после исправления запустите команду снова"; }
+      rm -f "$BUILD_TMP"
+      hash -r
+      ;;
+  esac
+fi
+
 # Репозиторий нужен ровно затем, чтобы **поставить** FreeSWITCH. Если он уже стоит,
 # ставить нечего, и требовать адрес значило бы не пускать на узел, которому он не нужен.
 # Первый узел площадки поднимается именно так: FreeSWITCH на нём собран руками,

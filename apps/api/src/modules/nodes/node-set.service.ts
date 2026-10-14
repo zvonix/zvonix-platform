@@ -34,6 +34,8 @@ const NODE_DIR = path.join(
 );
 
 const INSTALL_SCRIPT = path.join(NODE_DIR, 'install.sh');
+/** Сборка FreeSWITCH из исходников: установщик скачивает её, когда ни пакета, ни репозитория нет. */
+const BUILD_SCRIPT = path.join(NODE_DIR, 'build-freeswitch.sh');
 /** Набор конфигурации узла целиком ([ADR-0051](../../../../../docs/adr/0051-svoya-konfiguraciya-uzla.md)). */
 const CONF_DIR = path.join(NODE_DIR, 'conf');
 
@@ -63,6 +65,11 @@ export class NodeSetService {
   async script(): Promise<string> {
     const [built, version] = await Promise.all([this.build(), this.version()]);
     return built.replaceAll(VERSION_MARK, () => version);
+  }
+
+  /** Скрипт сборки FreeSWITCH как есть: подставлять в нём нечего, секретов в нём нет. */
+  buildScript(): Promise<string> {
+    return this.read(BUILD_SCRIPT);
   }
 
   /** Версия набора — первые 12 знаков SHA-256 скрипта с пустой меткой версии (в неё сама версия войти не может). */

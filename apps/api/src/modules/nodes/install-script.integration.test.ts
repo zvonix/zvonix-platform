@@ -66,6 +66,15 @@ describe('установщик узла', () => {
     expect(response.headers['cache-control']).toBe('no-store');
   });
 
+  it('сборка FreeSWITCH отдаётся без ключа, а установщик скачивает её, когда пакетов нет', async () => {
+    const response = await api().inject({ method: 'GET', url: '/install/build-freeswitch.sh' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/x-shellscript');
+    expect(response.body).toContain('FREESWITCH_TAG=');
+    expect(script).toContain('/install/build-freeswitch.sh');
+  });
+
   it('параметры площадки подставлены', () => {
     expect(script).toContain(REPO);
     expect(script).toContain(FINGERPRINT);
