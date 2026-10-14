@@ -32,6 +32,7 @@ interface Setup {
   }[];
   messages?: { total: number; failed: number };
   certificate?: Record<string, unknown>;
+  githubToken?: Record<string, unknown>;
   payments?: {
     id: string;
     clientId: string;
@@ -75,6 +76,7 @@ function build(setup: Setup) {
     {
       status: () => Promise.resolve({ state: 'ok', domain: 'cp.zvonix.com', ...setup.certificate }),
     } as never,
+    { status: () => Promise.resolve({ state: 'ok', ...setup.githubToken }) } as never,
     logger(),
   );
   return { service, enqueue };
@@ -263,5 +265,22 @@ describe('тревоги администраторам', () => {
     };
     expect(await bodyFor(true)).toContain('не сработало');
     expect(await bodyFor(false)).toContain('выключено');
+  });
+
+  it('токен GitHub скоро кончится или не принимается — письмо; рабочий молчит', async () => {
+    const kindsFor = async (githubToken: Record<string, unknown>): Promise<string[]> => {
+      const { service, enqueue } = build({ admins: [confirmed], githubToken });
+      await service.notify(NOW);
+      return enqueue.mock.calls.map((call) => (call as unknown as [{ kind: string }])[0].kind);
+    };
+
+    expect(await kindsFor({ state: 'soon', days_left: 6, expires_at: '2026-10-20' })).toEqual([
+      'alert_github_token:soon',
+    ]);
+    expect(await kindsFor({ state: 'invalid', problem: 'GitHub не принял токен' })).toEqual([
+      'alert_github_token:invalid',
+    ]);
+    expect(await kindsFor({ state: 'ok' })).toEqual([]);
+    expect(await kindsFor({ state: 'unknown' })).toEqual([]);
   });
 });

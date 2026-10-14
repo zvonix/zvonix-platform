@@ -12,6 +12,7 @@ import { moment } from '@/lib/format';
 import { useUrlState } from '@/lib/url-state';
 import { useSession } from '@/lib/session';
 import { CertificatePanel } from './certificate-panel';
+import { GithubTokenPanel } from './github-token-panel';
 import { SettingField, labelOf, type DraftValue, type SettingView } from './setting-field';
 
 const SETTINGS_QUERY_KEY = ['settings'] as const;
@@ -177,6 +178,8 @@ function SettingsForm() {
     })),
     // Сертификат — не настройка из списка, а состояние сервера с действиями (ADR-0083).
     { key: 'certificate', title: 'Сертификат', settings: [], prefix: 'certificate' },
+    // Токен GitHub для обновлений — тоже состояние сервера, а не настройка из списка (ADR-0084).
+    { key: 'updates', title: 'Обновления', settings: [], prefix: 'updates' },
     ...(rest.length > 0 ? [{ key: 'other', title: 'Прочее', settings: rest, prefix: '' }] : []),
   ];
   const section = sections.find((candidate) => candidate.key === url.get('section')) ?? sections[0];
@@ -278,6 +281,7 @@ function SettingsForm() {
             {/* Настройка, для которой ещё нет раздела, живёт в «Прочем»: лучше показать под ключом,
                 чем не показать вовсе — иначе новое поле пропадает молча. */}
             {section.key === 'certificate' && <CertificatePanel />}
+            {section.key === 'updates' && <GithubTokenPanel />}
             <div className="flex flex-col gap-4">
               {subgroupsOf(section.settings).map((group) => (
                 <div key={group.title ?? ''}>

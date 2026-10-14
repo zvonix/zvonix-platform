@@ -24,10 +24,11 @@ export type UpdateAction =
   | 'cert-check'
   | 'cert-issue'
   | 'cert-auto-on'
-  | 'cert-auto-off';
+  | 'cert-auto-off'
+  | 'token-set';
 
 /** Лёгкие действия: чтение без изменений, не мешают идущей выкладке. */
-const LIGHT_ACTIONS: readonly UpdateAction[] = ['refresh', 'cert-check'];
+const LIGHT_ACTIONS: readonly UpdateAction[] = ['refresh', 'cert-check', 'token-set'];
 type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface ReleaseItem {
@@ -285,7 +286,13 @@ export class UpdatesService {
    * Ставит заявку в очередь. Выкладка и откат — по одной: пока есть ждущая или идущая, новая — `409`.
    * Метка берётся только из списка выпусков: произвольную строку служба не получит.
    */
-  async request(actor: Actor, action: UpdateAction, tag: string | null): Promise<QueuedRequest> {
+  async request(
+    actor: Actor,
+    action: UpdateAction,
+    tag: string | null,
+    /** Только у `token-set`: токен уходит службе в заявке и больше нигде не пишется (ADR-0084). */
+    secret?: { readonly token: string },
+  ): Promise<QueuedRequest> {
     if (!(await this.isAvailable())) {
       throw conflict('Обновление из кабинета на этой площадке не настроено');
     }
@@ -316,8 +323,15 @@ export class UpdatesService {
     const final = path.join(this.requestsDir, `${id}.json`);
     await writeFile(
       `${final}.tmp`,
-      JSON.stringify({ action, tag: request.tag, by: request.by, at: request.requested_at }),
-      { flag: 'wx', mode: 0o640 },
+      JSON.stringify({
+        action,
+        tag: request.tag,
+        by: request.by,
+        at: request.requested_at,
+        ...(secret === undefined ? {} : { token: secret.token }),
+      }),
+      // Заявка с токеном читается только владельцем и службой от root; остальные — как прежде.
+      { flag: 'wx', mode: secret === undefined ? 0o640 : 0o600 },
     );
     await rename(`${final}.tmp`, final);
 

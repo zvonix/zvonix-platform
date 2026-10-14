@@ -417,3 +417,104 @@ describe('сертификат (ADR-0083)', () => {
     await clearRequests();
   });
 });
+
+describe('токен GitHub (ADR-0084)', () => {
+  const SECRET = 'github_pat_11AAAAAAA0abcdefghijklmnopqrstuvwxyz0123456789';
+  const DAY = 86_400_000;
+
+  async function clearRequests(): Promise<void> {
+    const dir = path.join(root, 'requests');
+    await mkdir(dir, { recursive: true });
+    for (const name of await readdir(dir)) await rm(path.join(dir, name));
+  }
+
+  const view = async () =>
+    (await call('admin', 'GET', '/updates/github-token')).json<{
+      available: boolean;
+      state: string;
+      days_left: number | null;
+      expires_at: string | null;
+      busy: boolean;
+    }>();
+
+  it('закрыт для всех, кроме администратора', async () => {
+    expect((await api().inject({ method: 'GET', url: '/updates/github-token' })).statusCode).toBe(
+      401,
+    );
+    for (const role of ['support', 'client', 'partner'] as const) {
+      expect((await call(role, 'GET', '/updates/github-token')).statusCode).toBe(403);
+      expect(
+        (await call(role, 'POST', '/updates/github-token', { token: SECRET })).statusCode,
+      ).toBe(403);
+    }
+  });
+
+  it('пока служба не проверяла токен — «нет данных»; потом состояние со сроком', async () => {
+    await rm(path.join(root, 'github-token.json'), { force: true });
+    expect(await view()).toMatchObject({ available: false, state: 'unknown' });
+
+    const status = (overrides: Record<string, unknown>) =>
+      writeFile(
+        path.join(root, 'github-token.json'),
+        JSON.stringify({
+          checked_at: new Date().toISOString(),
+          repository: 'zvonix/zvonix-platform',
+          valid: true,
+          expires_at: null,
+          problem: null,
+          ...overrides,
+        }),
+      );
+
+    await status({ expires_at: new Date(Date.now() + 60 * DAY).toISOString() });
+    expect(await view()).toMatchObject({ available: true, state: 'ok' });
+    await status({ expires_at: new Date(Date.now() + 5 * DAY).toISOString() });
+    expect(await view()).toMatchObject({ state: 'soon', days_left: 4 });
+    await status({ valid: false, problem: 'GitHub не принял токен' });
+    expect(await view()).toMatchObject({ state: 'invalid' });
+  });
+
+  it('токен уходит службе в заявке с правами 0600, а в журнал действий и в ответы не попадает', async () => {
+    await clearRequests();
+    const response = await call('admin', 'POST', '/updates/github-token', { token: SECRET });
+    expect(response.statusCode).toBe(202);
+    expect(JSON.stringify(response.json())).not.toContain(SECRET);
+
+    const names = await readdir(path.join(root, 'requests'));
+    expect(names).toHaveLength(1);
+    const file = path.join(root, 'requests', names[0] ?? '');
+    const request = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    expect(request).toMatchObject({ action: 'token-set', token: SECRET });
+    if (process.platform !== 'win32') {
+      const { stat } = await import('node:fs/promises');
+      expect(((await stat(file)).mode & 0o777).toString(8)).toBe('600');
+    }
+
+    // Повторная заявка, пока предыдущая ждёт, не принимается.
+    expect(
+      (await call('admin', 'POST', '/updates/github-token', { token: SECRET })).statusCode,
+    ).toBe(409);
+    // Состояние показывает «занято» и тоже не содержит токена.
+    const overview = await call('admin', 'GET', '/updates/github-token');
+    expect(overview.json<{ busy: boolean }>().busy).toBe(true);
+    expect(overview.body).not.toContain(SECRET);
+
+    // Журнал действий хранит факт заявки, но не токен.
+    const audit = await withDatabase((execute) =>
+      execute(sql`select * from audit_log where action = 'update.token-set_requested'`),
+    );
+    expect(audit.rows.length).toBeGreaterThan(0);
+    expect(JSON.stringify(audit.rows)).not.toContain(SECRET);
+    await clearRequests();
+  });
+
+  it('токен негодной формы отклоняется до заявки', async () => {
+    await clearRequests();
+    for (const token of ['', 'короткий', 'a'.repeat(20) + ' пробел', 'x'.repeat(300)]) {
+      expect((await call('admin', 'POST', '/updates/github-token', { token })).statusCode).toBe(
+        400,
+      );
+    }
+    expect(await readdir(path.join(root, 'requests'))).toHaveLength(0);
+  });
+});

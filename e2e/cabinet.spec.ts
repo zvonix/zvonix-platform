@@ -2075,3 +2075,37 @@ test.describe('сайт проекта (ADR-0082)', () => {
     ).toHaveCount(0);
   });
 });
+
+test.describe('токен GitHub в настройках (ADR-0084)', () => {
+  test('токен вводится в настройках, уходит заявкой и из поля пропадает; назад не показывается', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/settings?section=updates');
+    await expect(page.getByRole('heading', { name: 'Обновления' })).toBeVisible();
+    await expect(page.getByText('Ещё не проверен')).toBeVisible();
+
+    const secret = 'github_pat_11ZZZZZZZ0abcdefghijklmnopqrstuvwxyz0123456789';
+    const field = page.getByLabel('Новый токен GitHub');
+    // Поле скрытое: токен на экране не читается.
+    await expect(field).toHaveAttribute('type', 'password');
+    // Пока поле пусто, отправлять нечего.
+    await expect(page.getByRole('button', { name: 'Проверить и сохранить' })).toBeDisabled();
+
+    await field.fill(secret);
+    await page.getByRole('button', { name: 'Проверить и сохранить' }).click();
+    // Службы обновления на стенде нет, заявка ждёт её: раздел это показывает, а поле очищено.
+    await expect(page.getByText('Проверяется…')).toBeVisible();
+    await expect(field).toHaveValue('');
+    await expect(page.getByText(secret)).toHaveCount(0);
+
+    // Убрать заявку из очереди: остальные проверки обновлений считают очередь своей.
+    const overview = await page.request.get('/api/updates');
+    const queue = (await overview.json()) as { queue: { id: string; action: string }[] };
+    for (const item of queue.queue.filter((entry) => entry.action === 'token-set')) {
+      await page.request.post(`/api/updates/${item.id}/cancel`, {
+        headers: { 'X-Zvonix-Web': '1' },
+      });
+    }
+  });
+});
