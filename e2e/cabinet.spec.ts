@@ -2075,3 +2075,25 @@ test.describe('сайт проекта (ADR-0082)', () => {
     ).toHaveCount(0);
   });
 });
+
+test.describe('сессия кончилась посреди работы', () => {
+  test('любой отказ «требуется вход» уводит на вход, а не оставляет меню над пустой страницей', async ({
+    page,
+    context,
+  }) => {
+    await signIn(page, PEOPLE.partner);
+    await expect(page.getByRole('navigation', { name: 'Разделы' })).toBeVisible();
+
+    // Сессия пропала на стороне сервера (срок, выход в другой вкладке), а вкладка этого не знает.
+    await context.clearCookies();
+    // Переход внутри страницы, без перезагрузки: оболочка о потере сессии ничего не знает. Нажатие
+    // средствами страницы, а не Playwright: фоновый опрос мог уже увести на вход, и ждать «пропавшую»
+    // ссылку незачем — итог один.
+    await page.evaluate(() => {
+      document.querySelector<HTMLAnchorElement>('a[href="/partner/prices"]')?.click();
+    });
+
+    await expect(page).toHaveURL(/\/login/u);
+    await expect(page.getByRole('navigation', { name: 'Разделы' })).toHaveCount(0);
+  });
+});
