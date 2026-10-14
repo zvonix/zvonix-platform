@@ -2076,6 +2076,66 @@ test.describe('сайт проекта (ADR-0082)', () => {
   });
 });
 
+test.describe('страница «Лимиты» партнёра при многих картах', () => {
+  test('правило на много карт свёрнуто, на три карты — видно сразу', async ({ page }) => {
+    await signIn(page, PEOPLE.partner);
+
+    const row = (rule: string, window: string, n: number, exceeded: boolean) => ({
+      id: rule,
+      partner_id: null,
+      sim_card_id: null,
+      tariff_id: 't-1',
+      window,
+      metric: 'calls',
+      value: 100,
+      per_sim: true,
+      rounding: 'none',
+      period_start_day: null,
+      set_by: 'partner',
+      usage_sim_card_id: `sim-${String(n)}`,
+      resets_at: '2026-10-15T00:00:00.000Z',
+      used: exceeded ? 100 : 10 * n,
+      limit: 100,
+      exceeded,
+    });
+    // Правило «много»: 8 карт, одна исчерпала. Правило «мало»: 3 карты.
+    const limits = [
+      ...Array.from({ length: 8 }, (_, n) => row('many', 'day', n + 1, n === 4)),
+      ...Array.from({ length: 3 }, (_, n) => row('few', 'week', n + 1, false)),
+    ];
+    await page.route('**/api/partner/limits', (route) =>
+      route.fulfill({
+        json: {
+          limits,
+          tariff_limits: [],
+          sims: Array.from({ length: 8 }, (_, n) => ({
+            id: `sim-${String(n + 1)}`,
+            msisdn: `7913000${String(1001 + n)}`,
+            tariff_id: 't-1',
+          })),
+          tariffs: [{ id: 't-1', name: 'Основной', is_default: true }],
+        },
+      }),
+    );
+
+    await page.goto('/partner/limits');
+    // Много карт: одна строка со сводкой, карты не перечислены (карта 5 есть только в этом правиле).
+    await expect(page.getByText('8 карт')).toBeVisible();
+    await expect(page.getByText('исчерпали: 1')).toBeVisible();
+    await expect(page.getByText('79130001005')).toHaveCount(0);
+    // Три карты: как и раньше, все видны сразу, и кнопка раскрытия одна — у большого правила.
+    await expect(page.getByText('79130001001')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Показать все' })).toHaveCount(1);
+
+    await page.getByRole('button', { name: 'Показать все' }).click();
+    await expect(page.getByRole('button', { name: 'Свернуть', exact: true })).toBeVisible();
+    await expect(page.getByText('79130001005')).toBeVisible();
+    // Исчерпавшая карта — первой в раскрытом списке правила.
+    const firstCard = page.getByRole('row').filter({ hasText: '79130001005' });
+    await expect(firstCard).toContainText('исчерпан');
+  });
+});
+
 test.describe('сессия кончилась посреди работы', () => {
   test('любой отказ «требуется вход» уводит на вход, а не оставляет меню над пустой страницей', async ({
     page,
