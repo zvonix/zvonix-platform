@@ -39,4 +39,16 @@ export class NodeInstallController {
     reply.header('content-disposition', 'inline; filename="install.sh"');
     return this.nodeSet.script();
   }
+
+  /**
+   * Сборка FreeSWITCH для узла, на котором его нет и пакетов нет. Публичная по той же причине,
+   * что и `install.sh`: секретов в файле нет, а `curl` на чистой машине ничем не располагает.
+   */
+  @Public()
+  @Get('install/build-freeswitch.sh')
+  @Header('content-type', 'text/x-shellscript; charset=utf-8')
+  @Header('cache-control', 'no-store')
+  async buildScript(): Promise<string> {
+    return this.nodeSet.buildScript();
+  }
 }

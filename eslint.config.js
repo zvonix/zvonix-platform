@@ -13,6 +13,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '**/.next/**',
+      '.kilo/**',
       '**/*.config.js',
       '**/*.config.mjs',
       '**/*.config.ts',
