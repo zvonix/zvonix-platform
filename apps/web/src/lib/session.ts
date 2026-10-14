@@ -18,7 +18,7 @@ export interface CurrentUser {
   readonly second_factor_required?: boolean;
 }
 
-const SESSION_QUERY_KEY = ['auth', 'me'] as const;
+export const SESSION_QUERY_KEY = ['auth', 'me'] as const;
 
 /**
  * Кто вошёл.

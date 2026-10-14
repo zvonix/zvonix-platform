@@ -80,9 +80,15 @@ describe('проверка партнёрского ключа', () => {
     respond = () => ({ status: 403, json: {} });
     expect(await provider().checkAccess()).toEqual({ state: 'rejected' });
     respond = () => ({ status: 502, json: {} });
-    expect(await provider().checkAccess()).toEqual({ state: 'unreachable' });
+    expect(await provider().checkAccess()).toEqual({
+      state: 'unreachable',
+      host: new URL(PARTNER_URL).host,
+    });
     vi.stubGlobal('fetch', () => Promise.reject(new Error('сеть')));
-    expect(await provider().checkAccess()).toEqual({ state: 'unreachable' });
+    expect(await provider().checkAccess()).toEqual({
+      state: 'unreachable',
+      host: new URL(PARTNER_URL).host,
+    });
     expect(await provider('').checkAccess()).toEqual({ state: 'no_key' });
   });
 });

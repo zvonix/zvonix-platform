@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
@@ -96,55 +96,145 @@ function PartnerLimits() {
                 </TableCell>
               </TableRow>
             )}
-            {groups.map((rows) => {
-              const first = rows[0];
-              if (first === undefined) return null;
-              return (
-                <Fragment key={first.id}>
-                  {rows.map((row, index) => (
-                    <TableRow key={`${row.id}:${row.usage_sim_card_id ?? ''}`}>
-                      {index === 0 && (
-                        <TableCell rowSpan={rows.length} className="align-top whitespace-normal">
-                          {counted(row.metric, row.value)} {LIMIT_WINDOW_NAME[row.window]}
-                          <span className="block text-faint">
-                            {row.tariff_id === null
-                              ? limitRuleNote(row)
-                              : `тариф «${tariffName(row.tariff_id) ?? '—'}»`}
-                          </span>
-                        </TableCell>
-                      )}
-                      <TableCell className="num">
-                        {whose(row, numberOf) ?? <span className="text-faint">—</span>}
-                      </TableCell>
-                      <TableCell
-                        className={`hidden text-right sm:table-cell num ${row.exceeded ? 'text-crit' : ''}`}
-                      >
-                        {amount(row.metric, row.used)}
-                      </TableCell>
-                      <TableCell className="num text-right">
-                        {row.exceeded ? (
-                          <span className="text-crit">исчерпан</span>
-                        ) : (
-                          amount(row.metric, row.limit - row.used)
-                        )}
-                      </TableCell>
-                      <TableCell className="num text-muted-foreground">
-                        {moment(row.resets_at)}
-                      </TableCell>
-                      {index === 0 && (
-                        <TableCell rowSpan={rows.length} className="align-top">
-                          <Actions row={row} />
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))}
-                </Fragment>
-              );
-            })}
+            {groups.map((rows) => (
+              <LimitGroup
+                key={rows[0]?.id ?? ''}
+                rows={rows}
+                numberOf={numberOf}
+                tariffName={tariffName}
+              />
+            ))}
           </TableBody>
         </Table>
       </div>
     </div>
+  );
+}
+
+/**
+ * Правило с цифрами по картам. Пока карт немного, строки видны сразу — как и было; у правила на сотни карт
+ * строк становится на сотни, поэтому такое правило свёрнуто в одну строку: сколько карт, сколько исчерпало
+ * лимит и сколько осталось у самой «бедной». Раскрытое показывает исчерпавшие первыми.
+ */
+const COLLAPSE_FROM = 6;
+
+function LimitGroup({
+  rows,
+  numberOf,
+  tariffName,
+}: {
+  rows: LimitRow[];
+  numberOf: (id: string | null) => string | undefined;
+  tariffName: (id: string | null) => string | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const first = rows[0];
+  if (first === undefined) return null;
+
+  const collapsible = rows.length >= COLLAPSE_FROM;
+  const collapsed = collapsible && !open;
+  const exhausted = rows.filter((row) => row.exceeded).length;
+  const poorest = Math.min(...rows.map((row) => row.limit - row.used));
+  // Исчерпавшие — первыми: в раскрытом списке сначала то, что требует внимания.
+  const visible = collapsed
+    ? []
+    : collapsible
+      ? [...rows].sort((a, b) => Number(b.exceeded) - Number(a.exceeded))
+      : rows;
+
+  const rule = (
+    <>
+      {counted(first.metric, first.value)} {LIMIT_WINDOW_NAME[first.window]}
+      <span className="block text-faint">
+        {first.tariff_id === null
+          ? limitRuleNote(first)
+          : `тариф «${tariffName(first.tariff_id) ?? '—'}»`}
+      </span>
+    </>
+  );
+
+  if (collapsed) {
+    return (
+      <TableRow>
+        <TableCell className="align-top whitespace-normal">{rule}</TableCell>
+        <TableCell>
+          <span className="num">{rows.length} карт</span>
+          {exhausted > 0 && <span className="text-crit"> · исчерпали: {exhausted}</span>}
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className="ml-2"
+            onClick={() => {
+              setOpen(true);
+            }}
+          >
+            Показать все
+          </Button>
+        </TableCell>
+        <TableCell className="hidden sm:table-cell" />
+        <TableCell className="num text-right">
+          <span className="text-muted-foreground">меньше всего: </span>
+          {poorest <= 0 ? (
+            <span className="text-crit">исчерпан</span>
+          ) : (
+            amount(first.metric, poorest)
+          )}
+        </TableCell>
+        <TableCell />
+        <TableCell className="align-top">
+          <Actions row={first} />
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  return (
+    <Fragment>
+      {visible.map((row, index) => (
+        <TableRow key={`${row.id}:${row.usage_sim_card_id ?? ''}`}>
+          {index === 0 && (
+            <TableCell rowSpan={visible.length} className="align-top whitespace-normal">
+              {rule}
+              {collapsible && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="mt-2"
+                  onClick={() => {
+                    setOpen(false);
+                  }}
+                >
+                  Свернуть
+                </Button>
+              )}
+            </TableCell>
+          )}
+          <TableCell className="num">
+            {whose(row, numberOf) ?? <span className="text-faint">—</span>}
+          </TableCell>
+          <TableCell
+            className={`hidden text-right sm:table-cell num ${row.exceeded ? 'text-crit' : ''}`}
+          >
+            {amount(row.metric, row.used)}
+          </TableCell>
+          <TableCell className="num text-right">
+            {row.exceeded ? (
+              <span className="text-crit">исчерпан</span>
+            ) : (
+              amount(row.metric, row.limit - row.used)
+            )}
+          </TableCell>
+          <TableCell className="num text-muted-foreground">{moment(row.resets_at)}</TableCell>
+          {index === 0 && (
+            <TableCell rowSpan={visible.length} className="align-top">
+              <Actions row={row} />
+            </TableCell>
+          )}
+        </TableRow>
+      ))}
+    </Fragment>
   );
 }
 

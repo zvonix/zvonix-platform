@@ -5,9 +5,9 @@ import { getSiteInfo } from '../site-data';
 export const revalidate = 60;
 
 export const metadata: Metadata = {
-  title: 'Службам такси',
+  title: 'Компаниям и сервисам',
   description:
-    'Звонки пассажирам и сообщения MAX через одну площадку: цена до звонка, лимиты, приоритеты, записи.',
+    'Звонки и уведомления MAX вашим клиентам через одну площадку: цена до звонка, лимиты, приоритеты, записи.',
 };
 
 export default async function ClientsPage() {
@@ -16,7 +16,7 @@ export default async function ClientsPage() {
     <>
       <PageHeader
         eyebrow="Клиентам"
-        title="Звонки и сообщения пассажирам — без своих SIM и шлюзов"
+        title="Звонки и уведомления вашим клиентам — без своих SIM и шлюзов"
         lead="Вы подключаете линию и платите за состоявшиеся вызовы и отправленные сообщения. Оборудование и SIM — забота партнёров площадки."
       />
 
@@ -41,7 +41,7 @@ export default async function ClientsPage() {
 
       <Section
         title="Сообщения MAX — по протоколу SMS"
-        lead="Сообщение уходит пассажиру в MAX, а вы отправляете его привычным способом."
+        lead="Уведомление уходит вашему клиенту в MAX, а вы отправляете его привычным способом."
       >
         <Steps
           items={[

@@ -298,7 +298,7 @@ function ApplicationRow({
                     }}
                   />
                   <span className="text-xs text-muted-foreground">
-                    Только его видят службы такси. Не должен намекать на личность
+                    Только его видят клиенты площадки. Не должен намекать на личность
                   </span>
                 </div>
               )}

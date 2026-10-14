@@ -41,6 +41,15 @@ const STATES: Record<string, ProviderState> = {
   pendingPassword: 'not_authorized',
 };
 
+/** Имя узла из адреса для сообщения администратору; нечитаемый адрес — как есть, без разбора. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 @Injectable()
 export class GreenApiMessageProvider implements MessageProvider {
   readonly id: MessengerProviderId = 'green_api';
@@ -67,7 +76,7 @@ export class GreenApiMessageProvider implements MessageProvider {
       this.unavailable(cause);
       const refused =
         cause instanceof ProviderHttpError && cause.status >= 400 && cause.status < 500;
-      return { state: refused ? 'rejected' : 'unreachable' };
+      return refused ? { state: 'rejected' } : { state: 'unreachable', host: hostOf(partnerUrl) };
     }
   }
 
