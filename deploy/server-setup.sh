@@ -288,6 +288,14 @@ sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'zvonix'" 
 
 step "Окружение площадки"
 ADDRESS_CHANGED=no
+# Адрес площадки для узлов АТС и клиентов SMPP (PUBLIC_BASE_URL). На домене это адрес кабинета с префиксом /api: там
+# API за nginx (префикс отрезается), а «корень» домена — кабинет, и `/install.sh` по нему не отдаётся. Прежнее значение
+# 127.0.0.1 годилось только узлу на этой же машине: команда установки для чужой машины вела бы «на себя».
+if [[ "$WEB_ADDRESS" == https://* ]]; then
+  PUBLIC_ADDRESS="${WEB_ADDRESS}/api"
+else
+  PUBLIC_ADDRESS="http://127.0.0.1:8000"
+fi
 # Порт SMPP для клиентов (ADR-0072). Своё значение — SMPP_PORT=… в вызове; 0 — выключить.
 SMPP_PORT="${SMPP_PORT:-2775}"
 if [ ! -s "$ENV_FILE" ]; then
@@ -297,9 +305,9 @@ if [ ! -s "$ENV_FILE" ]; then
 APP_ENV=production
 APP_HOST=127.0.0.1
 APP_PORT=8000
-# Адрес, по которому к площадке ходят узлы АТС. Узел на этом же сервере — 127.0.0.1;
-# на отдельном сервере — только https и домен (ADR-0045).
-PUBLIC_BASE_URL=http://127.0.0.1:8000
+# Адрес, по которому к площадке ходят узлы АТС и клиенты SMPP: на домене — https://кабинет/api,
+# в туннеле — 127.0.0.1 (ADR-0045).
+PUBLIC_BASE_URL=${PUBLIC_ADDRESS}
 # Адрес кабинета: письма, код первого запуска, Secure у cookie входа.
 WEB_BASE_URL=${WEB_ADDRESS}
 LOG_LEVEL=info
@@ -332,6 +340,19 @@ else
     sed -i "s|^WEB_BASE_URL=.*|WEB_BASE_URL=${WEB_ADDRESS}|" "$ENV_FILE"
     echo "адрес кабинета: ${current} → ${WEB_ADDRESS}"
     ADDRESS_CHANGED=yes
+  fi
+  # Установка до этой правки записывала 127.0.0.1 и при домене: команда установки узла вела на машину самого узла.
+  # Исправляется только нетронутое значение по умолчанию; адрес, заданный руками, остаётся.
+  if [[ "$PUBLIC_ADDRESS" == https://* ]]; then
+    if grep -q '^PUBLIC_BASE_URL=http://127\.0\.0\.1:8000$' "$ENV_FILE"; then
+      sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=${PUBLIC_ADDRESS}|" "$ENV_FILE"
+      echo "адрес площадки для узлов: ${PUBLIC_ADDRESS}"
+      ADDRESS_CHANGED=yes
+    elif ! grep -q '^PUBLIC_BASE_URL=' "$ENV_FILE"; then
+      printf '# Адрес площадки для узлов АТС и клиентов SMPP.\nPUBLIC_BASE_URL=%s\n' "$PUBLIC_ADDRESS" >>"$ENV_FILE"
+      echo "дописан PUBLIC_BASE_URL=${PUBLIC_ADDRESS}"
+      ADDRESS_CHANGED=yes
+    fi
   fi
 fi
 # Готовое окружение без порта SMPP получает его, а заданное не меняется: повтор подготовки
