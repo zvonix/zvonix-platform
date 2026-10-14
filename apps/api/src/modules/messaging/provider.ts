@@ -46,7 +46,9 @@ export type RecipientCheck = 'exists' | 'absent' | 'unknown' | 'limited';
  */
 export type AccessCheck =
   | { readonly state: 'ok'; readonly instances: number }
-  | { readonly state: 'no_key' | 'rejected' | 'unreachable' };
+  /** `host` — к какому адресу не удалось подключиться: администратор сам его вписал в настройках. */
+  | { readonly state: 'unreachable'; readonly host: string }
+  | { readonly state: 'no_key' | 'rejected' };
 
 export interface MessageProvider {
   readonly id: MessengerProviderId;

@@ -2133,5 +2133,25 @@ test.describe('страница «Лимиты» партнёра при мно�
     // Исчерпавшая карта — первой в раскрытом списке правила.
     const firstCard = page.getByRole('row').filter({ hasText: '79130001005' });
     await expect(firstCard).toContainText('исчерпан');
+
+test.describe('сессия кончилась посреди работы', () => {
+  test('любой отказ «требуется вход» уводит на вход, а не оставляет меню над пустой страницей', async ({
+    page,
+    context,
+  }) => {
+    await signIn(page, PEOPLE.partner);
+    await expect(page.getByRole('navigation', { name: 'Разделы' })).toBeVisible();
+
+    // Сессия пропала на стороне сервера (срок, выход в другой вкладке), а вкладка этого не знает.
+    await context.clearCookies();
+    // Переход внутри страницы, без перезагрузки: оболочка о потере сессии ничего не знает. Нажатие
+    // средствами страницы, а не Playwright: фоновый опрос мог уже увести на вход, и ждать «пропавшую»
+    // ссылку незачем — итог один.
+    await page.evaluate(() => {
+      document.querySelector<HTMLAnchorElement>('a[href="/partner/prices"]')?.click();
+    });
+
+    await expect(page).toHaveURL(/\/login/u);
+    await expect(page.getByRole('navigation', { name: 'Разделы' })).toHaveCount(0);
   });
 });
