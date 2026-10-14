@@ -19,8 +19,8 @@ export default async function HomePage() {
             Звонки и сообщения в одном месте
           </h1>
           <p className="max-w-2xl text-lg text-muted-foreground md:text-xl">
-            Службам такси — звонки пассажирам и сообщения MAX по понятным ценам. Владельцам
-            GSM-оборудования — загрузка SIM и выплаты за каждую минуту.
+            Компаниям и сервисам — звонки и уведомления MAX вашим клиентам по понятным ценам.
+            Владельцам GSM-оборудования — загрузка SIM и выплаты за каждую минуту.
           </p>
           <div className="flex flex-wrap gap-3 pt-2">
             <a
@@ -70,10 +70,11 @@ export default async function HomePage() {
               href="/clients"
               className="group flex h-full flex-col gap-3 rounded-xl border border-border bg-card p-6 transition-colors hover:border-primary"
             >
-              <h3 className="text-xl font-semibold">Службам такси</h3>
+              <h3 className="text-xl font-semibold">Компаниям и сервисам</h3>
               <p className="text-muted-foreground">
-                Звонки пассажирам и сообщения MAX через одну площадку. Вы видите цену, ставите
-                лимиты и сами решаете, через кого звонить в первую очередь.
+                Звонки и уведомления вашим клиентам через одну площадку: доставка, такси, магазины,
+                салоны. Вы видите цену, ставите лимиты и сами решаете, через кого звонить в первую
+                очередь.
               </p>
               <span className="mt-auto font-medium text-primary group-hover:underline">
                 Подробнее →
@@ -100,7 +101,7 @@ export default async function HomePage() {
 
       <Section
         title="Путь вызова"
-        lead="От вашей системы до телефона пассажира — через нашу АТС и GSM-шлюз партнёра."
+        lead="От вашей системы до телефона вашего клиента — через нашу АТС и GSM-шлюз партнёра."
       >
         <CallPath />
       </Section>
