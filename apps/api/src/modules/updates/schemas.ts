@@ -13,3 +13,13 @@ export const logQuerySchema = z.object({
 });
 
 export const certificateAutoSchema = z.object({ enabled: z.boolean() });
+
+/** Токен GitHub: классический (`ghp_…`) или fine-grained (`github_pat_…`) — буквы, цифры, подчёркивание. */
+export const githubTokenSchema = z.object({
+  token: z
+    .string()
+    .trim()
+    .min(20, 'токен слишком короткий')
+    .max(255, 'токен слишком длинный')
+    .regex(/^[A-Za-z0-9_]+$/u, 'токен записан неверно: допустимы буквы, цифры и подчёркивание'),
+});

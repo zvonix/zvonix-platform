@@ -33,7 +33,8 @@ type Action =
   | 'cert-check'
   | 'cert-issue'
   | 'cert-auto-on'
-  | 'cert-auto-off';
+  | 'cert-auto-off'
+  | 'token-set';
 type Status = 'running' | 'succeeded' | 'failed';
 
 interface Release {
@@ -96,6 +97,7 @@ const ACTION_NAME: Record<Action, string> = {
   'cert-issue': 'Выпуск сертификата',
   'cert-auto-on': 'Автопродление сертификата: включено',
   'cert-auto-off': 'Автопродление сертификата: выключено',
+  'token-set': 'Токен GitHub',
 };
 
 const STATUS_NAME: Record<Status, string> = {

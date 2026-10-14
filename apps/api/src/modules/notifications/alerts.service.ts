@@ -26,6 +26,7 @@ import { ServersService } from '../servers/servers.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { QualityService, type QualityView } from '../telephony/quality.service.js';
 import { CertificateStatusService } from '../updates/certificate-status.service.js';
+import { GithubTokenStatusService } from '../updates/github-token-status.service.js';
 
 /** Не чаще раза в полсуток по одному объекту: напоминание, а не поток. */
 const REPEAT_HOURS = 12;
@@ -81,6 +82,7 @@ export class AlertsService {
     private readonly servers: ServersService,
     private readonly messages: MessagesService,
     private readonly certificate: CertificateStatusService,
+    private readonly githubToken: GithubTokenStatusService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('alerts');
@@ -226,6 +228,12 @@ export class AlertsService {
       this.logger.error('Тревоги: сертификат не прочитан', cause);
     }
 
+    try {
+      alerts.push(...(await this.githubTokenAlerts(now)));
+    } catch (cause) {
+      this.logger.error('Тревоги: токен GitHub не прочитан', cause);
+    }
+
     return alerts;
   }
 
@@ -282,6 +290,45 @@ export class AlertsService {
       default:
         return [];
     }
+  }
+
+  /**
+   * Токен GitHub для обновлений скоро кончится или перестал приниматься (ADR-0084). Без него обновления
+   * из кабинета встанут молча, поэтому предупреждаем заранее.
+   */
+  private async githubTokenAlerts(now: Date): Promise<Alert[]> {
+    const status = await this.githubToken.status(now);
+    const hint =
+      'Выпустите новый токен в GitHub и впишите его в «Настройки площадки» → «Обновления».';
+    if (status.state === 'soon') {
+      return [
+        {
+          kind: 'alert_github_token:soon',
+          subject: 'Zvonix: токен GitHub для обновлений скоро кончится',
+          body: [
+            `Токен, которым площадка скачивает выпуски, действует ещё ${String(status.days_left ?? 0)} дн. (до ${status.expires_at ?? 'неизвестно'}).`,
+            'После этого обновления из кабинета перестанут работать.',
+            '',
+            hint,
+          ].join('\n'),
+        },
+      ];
+    }
+    if (status.state === 'invalid') {
+      return [
+        {
+          kind: 'alert_github_token:invalid',
+          subject: 'Zvonix: токен GitHub для обновлений не принимается',
+          body: [
+            `Площадка не может скачивать выпуски: ${status.problem ?? 'токен не принят'}.`,
+            'Обновления из кабинета не работают, пока токен не заменён.',
+            '',
+            hint,
+          ].join('\n'),
+        },
+      ];
+    }
+    return [];
   }
 
   /** Сообщения MAX, которые массово не уходят: за последний час не отправлено больше половины. */

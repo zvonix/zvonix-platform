@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
@@ -28,12 +29,17 @@ ROOT = os.environ.get('ZVONIX_UPDATER_DIR', '/var/lib/zvonix-updater')
 # Команда выкладки; в проверках подменяется (может быть несколькими словами).
 DEPLOY = shlex.split(os.environ.get('ZVONIX_DEPLOY_CMD', '/usr/local/sbin/zvonix-deploy'))
 GITHUB_ENV = os.environ.get('ZVONIX_GITHUB_ENV', '/etc/zvonix/github.env')
+# Адрес API GitHub; подменяется только в проверках.
+GITHUB_API = os.environ.get('ZVONIX_GITHUB_API', 'https://api.github.com').rstrip('/')
+# Токен GitHub (ADR-0084): классические и fine-grained токены — буквы, цифры и подчёркивание.
+TOKEN_PATTERN = re.compile(r'^[A-Za-z0-9_]{20,255}$')
 REFRESH_EVERY = int(os.environ.get('ZVONIX_REFRESH_SECONDS', '600'))
 MAX_REQUEST = 4096
 KEEP_RUNS = 30
 TAG_PATTERN = re.compile(r'^v?[0-9A-Za-z][0-9A-Za-z._-]*$')
 ID_PATTERN = re.compile(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json')
-ACTIONS = ('deploy', 'prepare', 'rollback', 'refresh', 'cert-check', 'cert-issue', 'cert-auto-on', 'cert-auto-off')
+ACTIONS = ('deploy', 'prepare', 'rollback', 'refresh', 'cert-check', 'cert-issue', 'cert-auto-on', 'cert-auto-off',
+           'token-set')
 
 # Сертификат кабинета (ADR-0083). Имена берутся из файлов root, а не из заявки: заявка не называет
 # домен, поэтому выпустить сертификат на чужое имя через неё нельзя.
@@ -51,6 +57,7 @@ requests_dir = os.path.join(ROOT, 'requests')
 runs_dir = os.path.join(ROOT, 'runs')
 releases_file = os.path.join(ROOT, 'releases.json')
 certificate_file = os.path.join(ROOT, 'certificate.json')
+github_token_file = os.path.join(ROOT, 'github-token.json')
 
 
 def now():
@@ -91,8 +98,14 @@ def read_request(path):
         return None
     if action in ('deploy', 'prepare') and not (isinstance(tag, str) and TAG_PATTERN.match(tag)):
         return None
+    token = None
+    if action == 'token-set':
+        token = request.get('token')
+        if not (isinstance(token, str) and TOKEN_PATTERN.match(token)):
+            return None
     return {'action': action, 'tag': tag if action in ('deploy', 'prepare') else None,
-            'by': str(request.get('by', ''))[:200], 'at': str(request.get('at', ''))[:40]}
+            'by': str(request.get('by', ''))[:200], 'at': str(request.get('at', ''))[:40],
+            'token': token}
 
 
 def write_state(run, **fields):
@@ -150,6 +163,9 @@ def run_request(request_id, path, request):
     if request['action'].startswith('cert-'):
         run_certificate(request['action'], log_path, run)
         return
+    if request['action'] == 'token-set':
+        run_token_set(request['token'], log_path, run)
+        return
 
     arguments = {'deploy': [request['tag']], 'prepare': ['--prepare', request['tag']], 'rollback': ['--rollback']}
     command = DEPLOY + arguments[request['action']]
@@ -177,17 +193,19 @@ def read_env(path):
 
 def refresh_releases(log_path, run=None):
     """Список выпусков из GitHub по токену выкладки. Сбой — в журнал, старый список остаётся."""
+    repository = ''
     try:
         env = read_env(GITHUB_ENV)
         repository, token = env.get('GITHUB_REPOSITORY', ''), env.get('GITHUB_TOKEN', '')
         if not repository or not token:
             raise RuntimeError('в github.env не заданы GITHUB_REPOSITORY и GITHUB_TOKEN')
         http = urllib.request.Request(
-            f'https://api.github.com/repos/{repository}/releases?per_page=30',
+            f'{GITHUB_API}/repos/{repository}/releases?per_page=30',
             headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json',
                      'X-GitHub-Api-Version': '2022-11-28'})
         with urllib.request.urlopen(http, timeout=30) as response:
             items = json.load(response)
+            write_token_status(repository, True, response.headers.get('github-authentication-token-expiration'), None)
         releases = []
         for item in items:
             tag = item.get('tag_name')
@@ -199,6 +217,11 @@ def refresh_releases(log_path, run=None):
                              'notes': str(item.get('body') or '')[:2000]})
         write_atomic(releases_file, json.dumps({'fetched_at': now(), 'releases': releases}, ensure_ascii=False))
         ok, message = True, 'выпусков: ' + str(len(releases))
+    except urllib.error.HTTPError as error:
+        # Отказ GitHub по токену — это состояние токена, а не сети: кабинет покажет его и письмом предупредит.
+        if error.code in (401, 403, 404):
+            write_token_status(repository, False, None, token_problem(error.code))
+        ok, message = False, 'список выпусков не обновлён: ' + str(error)
     except Exception as error:  # noqa: BLE001 — сбой сети или разбора: список не обновлён, служба живёт
         ok, message = False, 'список выпусков не обновлён: ' + str(error)
     if log_path is not None:
@@ -209,6 +232,91 @@ def refresh_releases(log_path, run=None):
         write_state(run, status='succeeded' if ok else 'failed', finished_at=now(), exit_code=0 if ok else 1)
     else:
         print(message)
+
+
+def token_problem(code):
+    """Что сказать администратору об отказе GitHub: по-русски, без токена и без ответа GitHub."""
+    if code == 401:
+        return 'GitHub не принял токен: он отозван или истёк'
+    return ('у токена нет доступа к репозиторию: проверьте, что он выпущен на организацию-владельца '
+            'и ему дано право «Contents: Read-only»')
+
+
+def parse_token_expiry(value):
+    """Срок токена из заголовка GitHub («2026-12-31 12:00:00 UTC») в ISO; нет заголовка — None."""
+    if not value:
+        return None
+    text = value.strip().replace(' UTC', '+00:00').replace(' ', 'T', 1)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat(timespec='seconds')
+
+
+def write_token_status(repository, valid, expires_header, problem):
+    """Состояние токена для кабинета. Сам токен сюда не попадает никогда."""
+    write_atomic(github_token_file, json.dumps({
+        'checked_at': now(), 'repository': repository, 'valid': valid,
+        'expires_at': parse_token_expiry(expires_header), 'problem': problem,
+    }, ensure_ascii=False))
+
+
+def write_env_token(token):
+    """Строка GITHUB_TOKEN в github.env заменяется подменой файла; остальные строки и права сохраняются."""
+    lines = []
+    replaced = False
+    with open(GITHUB_ENV, encoding='utf-8') as handle:
+        for line in handle.read().splitlines():
+            if line.strip().startswith('GITHUB_TOKEN='):
+                lines.append('GITHUB_TOKEN=' + token)
+                replaced = True
+            else:
+                lines.append(line)
+    if not replaced:
+        lines.append('GITHUB_TOKEN=' + token)
+    temp = GITHUB_ENV + '.tmp'
+    descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+        handle.write('\n'.join(lines) + '\n')
+    os.chmod(temp, 0o600)
+    os.replace(temp, GITHUB_ENV)
+
+
+def run_token_set(token, log_path, run):
+    """Новый токен GitHub: проверяется у GitHub и только потом записывается. Репозиторий — из github.env, не из заявки."""
+    lines = []
+    code = 0
+    repository = ''
+    try:
+        repository = read_env(GITHUB_ENV).get('GITHUB_REPOSITORY', '')
+        if not repository:
+            raise RuntimeError('в github.env не задан GITHUB_REPOSITORY')
+        http = urllib.request.Request(
+            f'{GITHUB_API}/repos/{repository}/releases?per_page=1',
+            headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json',
+                     'X-GitHub-Api-Version': '2022-11-28'})
+        with urllib.request.urlopen(http, timeout=30) as response:
+            expires = response.headers.get('github-authentication-token-expiration')
+            response.read()
+        write_env_token(token)
+        write_token_status(repository, True, expires, None)
+        until = parse_token_expiry(expires)
+        lines.append('токен принят и записан' + (f'; действует до {until}' if until else '; срок не ограничен'))
+    except urllib.error.HTTPError as error:
+        problem = token_problem(error.code) if error.code in (401, 403, 404) else f'GitHub ответил {error.code}'
+        lines.append('токен не записан: ' + problem)
+        code = 1
+    except Exception as error:  # noqa: BLE001 — сеть или файлы: прежний токен остаётся
+        lines.append('токен не записан: ' + str(error).replace(token, '***'))
+        code = 1
+    with open(log_path, 'w', encoding='utf-8') as handle:
+        handle.write('\n'.join(lines) + '\n')
+    os.chmod(log_path, 0o644)
+    write_state(run, status='succeeded' if code == 0 else 'failed', finished_at=now(), exit_code=code)
+
 
 
 def cert_names():
