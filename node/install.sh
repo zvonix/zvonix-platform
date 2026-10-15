@@ -116,7 +116,7 @@ if ! command -v freeswitch >/dev/null 2>&1 && [ "$MODE" = install ]; then
       BUILD_TMP="$(mktemp)"
       curl -fsSL --max-time 60 "${CONTROL_PLANE}/install/build-freeswitch.sh" -o "$BUILD_TMP" \
         || die "не удалось скачать скрипт сборки ${CONTROL_PLANE}/install/build-freeswitch.sh"
-      bash "$BUILD_TMP" || { rm -f "$BUILD_TMP"; die "сборка FreeSWITCH не удалась — журнал выше; после исправления запустите команду снова"; }
+      ZVONIX_NO_START=1 bash "$BUILD_TMP" || { rm -f "$BUILD_TMP"; die "сборка FreeSWITCH не удалась — журнал выше; после исправления запустите команду снова"; }
       rm -f "$BUILD_TMP"
       hash -r
       ;;
@@ -543,12 +543,22 @@ net.core.netdev_max_backlog = 5000
 net.core.somaxconn = 4096
 net.netfilter.nf_conntrack_max = 262144
 SYSCTL
+  # Модуль conntrack грузится файрволом позже, чем systemd-sysctl читает файл: без этого значение не применилось бы после перезагрузки.
+  echo nf_conntrack >/etc/modules-load.d/zvonix-conntrack.conf
+  modprobe nf_conntrack 2>/dev/null || true
   # Ключа conntrack нет, пока не загружен модуль: ошибка по нему — не повод считать шаг проваленным.
   sysctl -q -p /etc/sysctl.d/90-zvonix.conf >/dev/null 2>&1 || true
   echo "Сетевые буферы под нагрузку заданы (/etc/sysctl.d/90-zvonix.conf)"
 }
 
 harden_ssh() {
+  # Ограничения попыток входа не зависят от ключей: безопасны всегда.
+  install -d -m 0755 /etc/ssh/sshd_config.d
+  cat >/etc/ssh/sshd_config.d/10-zvonix.conf <<'SSHD'
+# Порождается node/install.sh — правится там.
+MaxAuthTries 3
+LoginGraceTime 30
+SSHD
   # Пароли отключаются только когда есть чем войти: иначе машина осталась бы без доступа.
   local has_key=no key_file
   for key_file in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
@@ -557,34 +567,31 @@ harden_ssh() {
       break
     fi
   done
-  if [ "$has_key" != yes ]; then
-    echo "ВНИМАНИЕ: на сервере нет ключей SSH — вход по паролю оставлен. Добавьте ключ в ~/.ssh/authorized_keys и запустите установку снова: пароли будут отключены" >&2
-    return 0
-  fi
-  install -d -m 0755 /etc/ssh/sshd_config.d
-  cat >/etc/ssh/sshd_config.d/10-zvonix.conf <<'SSHD'
-# Порождается node/install.sh — правится там.
+  if [ "$has_key" = yes ]; then
+    cat >>/etc/ssh/sshd_config.d/10-zvonix.conf <<'SSHD'
 PermitRootLogin prohibit-password
 PasswordAuthentication no
 KbdInteractiveAuthentication no
-MaxAuthTries 3
-LoginGraceTime 30
 SSHD
+  else
+    echo "Справка: ключей SSH на сервере нет — вход по паролю оставлен (пароли отключаются, когда в ~/.ssh/authorized_keys есть ключ; затем запустите команду снова)"
+  fi
   if sshd -t 2>/dev/null; then
     systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
-    echo "SSH: вход только по ключу, пароли отключены"
+    [ "$has_key" = yes ] && echo "SSH: вход только по ключу, пароли отключены"
   else
     rm -f /etc/ssh/sshd_config.d/10-zvonix.conf
     echo "ВНИМАНИЕ: конфигурация SSH не прошла проверку — прежняя оставлена" >&2
   fi
+  return 0
 }
 
 if [ "${ZVONIX_SKIP_HARDENING:-}" = 1 ]; then
   echo "Укрепление сервера пропущено (ZVONIX_SKIP_HARDENING=1)"
 elif [ "$MODE" = install ]; then
-  harden_network
   harden_ssh
   harden_firewall
+  harden_network
 fi
 
 # --- Пароль ESL площадке (ADR-0055) -------------------------------------------
@@ -601,7 +608,7 @@ if printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" \
     --data-binary "@${ESL_BODY}" "${CONTROL_PLANE}/node/esl" >/dev/null; then
   echo "Тестовый звонок с SIM доступен: площадка знает пароль ESL узла"
 else
-  echo "ВНИМАНИЕ: площадка не приняла пароль ESL — тестовый звонок с SIM на этом узле недоступен (узел на другой машине или площадка не ответила)" >&2
+  echo "Справка: тестовый звонок с SIM для узла на отдельной машине недоступен — площадка принимает пароль ESL только от узла на той же машине. Звонки клиентов это не затрагивает"
 fi
 rm -f "$ESL_BODY"
 
