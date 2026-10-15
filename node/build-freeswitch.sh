@@ -185,6 +185,13 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable freeswitch >/dev/null 2>&1
+
+# Установщик узла собирает FreeSWITCH до того, как применена конфигурация площадки, и просит не запускать службу:
+# заводская конфигурация слушает SIP с общим паролем 1234, и открытая машина получила бы сканеры раньше защиты.
+if [ "${ZVONIX_NO_START:-}" = 1 ]; then
+  echo "FREESWITCH_OK собран, служба не запущена: её запустит установщик узла после настройки"
+  exit 0
+fi
 systemctl restart freeswitch
 
 for attempt in $(seq 1 30); do
