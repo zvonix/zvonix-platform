@@ -89,6 +89,8 @@ describe('установщик узла', () => {
     expect(script.indexOf('sshd -t')).toBeLessThan(script.indexOf('systemctl reload ssh'));
     // Только при установке, и отключаемо.
     expect(script).toContain('ZVONIX_SKIP_HARDENING');
+    expect(script).toContain('ZVONIX_SSH_ALLOW_IPS');
+    expect(script).toContain('ZVONIX_SKIP_UPGRADE');
     expect(script).toContain('elif [ "$MODE" = install ]; then\n  harden_ssh');
     // FreeSWITCH собирается без запуска: заводская конфигурация со своими паролями не должна слушать порт.
     expect(script).toContain('ZVONIX_NO_START=1 bash');

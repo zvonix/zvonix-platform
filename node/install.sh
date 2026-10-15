@@ -106,6 +106,15 @@ case "$CONTROL_PLANE" in
   "" | *"$MARK"*) die "адрес control plane не подставлен" ;;
 esac
 [[ "$SIP_REALM" =~ ^[a-z0-9.-]+$ ]] || die "SIP-домен площадки не подставлен или недопустим: «${SIP_REALM}»"
+# Обновление системы — до всего остального: на свежей машине обычно сотня пакетов с исправлениями безопасности, и
+# ставить их после запуска телефонии значило бы перезагружать её посреди работы. Не перезагружаем сами: звонков ещё
+# нет, но машина может быть не наша — о перезагрузке сказано в конце. Пропустить: ZVONIX_SKIP_UPGRADE=1.
+if [ "$MODE" = install ] && [ "${ZVONIX_SKIP_UPGRADE:-}" != 1 ] && command -v apt-get >/dev/null 2>&1; then
+  echo "Обновление пакетов системы (несколько минут)"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq     && apt-get -y -qq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade     || echo "Справка: обновить пакеты системы не удалось — узел ставится дальше; выполните apt upgrade позже" >&2
+fi
+
 # Нет FreeSWITCH и нет репозитория пакетов — собираем из исходников скриптом площадки: так одна команда
 # ставит узел на чистую машину целиком. Долго (полчаса–час), поэтому до обмена токена: токен не сгорает.
 if ! command -v freeswitch >/dev/null 2>&1 && [ "$MODE" = install ]; then
@@ -482,6 +491,12 @@ if command -v fail2ban-client >/dev/null 2>&1; then
   if [ -f "$FREESWITCH_LOG" ]; then
 @@FAIL2BAN_FILES@@
     sed -i "s|${MARK}FREESWITCH_LOG${MARK}|${FREESWITCH_LOG}|" /etc/fail2ban/jail.d/zvonix-freeswitch.conf
+    # Адреса, которые SSH не блокирует (свои офис и дом): только цифры, точки, двоеточия, слеши и пробелы.
+    ALLOW_IPS_RE='^[0-9a-fA-F.:/ ]+$'
+    if [ -n "${ZVONIX_SSH_ALLOW_IPS:-}" ] && [[ "$ZVONIX_SSH_ALLOW_IPS" =~ $ALLOW_IPS_RE ]]; then
+      printf 'ignoreip = 127.0.0.1/8 ::1 %s
+' "$ZVONIX_SSH_ALLOW_IPS" >>/etc/fail2ban/jail.d/zvonix-sshd.conf
+    fi
     systemctl enable fail2ban >/dev/null 2>&1 || true
     # Работающий fail2ban перечитывает правила, не снимая блокировок; стоящий — запускается.
     if fail2ban-client ping >/dev/null 2>&1; then
@@ -838,6 +853,10 @@ if [ "$MODE" = update ]; then
   exit 0
 fi
 echo "Готово. Узел «${NODE_NAME}» настроен, профиль SIP zvonix работает."
+# Новое ядро или библиотеки после обновления вступают в силу только после перезагрузки.
+if [ -f /var/run/reboot-required ]; then
+  echo "Нужна перезагрузка сервера (обновилось ядро): выполните sudo reboot, когда на узле нет звонков. FreeSWITCH и пульс поднимутся сами"
+fi
 echo
 echo "Обновить узел до набора нового выпуска площадки: zvonix-node-update"
 echo "(узел на одной машине с площадкой обновляет сама выкладка — zvonix-deploy)."
