@@ -214,6 +214,7 @@ describe('установщик узла', () => {
     // с сотней попыток в секунду занимал половину процессора API (живой узел 2026-09-22).
     expect(script).toContain("fail2ban_file 'filter.d/zvonix-freeswitch.conf'");
     expect(script).toContain("fail2ban_file 'jail.d/zvonix-freeswitch.conf'");
+    expect(script).toContain("fail2ban_file 'jail.d/zvonix-sshd.conf'");
     // Свои логины — отдельной тюрьмой с порогом атаки: шлюз партнёра со старым паролем
     // не должен закрывать его офис от площадки (владелец, 2026-09-25).
     expect(script).toContain("fail2ban_file 'filter.d/zvonix-freeswitch-known.conf'");
