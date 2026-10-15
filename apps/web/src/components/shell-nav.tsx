@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
+import { useQuery } from '@tanstack/react-query';
+import { request } from '@/lib/api';
 
 /**
  * Меню кабинета — по образцу ([DESIGN.md](../../../../docs/DESIGN.md), «Меню»).
@@ -62,6 +64,32 @@ function useCollapsed(): [boolean, (next: boolean) => void] {
 }
 
 /** Раздел открыт: сам адрес или страница внутри него, например карточка `/partners/<id>`. */
+/**
+ * Красная точка у «Серверов», когда что-то не в порядке: узел замолчал, мало памяти или диска, процессор перегружен.
+ * Только у этого пункта — он виден администратору и поддержке, остальным запрос не уходит.
+ */
+function AttentionDot({ href }: { href: string }) {
+  const attention = useQuery({
+    queryKey: ['servers', 'attention'],
+    queryFn: () =>
+      request<{ count: number; problems: { name: string; reason: string }[] }>(
+        '/servers/attention',
+      ),
+    enabled: href === '/servers',
+    refetchInterval: 60_000,
+  });
+  if (href !== '/servers' || !attention.data || attention.data.count === 0) return null;
+  const text = attention.data.problems.map((p) => `${p.name}: ${p.reason}`).join('; ');
+  return (
+    <span
+      role="img"
+      aria-label={`Требует внимания: ${text}`}
+      title={text}
+      className="ml-auto inline-block size-2 shrink-0 rounded-full bg-crit"
+    />
+  );
+}
+
 export function isCurrent(pathname: string, href: string): boolean {
   const path = href.split('?')[0] ?? href;
   return pathname === path || pathname.startsWith(`${path}/`);
@@ -225,6 +253,7 @@ export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; foote
                       ) : (
                         item.label
                       )}
+                      <AttentionDot href={item.href} />
                     </Link>
                   );
                 })}
@@ -303,6 +332,7 @@ function AllSections({
                   >
                     <item.Icon size={17} strokeWidth={2} aria-hidden />
                     {item.label}
+                    <AttentionDot href={item.href} />
                   </Link>
                 );
               })}

@@ -74,6 +74,9 @@ function NodesView() {
     queryFn: () => request<{ nodes: Node[]; current_set_version: string }>('/nodes'),
   });
 
+  /** Удалённые узлы остаются в базе ради CDR, но в таблице не нужны. */
+  const visible = list.data?.nodes.filter((node) => node.status !== 'decommissioned');
+
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['nodes'] });
   };
@@ -206,7 +209,7 @@ function NodesView() {
               </TableRow>
             )}
 
-            {list.data?.nodes.length === 0 && (
+            {visible?.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
                   Узлов нет — значит, вызовы не идут вовсе: маршрут запрашивает узел.
@@ -215,11 +218,11 @@ function NodesView() {
               </TableRow>
             )}
 
-            {list.data?.nodes.map((node) => (
+            {visible?.map((node) => (
               <NodeRows
                 key={node.id}
                 node={node}
-                currentSet={list.data.current_set_version}
+                currentSet={list.data?.current_set_version ?? ''}
                 busy={busy}
                 canChange={canChange}
                 onReissue={(allowedIps) => reissue.mutateAsync({ id: node.id, allowedIps })}
@@ -338,18 +341,20 @@ function NodeRows({
             </FormDialog>
 
             <ConfirmAction
-              label="Вывести"
-              title={`Вывести узел «${node.name}» из эксплуатации`}
+              label="Удалить"
+              title={`Удалить узел «${node.name}»`}
               consequence={
                 <>
-                  <p>Все ключи узла отзываются, вызовы через него прекращаются.</p>
                   <p>
-                    Запись остаётся: на неё ссылаются CDR. Состояние окончательное — вернуть узел в
-                    работу нельзя, понадобится завести новый.
+                    Все ключи узла отзываются, вызовы через него прекращаются, из списка он уходит.
+                  </p>
+                  <p>
+                    История вызовов сохраняется: на узел ссылаются CDR. Действие окончательное —
+                    вернуть узел нельзя, понадобится завести новый.
                   </p>
                 </>
               }
-              confirmLabel="Вывести навсегда"
+              confirmLabel="Удалить навсегда"
               disabled={busy}
               onConfirm={onDecommission}
             />

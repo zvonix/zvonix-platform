@@ -75,6 +75,23 @@ describe('установщик узла', () => {
     expect(script).toContain('/install/build-freeswitch.sh');
   });
 
+  it('укрепление сервера: файрвол оставляет SSH, пароли отключаются только при наличии ключа', () => {
+    // Порт SSH берётся из работающего sshd: фиксированный 22 отрезал бы машину с нестандартным портом.
+    expect(script).toContain("sshd -T 2>/dev/null | sed -n 's/^port //p'");
+    expect(script).toContain('ufw allow 16384:32768/udp');
+    // SSH разрешён раньше, чем включается файрвол.
+    expect(script.indexOf('ufw allow "${port}/tcp"')).toBeLessThan(
+      script.indexOf('ufw --force enable'),
+    );
+    // Пароли — только если ключи есть, и конфигурация проверяется до применения.
+    expect(script).toContain('has_key=yes');
+    expect(script).toContain('PasswordAuthentication no');
+    expect(script.indexOf('sshd -t')).toBeLessThan(script.indexOf('systemctl reload ssh'));
+    // Только при установке, и отключаемо.
+    expect(script).toContain('ZVONIX_SKIP_HARDENING');
+    expect(script).toContain('elif [ "$MODE" = install ]; then\n  harden_network');
+  });
+
   it('параметры площадки подставлены', () => {
     expect(script).toContain(REPO);
     expect(script).toContain(FINGERPRINT);

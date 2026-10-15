@@ -200,6 +200,40 @@ describe('страница «Серверы»', () => {
     ).toBe(400);
   });
 
+  it('отметка в меню: мало места — проблема с названием, достаточно — нет; роли и вход', async () => {
+    const low = await enrolledNode();
+    const send = (presented: string, diskFreeMb: number) =>
+      api().inject({
+        method: 'POST',
+        url: '/node/metrics',
+        headers: bearer(presented),
+        payload: metrics({ diskTotalMb: 100_000, diskFreeMb }),
+      });
+    await send(low.presented, 5000);
+
+    const response = await api().inject({
+      method: 'GET',
+      url: '/servers/attention',
+      headers: bearer(supportToken),
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ count: number; problems: { name: string; reason: string }[] }>();
+    expect(body.count).toBe(body.problems.length);
+    expect(body.problems).toContainEqual({ name: low.name, reason: 'мало места на диске' });
+
+    await send(low.presented, 60_000);
+    const after = await api().inject({
+      method: 'GET',
+      url: '/servers/attention',
+      headers: bearer(adminToken),
+    });
+    expect(
+      after.json<{ problems: { name: string }[] }>().problems.some((p) => p.name === low.name),
+    ).toBe(false);
+
+    expect((await api().inject({ method: 'GET', url: '/servers/attention' })).statusCode).toBe(401);
+  });
+
   it('замер самой площадки попадает в историю', async () => {
     await api().get(ServersService).samplePlatform();
     const platform = (await overview()).find((row) => row.scope === 'platform');

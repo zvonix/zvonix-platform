@@ -70,6 +70,14 @@ function toJson(view: ServerView): ServerJson {
 export class ServersController {
   constructor(private readonly servers: ServersService) {}
 
+  /** Что сейчас не в порядке: отметка у пункта «Серверы» в меню. */
+  @Roles('admin', 'support')
+  @Get('servers/attention')
+  async attention(): Promise<{ count: number; problems: { name: string; reason: string }[] }> {
+    const problems = await this.servers.attention();
+    return { count: problems.length, problems };
+  }
+
   /** Площадка и узлы: последний замер и история за окно (`range`: hour, day, week). */
   @Roles('admin', 'support')
   @Get('servers')
