@@ -164,6 +164,19 @@ export class NodesService {
       throw notFound('Узел не найден');
     }
 
+    // Имя машины уникально. Занятость проверяется ДО расхода токена: иначе отказ сжигал бы токен,
+    // и повтор той же команды был бы невозможен (найдено 2026-10-15 на живой установке).
+    const holder = await this.repository.findByHostname(hostname);
+    if (holder !== undefined && holder.id !== nodeId) {
+      if (holder.status === 'decommissioned') {
+        await this.repository.clearHostname(holder.id);
+      } else {
+        throw conflict(
+          `Имя машины «${hostname}» уже занято узлом «${holder.name}». Удалите тот узел в кабинете или переименуйте эту машину (hostnamectl set-hostname)`,
+        );
+      }
+    }
+
     await this.machine.consumeEnrollment(principal.credentialId, ip);
 
     const registered = await this.repository.markInstalling(nodeId, hostname, agentVersion);
@@ -328,7 +341,7 @@ export class NodesService {
     if (node.status === 'decommissioned') return node;
 
     const revoked = await this.machine.revokeAllOf(id, actorUserId, actorRole);
-    const closed = await this.repository.setStatus(id, 'decommissioned');
+    const closed = await this.repository.close(id);
     if (closed === undefined) throw notFound('Узел не найден');
 
     await this.audit.record({

@@ -257,6 +257,35 @@ describe('регистрация узла', () => {
     // отнести к узлу.
     expect((await enroll(tokenOf(second), 'node-same')).statusCode).toBe(409);
   });
+
+  it('отказ из-за занятого имени не сжигает токен: после переименования та же команда работает', async () => {
+    const first = await provision();
+    const second = await provision();
+    expect((await enroll(tokenOf(first), 'node-burn')).statusCode).toBe(200);
+
+    const refused = await enroll(tokenOf(second), 'node-burn');
+    expect(refused.statusCode).toBe(409);
+    // Причина названа в ответе, а не «токен уже применён».
+    expect(refused.body).toContain('уже занято узлом');
+
+    expect((await enroll(tokenOf(second), 'node-burn-renamed')).statusCode).toBe(200);
+  });
+
+  it('удалённый узел освобождает имя машины: переустановка на той же машине проходит', async () => {
+    const old = await provision();
+    const oldEnrolled = await enroll(tokenOf(old), 'node-reinstall');
+    expect(oldEnrolled.statusCode).toBe(200);
+
+    const closed = await api().inject({
+      method: 'POST',
+      url: `/nodes/${old.node.id}/decommission`,
+      headers: auth(),
+    });
+    expect(closed.statusCode).toBe(201);
+
+    const fresh = await provision();
+    expect((await enroll(tokenOf(fresh), 'node-reinstall')).statusCode).toBe(200);
+  });
 });
 
 describe('heartbeat', () => {

@@ -241,13 +241,20 @@ if [ "$MODE" = install ]; then
 
 echo "Регистрация узла ${HOSTNAME_FQDN} в ${CONTROL_PLANE}"
 
+# Без -f: при отказе площадка называет причину в теле ответа, и показать её — единственный способ не гадать.
 ENROLL_BODY="$(
-  curl -fsSL --max-time 30 \
+  curl -sSL --max-time 30 -w '\n%{http_code}' \
     -H "Authorization: Bearer ${TOKEN}" \
     -H 'Content-Type: application/json' \
     -d "{\"hostname\":\"${HOSTNAME_FQDN}\",\"agentVersion\":\"install.sh\"}" \
     "${CONTROL_PLANE}/node/enroll"
-)" || die "регистрация не удалась. Токен одноразовый и живёт час — выпустите команду заново"
+)" || die "площадка не ответила на регистрацию — проверьте сеть и адрес ${CONTROL_PLANE}"
+ENROLL_CODE="${ENROLL_BODY##*$'\n'}"
+ENROLL_BODY="${ENROLL_BODY%$'\n'*}"
+if [ "$ENROLL_CODE" != 200 ] && [ "$ENROLL_CODE" != 201 ]; then
+  ENROLL_REASON="$(printf '%s' "$ENROLL_BODY" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | head -1)"
+  die "регистрация не удалась (код ${ENROLL_CODE}): ${ENROLL_REASON:-без пояснения}. Если токен уже применён или просрочен — выпустите команду заново"
+fi
 
 read_field() {
   echo "$ENROLL_BODY" | python3 -c "
