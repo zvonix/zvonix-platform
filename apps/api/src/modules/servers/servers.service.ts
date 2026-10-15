@@ -292,6 +292,33 @@ export class ServersService {
     return found;
   }
 
+  /**
+   * Что сейчас не в порядке — для отметки в меню кабинета. Те же пороги, что у писем (ADR-0062): память, процессор,
+   * диск; плюс узел, который замолчал или работает с ошибками. Узел без замеров, но «добавлен», не проблема.
+   */
+  async attention(now: Date = new Date()): Promise<{ name: string; reason: string }[]> {
+    const found: { name: string; reason: string }[] = [];
+    for (const node of await this.nodes.list()) {
+      if (node.status === 'offline') found.push({ name: node.name, reason: 'узел не на связи' });
+      if (node.status === 'degraded')
+        found.push({ name: node.name, reason: 'узел работает с ошибками' });
+    }
+    for (const item of await this.strained(now)) {
+      if (item.memoryUsedPercent !== undefined) {
+        found.push({
+          name: item.name,
+          reason: `занято ${String(item.memoryUsedPercent)} % памяти`,
+        });
+      }
+      if (item.loadPerCore !== undefined)
+        found.push({ name: item.name, reason: 'процессор перегружен' });
+    }
+    for (const item of await this.lowDisk(now)) {
+      found.push({ name: item.name, reason: 'мало места на диске' });
+    }
+    return found;
+  }
+
   /** Убирает историю старше срока из настроек (ADR-0065); догоняющая: считает по сроку. */
   async purge(now: Date = new Date()): Promise<number> {
     const { metricsDays } = await this.settings.retention();

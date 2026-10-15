@@ -498,6 +498,88 @@ if command -v fail2ban-client >/dev/null 2>&1; then
   fi
 fi
 
+# --- Укрепление сервера: файрвол, сеть, SSH ---------------------------------
+# Узел стоит на открытом адресе, и за час на него приходят сотни попыток входа. Ставится только при установке
+# (не при обновлении набора): правила сервера — не часть набора конфигурации. Пропустить: ZVONIX_SKIP_HARDENING=1.
+# Каждый шаг не роняет установку: узел работает и без него, а об отказе сказано в выводе.
+
+harden_firewall() {
+  command -v ufw >/dev/null 2>&1 || apt-get install -y -qq ufw >/dev/null 2>&1 \
+    || { echo "ВНИМАНИЕ: ufw не установился — файрвол не включён" >&2; return 0; }
+  # Порт SSH берётся из работающей конфигурации: ошибка здесь отрезала бы единственный доступ к машине.
+  local ssh_ports
+  ssh_ports="$(sshd -T 2>/dev/null | sed -n 's/^port //p')"
+  [ -n "$ssh_ports" ] || ssh_ports=22
+  local port
+  for port in $ssh_ports; do
+    ufw allow "${port}/tcp" comment 'SSH' >/dev/null
+  done
+  ufw allow 5060/udp comment 'SIP' >/dev/null
+  ufw allow 5060/tcp comment 'SIP' >/dev/null
+  ufw allow 16384:32768/udp comment 'RTP' >/dev/null
+  # Исходящее разрешено, входящее — только перечисленное. Уже включённый ufw с чужими правилами не сбрасывается.
+  ufw default deny incoming >/dev/null
+  ufw default allow outgoing >/dev/null
+  ufw --force enable >/dev/null
+  echo "Файрвол включён: открыты SSH (${ssh_ports//$'\n'/, }), SIP 5060, RTP 16384–32768/UDP"
+}
+
+harden_network() {
+  # Буферы по умолчанию (~200 КБ) на сотнях потоков RTP дают потерю пакетов — треск в разговоре.
+  cat >/etc/sysctl.d/90-zvonix.conf <<'SYSCTL'
+# Порождается node/install.sh — правится там.
+net.core.rmem_max = 26214400
+net.core.wmem_max = 26214400
+net.core.rmem_default = 1048576
+net.core.wmem_default = 1048576
+net.core.netdev_max_backlog = 5000
+net.core.somaxconn = 4096
+net.netfilter.nf_conntrack_max = 262144
+SYSCTL
+  # Ключа conntrack нет, пока не загружен модуль: ошибка по нему — не повод считать шаг проваленным.
+  sysctl -q -p /etc/sysctl.d/90-zvonix.conf >/dev/null 2>&1 || true
+  echo "Сетевые буферы под нагрузку заданы (/etc/sysctl.d/90-zvonix.conf)"
+}
+
+harden_ssh() {
+  # Пароли отключаются только когда есть чем войти: иначе машина осталась бы без доступа.
+  local has_key=no key_file
+  for key_file in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
+    if [ -s "$key_file" ] && grep -qE '^(ssh-|ecdsa-|sk-)' "$key_file" 2>/dev/null; then
+      has_key=yes
+      break
+    fi
+  done
+  if [ "$has_key" != yes ]; then
+    echo "ВНИМАНИЕ: на сервере нет ключей SSH — вход по паролю оставлен. Добавьте ключ в ~/.ssh/authorized_keys и запустите установку снова: пароли будут отключены" >&2
+    return 0
+  fi
+  install -d -m 0755 /etc/ssh/sshd_config.d
+  cat >/etc/ssh/sshd_config.d/10-zvonix.conf <<'SSHD'
+# Порождается node/install.sh — правится там.
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+MaxAuthTries 3
+LoginGraceTime 30
+SSHD
+  if sshd -t 2>/dev/null; then
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+    echo "SSH: вход только по ключу, пароли отключены"
+  else
+    rm -f /etc/ssh/sshd_config.d/10-zvonix.conf
+    echo "ВНИМАНИЕ: конфигурация SSH не прошла проверку — прежняя оставлена" >&2
+  fi
+}
+
+if [ "${ZVONIX_SKIP_HARDENING:-}" = 1 ]; then
+  echo "Укрепление сервера пропущено (ZVONIX_SKIP_HARDENING=1)"
+elif [ "$MODE" = install ]; then
+  harden_network
+  harden_ssh
+  harden_firewall
+fi
+
 # --- Пароль ESL площадке (ADR-0055) -------------------------------------------
 # С ним площадка сама звонит с выбранной SIM — тестовый звонок партнёра. Принимается
 # только от узла на той же машине: ESL слушает 127.0.0.1. Отказ не роняет установку —
