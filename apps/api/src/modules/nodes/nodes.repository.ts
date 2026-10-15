@@ -138,6 +138,24 @@ export class NodesRepository {
     return row;
   }
 
+  /**
+   * Закрывает узел и освобождает имя машины: оно уникально, и новая установка на той же машине
+   * упиралась бы в закрытый узел.
+   */
+  async close(id: NodeId): Promise<NodeRow | undefined> {
+    const [row] = await this.db
+      .update(nodes)
+      .set({ status: 'decommissioned', hostname: null })
+      .where(eq(nodes.id, id))
+      .returning();
+    return row;
+  }
+
+  /** Снимает имя машины с узла, закрытого до того, как закрытие стало его освобождать. */
+  async clearHostname(id: NodeId): Promise<void> {
+    await this.db.update(nodes).set({ hostname: null }).where(eq(nodes.id, id));
+  }
+
   /** Узел по имени машины — для сверки `hostname` из запроса маршрута с ключом. */
   async findByHostname(hostname: string): Promise<NodeRow | undefined> {
     const [row] = await this.db
