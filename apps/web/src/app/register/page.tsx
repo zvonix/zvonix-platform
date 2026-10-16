@@ -169,7 +169,7 @@ export default function RegisterPage() {
               <h2 className="text-2xl font-semibold">Регистрация</h2>
               <span className="ml-auto flex items-center gap-3">
                 <Link href="/login" className="text-sm font-semibold text-primary">
-                  Уже есть вход? Войти
+                  Уже зарегистрированы? Войти
                 </Link>
                 <ThemeSwitch />
               </span>

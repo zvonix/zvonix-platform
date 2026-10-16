@@ -4,8 +4,10 @@ import { getSiteInfo } from './site-data';
 import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
 
-// Страницы пересобираются раз в минуту: контакты и цены меняются в настройках площадки.
-export const revalidate = 60;
+// Страница строится на каждый запрос, а данные площадки (контакты, адрес кабинета, цены) берутся из кэша на минуту.
+// Заранее собранная страница отдавала бы пустой адрес кабинета первые минуты после выкладки — пока API ещё не поднят:
+// «Войти» вело бы в никуда (найдено 2026-10-16).
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: {

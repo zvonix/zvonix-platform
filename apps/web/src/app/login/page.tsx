@@ -200,7 +200,7 @@ export default function LoginPage() {
           </Link>
         </form>
         <p className="pt-3 text-center text-muted-foreground">
-          Нет входа?{' '}
+          Ещё не зарегистрированы?{' '}
           <Link href="/register" className="font-semibold text-primary">
             Зарегистрироваться
           </Link>

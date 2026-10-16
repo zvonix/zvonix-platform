@@ -2201,3 +2201,24 @@ test.describe('токен GitHub в настройках (ADR-0084)', () => {
     }
   });
 });
+
+test.describe('сайт: меню и вход', () => {
+  test('открытый раздел подсвечен в меню, «Войти» ведёт на вход', async ({ page }) => {
+    await page.goto('/site/clients');
+    const nav = page.getByRole('navigation', { name: 'Разделы сайта' }).first();
+    await expect(nav.getByRole('link', { name: 'Клиентам' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(nav.getByRole('link', { name: 'Партнёрам' })).not.toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+
+    // Адрес кабинета на стенде — отдельный источник, поэтому проверяется ссылка, а не переход по ней.
+    await expect(page.getByRole('link', { name: 'Войти' }).first()).toHaveAttribute(
+      'href',
+      /\/login$/u,
+    );
+  });
+});
