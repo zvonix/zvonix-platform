@@ -210,23 +210,36 @@ export const updateTariffSchema = z
  */
 export const addPriceBandSchema = z
   .object({
-    operatorId: z.uuid('должен быть идентификатором'),
+    /** Оператор. Пусто — коридор на любой оператор. */
+    operatorId: z.uuid('должен быть идентификатором').optional(),
 
     /** Регион назначения. Пусто — коридор на любой регион. */
     region: z.string().trim().min(2, 'слишком короткий').max(100, 'слишком длинный').optional(),
 
-    minPrice: tariffAmount,
-    maxPrice: tariffAmount,
+    /** Нижняя граница. Не названа — без нижней границы. */
+    minPrice: tariffAmount.optional(),
+    /** Верхняя граница. Не названа — без верхней границы. */
+    maxPrice: tariffAmount.optional(),
 
     /** Момент начала действия. По умолчанию — сейчас. */
     effectiveFrom: z.iso.datetime({ error: 'должен быть датой в формате ISO' }).optional(),
   })
-  .refine((value) => value.maxPrice >= value.minPrice, {
-    // Такое же ограничение стоит в базе. Здесь — ради внятного сообщения: коридор
-    // с верхней границей ниже нижней не запрещает цену, а делает невозможной любую.
-    message: 'Верхняя граница коридора ниже нижней',
-    path: ['maxPrice'],
-  });
+  .refine((value) => value.minPrice !== undefined || value.maxPrice !== undefined, {
+    message: 'Задайте нижнюю или верхнюю границу',
+    path: ['minPrice'],
+  })
+  .refine(
+    (value) =>
+      value.minPrice === undefined ||
+      value.maxPrice === undefined ||
+      value.maxPrice >= value.minPrice,
+    {
+      // Такое же ограничение стоит в базе. Здесь — ради внятного сообщения: коридор
+      // с верхней границей ниже нижней не запрещает цену, а делает невозможной любую.
+      message: 'Верхняя граница коридора ниже нижней',
+      path: ['maxPrice'],
+    },
+  );
 
 const commissionProductSchema = z.enum(COMMISSION_PRODUCTS, {
   error: 'должно быть «call» или «message»',

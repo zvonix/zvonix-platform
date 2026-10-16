@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
 import { TERMINATION_KIND_MEANING, TERMINATION_KIND_NAME } from '@/lib/labels';
-import { money } from '@/lib/money';
+import { bandRange, money } from '@/lib/money';
 import {
   PARTNER_RATES_KEY,
   tariffOfRate,
@@ -205,7 +205,7 @@ function TariffCard({
                     {rate.band === null ? (
                       <span className="text-faint">не задан</span>
                     ) : (
-                      `${money(rate.band.min_price)} — ${money(rate.band.max_price)}`
+                      bandRange(rate.band.min_price, rate.band.max_price)
                     )}
                   </TableCell>
                 )}

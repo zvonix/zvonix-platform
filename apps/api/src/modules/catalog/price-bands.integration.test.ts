@@ -562,3 +562,131 @@ describe('права', () => {
     expect(response.statusCode).toBe(400);
   });
 });
+
+describe('коридор без оператора и с одной границей', () => {
+  const FROM = '2020-01-01T00:00:00.000Z';
+  const RATE_FROM = '2026-01-01T00:00:00.000Z';
+
+  it('только верхняя или только нижняя граница; без обеих — отказ', async () => {
+    const partner = await createPartner();
+    const upper = await createOperator();
+    const lower = await createOperator();
+
+    expect(
+      (await addBand({ operatorId: upper, maxPrice: '3', effectiveFrom: FROM })).statusCode,
+    ).toBe(201);
+    expect(
+      (await addBand({ operatorId: lower, minPrice: '2', effectiveFrom: FROM })).statusCode,
+    ).toBe(201);
+    // Нижней границы у первого нет: копейки проходят; выше потолка — нет.
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: upper,
+          pricePerMinute: '0.01',
+          effectiveFrom: RATE_FROM,
+        })
+      ).statusCode,
+    ).toBe(201);
+    const over = await addRate({
+      partnerId: partner,
+      operatorId: upper,
+      pricePerMinute: '9',
+      effectiveFrom: RATE_FROM,
+    });
+    expect(over.statusCode).toBe(400);
+    const details = over.json<{ error: { details: Record<string, string> } }>().error.details;
+    expect(details['max_price']).toBe('3');
+    // Границы с другой стороны нет — и поля нет, а не «пусто».
+    expect(details).not.toHaveProperty('min_price');
+
+    // Верхней границы у второго нет: любая цена выше пола проходит, ниже — нет.
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: lower,
+          pricePerMinute: '500',
+          effectiveFrom: RATE_FROM,
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: lower,
+          pricePerMinute: '1',
+          effectiveFrom: RATE_FROM,
+        })
+      ).statusCode,
+    ).toBe(400);
+
+    const none = await addBand({ operatorId: upper });
+    expect(none.statusCode).toBe(400);
+  });
+
+  it('«любой оператор»: ограничивает операторов без своего коридора, свой коридор побеждает', async () => {
+    const partner = await createPartner();
+    const withOwn = await createOperator();
+    const without = await createOperator();
+
+    const any = await addBand({ maxPrice: '5', effectiveFrom: FROM });
+    expect(any.statusCode).toBe(201);
+    expect(
+      any.json<{ band: { operator_id: string | null; min_price: string | null } }>().band,
+    ).toMatchObject({ operator_id: null, min_price: null });
+
+    // Свой коридор шире общего и побеждает его.
+    expect(
+      (await addBand({ operatorId: withOwn, minPrice: '1', maxPrice: '20', effectiveFrom: FROM }))
+        .statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: withOwn,
+          pricePerMinute: '10',
+          effectiveFrom: RATE_FROM,
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    // У оператора без своего коридора действует общий.
+    const blocked = await addRate({
+      partnerId: partner,
+      operatorId: without,
+      pricePerMinute: '10',
+      effectiveFrom: RATE_FROM,
+    });
+    expect(blocked.statusCode).toBe(400);
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: without,
+          pricePerMinute: '4',
+          effectiveFrom: RATE_FROM,
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    // Цена «на все операторы» не обходит общий коридор.
+    expect(
+      (await addRate({ partnerId: partner, pricePerMinute: '10', effectiveFrom: RATE_FROM }))
+        .statusCode,
+    ).toBe(400);
+  });
+
+  it('список отдаёт коридор без оператора и без границ как пустые значения', async () => {
+    const listed = await api().inject({ method: 'GET', url: '/price-bands', headers: auth() });
+    expect(listed.statusCode).toBe(200);
+    const bands = listed.json<{
+      bands: { operator_id: string | null; min_price: string | null; max_price: string | null }[];
+    }>().bands;
+    expect(bands.some((band) => band.operator_id === null && band.max_price === '5')).toBe(true);
+    expect(bands.some((band) => band.operator_id !== null && band.max_price === null)).toBe(true);
+  });
+});

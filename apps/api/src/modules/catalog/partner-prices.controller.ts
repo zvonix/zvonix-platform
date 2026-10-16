@@ -33,7 +33,7 @@ import type { PartnerRow } from '../billing/billing.repository.js';
 import type { Principal } from '../identity/identity.service.js';
 import { CatalogService } from './catalog.service.js';
 import { createTariffSchema, partnerOwnRateSchema, updateTariffSchema } from './schemas.js';
-import { TariffService, type RateWithBand } from './tariff.service.js';
+import { ANY_OPERATOR_KEY, TariffService, type RateWithBand } from './tariff.service.js';
 import { toRateView, toTariffView, type RateView, type TariffView } from './views.js';
 
 /**
@@ -63,7 +63,7 @@ interface PricedDirectionView {
   readonly effective_from: string;
   readonly reference_cost: string;
   /** Рамки цены; у цены на все операторы — пересечение коридоров всех операторов. */
-  readonly band: { min_price: string; max_price: string } | null;
+  readonly band: { min_price: string | null; max_price: string | null } | null;
   /** Уложилась ли цена в коридор. Коридора нет — уложилась по определению. */
   readonly within_band: boolean;
 }
@@ -137,12 +137,15 @@ export class PartnerPricesController {
             .filter((operator) => !priced.has(operator.id))
             .map((operator) => ({ operator_id: operator.id, operator_name: operator.name })),
       operators: verified.map((operator) => {
-        const band = bandsEnabled ? bands.get(operator.id) : undefined;
+        // Свой коридор оператора, а при его отсутствии — «любой оператор».
+        const band = bandsEnabled
+          ? (bands.get(operator.id) ?? bands.get(ANY_OPERATOR_KEY))
+          : undefined;
         return {
           operator_id: operator.id,
           operator_name: operator.name,
-          min_price: band === undefined ? null : Money.format(band.minPrice),
-          max_price: band === undefined ? null : Money.format(band.maxPrice),
+          min_price: band?.minPrice == null ? null : Money.format(band.minPrice),
+          max_price: band?.maxPrice == null ? null : Money.format(band.maxPrice),
         };
       }),
     };
@@ -258,7 +261,10 @@ function toPricedDirection(row: RateWithBand, names: Map<string, string>): Price
     band:
       limits === undefined
         ? null
-        : { min_price: Money.format(limits.minPrice), max_price: Money.format(limits.maxPrice) },
+        : {
+            min_price: limits.minPrice === null ? null : Money.format(limits.minPrice),
+            max_price: limits.maxPrice === null ? null : Money.format(limits.maxPrice),
+          },
     within_band: row.withinBand,
   };
 }

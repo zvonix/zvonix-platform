@@ -414,6 +414,13 @@
       "when": 1791937724534,
       "tag": "0058_limit_max_v_chas",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1792149164234,
+      "tag": "0059_koridory_lyuboy_operator",
+      "breakpoints": true
     }
   ]
 }

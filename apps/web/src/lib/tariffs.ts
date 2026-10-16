@@ -34,7 +34,7 @@ export interface Rate {
   readonly rounding: Rounding;
   readonly effective_from: string;
   readonly reference_cost: string;
-  readonly band: { readonly min_price: string; readonly max_price: string } | null;
+  readonly band: { readonly min_price: string | null; readonly max_price: string | null } | null;
   readonly within_band: boolean;
 }
 

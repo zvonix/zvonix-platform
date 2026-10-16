@@ -2222,3 +2222,29 @@ test.describe('сайт: меню и вход', () => {
     );
   });
 });
+
+test.describe('коридоры цен: любой оператор и одна граница', () => {
+  test('коридор без оператора и без нижней границы заводится и виден в таблице', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/tariffs');
+
+    await page.getByRole('button', { name: 'Добавить коридор' }).first().click();
+    // Оператор не выбран («любой оператор»), нижняя граница пуста, верхняя — 7 ₽.
+    await expect(page.getByRole('button', { name: 'Добавить', exact: true })).toBeDisabled();
+    await page.getByLabel('Не выше, ₽ (можно пусто)').fill('7');
+    await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('любой оператор');
+    await expect(dialog).toContainText('до');
+    await dialog.getByRole('button', { name: 'Добавить коридор' }).click();
+    await expect(dialog).toHaveCount(0);
+
+    const row = page.getByRole('row').filter({ hasText: 'любой оператор' });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('без границы');
+    await expect(row).toContainText('7');
+  });
+});

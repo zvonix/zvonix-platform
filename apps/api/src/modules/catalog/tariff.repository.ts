@@ -372,10 +372,12 @@ export class TariffRepository {
 
   async insertPriceBand(
     draft: {
-      operatorId: Id<'operator'>;
+      /** Пусто — коридор на любой оператор. */
+      operatorId: Id<'operator'> | null;
       region: string | null;
-      minPrice: MoneyAmount;
-      maxPrice: MoneyAmount;
+      /** Пусто — без нижней границы; хотя бы одна из двух границ задана. */
+      minPrice: MoneyAmount | null;
+      maxPrice: MoneyAmount | null;
       effectiveFrom: Date;
     },
     executor: Executor = this.db,
@@ -405,29 +407,24 @@ export class TariffRepository {
    * в одну очередь. Записи цен и коридоров редки — административное действие,
    * а теперь ещё и партнёрское, — и последовательность по оператору ничего не стоит.
    *
+   * Коридор «любой оператор» ограничивает цену **каждого** оператора, поэтому у записи с оператором
+   * есть ещё общий ключ — разделяемо, а запись «на все операторы» (цены или коридора) берёт его
+   * исключительно. Так записи разных операторов идут параллельно, но «на все» не проскочит
+   * между проверкой и записью чужой цены.
+   *
    * Блокировка транзакционная: снимается сама, в том числе при откате. Ключ
    * с префиксом, чтобы не столкнуться с чужой блокировкой по тому же идентификатору.
    */
-  async lockOperatorTariffs(
-    operatorId: Id<'operator'> | null,
-    executor: Executor,
-    purpose: 'rate' | 'band' = 'rate',
-  ): Promise<void> {
-    // Цена «на все операторы» проверяется коридорами **всех** операторов (ADR-0056):
-    // её запись берёт общий ключ исключительно, а запись коридора — разделяемо. Так
-    // коридоры разных операторов по-прежнему пишутся параллельно, но ни один не проскочит
-    // между проверкой и записью цены на всех.
+  async lockOperatorTariffs(operatorId: Id<'operator'> | null, executor: Executor): Promise<void> {
     if (operatorId === null) {
       await executor.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${ALL_OPERATORS_LOCK}, 0))`,
       );
       return;
     }
-    if (purpose === 'band') {
-      await executor.execute(
-        sql`select pg_advisory_xact_lock_shared(hashtextextended(${ALL_OPERATORS_LOCK}, 0))`,
-      );
-    }
+    await executor.execute(
+      sql`select pg_advisory_xact_lock_shared(hashtextextended(${ALL_OPERATORS_LOCK}, 0))`,
+    );
     await executor.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${`tariff:${operatorId}`}, 0))`,
     );

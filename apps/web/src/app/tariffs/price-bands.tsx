@@ -20,14 +20,17 @@ import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { useOperators } from '@/lib/dictionaries';
 import { moment } from '@/lib/format';
-import { microunits, money, moneyFromInput } from '@/lib/money';
+import { bandRange, microunits, money, moneyFromInput } from '@/lib/money';
 
 interface PriceBand {
   readonly id: string;
-  readonly operator_id: string;
+  /** Пусто — коридор на любой оператор. */
+  readonly operator_id: string | null;
   readonly region: string | null;
-  readonly min_price: string;
-  readonly max_price: string;
+  /** Пусто — без нижней границы. */
+  readonly min_price: string | null;
+  /** Пусто — без верхней границы. */
+  readonly max_price: string | null;
   readonly effective_from: string;
 }
 
@@ -41,10 +44,9 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * коридор по одной цене за минуту обходится платой за соединение или минимальной
  * длительностью в десять минут — то есть не ограничивает ничего.
  *
- * С тех пор как цену назначает сам партнёр, **направление без коридора ему закрыто**:
- * его цену API отвергает (`TariffService`). Администратору — нет: он коридор и задаёт.
- * Прежний текст экрана «коридоров нет — цена ничем не ограничена» говорил обратное
- * (ui-review, 2026-09-14).
+ * Оператор можно не называть («любой оператор»: коридор на всех, у оператора со своим коридором
+ * действует свой), и границу можно задать одну — только «не ниже» или только «не выше» (владелец, 2026-10-16).
+ * Направление без коридора партнёру открыто: коридор — рамка там, где площадка её задала (ADR-0056).
  *
  * Добавление — окном, а в нём через подтверждение: проверка коридора идёт при назначении цены,
  * поэтому суженный коридор оставляет уже назначенные цены снаружи, и это стоит сказать
@@ -112,9 +114,8 @@ export function PriceBands() {
             {list.data?.bands.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={5} className="whitespace-normal text-muted-foreground">
-                  Коридоров нет — значит, ни по одному направлению партнёр не может назначить цену
-                  сам: без коридора его цена отклоняется. Администратор назначает цену и без
-                  коридора.
+                  Коридоров нет — партнёры назначают цены без ограничений. Коридор ставит рамку там,
+                  где вы хотите её задать.
                 </TableCell>
               </TableRow>
             )}
@@ -122,15 +123,31 @@ export function PriceBands() {
             {list.data?.bands.map((band) => (
               <TableRow key={band.id}>
                 <TableCell>
-                  {operators.nameOf(band.operator_id) ?? (
-                    <span className="num text-faint">{band.operator_id}</span>
+                  {band.operator_id === null ? (
+                    <span className="font-medium">любой оператор</span>
+                  ) : (
+                    (operators.nameOf(band.operator_id) ?? (
+                      <span className="num text-faint">{band.operator_id}</span>
+                    ))
                   )}
                 </TableCell>
                 <TableCell>
                   {band.region ?? <span className="text-muted-foreground">все</span>}
                 </TableCell>
-                <TableCell className="num text-right">{money(band.min_price)}</TableCell>
-                <TableCell className="num text-right">{money(band.max_price)}</TableCell>
+                <TableCell className="num text-right">
+                  {band.min_price === null ? (
+                    <span className="text-muted-foreground">без границы</span>
+                  ) : (
+                    money(band.min_price)
+                  )}
+                </TableCell>
+                <TableCell className="num text-right">
+                  {band.max_price === null ? (
+                    <span className="text-muted-foreground">без границы</span>
+                  ) : (
+                    money(band.max_price)
+                  )}
+                </TableCell>
                 <TableCell>
                   <span className="num text-muted-foreground">{moment(band.effective_from)}</span>
                 </TableCell>
@@ -157,14 +174,14 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
   const [maxPrice, setMaxPrice] = useState('');
 
   const add = useMutation({
-    mutationFn: (input: { min: string; max: string }) =>
+    mutationFn: (input: { min: string | undefined; max: string | undefined }) =>
       request<unknown>('/price-bands', {
         method: 'POST',
         body: {
-          operatorId,
+          ...(operatorId === '' ? {} : { operatorId }),
           ...(region.trim() === '' ? {} : { region: region.trim() }),
-          minPrice: input.min,
-          maxPrice: input.max,
+          ...(input.min === undefined ? {} : { minPrice: input.min }),
+          ...(input.max === undefined ? {} : { maxPrice: input.max }),
         },
       }),
     onSuccess: () => {
@@ -178,8 +195,12 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
   const max = moneyFromInput(maxPrice);
   // Сравнение в микроединицах, а не числами с плавающей точкой: границы — деньги.
   const inverted = min !== undefined && max !== undefined && microunits(max) < microunits(min);
-  const ready = operatorId !== '' && min !== undefined && max !== undefined && !inverted;
-  const operatorName = operators.nameOf(operatorId) ?? 'оператор';
+  // Границ можно задать одну, но не ноль; набранное, но не разобранное как сумма, коридор не готовит.
+  const garbled =
+    (minPrice.trim() !== '' && min === undefined) || (maxPrice.trim() !== '' && max === undefined);
+  const ready = (min !== undefined || max !== undefined) && !garbled && !inverted;
+  const operatorName =
+    operatorId === '' ? 'любой оператор' : (operators.nameOf(operatorId) ?? 'оператор');
   const regionName = region.trim() === '' ? 'все регионы' : region.trim();
 
   return (
@@ -200,9 +221,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
             }}
             className="h-9 w-full rounded-md border border-input bg-transparent px-2"
           >
-            <option value="">
-              {operators.ready ? 'выберите оператора' : 'загружаем операторов…'}
-            </option>
+            <option value="">{operators.ready ? 'любой оператор' : 'загружаем операторов…'}</option>
             {operators.rows.map((operator) => (
               <option key={operator.id} value={operator.id}>
                 {operator.name}
@@ -222,7 +241,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
           />
         </DialogField>
 
-        <DialogField label="Не ниже, ₽">
+        <DialogField label="Не ниже, ₽ (можно пусто)">
           <Input
             className="num"
             inputMode="decimal"
@@ -235,7 +254,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
           />
         </DialogField>
 
-        <DialogField label="Не выше, ₽">
+        <DialogField label="Не выше, ₽ (можно пусто)">
           <Input
             className="num"
             inputMode="decimal"
@@ -248,7 +267,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
           />
         </DialogField>
 
-        {((minPrice !== '' && min === undefined) || (maxPrice !== '' && max === undefined)) && (
+        {garbled && (
           <p className="text-warn sm:col-span-2">
             Границы — суммы в рублях, не больше шести знаков после запятой: например 0,50.
           </p>
@@ -270,9 +289,11 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
           consequence={
             <>
               <p>
-                Партнёры смогут назначать цену по этому направлению только в границах от{' '}
-                <b className="num">{min === undefined ? '' : money(min)}</b> до{' '}
-                <b className="num">{max === undefined ? '' : money(max)}</b> за вызов в 60 секунд.
+                Партнёры смогут назначать цену по этому направлению только в границах:{' '}
+                <b className="num">{bandRange(min ?? null, max ?? null)}</b> за вызов в 60 секунд.
+                {operatorId === ''
+                  ? ' Коридор касается всех операторов, у которых нет своего.'
+                  : ''}{' '}
                 Коридор действует с этой минуты.
               </p>
               <p>
@@ -282,7 +303,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
             </>
           }
           confirmLabel="Добавить коридор"
-          onConfirm={() => add.mutateAsync({ min: min ?? '0', max: max ?? '0' })}
+          onConfirm={() => add.mutateAsync({ min, max })}
         />
         <DialogClose asChild>
           <Button type="button" variant="outline" size="sm">

@@ -27,10 +27,13 @@ import { toRateView, toTariffView, type RateView, type TariffView } from './view
 
 interface PriceBandView {
   readonly id: string;
-  readonly operator_id: string;
+  /** Пусто — коридор на любой оператор. */
+  readonly operator_id: string | null;
   readonly region: string | null;
-  readonly min_price: string;
-  readonly max_price: string;
+  /** Пусто — без нижней границы. */
+  readonly min_price: string | null;
+  /** Пусто — без верхней границы. */
+  readonly max_price: string | null;
   readonly effective_from: string;
 }
 
@@ -152,10 +155,10 @@ export class TariffController {
   ): Promise<{ band: PriceBandView }> {
     const row = await this.tariffs.addPriceBand(
       {
-        operatorId: parseId(body.operatorId, 'operator'),
+        operatorId: body.operatorId === undefined ? null : parseId(body.operatorId, 'operator'),
         region: body.region ?? null,
-        minPrice: body.minPrice,
-        maxPrice: body.maxPrice,
+        minPrice: body.minPrice ?? null,
+        maxPrice: body.maxPrice ?? null,
         effectiveFrom: body.effectiveFrom === undefined ? new Date() : new Date(body.effectiveFrom),
       },
       actor.userId,
@@ -268,8 +271,8 @@ function toBandView(row: PriceBandRow): PriceBandView {
     id: row.id,
     operator_id: row.operatorId,
     region: row.region,
-    min_price: Money.format(row.minPrice),
-    max_price: Money.format(row.maxPrice),
+    min_price: row.minPrice === null ? null : Money.format(row.minPrice),
+    max_price: row.maxPrice === null ? null : Money.format(row.maxPrice),
     effective_from: row.effectiveFrom.toISOString(),
   };
 }

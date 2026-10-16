@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { useOperators } from '@/lib/dictionaries';
-import { money } from '@/lib/money';
+import { bandRange, money } from '@/lib/money';
 
 interface Violation {
   readonly rate: {
@@ -22,8 +22,8 @@ interface Violation {
     readonly price_per_minute: string;
   };
   readonly band: {
-    readonly min_price: string;
-    readonly max_price: string;
+    readonly min_price: string | null;
+    readonly max_price: string | null;
   };
   readonly reference_cost: string;
   readonly reference_call_seconds: number;
@@ -95,7 +95,7 @@ export function BandViolations() {
                   {money(violation.reference_cost)}
                 </TableCell>
                 <TableCell className="num text-right text-muted-foreground">
-                  {money(violation.band.min_price)} — {money(violation.band.max_price)}
+                  {bandRange(violation.band.min_price, violation.band.max_price)}
                 </TableCell>
                 <TableCell>
                   {/*
