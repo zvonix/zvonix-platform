@@ -18,7 +18,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { prepareEnvironment, resetDatabase, startApi } from '../../testing/harness.js';
 
@@ -33,6 +33,10 @@ prepareEnvironment({
   NODE_PACKAGE_SUITE: 'noble',
   NODE_PACKAGE_KEY_FINGERPRINT: FINGERPRINT,
 });
+
+// Тесты порождают bash десятками раз: на Windows это секунды на запуск, и лимит в 30 секунд на тест мал
+// (на Linux в CI они укладываются в доли секунды).
+vi.setConfig({ testTimeout: 120_000 });
 
 let app: NestFastifyApplication | undefined;
 let script = '';

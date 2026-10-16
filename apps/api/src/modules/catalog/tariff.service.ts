@@ -156,10 +156,14 @@ export interface RateWithBand {
   readonly violated: PriceBandRow | undefined;
 }
 
+/** Рамки цены; пусто — с этой стороны ограничения нет. */
 interface BandLimits {
-  readonly minPrice: MoneyAmount;
-  readonly maxPrice: MoneyAmount;
+  readonly minPrice: MoneyAmount | null;
+  readonly maxPrice: MoneyAmount | null;
 }
+
+/** Ключ коридора «любой оператор» в списках, где ключ — идентификатор оператора. */
+export const ANY_OPERATOR_KEY = '*';
 
 export interface BandViolation {
   readonly rate: PartnerRateRow;
@@ -678,7 +682,7 @@ export class TariffService {
     return this.repository.pool.transaction(async (tx) => {
       // Та же очередь, что и у записи цены: иначе сужение коридора проскакивало бы
       // между её проверкой и вставкой (ADR-0023).
-      await this.repository.lockOperatorTariffs(draft.operatorId, tx, 'band');
+      await this.repository.lockOperatorTariffs(draft.operatorId, tx);
 
       const row = await this.repository.insertPriceBand(draft, tx);
       await this.audit.record(
@@ -691,8 +695,8 @@ export class TariffService {
           after: {
             operator_id: row.operatorId,
             region: row.region,
-            min_price: row.minPrice.toString(),
-            max_price: row.maxPrice.toString(),
+            min_price: row.minPrice === null ? null : row.minPrice.toString(),
+            max_price: row.maxPrice === null ? null : row.maxPrice.toString(),
             effective_from: row.effectiveFrom.toISOString(),
           },
         },
@@ -703,7 +707,8 @@ export class TariffService {
   }
 
   /**
-   * Действующие общие коридоры — по одному на оператора, без региона.
+   * Действующие общие коридоры — по одному на оператора, без региона. Коридор «любой оператор» лежит
+   * под ключом {@link ANY_OPERATOR_KEY}: у оператора без собственного коридора действует он.
    *
    * Нужны там, где цену **ещё только собираются назначить**: без рамок рядом с полем
    * человек вводит число вслепую и узнаёт о коридоре из отказа. Региональные коридоры
@@ -713,7 +718,9 @@ export class TariffService {
   async generalBands(at: Date): Promise<Map<string, PriceBandRow>> {
     const bands = await this.repository.listActivePriceBands(at);
     return new Map(
-      bands.filter((band) => band.regionKey === null).map((band) => [band.operatorId, band]),
+      bands
+        .filter((band) => band.regionKey === null)
+        .map((band) => [band.operatorId ?? ANY_OPERATOR_KEY, band]),
     );
   }
 
@@ -812,9 +819,11 @@ export class TariffService {
           // за соединение это разные числа, и показать не то значит оставить человека
           // с вопросом «почему 2 рубля не помещаются в коридор от 1 до 3».
           reference_cost: Money.format(cost),
-          min_price: Money.format(band.minPrice),
-          max_price: Money.format(band.maxPrice),
-          operator_id: band.operatorId,
+          // Нет границы с одной стороны — поля нет: «ограничения нет» не число.
+          ...(band.minPrice === null ? {} : { min_price: Money.format(band.minPrice) }),
+          ...(band.maxPrice === null ? {} : { max_price: Money.format(band.maxPrice) }),
+          // Пусто — коридор «любой оператор».
+          ...(band.operatorId === null ? {} : { operator_id: band.operatorId }),
           price_band_id: band.id,
         },
       });
@@ -881,50 +890,88 @@ function toCommissionRule(row: CommissionRuleRow): CommissionRule {
 }
 
 function fits(cost: MoneyAmount, band: PriceBandRow): boolean {
-  return Money.compare(cost, band.minPrice) >= 0 && Money.compare(cost, band.maxPrice) <= 0;
+  return (
+    (band.minPrice === null || Money.compare(cost, band.minPrice) >= 0) &&
+    (band.maxPrice === null || Money.compare(cost, band.maxPrice) <= 0)
+  );
 }
 
 /**
  * Коридоры, ограничивающие цену (ADR-0023, ADR-0056).
  *
- * У каждого оператора — один: региональный, если регион цены совпал, иначе общий;
- * среди подошедших региональных — самый свежий. Цена без региона ограничивается только
- * общими: коридор конкретного региона к направлению «любой регион» отношения не имеет.
- * У цены с оператором — коридор этого оператора, у цены «на все» — каждого.
+ * Для оператора действует один коридор — самый конкретный из подошедших: сначала **свой** оператор, потом «любой»;
+ * внутри каждого — региональный, если регион цены совпал, иначе общий (среди региональных — самый свежий).
+ * Цена без региона ограничивается только общими: коридор конкретного региона к направлению «любой регион»
+ * отношения не имеет.
+ *
+ * У цены с оператором — коридор этого оператора. У цены «на все операторы» — коридор каждого оператора, у которого
+ * он свой, **и** коридор «любой оператор», если он есть: так цена на всех не обходит ни одного ограничения. Это
+ * строже точного (коридор «любой», перекрытый у всех операторов своими, всё равно проверяется), зато без перебора
+ * справочника операторов; перекрытый коридор «любой» — редкая настройка.
  */
 function applicableBands(
   operatorId: Id<'operator'> | null,
   regionKeys: readonly string[],
   bands: readonly PriceBandRow[],
 ): PriceBandRow[] {
-  const byOperator = new Map<string, { general?: PriceBandRow; regional?: PriceBandRow }>();
-  for (const band of bands) {
-    if (operatorId !== null && band.operatorId !== operatorId) continue;
-    const entry = byOperator.get(band.operatorId) ?? {};
-    if (band.regionKey === null) {
-      entry.general = band;
-    } else if (
-      regionKeys.includes(band.regionKey) &&
-      (entry.regional === undefined || band.effectiveFrom > entry.regional.effectiveFrom)
-    ) {
-      entry.regional = band;
+  const bestOf = (own: readonly PriceBandRow[]): PriceBandRow | undefined => {
+    let general: PriceBandRow | undefined;
+    let regional: PriceBandRow | undefined;
+    for (const band of own) {
+      if (band.regionKey === null) {
+        general = band;
+      } else if (
+        regionKeys.includes(band.regionKey) &&
+        (regional === undefined || band.effectiveFrom > regional.effectiveFrom)
+      ) {
+        regional = band;
+      }
     }
-    byOperator.set(band.operatorId, entry);
+    return regional ?? general;
+  };
+
+  const byOperator = new Map<string, PriceBandRow[]>();
+  const anyOperator: PriceBandRow[] = [];
+  for (const band of bands) {
+    if (band.operatorId === null) {
+      anyOperator.push(band);
+      continue;
+    }
+    const list = byOperator.get(band.operatorId) ?? [];
+    list.push(band);
+    byOperator.set(band.operatorId, list);
   }
-  return [...byOperator.values()].flatMap((entry) => {
-    const band = entry.regional ?? entry.general;
+
+  if (operatorId !== null) {
+    const band = bestOf(byOperator.get(operatorId) ?? []) ?? bestOf(anyOperator);
+    return band === undefined ? [] : [band];
+  }
+  const found = [...byOperator.values()].flatMap((own) => {
+    const band = bestOf(own);
     return band === undefined ? [] : [band];
   });
+  const any = bestOf(anyOperator);
+  return any === undefined ? found : [...found, any];
 }
 
-/** Общие рамки нескольких коридоров — их пересечение. */
+/** Общие рамки нескольких коридоров — их пересечение; без границы с какой-то стороны её и нет. */
 function limitsOf(bands: readonly PriceBandRow[]): BandLimits | undefined {
   if (bands.length === 0) return undefined;
-  let minPrice = bands[0]?.minPrice ?? Money.ZERO;
-  let maxPrice = bands[0]?.maxPrice ?? Money.ZERO;
+  let minPrice: MoneyAmount | null = null;
+  let maxPrice: MoneyAmount | null = null;
   for (const band of bands) {
-    if (Money.compare(band.minPrice, minPrice) > 0) minPrice = band.minPrice;
-    if (Money.compare(band.maxPrice, maxPrice) < 0) maxPrice = band.maxPrice;
+    if (
+      band.minPrice !== null &&
+      (minPrice === null || Money.compare(band.minPrice, minPrice) > 0)
+    ) {
+      minPrice = band.minPrice;
+    }
+    if (
+      band.maxPrice !== null &&
+      (maxPrice === null || Money.compare(band.maxPrice, maxPrice) < 0)
+    ) {
+      maxPrice = band.maxPrice;
+    }
   }
   return { minPrice, maxPrice };
 }

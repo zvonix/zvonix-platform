@@ -9,7 +9,7 @@ import { DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { TERMINATION_KIND_NAME } from '@/lib/labels';
-import { money, numberFromInput } from '@/lib/money';
+import { bandRange, money, numberFromInput } from '@/lib/money';
 import { PARTNER_RATES_KEY, type OperatorChoice, type Tariff } from '@/lib/tariffs';
 
 /** Значение пункта «Все операторы» в списке: цена без оператора (ADR-0056). */
@@ -294,12 +294,11 @@ function BandNote({
   chosen: OperatorChoice | undefined;
   bandsEnabled: boolean;
 }) {
-  if (!bandsEnabled || everyone || chosen?.min_price == null || chosen.max_price == null) {
-    return null;
-  }
+  if (!bandsEnabled || everyone || chosen === undefined) return null;
+  if (chosen.min_price === null && chosen.max_price === null) return null;
   return (
     <p className="text-muted-foreground sm:col-span-2">
-      Коридор: {money(chosen.min_price)} — {money(chosen.max_price)} за вызов 60 с
+      Коридор: {bandRange(chosen.min_price, chosen.max_price)} за вызов 60 с
     </p>
   );
 }
@@ -328,10 +327,10 @@ function Refusal({ error }: { error: Error }) {
   return (
     <div role="alert" className="flex flex-col gap-0.5">
       <span className="text-crit">{error.message}</span>
-      {cost !== undefined && min !== undefined && max !== undefined && (
+      {cost !== undefined && (min !== undefined || max !== undefined) && (
         <span className="text-muted-foreground">
-          Вызов в 60 секунд по этому тарифу стоит {money(cost)}, а коридор — от {money(min)} до{' '}
-          {money(max)}.
+          Вызов в 60 секунд по этому тарифу стоит {money(cost)}, а коридор —{' '}
+          {bandRange(min ?? null, max ?? null)}.
         </span>
       )}
       {remedy !== undefined && <span className="text-muted-foreground">{remedy}</span>}

@@ -208,9 +208,8 @@ export const priceBands = pgTable(
   {
     id: primaryId<'priceBand'>(),
 
-    operatorId: idRef<'operator'>()
-      .notNull()
-      .references(() => operators.id, { onDelete: 'restrict' }),
+    /** Оператор. Пусто — «любой оператор»: коридор на всех, у конкретного оператора свой побеждает его. */
+    operatorId: idRef<'operator'>().references(() => operators.id, { onDelete: 'restrict' }),
 
     /** Регион назначения. Пусто — «любой регион», как и у цены партнёра. */
     region: text(),
@@ -218,11 +217,11 @@ export const priceBands = pgTable(
     /** Приведённое написание региона (`regionKeyOf`). По нему идёт сравнение. */
     regionKey: text(),
 
-    /** Нижняя граница стоимости эталонного вызова. */
-    minPrice: money().notNull(),
+    /** Нижняя граница стоимости эталонного вызова. Пусто — без нижней границы. */
+    minPrice: money(),
 
-    /** Верхняя граница стоимости эталонного вызова. */
-    maxPrice: money().notNull(),
+    /** Верхняя граница стоимости эталонного вызова. Пусто — без верхней границы. */
+    maxPrice: money(),
 
     effectiveFrom: timestamptz().notNull(),
     createdAt: createdAt(),
@@ -232,6 +231,8 @@ export const priceBands = pgTable(
     // Пустой коридор (`max < min`) не запрещает цену, а делает невозможной любую:
     // такую опечатку лучше поймать вставкой, чем разбором «почему цена не заводится».
     check('price_bands_bounds', sql`${t.maxPrice} >= ${t.minPrice}`),
+    // Коридор без обеих границ ничего не ограничивает — такая запись только путала бы список.
+    check('price_bands_has_bound', sql`${t.minPrice} is not null or ${t.maxPrice} is not null`),
     check('price_bands_region_key_paired', sql`(${t.region} is null) = (${t.regionKey} is null)`),
     index('price_bands_lookup_idx').on(t.operatorId, t.regionKey, t.effectiveFrom),
   ],

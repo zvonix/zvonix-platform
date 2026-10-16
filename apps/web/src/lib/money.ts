@@ -40,6 +40,17 @@ export function money(value: string): string {
   return `${sign}${grouped}${tail}${CURRENCY}`;
 }
 
+/**
+ * Границы коридора словами: «1 ₽ — 3 ₽», «от 1 ₽», «до 3 ₽». Нет обеих — тире.
+ * Граница, которой нет, — это «без ограничения с этой стороны», а не ноль и не пустое место.
+ */
+export function bandRange(min: string | null, max: string | null): string {
+  if (min !== null && max !== null) return `${money(min)} — ${money(max)}`;
+  if (min !== null) return `от ${money(min)}`;
+  if (max !== null) return `до ${money(max)}`;
+  return '—';
+}
+
 /** Отрицательная сумма? Нужно, чтобы выделить долг, не разбирая строку дважды. */
 export function isNegative(value: string): boolean {
   return value.trim().startsWith('-');
