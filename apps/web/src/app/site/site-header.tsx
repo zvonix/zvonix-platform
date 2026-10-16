@@ -1,7 +1,7 @@
 'use client';
 
 import { Menu, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { NAV } from './nav';
 
@@ -9,8 +9,22 @@ import { NAV } from './nav';
  * Шапка сайта. Ссылки — обычные `<a>`, а не клиентский переход: страницы сайта статичны, а переход
  * между ними полной загрузкой надёжнее, чем разбор состояния маршрутизатора за обратным прокси.
  */
+/**
+ * Адрес текущей страницы относительно корня сайта. Берётся из адресной строки, а не из маршрутизатора: за обратным
+ * прокси сайт открыт в корне домена, а кабинет отдаёт его под `/site` — маршрутизатор видит второй путь.
+ */
+function currentPath(): string {
+  const path = window.location.pathname.replace(/^\/site(?=\/|$)/u, '').replace(/\/+$/u, '');
+  return path === '' ? '/' : path;
+}
+
 export function SiteHeader({ cabinetUrl }: { cabinetUrl: string }) {
   const [open, setOpen] = useState(false);
+  const [path, setPath] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setPath(currentPath());
+  }, []);
+  const isCurrent = (href: string): boolean => path !== undefined && path === href;
   const login = `${cabinetUrl}/login`;
 
   return (
@@ -25,7 +39,12 @@ export function SiteHeader({ cabinetUrl }: { cabinetUrl: string }) {
             <a
               key={item.href}
               href={item.href}
-              className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-current={isCurrent(item.href) ? 'page' : undefined}
+              className={`rounded-md px-2.5 py-1.5 transition-colors hover:bg-muted hover:text-foreground ${
+                isCurrent(item.href)
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground'
+              }`}
             >
               {item.label}
             </a>
@@ -64,7 +83,13 @@ export function SiteHeader({ cabinetUrl }: { cabinetUrl: string }) {
           <ul className="mx-auto flex max-w-6xl flex-col px-4 py-2">
             {NAV.map((item) => (
               <li key={item.href}>
-                <a href={item.href} className="block rounded-md px-2 py-2.5 hover:bg-muted">
+                <a
+                  href={item.href}
+                  aria-current={isCurrent(item.href) ? 'page' : undefined}
+                  className={`block rounded-md px-2 py-2.5 hover:bg-muted ${
+                    isCurrent(item.href) ? 'bg-muted font-medium' : ''
+                  }`}
+                >
                   {item.label}
                 </a>
               </li>

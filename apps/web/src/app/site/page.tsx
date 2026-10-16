@@ -2,7 +2,7 @@ import { CallPath, CallToAction, Feature, FeatureGrid, Section } from './blocks'
 import { Reveal } from './reveal';
 import { getSiteInfo, getSitePrices, rubles } from './site-data';
 
-export const revalidate = 60;
+export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
   const [info, prices] = await Promise.all([getSiteInfo(), getSitePrices()]);

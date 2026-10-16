@@ -400,7 +400,8 @@ function SettingsForm() {
         )}
       </div>
 
-      <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t border-border bg-background py-3">
+      {/* -mb-4 уравнивает нижний отступ страницы (p-4): иначе в конце прокрутки панель поднималась на 16 px. */}
+      <div className="sticky bottom-0 -mb-4 flex flex-wrap items-center gap-3 border-t border-border bg-background py-3">
         {/*
           Очистка секрета — через подтверждение: без пароля почта перестаёт уходить,
           без серверного ключа капча выключается. Остальное сохраняется сразу.
