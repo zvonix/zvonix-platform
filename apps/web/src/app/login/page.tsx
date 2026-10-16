@@ -202,7 +202,7 @@ export default function LoginPage() {
         <p className="pt-3 text-center text-muted-foreground">
           Нет входа?{' '}
           <Link href="/register" className="font-semibold text-primary">
-            Подать заявку на подключение
+            Зарегистрироваться
           </Link>
         </p>
       </div>

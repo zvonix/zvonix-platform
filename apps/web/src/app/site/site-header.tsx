@@ -11,7 +11,7 @@ import { NAV } from './nav';
  */
 export function SiteHeader({ cabinetUrl }: { cabinetUrl: string }) {
   const [open, setOpen] = useState(false);
-  const login = cabinetUrl === '' ? '#' : `${cabinetUrl}/login`;
+  const login = `${cabinetUrl}/login`;
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur">

@@ -6,8 +6,7 @@ export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: 'Цены',
-  description:
-    'Цены от: звонок за минуту и сообщение MAX. Точная цена — в кабинете, по направлению.',
+  description: 'Цены от: звонок за минуту и сообщение. Точная цена — в кабинете, по направлению.',
 };
 
 export default async function PricingPage() {
@@ -34,7 +33,7 @@ export default async function PricingPage() {
             </p>
           </article>
           <article className="flex flex-col gap-2 rounded-xl border border-border bg-card p-6">
-            <h3 className="text-muted-foreground">Сообщение MAX</h3>
+            <h3 className="text-muted-foreground">Сообщение</h3>
             <p className="text-3xl font-semibold tabular-nums">
               {prices.messageFrom === null ? 'по запросу' : `от ${rubles(prices.messageFrom)}`}
             </p>

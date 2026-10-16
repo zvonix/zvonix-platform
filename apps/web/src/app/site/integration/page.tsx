@@ -6,7 +6,7 @@ export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: 'Интеграция',
-  description: 'Подключение по HTTP API и SMPP: вызовы, баланс, отправка сообщений MAX.',
+  description: 'Подключение по HTTP API и SMPP: вызовы, баланс, отправка сообщений.',
 };
 
 const EXAMPLE = `curl https://<кабинет>/api/v1/balance \\
@@ -30,7 +30,7 @@ export default async function IntegrationPage() {
       <Section title="Что доступно">
         <FeatureGrid>
           <Feature title="HTTP API">
-            Список вызовов и карточка вызова, баланс, отправка и статусы сообщений MAX. Доступ — по
+            Список вызовов и карточка вызова, баланс, отправка и статусы сообщений. Доступ — по
             ключу клиента.
           </Feature>
           <Feature title="Повтор без дублей" delay={60}>

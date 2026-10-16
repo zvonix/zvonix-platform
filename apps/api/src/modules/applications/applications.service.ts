@@ -191,6 +191,17 @@ export class ApplicationsService {
    * раз в минуту и сразу после подачи заявки; включили настройку — разберёт и то, что
    * накопилось. Возвращает число одобренных.
    */
+  async registrationMode(): Promise<{
+    client_auto_approve: boolean;
+    partner_auto_approve: boolean;
+  }> {
+    const [partners, clients] = await Promise.all([
+      this.settings.partners(),
+      this.settings.clients(),
+    ]);
+    return { client_auto_approve: clients.autoApprove, partner_auto_approve: partners.autoApprove };
+  }
+
   async autoApprove(): Promise<number> {
     const [partners, clients] = await Promise.all([
       this.settings.partners(),

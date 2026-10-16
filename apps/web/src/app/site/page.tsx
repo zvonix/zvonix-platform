@@ -6,7 +6,7 @@ export const revalidate = 60;
 
 export default async function HomePage() {
   const [info, prices] = await Promise.all([getSiteInfo(), getSitePrices()]);
-  const register = info.cabinetUrl === '' ? '#' : `${info.cabinetUrl}/register`;
+  const register = `${info.cabinetUrl}/register`;
 
   return (
     <>
@@ -19,15 +19,15 @@ export default async function HomePage() {
             Звонки и сообщения в одном месте
           </h1>
           <p className="max-w-2xl text-lg text-muted-foreground md:text-xl">
-            Компаниям и сервисам — звонки и уведомления MAX вашим клиентам по понятным ценам.
-            Владельцам GSM-оборудования — загрузка SIM и выплаты за каждую минуту.
+            Компаниям и сервисам — звонки и уведомления в мессенджерах вашим клиентам по понятным
+            ценам. Владельцам GSM-оборудования — загрузка SIM и выплаты за каждую минуту.
           </p>
           <div className="flex flex-wrap gap-3 pt-2">
             <a
               href={register}
               className="rounded-md bg-primary px-5 py-3 font-medium text-primary-foreground transition-opacity hover:opacity-90"
             >
-              Подать заявку
+              Зарегистрироваться
             </a>
             <a
               href="/how-it-works"
@@ -48,7 +48,7 @@ export default async function HomePage() {
               </dd>
             </div>
             <div className="rounded-lg border border-border bg-card/80 p-4">
-              <dt className="text-muted-foreground">Сообщение MAX</dt>
+              <dt className="text-muted-foreground">Сообщение</dt>
               <dd className="mt-1 text-2xl font-semibold tabular-nums">
                 {prices.messageFrom === null ? 'по запросу' : `от ${rubles(prices.messageFrom)}`}
                 {prices.messageFrom !== null && (
@@ -107,8 +107,8 @@ export default async function HomePage() {
       </Section>
 
       <Section
-        title="Сообщения MAX — как обычные SMS"
-        lead="Ваша система отправляет сообщение так же, как SMS: по протоколу SMPP или по HTTP API. Площадка доставляет его в MAX."
+        title="Сообщения — как обычные SMS"
+        lead="Ваша система отправляет сообщение так же, как SMS: по протоколу SMPP или по HTTP API. Площадка доставляет его в мессенджер (сейчас MAX; другие мессенджеры и SMS подключаются)."
       >
         <FeatureGrid>
           <Feature title="Протокол SMS (SMPP)">
@@ -140,9 +140,9 @@ export default async function HomePage() {
             Записи хранятся на площадке, слушать их можно по временным ссылкам; каждое прослушивание
             остаётся в журнале.
           </Feature>
-          <Feature title="Каналы сообщений MAX">
-            Через аккаунты партнёров или через бота MAX; отправка из кабинета, по HTTP API или по
-            SMPP — с одной ценой, лимитами и возвратом.
+          <Feature title="Каналы сообщений">
+            Через аккаунты партнёров или через бота площадки; отправка из кабинета, по HTTP API или
+            по SMPP — с одной ценой, лимитами и возвратом.
           </Feature>
           <Feature title="Отчёты и акт" delay={60}>
             Вызовы с причинами отказов, итоги за период, акт за месяц с остатком на начало и конец,

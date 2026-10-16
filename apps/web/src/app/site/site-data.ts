@@ -17,7 +17,7 @@ export interface SiteInfo {
   readonly phone: string;
   readonly telegram: string;
   readonly workingHours: string;
-  /** Куда ведут «Войти» и «Подать заявку». */
+  /** Куда ведут «Войти» и «Зарегистрироваться»; пусто — на тот же адрес, где открыт сайт (кабинет рядом). */
   readonly cabinetUrl: string;
   readonly siteUrl: string | null;
 }

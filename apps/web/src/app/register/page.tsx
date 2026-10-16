@@ -19,13 +19,13 @@ interface CaptchaSettings {
 
 /**
  * Что говорит левая колонка. Текст зависит от выбора: клиенту и партнёру площадка
- * обещает разное. Про проверку администратором ничего не сказано: допуск зависит
- * от настроек площадки (`clients.auto_approve`, `partners.auto_approve`).
+ * обещает разное. Про проверку администратором здесь ничего не сказано: допуск зависит
+ * от настроек площадки, а о режиме форма узнаёт у неё (`GET /public/registration`).
  */
 const PITCH: Record<Cabinet, { title: string; text: string; steps: readonly string[] }> = {
   client: {
-    title: 'Звонки и сообщения MAX — дешевле и без сбоев',
-    text: 'Звонки идут через SIM-карты партнёров, а получатель видит мобильный номер, а не городской. Сообщения MAX отправляются из кабинета, по API или по протоколу SMS (SMPP) — как обычные SMS.',
+    title: 'Звонки и сообщения — дешевле и без сбоев',
+    text: 'Звонки идут через SIM-карты партнёров, а получатель видит мобильный номер, а не городской. Сообщения в мессенджеры (сейчас MAX) отправляются из кабинета, по API или по протоколу SMS (SMPP) — как обычные SMS.',
     steps: [
       'Подтвердите почту',
       'Пополните счёт',
@@ -34,7 +34,7 @@ const PITCH: Record<Cabinet, { title: string; text: string; steps: readonly stri
   },
   partner: {
     title: 'Ваши SIM работают — вы получаете деньги',
-    text: 'Подключите GOIP с SIM-картами: площадка направит на них звонки клиентов, а через аккаунты MAX на тех же SIM уйдут их сообщения. Цену назначаете вы, заработок виден по каждой карте.',
+    text: 'Подключите GOIP с SIM-картами: площадка направит на них звонки клиентов, а через аккаунты мессенджеров на тех же SIM уйдут их сообщения. Цену назначаете вы, заработок виден по каждой карте.',
     steps: [
       'Подтвердите почту',
       'Шлюз подключается по инструкции из кабинета',
@@ -44,7 +44,7 @@ const PITCH: Record<Cabinet, { title: string; text: string; steps: readonly stri
 };
 
 const ROLES: readonly { id: Cabinet; title: string; text: string }[] = [
-  { id: 'client', title: 'Клиент', text: 'Хочу звонить и отправлять сообщения MAX через площадку' },
+  { id: 'client', title: 'Клиент', text: 'Хочу звонить и отправлять сообщения через площадку' },
   {
     id: 'partner',
     title: 'Партнёр',
@@ -74,6 +74,20 @@ export default function RegisterPage() {
     retry: false,
     staleTime: 5 * 60_000,
   });
+  const mode = useQuery({
+    queryKey: ['public', 'registration'],
+    queryFn: () =>
+      request<{ client_auto_approve: boolean; partner_auto_approve: boolean }>(
+        '/public/registration',
+      ),
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  // Не знаем режима (ответ не пришёл) — говорим осторожно: как при проверке администратором.
+  const immediate =
+    mode.data !== undefined &&
+    (cabinet === 'client' ? mode.data.client_auto_approve : mode.data.partner_auto_approve);
+
   const siteKey =
     captcha.data?.register === true && captcha.data.site_key !== ''
       ? captcha.data.site_key
@@ -121,18 +135,23 @@ export default function RegisterPage() {
           ))}
         </ol>
         <span className="mt-auto hidden text-sm text-rail-ink-dim md:block">
-          Ответ по заявке придёт на почту.
+          {immediate
+            ? 'Письмо для подтверждения придёт на почту.'
+            : 'Ответ по регистрации придёт на почту.'}
         </span>
       </aside>
 
       <main className="flex justify-center px-4 py-8 md:px-12 md:py-12">
         {register.isSuccess ? (
           <section role="status" className="flex w-full max-w-[560px] flex-col gap-3">
-            <h2 className="text-2xl font-semibold">Заявка отправлена</h2>
+            <h2 className="text-2xl font-semibold">
+              {immediate ? 'Осталось подтвердить почту' : 'Регистрация принята'}
+            </h2>
             <p>
-              Проверьте почту <b>{email}</b>: подтвердите адрес по ссылке из письма. Заявку
-              рассмотрит администратор площадки, и войти можно будет после одобрения — о нём тоже
-              придёт письмо.
+              Проверьте почту <b>{email}</b>: подтвердите адрес по ссылке из письма.{' '}
+              {immediate
+                ? 'После этого можно входить в кабинет.'
+                : 'Регистрацию рассмотрит администратор площадки, и войти можно будет после одобрения — о нём тоже придёт письмо.'}
             </p>
             <Link href="/login" className="font-semibold text-primary">
               На страницу входа
@@ -147,7 +166,7 @@ export default function RegisterPage() {
             }}
           >
             <div className="flex flex-wrap items-baseline gap-3">
-              <h2 className="text-2xl font-semibold">Заявка на подключение</h2>
+              <h2 className="text-2xl font-semibold">Регистрация</h2>
               <span className="ml-auto flex items-center gap-3">
                 <Link href="/login" className="text-sm font-semibold text-primary">
                   Уже есть вход? Войти
@@ -243,17 +262,19 @@ export default function RegisterPage() {
                 }}
                 className="mt-0.5 size-4 accent-primary"
               />
-              <span>Согласен на обработку моих данных для рассмотрения заявки</span>
+              <span>Согласен на обработку моих данных</span>
             </label>
 
             {error !== undefined && <ErrorNote error={error} />}
 
             <Button type="submit" size="default" disabled={register.isPending} className="h-11">
-              {register.isPending ? 'Отправляем…' : 'Отправить заявку'}
+              {register.isPending ? 'Регистрируем…' : 'Зарегистрироваться'}
             </Button>
             <p className="text-sm text-muted-foreground">
-              Войти можно будет после одобрения. Второй кабинет — клиента или партнёра — потом
-              подключается из первого, тем же логином.
+              {immediate
+                ? 'Войти можно сразу после подтверждения почты.'
+                : 'Войти можно будет после одобрения.'}{' '}
+              Второй кабинет — клиента или партнёра — потом подключается из первого, тем же логином.
             </p>
           </form>
         )}
