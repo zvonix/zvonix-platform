@@ -208,6 +208,12 @@ export const priceBands = pgTable(
   {
     id: primaryId<'priceBand'>(),
 
+    /**
+     * Продукт: коридор цены звонка (по направлению) или цены сообщения (одна цена за сообщение, без оператора и
+     * региона — ADR-0023, ревизия 2026-10-16). Как у правил наценки (`commission_rules.product`).
+     */
+    product: text().$type<CommissionProduct>().notNull().default('call'),
+
     /** Оператор. Пусто — «любой оператор»: коридор на всех, у конкретного оператора свой побеждает его. */
     operatorId: idRef<'operator'>().references(() => operators.id, { onDelete: 'restrict' }),
 
@@ -232,9 +238,15 @@ export const priceBands = pgTable(
     // такую опечатку лучше поймать вставкой, чем разбором «почему цена не заводится».
     check('price_bands_bounds', sql`${t.maxPrice} >= ${t.minPrice}`),
     // Коридор без обеих границ ничего не ограничивает — такая запись только путала бы список.
+    check('price_bands_product_check', oneOf(t.product, COMMISSION_PRODUCTS)),
+    // У сообщения нет направлений: оператора и региона у его коридора быть не может.
+    check(
+      'price_bands_message_scope',
+      sql`${t.product} <> 'message' or (${t.operatorId} is null and ${t.region} is null)`,
+    ),
     check('price_bands_has_bound', sql`${t.minPrice} is not null or ${t.maxPrice} is not null`),
     check('price_bands_region_key_paired', sql`(${t.region} is null) = (${t.regionKey} is null)`),
-    index('price_bands_lookup_idx').on(t.operatorId, t.regionKey, t.effectiveFrom),
+    index('price_bands_lookup_idx').on(t.product, t.operatorId, t.regionKey, t.effectiveFrom),
   ],
 );
 

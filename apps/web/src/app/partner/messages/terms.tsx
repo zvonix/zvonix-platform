@@ -19,7 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
-import { money, moneyFromInput, numberFromInput } from '@/lib/money';
+import { bandRange, money, moneyFromInput, numberFromInput } from '@/lib/money';
 
 /**
  * Аккаунты и тарифы MAX партнёра ([ADR-0075](../../../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)).
@@ -81,7 +81,11 @@ function useMessengerTariffs() {
   return useQuery({
     queryKey: TARIFFS_KEY,
     queryFn: ({ signal }) =>
-      request<{ tariffs: Tariff[] }>('/partner/messenger/tariffs', { signal }),
+      request<{
+        tariffs: Tariff[];
+        /** Коридор цены сообщения от площадки; пусто — коридора нет. */
+        price_band: { min_price: string | null; max_price: string | null } | null;
+      }>('/partner/messenger/tariffs', { signal }),
   });
 }
 
@@ -199,6 +203,7 @@ export function AccountTariffSelect({ account }: { account: Account }) {
 // --- Тарифы -------------------------------------------------------------------------------------
 
 function TariffForm({ tariff }: { tariff?: Tariff }) {
+  const band = useMessengerTariffs().data?.price_band;
   const queryClient = useQueryClient();
   const [name, setName] = useState(tariff?.name ?? '');
   const [price, setPrice] = useState(tariff === undefined ? '' : numberFromInput(tariff.price));
@@ -267,7 +272,11 @@ function TariffForm({ tariff }: { tariff?: Tariff }) {
       </DialogField>
       <DialogField
         label="Цена за сообщение, ₽"
-        hint="От 0,01 до 100. Клиентам — с наценкой площадки."
+        hint={
+          band === undefined || band === null
+            ? 'От 0,01 до 100. Клиентам — с наценкой площадки.'
+            : `Коридор площадки: ${bandRange(band.min_price, band.max_price)} за сообщение. Клиентам — с наценкой площадки.`
+        }
       >
         <Input
           className="num"

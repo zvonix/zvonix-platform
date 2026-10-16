@@ -4,6 +4,7 @@ import { ConsoleShell } from '@/components/console-shell';
 import { SectionTabs } from '@/components/section-tabs';
 import { BandViolations } from './band-violations';
 import { CommissionRules } from './commission-rules';
+import { MessagePriceBand } from './message-price-band';
 import { PriceBands } from './price-bands';
 
 /**
@@ -44,7 +45,12 @@ export default function TariffsPage() {
             {
               id: 'max',
               label: 'Сообщения MAX',
-              content: <CommissionRules product="message" />,
+              content: (
+                <div className="flex flex-col gap-6">
+                  <CommissionRules product="message" />
+                  <MessagePriceBand />
+                </div>
+              ),
             },
           ]}
         />

@@ -22,6 +22,7 @@ import {
 } from '@zvonix/shared';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingService } from '../billing/billing.service.js';
+import { TariffService } from '../catalog/tariff.service.js';
 import { MessagingRepository, type MessengerAccountRow } from './messaging.repository.js';
 import {
   MessengerTariffsRepository,
@@ -92,7 +93,16 @@ export class MessengerTariffsService {
     private readonly accounts: MessagingRepository,
     private readonly billing: BillingService,
     private readonly audit: AuditService,
+    private readonly catalog: TariffService,
   ) {}
+
+  /** Коридор цены сообщения, который задала площадка; пусто — коридора нет. Партнёр видит его рядом с полем цены. */
+  async priceBand(): Promise<
+    { minPrice: MoneyAmount | null; maxPrice: MoneyAmount | null } | undefined
+  > {
+    const band = await this.catalog.messageBand();
+    return band === undefined ? undefined : { minPrice: band.minPrice, maxPrice: band.maxPrice };
+  }
 
   async list(userId: Id<'user'>): Promise<TariffView[]> {
     const partner = await this.billing.requirePartnerOwnedBy(userId);
@@ -115,6 +125,8 @@ export class MessengerTariffsService {
     assertTariffTerms(input);
 
     const row = await this.repository.transaction(async (tx) => {
+      // Проверка коридора и запись цены — в одной транзакции под одним ключом: сужение коридора не проскочит между ними.
+      await this.catalog.assertMessagePriceWithinBand(input.price, tx);
       const existing = await this.repository.listOfPartner(partner.id, tx);
       const makeDefault = input.isDefault || existing.length === 0;
       if (makeDefault) await this.repository.clearDefault(partner.id, tx);
@@ -164,6 +176,8 @@ export class MessengerTariffsService {
         limitPerHour: patch.limitPerHour === undefined ? before.limitPerHour : patch.limitPerHour,
         limitPerDay: patch.limitPerDay === undefined ? before.limitPerDay : patch.limitPerDay,
       });
+      if (patch.price !== undefined)
+        await this.catalog.assertMessagePriceWithinBand(patch.price, tx);
       const after = await this.repository.update(tariffId, patch, tx);
       if (after === undefined) throw notFound('Тариф не найден');
       await this.accounts.recomputeTerms(partner.id, tx);
