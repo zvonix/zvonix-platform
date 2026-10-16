@@ -79,12 +79,14 @@ MAX либо нет связи; `retired` — списан (в списках е
 ### `GET /partner/messenger/tariffs`
 
 `200` → `{ "tariffs": [ { "id", "name", "price": "0.45", "limit_per_minute", "limit_per_hour", "limit_per_day", "is_default",
-"accounts" } ] }`; `accounts` — сколько живых аккаунтов действует по тарифу (у умолчания — и идущие за ним).
+"accounts" } ], "price_band": { "min_price": "0.1", "max_price": "2" } | null }`; `accounts` — сколько живых аккаунтов действует по тарифу
+(у умолчания — и идущие за ним). `price_band` — коридор цены сообщения, заданный площадкой ([tariffs.md](tariffs.md), `POST /price-bands`
+с `product: "message"`); `null` — коридора нет или проверка коридоров отключена; граница, которой нет, — `null`.
 
 ### `POST /partner/messenger/tariffs`
 
 `{ "name": "Основной", "price": "0.45", "limitPerMinute": 10, "limitPerHour": 100, "limitPerDay": 500, "isDefault": false }` → `201`.
-Цена — от 0,01 до 100 ₽; лимиты — целые от 1 или `null`; в минуту не больше, чем в сутки (`400`). Имя уникально у
+Цена — от 0,01 до 100 ₽ **и внутри коридора площадки**, если он задан (иначе `400` с полями `price`, `min_price`, `max_price`); лимиты — целые от 1 или `null`; в минуту не больше, чем в сутки (`400`). Имя уникально у
 партнёра без учёта регистра (`409`). Журнал: `messenger_tariff.created`.
 
 ### `PATCH /partner/messenger/tariffs/:id`

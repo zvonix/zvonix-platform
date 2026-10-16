@@ -697,3 +697,92 @@ describe('для сотрудников', () => {
     ).toBe(403);
   });
 });
+
+describe('коридор цены сообщения (ADR-0023, ревизия 2026-10-16)', () => {
+  const addBand = (payload: Record<string, unknown>) =>
+    api().inject({
+      method: 'POST',
+      url: '/price-bands',
+      headers: bearer(adminToken),
+      payload,
+    });
+
+  it('у коридора сообщения нет оператора; границы по одной; звонковые коридоры его не видят', async () => {
+    const withOperator = await addBand({
+      product: 'message',
+      operatorId: '018f0000-0000-7000-8000-000000000001',
+      maxPrice: '2',
+    });
+    expect(withOperator.statusCode).toBe(400);
+
+    const created = await addBand({ product: 'message', minPrice: '0.1', maxPrice: '2' });
+    expect(created.statusCode).toBe(201);
+    expect(
+      created.json<{ band: { product: string; operator_id: string | null } }>().band,
+    ).toMatchObject({ product: 'message', operator_id: null });
+
+    const calls = await api().inject({
+      method: 'GET',
+      url: '/price-bands',
+      headers: bearer(adminToken),
+    });
+    expect(
+      calls.json<{ bands: { product: string }[] }>().bands.every((b) => b.product === 'call'),
+    ).toBe(true);
+    const messages = await api().inject({
+      method: 'GET',
+      url: '/price-bands?product=message',
+      headers: bearer(adminToken),
+    });
+    expect(
+      messages.json<{ bands: { product: string }[] }>().bands.some((b) => b.product === 'message'),
+    ).toBe(true);
+  });
+
+  it('цена тарифа MAX вне коридора отвергается при создании и правке; внутри — принимается', async () => {
+    await setSetting('messaging.enabled', true);
+    const partner = await verifiedPartner();
+    const tariff = (payload: Record<string, unknown>) =>
+      api().inject({
+        method: 'POST',
+        url: '/partner/messenger/tariffs',
+        headers: bearer(partner.token),
+        payload,
+      });
+
+    const high = await tariff({ name: 'Дорого', price: '5' });
+    expect(high.statusCode).toBe(400);
+    expect(high.json<{ error: { details: Record<string, string> } }>().error.details).toMatchObject(
+      {
+        max_price: '2',
+        min_price: '0.1',
+      },
+    );
+    expect((await tariff({ name: 'Дёшево', price: '0.01' })).statusCode).toBe(400);
+
+    const ok = await tariff({ name: 'Нормально', price: '1' });
+    expect(ok.statusCode).toBe(201);
+    const id = ok.json<{ tariff: { id: string } }>().tariff.id;
+
+    const patch = (price: string) =>
+      api().inject({
+        method: 'PATCH',
+        url: `/partner/messenger/tariffs/${id}`,
+        headers: bearer(partner.token),
+        payload: { price },
+      });
+    expect((await patch('9')).statusCode).toBe(400);
+    expect((await patch('1.5')).statusCode).toBe(200);
+
+    // Рамка видна партнёру рядом с полем цены.
+    const listed = await api().inject({
+      method: 'GET',
+      url: '/partner/messenger/tariffs',
+      headers: bearer(partner.token),
+    });
+    expect(listed.json<{ price_band: unknown }>().price_band).toEqual({
+      min_price: '0.1',
+      max_price: '2',
+    });
+  });
+});

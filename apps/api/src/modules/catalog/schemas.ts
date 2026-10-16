@@ -210,6 +210,11 @@ export const updateTariffSchema = z
  */
 export const addPriceBandSchema = z
   .object({
+    /** Продукт: звонок (по умолчанию) или сообщение. У коридора сообщения нет оператора и региона. */
+    product: z
+      .enum(COMMISSION_PRODUCTS, { error: 'должно быть «call» или «message»' })
+      .default('call'),
+
     /** Оператор. Пусто — коридор на любой оператор. */
     operatorId: z.uuid('должен быть идентификатором').optional(),
 
@@ -224,6 +229,11 @@ export const addPriceBandSchema = z
     /** Момент начала действия. По умолчанию — сейчас. */
     effectiveFrom: z.iso.datetime({ error: 'должен быть датой в формате ISO' }).optional(),
   })
+  .refine(
+    (value) =>
+      value.product !== 'message' || (value.operatorId === undefined && value.region === undefined),
+    { message: 'У коридора цены сообщения нет оператора и региона', path: ['product'] },
+  )
   .refine((value) => value.minPrice !== undefined || value.maxPrice !== undefined, {
     message: 'Задайте нижнюю или верхнюю границу',
     path: ['minPrice'],

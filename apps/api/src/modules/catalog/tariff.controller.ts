@@ -6,7 +6,7 @@
  */
 
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
-import { Money, parseId, REFERENCE_CALL_SECONDS } from '@zvonix/shared';
+import { Money, parseId, REFERENCE_CALL_SECONDS, type CommissionProduct } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
@@ -27,6 +27,7 @@ import { toRateView, toTariffView, type RateView, type TariffView } from './view
 
 interface PriceBandView {
   readonly id: string;
+  readonly product: CommissionProduct;
   /** Пусто — коридор на любой оператор. */
   readonly operator_id: string | null;
   readonly region: string | null;
@@ -155,6 +156,7 @@ export class TariffController {
   ): Promise<{ band: PriceBandView }> {
     const row = await this.tariffs.addPriceBand(
       {
+        product: body.product,
         operatorId: body.operatorId === undefined ? null : parseId(body.operatorId, 'operator'),
         region: body.region ?? null,
         minPrice: body.minPrice ?? null,
@@ -171,9 +173,11 @@ export class TariffController {
   @Get('price-bands')
   async listPriceBands(
     @Query('operatorId') operatorId?: string,
+    @Query('product') product?: string,
   ): Promise<{ bands: PriceBandView[] }> {
     const rows = await this.tariffs.listPriceBands(
       operatorId === undefined ? undefined : parseId(operatorId, 'operator'),
+      product === 'message' ? 'message' : 'call',
     );
     return { bands: rows.map(toBandView) };
   }
@@ -269,6 +273,7 @@ export class TariffController {
 function toBandView(row: PriceBandRow): PriceBandView {
   return {
     id: row.id,
+    product: row.product,
     operator_id: row.operatorId,
     region: row.region,
     min_price: row.minPrice === null ? null : Money.format(row.minPrice),

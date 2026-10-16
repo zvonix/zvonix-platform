@@ -43,9 +43,25 @@ export class MessengerTariffsController {
 
   @Cabinets('partner')
   @Get('partner/messenger/tariffs')
-  async list(@CurrentUser() actor: Principal): Promise<{ tariffs: TariffJson[] }> {
-    const views = await this.tariffs.list(actor.userId);
-    return { tariffs: views.map((item) => toJson(item.row, item.accounts)) };
+  async list(@CurrentUser() actor: Principal): Promise<{
+    tariffs: TariffJson[];
+    price_band: { min_price: string | null; max_price: string | null } | null;
+  }> {
+    const [views, band] = await Promise.all([
+      this.tariffs.list(actor.userId),
+      this.tariffs.priceBand(),
+    ]);
+    return {
+      tariffs: views.map((item) => toJson(item.row, item.accounts)),
+      // Коридор цены сообщения — рамка от площадки; границы, которой нет, в числах нет.
+      price_band:
+        band === undefined
+          ? null
+          : {
+              min_price: band.minPrice === null ? null : Money.format(band.minPrice),
+              max_price: band.maxPrice === null ? null : Money.format(band.maxPrice),
+            },
+    };
   }
 
   @Cabinets('partner')

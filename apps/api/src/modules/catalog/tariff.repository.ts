@@ -372,6 +372,8 @@ export class TariffRepository {
 
   async insertPriceBand(
     draft: {
+      /** Продукт: у сообщения нет оператора и региона (ADR-0023, ревизия 2026-10-16). */
+      product: CommissionProduct;
       /** Пусто — коридор на любой оператор. */
       operatorId: Id<'operator'> | null;
       region: string | null;
@@ -430,11 +432,45 @@ export class TariffRepository {
     );
   }
 
-  async listPriceBands(operatorId?: Id<'operator'>): Promise<PriceBandRow[]> {
-    const query = this.db.select().from(priceBands);
-    return operatorId === undefined
-      ? query.orderBy(desc(priceBands.effectiveFrom))
-      : query.where(eq(priceBands.operatorId, operatorId)).orderBy(desc(priceBands.effectiveFrom));
+  async listPriceBands(
+    operatorId?: Id<'operator'>,
+    product: CommissionProduct = 'call',
+  ): Promise<PriceBandRow[]> {
+    return this.db
+      .select()
+      .from(priceBands)
+      .where(
+        operatorId === undefined
+          ? eq(priceBands.product, product)
+          : and(eq(priceBands.product, product), eq(priceBands.operatorId, operatorId)),
+      )
+      .orderBy(desc(priceBands.effectiveFrom));
+  }
+
+  /** Действующий коридор цены сообщения — самый свежий из уже начавших действовать. */
+  async activeMessageBand(
+    at: Date,
+    executor: Executor = this.db,
+  ): Promise<PriceBandRow | undefined> {
+    const [row] = await executor
+      .select()
+      .from(priceBands)
+      .where(and(eq(priceBands.product, 'message'), lte(priceBands.effectiveFrom, at)))
+      .orderBy(desc(priceBands.effectiveFrom))
+      .limit(1);
+    return row;
+  }
+
+  /**
+   * Очередь записей цены сообщения и её коридора: тариф MAX пишется под разделяемым ключом, коридор — под
+   * исключительным. Иначе коридор успевал бы сузиться между проверкой цены и её записью (как у звонков).
+   */
+  async lockMessageBands(executor: Executor, mode: 'shared' | 'exclusive'): Promise<void> {
+    await executor.execute(
+      mode === 'exclusive'
+        ? sql`select pg_advisory_xact_lock(hashtextextended(${MESSAGE_BAND_LOCK}, 0))`
+        : sql`select pg_advisory_xact_lock_shared(hashtextextended(${MESSAGE_BAND_LOCK}, 0))`,
+    );
   }
 
   /**
@@ -447,7 +483,7 @@ export class TariffRepository {
     return executor
       .selectDistinctOn([priceBands.operatorId, priceBands.regionKey])
       .from(priceBands)
-      .where(lte(priceBands.effectiveFrom, at))
+      .where(and(eq(priceBands.product, 'call'), lte(priceBands.effectiveFrom, at)))
       .orderBy(
         asc(priceBands.operatorId),
         sql`${priceBands.regionKey} asc nulls last`,
@@ -575,6 +611,7 @@ export class TariffRepository {
 
 /** Ключ блокировки цены «на все операторы»; с префиксом, как и ключ оператора. */
 const ALL_OPERATORS_LOCK = 'tariff:*';
+const MESSAGE_BAND_LOCK = 'tariff:message';
 
 /**
  * Старшинство строк цены (ADR-0056): оператор номера раньше «всех операторов»,

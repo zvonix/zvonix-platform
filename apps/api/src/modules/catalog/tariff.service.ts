@@ -682,7 +682,11 @@ export class TariffService {
     return this.repository.pool.transaction(async (tx) => {
       // Та же очередь, что и у записи цены: иначе сужение коридора проскакивало бы
       // между её проверкой и вставкой (ADR-0023).
-      await this.repository.lockOperatorTariffs(draft.operatorId, tx);
+      if (draft.product === 'message') {
+        await this.repository.lockMessageBands(tx, 'exclusive');
+      } else {
+        await this.repository.lockOperatorTariffs(draft.operatorId, tx);
+      }
 
       const row = await this.repository.insertPriceBand(draft, tx);
       await this.audit.record(
@@ -693,6 +697,7 @@ export class TariffService {
           actorUserId,
           actorRole,
           after: {
+            product: row.product,
             operator_id: row.operatorId,
             region: row.region,
             min_price: row.minPrice === null ? null : row.minPrice.toString(),
@@ -724,8 +729,46 @@ export class TariffService {
     );
   }
 
-  async listPriceBands(operatorId?: Id<'operator'>): Promise<PriceBandRow[]> {
-    return this.repository.listPriceBands(operatorId);
+  async listPriceBands(
+    operatorId?: Id<'operator'>,
+    product: CommissionProduct = 'call',
+  ): Promise<PriceBandRow[]> {
+    return this.repository.listPriceBands(operatorId, product);
+  }
+
+  /**
+   * Коридор цены сообщения, действующий сейчас; пусто — коридора нет или проверка коридоров отключена
+   * (`pricing.price_bands_enabled`). По нему партнёр видит границы рядом с полем цены.
+   */
+  async messageBand(at: Date = new Date()): Promise<PriceBandRow | undefined> {
+    if (!(await this.bandsEnabled())) return undefined;
+    return this.repository.activeMessageBand(at);
+  }
+
+  /**
+   * Цена сообщения обязана укладываться в коридор, как цена звонка (ADR-0023, ревизия 2026-10-16). Вызывается из
+   * записи тарифа MAX партнёра **в его транзакции**: проверка и запись под одним ключом, а запись коридора ждёт.
+   */
+  async assertMessagePriceWithinBand(price: MoneyAmount, executor: Executor): Promise<void> {
+    await this.repository.lockMessageBands(executor, 'shared');
+    if (!(await this.bandsEnabled())) return;
+    const band = await this.repository.activeMessageBand(new Date(), executor);
+    if (band === undefined || fits(price, band)) return;
+    const rubles = (value: MoneyAmount): string => `${Money.format(value).replace('.', ',')} ₽`;
+    const range =
+      band.minPrice !== null && band.maxPrice !== null
+        ? `от ${rubles(band.minPrice)} до ${rubles(band.maxPrice)}`
+        : band.minPrice !== null
+          ? `не ниже ${rubles(band.minPrice)}`
+          : `не выше ${rubles(band.maxPrice ?? price)}`;
+    throw validationFailed(`Цена за сообщение вне коридора площадки: ${range}`, {
+      details: {
+        price: Money.format(price),
+        ...(band.minPrice === null ? {} : { min_price: Money.format(band.minPrice) }),
+        ...(band.maxPrice === null ? {} : { max_price: Money.format(band.maxPrice) }),
+        price_band_id: band.id,
+      },
+    });
   }
 
   /**

@@ -2248,3 +2248,30 @@ test.describe('коридоры цен: любой оператор и одна 
     await expect(row).toContainText('7');
   });
 });
+
+test.describe('коридор цены сообщения', () => {
+  test('администратор задаёт коридор на вкладке «Сообщения MAX»: одна граница, без оператора', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/tariffs?tab=max');
+    const section = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Коридор цены сообщения' }) });
+
+    await section.getByRole('button', { name: 'Добавить коридор' }).click();
+    await expect(page.getByRole('button', { name: 'Добавить', exact: true })).toBeDisabled();
+    await page.getByLabel('Не выше, ₽ (можно пусто)').fill('3');
+    await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('за сообщение');
+    await dialog.getByRole('button', { name: 'Добавить коридор' }).click();
+    await expect(dialog).toHaveCount(0);
+
+    const row = section.getByRole('row').filter({ hasText: 'без границы' });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('без границы');
+    await expect(row).toContainText('3');
+  });
+});
