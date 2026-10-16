@@ -385,6 +385,33 @@ describe('вторая заявка из кабинета', () => {
   });
 });
 
+describe('режим допуска виден форме регистрации', () => {
+  it('без входа отдаёт два признака и следует за настройками', async () => {
+    const read = async () =>
+      (await api().inject({ method: 'GET', url: '/public/registration' })).json<{
+        client_auto_approve: boolean;
+        partner_auto_approve: boolean;
+      }>();
+    expect(await read()).toEqual({ client_auto_approve: false, partner_auto_approve: false });
+
+    const put = await api().inject({
+      method: 'PUT',
+      url: '/settings',
+      headers: admin,
+      payload: { settings: { 'clients.auto_approve': true } },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(await read()).toEqual({ client_auto_approve: true, partner_auto_approve: false });
+
+    await api().inject({
+      method: 'PUT',
+      url: '/settings',
+      headers: admin,
+      payload: { settings: { 'clients.auto_approve': false } },
+    });
+  });
+});
+
 describe('допуск партнёров без администратора (partners.auto_approve)', () => {
   async function setAutoApprove(value: boolean): Promise<void> {
     const response = await api().inject({

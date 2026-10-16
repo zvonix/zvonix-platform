@@ -11,7 +11,7 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { isStaffRole, parseId, type ApplicationStatus, type Cabinet } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Public, Roles } from '../../http/auth.guard.js';
 import { CurrentUser, Meta } from '../../http/request-context.js';
 import { zodBody, zodQuery } from '../../http/zod.pipe.js';
 import type { ApplicationRow } from '../identity/identity.repository.js';
@@ -66,6 +66,19 @@ export class ApplicationsController {
     private readonly applications: ApplicationsService,
     private readonly identity: IdentityService,
   ) {}
+
+  /**
+   * Открывается ли кабинет сразу после подтверждения почты или после одобрения администратором — форма регистрации
+   * по нему говорит человеку правду. Публичный: по устройству это то же, что человек узнал бы, зарегистрировавшись.
+   */
+  @Public()
+  @Get('public/registration')
+  async registrationMode(): Promise<{
+    client_auto_approve: boolean;
+    partner_auto_approve: boolean;
+  }> {
+    return this.applications.registrationMode();
+  }
 
   @Roles('admin', 'support')
   @Get('applications')

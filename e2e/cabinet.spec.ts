@@ -127,9 +127,11 @@ test.describe('заявки', () => {
     await page.getByLabel('Почта — она же логин').fill('orlov@e2e.zvonix.test');
     await page.getByLabel('Пароль').fill('очень-длинный-пароль');
     await page.getByLabel(/Согласен/u).check();
-    await page.getByRole('button', { name: 'Отправить заявку' }).click();
+    await page.getByRole('button', { name: 'Зарегистрироваться' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Заявка отправлена' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: /Регистрация принята|Осталось подтвердить почту/ }),
+    ).toBeVisible();
   });
 
   test('администратор одобряет партнёра окном с псевдонимом', async ({ page }) => {
@@ -400,18 +402,26 @@ test.describe('настройки площадки по разделам', () =>
     await signIn(page, PEOPLE.admin);
     await page.goto('/settings');
     const nav = page.getByRole('navigation', { name: 'Разделы настроек' });
-    await expect(page.getByRole('heading', { name: 'Почта' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Регистрация', level: 2 })).toBeVisible();
     // Другой раздел на экран не выводится: страница не растёт с каждой новой настройкой.
     await expect(page.getByRole('heading', { name: 'Хранение' })).toHaveCount(0);
 
+    await nav.getByRole('button', { name: 'Почта и письма' }).click();
+    await expect(page).toHaveURL(/section=mail/u);
     await page.getByLabel('Узел SMTP').fill('smtp.example.test');
-    await nav.getByRole('button', { name: 'Хранение' }).click();
-    await expect(page).toHaveURL(/section=retention/u);
+    await nav.getByRole('button', { name: 'Система' }).click();
+    await expect(page).toHaveURL(/section=system/u);
     await expect(page.getByRole('heading', { name: 'Хранение' })).toBeVisible();
     await expect(nav.getByRole('img', { name: 'несохранённых: 1' })).toBeVisible();
 
-    await nav.getByRole('button', { name: 'Почта' }).click();
+    await nav.getByRole('button', { name: 'Почта и письма' }).click();
     await expect(page.getByLabel('Узел SMTP')).toHaveValue('smtp.example.test');
+  });
+
+  test('прежний адрес раздела («bot») ведёт в объединённый «Сообщения»', async ({ page }) => {
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/settings?section=bot');
+    await expect(page.getByRole('heading', { name: 'Бот площадки' })).toBeVisible();
   });
 
   test('суммы принимают копейки, число за пределами не уходит в сохранение, пояснение — за «?»', async ({

@@ -68,6 +68,84 @@ function subgroupsOf(
   return groups.sort((a, b) => Number(b.title === undefined) - Number(a.title === undefined));
 }
 
+/**
+ * Разделы настроек. Раньше их было семнадцать, многие — из одной-двух настроек; теперь по смыслу, а части внутри
+ * раздела (`parts`) отделены заголовками. Ключ раздела — в адресе (`?section=`).
+ */
+const SECTIONS: readonly {
+  key: string;
+  title: string;
+  parts: readonly { title: string; prefixes: readonly string[] }[];
+}[] = [
+  {
+    key: 'registration',
+    title: 'Регистрация',
+    parts: [
+      { title: 'Партнёры', prefixes: ['partners.'] },
+      { title: 'Клиенты', prefixes: ['clients.'] },
+      { title: 'Кабинеты', prefixes: ['cabinets.'] },
+    ],
+  },
+  {
+    key: 'mail',
+    title: 'Почта и письма',
+    parts: [
+      { title: 'Почта', prefixes: ['mail.'] },
+      { title: 'Письма о событиях', prefixes: ['notifications.'] },
+    ],
+  },
+  {
+    key: 'messaging',
+    title: 'Сообщения',
+    parts: [
+      { title: 'Через аккаунты партнёров', prefixes: ['messaging.', 'messages.'] },
+      { title: 'Бот площадки', prefixes: ['bot.'] },
+    ],
+  },
+  {
+    key: 'money',
+    title: 'Деньги',
+    parts: [
+      { title: 'Пополнение счёта', prefixes: ['payments.'] },
+      { title: 'Цены партнёров', prefixes: ['pricing.'] },
+    ],
+  },
+  {
+    key: 'security',
+    title: 'Безопасность',
+    parts: [
+      { title: 'Вход', prefixes: ['security.'] },
+      { title: 'Проверка «я не робот»', prefixes: ['captcha.'] },
+    ],
+  },
+  {
+    key: 'system',
+    title: 'Система',
+    parts: [
+      { title: 'Узлы', prefixes: ['nodes.'] },
+      { title: 'Хранение', prefixes: ['retention.'] },
+      { title: 'Записи разговоров', prefixes: ['recordings.'] },
+      { title: 'Сайт', prefixes: ['site.'] },
+    ],
+  },
+];
+
+/** Старые ключи разделов → новые. */
+const SECTION_ALIASES: Record<string, string> = {
+  captcha: 'security',
+  partners: 'registration',
+  clients: 'registration',
+  cabinets: 'registration',
+  notifications: 'mail',
+  bot: 'messaging',
+  payments: 'money',
+  pricing: 'money',
+  nodes: 'system',
+  retention: 'system',
+  recordings: 'system',
+  site: 'system',
+};
+
 interface SettingsResponse {
   readonly settings: SettingView[];
 }
@@ -144,45 +222,50 @@ function SettingsForm() {
   if (loadError !== undefined) return <ErrorNote error={loadError} />;
   if (settings.data === undefined) return null;
 
-  const groups = [
-    { title: 'Почта', prefixes: ['mail.'] },
-    { title: 'Проверка «я не робот»', prefixes: ['captcha.'] },
-    { title: 'Регистрация', prefixes: ['partners.'] },
-    { title: 'Регистрация клиентов', prefixes: ['clients.'] },
-    { title: 'Письма о событиях', prefixes: ['notifications.'] },
-    { title: 'Пополнение счёта', prefixes: ['payments.'] },
-    { title: 'Хранение', prefixes: ['retention.'] },
-    { title: 'Записи разговоров', prefixes: ['recordings.'] },
-    { title: 'Сообщения MAX', prefixes: ['messaging.', 'messages.'] },
-    { title: 'Бот MAX', prefixes: ['bot.'] },
-    { title: 'Узлы', prefixes: ['nodes.'] },
-    { title: 'Вход', prefixes: ['security.'] },
-    { title: 'Цены партнёров', prefixes: ['pricing.'] },
-    { title: 'Кабинеты', prefixes: ['cabinets.'] },
-    { title: 'Сайт', prefixes: ['site.'] },
-  ];
-  const known = new Set(groups.flatMap((group) => group.prefixes));
+  const settingsOf = (prefixes: readonly string[]): SettingView[] =>
+    settings.data.settings.filter((setting) =>
+      prefixes.some((prefix) => setting.key.startsWith(prefix)),
+    );
+  const known = new Set(SECTIONS.flatMap((item) => item.parts.flatMap((part) => part.prefixes)));
   const rest = settings.data.settings.filter(
     (setting) => ![...known].some((prefix) => setting.key.startsWith(prefix)),
   );
 
   const changed = Object.keys(draft);
   const sections = [
-    ...groups.map((group) => ({
-      key: (group.prefixes[0] ?? '').replace('.', ''),
-      title: group.title,
-      settings: settings.data.settings.filter((setting) =>
-        group.prefixes.some((prefix) => setting.key.startsWith(prefix)),
-      ),
-      prefix: group.prefixes[0] ?? '',
-    })),
+    ...SECTIONS.map((item) => {
+      const parts = item.parts.map((part) => ({
+        title: part.title,
+        settings: settingsOf(part.prefixes),
+      }));
+      return {
+        key: item.key,
+        title: item.title,
+        parts,
+        settings: parts.flatMap((part) => part.settings),
+        prefix: item.parts[0]?.prefixes[0] ?? '',
+      };
+    }),
     // Сертификат — не настройка из списка, а состояние сервера с действиями (ADR-0083).
-    { key: 'certificate', title: 'Сертификат', settings: [], prefix: 'certificate' },
+    { key: 'certificate', title: 'Сертификат', parts: [], settings: [], prefix: 'certificate' },
     // Токен GitHub для обновлений — тоже состояние сервера, а не настройка из списка (ADR-0084).
-    { key: 'updates', title: 'Обновления', settings: [], prefix: 'updates' },
-    ...(rest.length > 0 ? [{ key: 'other', title: 'Прочее', settings: rest, prefix: '' }] : []),
+    { key: 'updates', title: 'Обновления', parts: [], settings: [], prefix: 'updates' },
+    ...(rest.length > 0
+      ? [
+          {
+            key: 'other',
+            title: 'Прочее',
+            parts: [{ title: 'Прочее', settings: rest }],
+            settings: rest,
+            prefix: '',
+          },
+        ]
+      : []),
   ];
-  const section = sections.find((candidate) => candidate.key === url.get('section')) ?? sections[0];
+  // Прежние адреса разделов (до объединения) ведут в новые: ссылки из писем и закладок не ломаются.
+  const wanted = url.get('section');
+  const requested = SECTION_ALIASES[wanted] ?? wanted;
+  const section = sections.find((candidate) => candidate.key === requested) ?? sections[0];
   const unsaved = (keys: readonly string[]): number =>
     changed.filter((key) => keys.includes(key)).length;
   const secrets = new Set(
@@ -282,20 +365,37 @@ function SettingsForm() {
                 чем не показать вовсе — иначе новое поле пропадает молча. */}
             {section.key === 'certificate' && <CertificatePanel />}
             {section.key === 'updates' && <GithubTokenPanel />}
-            <div className="flex flex-col gap-4">
-              {subgroupsOf(section.settings).map((group) => (
-                <div key={group.title ?? ''}>
-                  {group.title !== undefined && (
-                    <h3 className="border-b border-border pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {group.title}
-                    </h3>
-                  )}
-                  <div className="divide-y divide-border-soft">{group.items.map(field)}</div>
-                </div>
-              ))}
+            <div className="flex flex-col gap-6">
+              {section.parts
+                .filter((part) => part.settings.length > 0)
+                .map((part) => (
+                  <div key={part.title} className="flex flex-col gap-3">
+                    {/* Заголовок части — только когда в разделе их несколько: иначе повторял бы название раздела. */}
+                    {section.parts.length > 1 && (
+                      <h3 className="border-b-2 border-border pb-1.5 text-sm font-semibold">
+                        {part.title}
+                      </h3>
+                    )}
+                    {subgroupsOf(part.settings).map((group) => (
+                      <div
+                        key={group.title ?? ''}
+                        className="overflow-hidden rounded-md border border-border"
+                      >
+                        {group.title !== undefined && (
+                          <h4 className="border-b border-border bg-muted px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {group.title}
+                          </h4>
+                        )}
+                        <div className="divide-y divide-border-soft px-3">
+                          {group.items.map(field)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
             </div>
             {section.prefix === 'mail.' && <TestLetter />}
-            {section.prefix === 'captcha.' && <CaptchaWarning />}
+            {section.key === 'security' && <CaptchaWarning />}
           </section>
         )}
       </div>

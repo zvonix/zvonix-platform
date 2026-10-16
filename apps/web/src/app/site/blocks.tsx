@@ -97,15 +97,15 @@ export function Steps({ items }: { items: readonly { title: string; text: string
 /** Призыв к действию в конце страницы. */
 export function CallToAction({
   cabinetUrl,
-  title = 'Начните с заявки',
-  text = 'Регистрация занимает несколько минут. Подтверждаем заявки вручную, чтобы на площадке были только реальные клиенты и партнёры.',
+  title = 'Начните с регистрации',
+  text = 'Регистрация занимает несколько минут: укажите контакты и подтвердите почту.',
 }: {
   cabinetUrl: string;
   title?: string;
   text?: string;
 }) {
-  const register = cabinetUrl === '' ? '#' : `${cabinetUrl}/register`;
-  const login = cabinetUrl === '' ? '#' : `${cabinetUrl}/login`;
+  const register = `${cabinetUrl}/register`;
+  const login = `${cabinetUrl}/login`;
   return (
     <section className="mx-auto w-full max-w-6xl px-4 pt-20">
       <Reveal>
@@ -119,7 +119,7 @@ export function CallToAction({
               href={register}
               className="rounded-md bg-primary px-5 py-2.5 font-medium text-primary-foreground transition-opacity hover:opacity-90"
             >
-              Подать заявку
+              Зарегистрироваться
             </a>
             <a
               href={login}
