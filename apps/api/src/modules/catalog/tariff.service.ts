@@ -691,7 +691,10 @@ export class TariffService {
       const row = await this.repository.insertPriceBand(draft, tx);
       await this.audit.record(
         {
-          action: 'price_band.added',
+          action:
+            row.minPrice === null && row.maxPrice === null
+              ? 'price_band.lifted'
+              : 'price_band.added',
           entityType: 'price_band',
           entityId: row.id,
           actorUserId,

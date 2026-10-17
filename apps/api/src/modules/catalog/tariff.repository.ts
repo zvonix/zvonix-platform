@@ -458,7 +458,8 @@ export class TariffRepository {
       .where(and(eq(priceBands.product, 'message'), lte(priceBands.effectiveFrom, at)))
       .orderBy(desc(priceBands.effectiveFrom))
       .limit(1);
-    return row;
+    // Снятый коридор (обе границы пусты) ничего не ограничивает.
+    return row !== undefined && (row.minPrice !== null || row.maxPrice !== null) ? row : undefined;
   }
 
   /**
@@ -480,7 +481,7 @@ export class TariffRepository {
    * незачем, а история коридоров растёт быстрее, чем их число.
    */
   async listActivePriceBands(at: Date, executor: Executor = this.db): Promise<PriceBandRow[]> {
-    return executor
+    const rows = await executor
       .selectDistinctOn([priceBands.operatorId, priceBands.regionKey])
       .from(priceBands)
       .where(and(eq(priceBands.product, 'call'), lte(priceBands.effectiveFrom, at)))
@@ -489,6 +490,8 @@ export class TariffRepository {
         sql`${priceBands.regionKey} asc nulls last`,
         desc(priceBands.effectiveFrom),
       );
+    // Снятые коридоры (обе границы пусты) перекрыли прежние и сами ничего не ограничивают.
+    return rows.filter((band) => band.minPrice !== null || band.maxPrice !== null);
   }
 
   /**

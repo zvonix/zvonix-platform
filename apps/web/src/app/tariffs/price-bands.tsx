@@ -34,6 +34,25 @@ interface PriceBand {
   readonly effective_from: string;
 }
 
+/**
+ * Действующие коридоры: по одному на направление. Список приходит со свежими сверху, поэтому первый из
+ * начавших действовать и есть действующий; снятый (обе границы пусты) направление открывает и в список не попадает.
+ * Историю прежних границ хранит журнал, а не экран: одно направление — одна строка.
+ */
+function currentBands(bands: readonly PriceBand[]): PriceBand[] {
+  const now = Date.now();
+  const seen = new Set<string>();
+  const result: PriceBand[] = [];
+  for (const band of bands) {
+    if (new Date(band.effective_from).getTime() > now) continue;
+    const key = `${band.operator_id ?? '*'}|${band.region?.toLowerCase() ?? '*'}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (band.min_price !== null || band.max_price !== null) result.push(band);
+  }
+  return result;
+}
+
 const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
 
@@ -47,6 +66,9 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * Оператор можно не называть («любой оператор»: коридор на всех, у оператора со своим коридором
  * действует свой), и границу можно задать одну — только «не ниже» или только «не выше» (владелец, 2026-10-16).
  * Направление без коридора партнёру открыто: коридор — рамка там, где площадка её задала (ADR-0056).
+ *
+ * Одно направление — один коридор: «Изменить» заменяет границы, «Снять» открывает направление партнёрам
+ * (владелец, 2026-10-16; прежние границы остаются в журнале).
  *
  * Добавление — окном, а в нём через подтверждение: проверка коридора идёт при назначении цены,
  * поэтому суженный коридор оставляет уже назначенные цены снаружи, и это стоит сказать
@@ -63,6 +85,7 @@ export function PriceBands() {
   });
 
   const listError = asApiError(list.error);
+  const bands = currentBands(list.data?.bands ?? []);
 
   return (
     <section className="flex max-w-[960px] flex-col gap-2">
@@ -100,27 +123,31 @@ export function PriceBands() {
               <TableHead className="h-8 text-right">Не ниже</TableHead>
               <TableHead className="h-8 text-right">Не выше</TableHead>
               <TableHead className="h-8">Действует с</TableHead>
+              {canChange && <TableHead className="h-8" />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {list.isPending && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="text-muted-foreground">
+                <TableCell colSpan={canChange ? 6 : 5} className="text-muted-foreground">
                   Загружаем…
                 </TableCell>
               </TableRow>
             )}
 
-            {list.data?.bands.length === 0 && (
+            {list.data !== undefined && bands.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="whitespace-normal text-muted-foreground">
+                <TableCell
+                  colSpan={canChange ? 6 : 5}
+                  className="whitespace-normal text-muted-foreground"
+                >
                   Коридоров нет — партнёры назначают цены без ограничений. Коридор ставит рамку там,
                   где вы хотите её задать.
                 </TableCell>
               </TableRow>
             )}
 
-            {list.data?.bands.map((band) => (
+            {bands.map((band) => (
               <TableRow key={band.id}>
                 <TableCell>
                   {band.operator_id === null ? (
@@ -151,6 +178,14 @@ export function PriceBands() {
                 <TableCell>
                   <span className="num text-muted-foreground">{moment(band.effective_from)}</span>
                 </TableCell>
+                {canChange && (
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <BandEdit band={band} />
+                      <LiftBand band={band} />
+                    </div>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -165,13 +200,15 @@ export function PriceBands() {
  * подтверждение поверх него; отказ API показывается там же. Окно закрывается
  * вызывающим, когда коридор заведён.
  */
-function NewPriceBand({ onAdded }: { onAdded: () => void }) {
+function NewPriceBand({ onAdded, initial }: { onAdded: () => void; initial?: PriceBand }) {
   const queryClient = useQueryClient();
   const operators = useOperators();
-  const [operatorId, setOperatorId] = useState('');
-  const [region, setRegion] = useState('');
-  const [minPrice, setMinPrice] = useState('');
-  const [maxPrice, setMaxPrice] = useState('');
+  const [operatorId, setOperatorId] = useState(initial?.operator_id ?? '');
+  const [region, setRegion] = useState(initial?.region ?? '');
+  const [minPrice, setMinPrice] = useState(initial?.min_price ?? '');
+  const [maxPrice, setMaxPrice] = useState(initial?.max_price ?? '');
+  // При изменении направление то же: оператор и регион не правятся.
+  const changing = initial !== undefined;
 
   const add = useMutation({
     mutationFn: (input: { min: string | undefined; max: string | undefined }) =>
@@ -214,7 +251,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
         <DialogField label="Оператор">
           <select
             value={operatorId}
-            disabled={!operators.ready}
+            disabled={!operators.ready || changing}
             autoFocus
             onChange={(event) => {
               setOperatorId(event.target.value);
@@ -233,6 +270,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
         <DialogField label="Регион">
           <Input
             autoComplete="off"
+            disabled={changing}
             value={region}
             placeholder="все регионы"
             onChange={(event) => {
@@ -241,7 +279,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
           />
         </DialogField>
 
-        <DialogField label="Не ниже, ₽ (можно пусто)">
+        <DialogField label="Не ниже, ₽">
           <Input
             className="num"
             inputMode="decimal"
@@ -254,7 +292,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
           />
         </DialogField>
 
-        <DialogField label="Не выше, ₽ (можно пусто)">
+        <DialogField label="Не выше, ₽">
           <Input
             className="num"
             inputMode="decimal"
@@ -281,7 +319,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
 
       <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
         <ConfirmAction
-          label="Добавить"
+          label={changing ? 'Сохранить' : 'Добавить'}
           variant="default"
           tone="neutral"
           disabled={!ready}
@@ -294,7 +332,8 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
                 {operatorId === ''
                   ? ' Коридор касается всех операторов, у которых нет своего.'
                   : ''}{' '}
-                Коридор действует с этой минуты.
+                Коридор действует с этой минуты.{' '}
+                {changing ? 'Он заменит действующий коридор этого направления.' : ''}
               </p>
               <p>
                 Уже назначенные цены за его границами останутся и будут считаться по-прежнему, но
@@ -302,7 +341,7 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
               </p>
             </>
           }
-          confirmLabel="Добавить коридор"
+          confirmLabel={changing ? 'Сохранить коридор' : 'Добавить коридор'}
           onConfirm={() => add.mutateAsync({ min, max })}
         />
         <DialogClose asChild>
@@ -312,5 +351,66 @@ function NewPriceBand({ onAdded }: { onAdded: () => void }) {
         </DialogClose>
       </div>
     </form>
+  );
+}
+
+/** «Изменить» в строке коридора: то же окно, направление зафиксировано. */
+function BandEdit({ band }: { band: PriceBand }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <FormDialog
+      label="Изменить"
+      title="Изменить коридор цен"
+      description="Границы — стоимость вызова в 60 секунд. Направление остаётся прежним."
+      variant="outline"
+      size="xs"
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <NewPriceBand
+        initial={band}
+        onAdded={() => {
+          setOpen(false);
+        }}
+      />
+    </FormDialog>
+  );
+}
+
+/** «Снять» коридор направления: партнёрам направление снова открыто; прежние границы остаются в журнале. */
+function LiftBand({ band }: { band: PriceBand }) {
+  const queryClient = useQueryClient();
+  const operators = useOperators();
+  const lift = useMutation({
+    mutationFn: () =>
+      request<unknown>('/price-bands', {
+        method: 'POST',
+        body: {
+          lift: true,
+          ...(band.operator_id === null ? {} : { operatorId: band.operator_id }),
+          ...(band.region === null ? {} : { region: band.region }),
+        },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['price-bands'] }),
+  });
+  const operatorName =
+    band.operator_id === null
+      ? 'любой оператор'
+      : (operators.nameOf(band.operator_id) ?? 'оператор');
+  return (
+    <ConfirmAction
+      label="Снять"
+      size="xs"
+      tone="neutral"
+      title={`Снять коридор: ${operatorName}, ${band.region ?? 'все регионы'}`}
+      consequence={
+        <p>
+          Партнёры смогут назначать цену по этому направлению без ограничений площадки. Уже
+          назначенные цены не меняются.
+        </p>
+      }
+      confirmLabel="Снять коридор"
+      onConfirm={() => lift.mutateAsync()}
+    />
   );
 }
