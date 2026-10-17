@@ -220,10 +220,16 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
    */
   partner: [
     {
-      title: 'Мой кабинет',
+      title: 'Общее',
       items: [
         { href: '/partner/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/partner/statement', label: 'Выписка за месяц', Icon: FileText },
+        { href: '/partner/money', label: 'Деньги', Icon: Wallet },
+      ],
+    },
+    {
+      title: 'Звонки',
+      items: [
         { href: '/partner/calls', label: 'Вызовы через меня', short: 'Вызовы', Icon: PhoneCall },
         {
           href: '/partner/equipment',
@@ -233,6 +239,11 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         },
         { href: '/partner/prices', label: 'Мои тарифы', short: 'Тарифы', Icon: ReceiptText },
         { href: '/partner/limits', label: 'Лимиты', Icon: Gauge },
+      ],
+    },
+    {
+      title: 'Сообщения MAX',
+      items: [
         {
           href: '/partner/messages',
           label: 'Аккаунты MAX',
@@ -241,7 +252,6 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         },
         { href: '/partner/distribution', label: 'Распределение', Icon: Shuffle },
         { href: '/partner/send', label: 'Отправить сообщение', short: 'Отправить', Icon: Send },
-        { href: '/partner/money', label: 'Деньги', Icon: Wallet },
       ],
     },
   ],
@@ -257,17 +267,27 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
    */
   client: [
     {
-      title: 'Мой кабинет',
+      title: 'Общее',
       items: [
         { href: '/my/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/my/act', label: 'Акт за месяц', Icon: FileText },
-        { href: '/my/messages', label: 'Сообщения MAX', short: 'Сообщения', Icon: MessageSquare },
+        { href: '/my/money', label: 'Деньги', Icon: Wallet },
+        { href: '/my/integration', label: 'Интеграция', Icon: KeyRound },
+      ],
+    },
+    {
+      title: 'Звонки',
+      items: [
         { href: '/my/calls', label: 'Вызовы', Icon: PhoneCall },
         { href: '/my/channels', label: 'Мои линии', Icon: Route },
         { href: '/my/prices', label: 'Мои цены', Icon: ReceiptText },
         { href: '/my/priorities', label: 'Приоритеты', Icon: ListOrdered },
-        { href: '/my/money', label: 'Деньги', Icon: Wallet },
-        { href: '/my/integration', label: 'Интеграция', Icon: KeyRound },
+      ],
+    },
+    {
+      title: 'Сообщения MAX',
+      items: [
+        { href: '/my/messages', label: 'Сообщения MAX', short: 'Сообщения', Icon: MessageSquare },
       ],
     },
   ],
