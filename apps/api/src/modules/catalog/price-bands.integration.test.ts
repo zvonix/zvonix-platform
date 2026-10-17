@@ -627,6 +627,60 @@ describe('коридор без оператора и с одной границ
     expect(none.statusCode).toBe(400);
   });
 
+  it('снятый коридор открывает направление, а изменённый действует вместо прежнего', async () => {
+    const partner = await createPartner();
+    const operator = await createOperator();
+    const NOW_FROM = '2020-01-01T00:00:00.000Z';
+    const LATER = '2020-02-01T00:00:00.000Z';
+    const RATE = '2026-01-01T00:00:00.000Z';
+
+    expect(
+      (await addBand({ operatorId: operator, maxPrice: '3', effectiveFrom: NOW_FROM })).statusCode,
+    ).toBe(201);
+    // Изменение — новая запись на то же направление: действует она, а не прежняя.
+    expect(
+      (await addBand({ operatorId: operator, maxPrice: '9', effectiveFrom: LATER })).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: operator,
+          pricePerMinute: '8',
+          effectiveFrom: RATE,
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    // Снять: без границ, с признаком lift. Границы вместе со снятием — отказ.
+    expect((await addBand({ operatorId: operator, lift: true, maxPrice: '1' })).statusCode).toBe(
+      400,
+    );
+    const lifted = await addBand({
+      operatorId: operator,
+      lift: true,
+      effectiveFrom: '2020-03-01T00:00:00.000Z',
+    });
+    expect(lifted.statusCode).toBe(201);
+    expect(
+      lifted.json<{ band: { min_price: string | null; max_price: string | null } }>().band,
+    ).toMatchObject({
+      min_price: null,
+      max_price: null,
+    });
+    // Направление открыто: цена выше прежнего потолка проходит.
+    expect(
+      (
+        await addRate({
+          partnerId: partner,
+          operatorId: operator,
+          pricePerMinute: '500',
+          effectiveFrom: RATE,
+        })
+      ).statusCode,
+    ).toBe(201);
+  });
+
   it('«любой оператор»: ограничивает операторов без своего коридора, свой коридор побеждает', async () => {
     const partner = await createPartner();
     const withOwn = await createOperator();

@@ -8,18 +8,10 @@ import { DialogField, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
-import { bandRange, microunits, money, moneyFromInput } from '@/lib/money';
+import { bandRange, microunits, moneyFromInput } from '@/lib/money';
 
 interface MessageBand {
   readonly id: string;
@@ -37,11 +29,12 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * Коридор цены сообщения ([ADR-0023](../../../../../docs/adr/0023-koridory-cen.md), ревизия 2026-10-16).
  *
  * Как у звонков: рамка на цену, которую партнёр назначает в своём тарифе MAX. Отличий два: у сообщения одна цена
- * (направлений нет — ни оператора, ни региона) и границы — цена **за одно сообщение**. Действует последний из
- * начавших действовать; одну из границ можно не задавать.
+ * (направлений нет — ни оператора, ни региона) и границы — цена **за одно сообщение**. Коридор один на всё:
+ * «Изменить» заменяет границы, «Снять» открывает цену партнёрам; одну из границ можно не задавать.
  */
 export function MessagePriceBand() {
   const canChange = useCanChange();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
 
   const list = useQuery({
@@ -49,93 +42,98 @@ export function MessagePriceBand() {
     queryFn: () => request<{ bands: MessageBand[] }>('/price-bands?product=message'),
   });
   const listError = asApiError(list.error);
+  // Свежие сверху: первый из начавших действовать — действующий; снятый (обе границы пусты) коридора не оставляет.
+  const now = Date.now();
+  const latest = list.data?.bands.find((band) => new Date(band.effective_from).getTime() <= now);
+  const band =
+    latest !== undefined && (latest.min_price !== null || latest.max_price !== null)
+      ? latest
+      : undefined;
+
+  const lift = useMutation({
+    mutationFn: () =>
+      request<unknown>('/price-bands', {
+        method: 'POST',
+        body: { product: 'message', lift: true },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['price-bands'] }),
+  });
 
   return (
     <section className="flex max-w-[960px] flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="font-semibold">Коридор цены сообщения</h2>
         <span className="text-muted-foreground">границы — цена за одно сообщение</span>
-        {canChange && (
-          <FormDialog
-            label="Добавить коридор"
-            title="Новый коридор цены сообщения"
-            description="Границы — цена за одно сообщение, которую партнёр может назначить в своём тарифе MAX."
-            variant="outline"
-            open={open}
-            onOpenChange={setOpen}
-          >
-            <NewMessageBand
-              onAdded={() => {
-                setOpen(false);
-              }}
-            />
-          </FormDialog>
-        )}
       </div>
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8 text-right">Не ниже</TableHead>
-              <TableHead className="h-8 text-right">Не выше</TableHead>
-              <TableHead className="h-8">Действует с</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.isPending && (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={3} className="text-muted-foreground">
-                  Загружаем…
-                </TableCell>
-              </TableRow>
+      <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+        {list.isPending ? (
+          <span className="text-muted-foreground">Загружаем…</span>
+        ) : band === undefined ? (
+          <span className="text-muted-foreground">
+            Коридора нет — партнёры назначают цену за сообщение без ограничений площадки (общие
+            пределы продукта остаются).
+          </span>
+        ) : (
+          <span>
+            Цена за сообщение: <b className="num">{bandRange(band.min_price, band.max_price)}</b>
+            <span className="num ml-2 text-muted-foreground">с {moment(band.effective_from)}</span>
+          </span>
+        )}
+        {canChange && (
+          <div className="ml-auto flex gap-2">
+            <FormDialog
+              label={band === undefined ? 'Задать коридор' : 'Изменить'}
+              title="Коридор цены сообщения"
+              description="Границы — цена за одно сообщение, которую партнёр может назначить в своём тарифе MAX."
+              variant="outline"
+              size="xs"
+              open={open}
+              onOpenChange={setOpen}
+            >
+              <NewMessageBand
+                initial={band}
+                onAdded={() => {
+                  setOpen(false);
+                }}
+              />
+            </FormDialog>
+            {band !== undefined && (
+              <ConfirmAction
+                label="Снять"
+                size="xs"
+                tone="neutral"
+                title="Снять коридор цены сообщения"
+                consequence={
+                  <p>
+                    Партнёры смогут назначать цену за сообщение без ограничений площадки. Уже
+                    назначенные цены не меняются.
+                  </p>
+                }
+                confirmLabel="Снять коридор"
+                onConfirm={() => lift.mutateAsync()}
+              />
             )}
-
-            {list.data?.bands.length === 0 && (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={3} className="whitespace-normal text-muted-foreground">
-                  Коридора нет — партнёры назначают цену за сообщение без ограничений площадки
-                  (общие пределы продукта остаются).
-                </TableCell>
-              </TableRow>
-            )}
-
-            {list.data?.bands.map((band, index) => (
-              <TableRow key={band.id}>
-                <TableCell className="num text-right">
-                  {band.min_price === null ? (
-                    <span className="text-muted-foreground">без границы</span>
-                  ) : (
-                    money(band.min_price)
-                  )}
-                </TableCell>
-                <TableCell className="num text-right">
-                  {band.max_price === null ? (
-                    <span className="text-muted-foreground">без границы</span>
-                  ) : (
-                    money(band.max_price)
-                  )}
-                </TableCell>
-                <TableCell>
-                  <span className="num text-muted-foreground">{moment(band.effective_from)}</span>
-                  {index === 0 && <span className="ml-2 text-ok">действует</span>}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
 /** Поля окна «Новый коридор цены сообщения»; подтверждение — поверх окна, как у звонков. */
-function NewMessageBand({ onAdded }: { onAdded: () => void }) {
+function NewMessageBand({
+  onAdded,
+  initial,
+}: {
+  onAdded: () => void;
+  initial?: MessageBand | undefined;
+}) {
   const queryClient = useQueryClient();
-  const [minPrice, setMinPrice] = useState('');
-  const [maxPrice, setMaxPrice] = useState('');
+  const [minPrice, setMinPrice] = useState(initial?.min_price ?? '');
+  const [maxPrice, setMaxPrice] = useState(initial?.max_price ?? '');
 
   const add = useMutation({
     mutationFn: (input: { min: string | undefined; max: string | undefined }) =>
@@ -168,7 +166,7 @@ function NewMessageBand({ onAdded }: { onAdded: () => void }) {
       className="flex min-h-0 flex-col"
     >
       <div className="grid min-h-0 gap-3 overflow-y-auto px-5 pb-4 sm:grid-cols-2">
-        <DialogField label="Не ниже, ₽ (можно пусто)">
+        <DialogField label="Не ниже, ₽">
           <Input
             className="num"
             inputMode="decimal"
@@ -181,7 +179,7 @@ function NewMessageBand({ onAdded }: { onAdded: () => void }) {
             }}
           />
         </DialogField>
-        <DialogField label="Не выше, ₽ (можно пусто)">
+        <DialogField label="Не выше, ₽">
           <Input
             className="num"
             inputMode="decimal"
@@ -207,7 +205,7 @@ function NewMessageBand({ onAdded }: { onAdded: () => void }) {
 
       <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
         <ConfirmAction
-          label="Добавить"
+          label={initial === undefined ? 'Добавить' : 'Сохранить'}
           variant="default"
           tone="neutral"
           disabled={!ready}
@@ -225,7 +223,7 @@ function NewMessageBand({ onAdded }: { onAdded: () => void }) {
               </p>
             </>
           }
-          confirmLabel="Добавить коридор"
+          confirmLabel={initial === undefined ? 'Добавить коридор' : 'Сохранить коридор'}
           onConfirm={() => add.mutateAsync({ min, max })}
         />
         <DialogClose asChild>

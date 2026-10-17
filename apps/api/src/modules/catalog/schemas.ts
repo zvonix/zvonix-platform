@@ -226,6 +226,9 @@ export const addPriceBandSchema = z
     /** Верхняя граница. Не названа — без верхней границы. */
     maxPrice: tariffAmount.optional(),
 
+    /** Снять коридор направления: границ не называют. Запись остаётся в истории. */
+    lift: z.literal(true).optional(),
+
     /** Момент начала действия. По умолчанию — сейчас. */
     effectiveFrom: z.iso.datetime({ error: 'должен быть датой в формате ISO' }).optional(),
   })
@@ -234,10 +237,16 @@ export const addPriceBandSchema = z
       value.product !== 'message' || (value.operatorId === undefined && value.region === undefined),
     { message: 'У коридора цены сообщения нет оператора и региона', path: ['product'] },
   )
-  .refine((value) => value.minPrice !== undefined || value.maxPrice !== undefined, {
-    message: 'Задайте нижнюю или верхнюю границу',
-    path: ['minPrice'],
-  })
+  .refine(
+    (value) =>
+      value.lift === true
+        ? value.minPrice === undefined && value.maxPrice === undefined
+        : value.minPrice !== undefined || value.maxPrice !== undefined,
+    {
+      message: 'Задайте нижнюю или верхнюю границу, либо снимите коридор без границ',
+      path: ['minPrice'],
+    },
+  )
   .refine(
     (value) =>
       value.minPrice === undefined ||

@@ -2233,7 +2233,7 @@ test.describe('коридоры цен: любой оператор и одна 
     await page.getByRole('button', { name: 'Добавить коридор' }).first().click();
     // Оператор не выбран («любой оператор»), нижняя граница пуста, верхняя — 7 ₽.
     await expect(page.getByRole('button', { name: 'Добавить', exact: true })).toBeDisabled();
-    await page.getByLabel('Не выше, ₽ (можно пусто)').fill('7');
+    await page.getByLabel('Не выше, ₽').fill('7');
     await page.getByRole('button', { name: 'Добавить', exact: true }).click();
 
     const dialog = page.getByRole('alertdialog');
@@ -2246,6 +2246,26 @@ test.describe('коридоры цен: любой оператор и одна 
     await expect(row).toBeVisible();
     await expect(row).toContainText('без границы');
     await expect(row).toContainText('7');
+
+    // Изменить: направление то же, строка остаётся одна, границы новые.
+    await row.getByRole('button', { name: 'Изменить' }).click();
+    await page.getByLabel('Не выше, ₽').fill('8');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    const change = page.getByRole('alertdialog');
+    await expect(change).toContainText('заменит действующий');
+    await change.getByRole('button', { name: 'Сохранить коридор' }).click();
+    await expect(change).toHaveCount(0);
+    await expect(page.getByRole('row').filter({ hasText: 'любой оператор' })).toHaveCount(1);
+    await expect(page.getByRole('row').filter({ hasText: 'любой оператор' })).toContainText('8');
+
+    // Снять: строка исчезает, направление открыто.
+    await page
+      .getByRole('row')
+      .filter({ hasText: 'любой оператор' })
+      .getByRole('button', { name: 'Снять' })
+      .click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Снять коридор' }).click();
+    await expect(page.getByRole('row').filter({ hasText: 'любой оператор' })).toHaveCount(0);
   });
 });
 
@@ -2259,9 +2279,9 @@ test.describe('коридор цены сообщения', () => {
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'Коридор цены сообщения' }) });
 
-    await section.getByRole('button', { name: 'Добавить коридор' }).click();
+    await section.getByRole('button', { name: 'Задать коридор' }).click();
     await expect(page.getByRole('button', { name: 'Добавить', exact: true })).toBeDisabled();
-    await page.getByLabel('Не выше, ₽ (можно пусто)').fill('3');
+    await page.getByLabel('Не выше, ₽').fill('3');
     await page.getByRole('button', { name: 'Добавить', exact: true }).click();
 
     const dialog = page.getByRole('alertdialog');
@@ -2269,9 +2289,17 @@ test.describe('коридор цены сообщения', () => {
     await dialog.getByRole('button', { name: 'Добавить коридор' }).click();
     await expect(dialog).toHaveCount(0);
 
-    const row = section.getByRole('row').filter({ hasText: 'без границы' });
-    await expect(row).toBeVisible();
-    await expect(row).toContainText('без границы');
-    await expect(row).toContainText('3');
+    await expect(section).toContainText('Цена за сообщение');
+    await expect(section).toContainText('3');
+
+    // Изменить, затем снять: коридор один на всё.
+    await section.getByRole('button', { name: 'Изменить' }).click();
+    await page.getByLabel('Не выше, ₽').fill('4');
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Сохранить коридор' }).click();
+    await expect(section).toContainText('4');
+    await section.getByRole('button', { name: 'Снять' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Снять коридор' }).click();
+    await expect(section).toContainText('Коридора нет');
   });
 });

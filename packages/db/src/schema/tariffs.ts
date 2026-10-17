@@ -223,7 +223,10 @@ export const priceBands = pgTable(
     /** Приведённое написание региона (`regionKeyOf`). По нему идёт сравнение. */
     regionKey: text(),
 
-    /** Нижняя граница стоимости эталонного вызова. Пусто — без нижней границы. */
+    /**
+     * Нижняя граница стоимости эталонного вызова. Пусто — без нижней границы. Обе границы пусты — коридор
+     * **снят** (ADR-0023, ревизия 2026-10-16 (3)): запись остаётся в истории и перекрывает прежние.
+     */
     minPrice: money(),
 
     /** Верхняя граница стоимости эталонного вызова. Пусто — без верхней границы. */
@@ -237,14 +240,12 @@ export const priceBands = pgTable(
     // Пустой коридор (`max < min`) не запрещает цену, а делает невозможной любую:
     // такую опечатку лучше поймать вставкой, чем разбором «почему цена не заводится».
     check('price_bands_bounds', sql`${t.maxPrice} >= ${t.minPrice}`),
-    // Коридор без обеих границ ничего не ограничивает — такая запись только путала бы список.
     check('price_bands_product_check', oneOf(t.product, COMMISSION_PRODUCTS)),
     // У сообщения нет направлений: оператора и региона у его коридора быть не может.
     check(
       'price_bands_message_scope',
       sql`${t.product} <> 'message' or (${t.operatorId} is null and ${t.region} is null)`,
     ),
-    check('price_bands_has_bound', sql`${t.minPrice} is not null or ${t.maxPrice} is not null`),
     check('price_bands_region_key_paired', sql`(${t.region} is null) = (${t.regionKey} is null)`),
     index('price_bands_lookup_idx').on(t.product, t.operatorId, t.regionKey, t.effectiveFrom),
   ],

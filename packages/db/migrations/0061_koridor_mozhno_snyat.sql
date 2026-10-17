@@ -1,0 +1,1 @@
+ALTER TABLE "price_bands" DROP CONSTRAINT "price_bands_has_bound";
