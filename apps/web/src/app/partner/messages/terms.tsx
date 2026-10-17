@@ -274,8 +274,8 @@ function TariffForm({ tariff }: { tariff?: Tariff }) {
         label="Цена за сообщение, ₽"
         hint={
           band === undefined || band === null
-            ? 'От 0,01 до 100. Клиентам — с наценкой площадки.'
-            : `Коридор площадки: ${bandRange(band.min_price, band.max_price)} за сообщение. Клиентам — с наценкой площадки.`
+            ? 'От 0,01 до 100.'
+            : `Коридор площадки: ${bandRange(band.min_price, band.max_price)} за сообщение.`
         }
       >
         <Input
@@ -289,7 +289,7 @@ function TariffForm({ tariff }: { tariff?: Tariff }) {
           }}
         />
       </DialogField>
-      <DialogField label="В минуту" hint="Пусто — без ограничения. Лишнее ждёт в очереди.">
+      <DialogField label="В минуту" hint="Пусто — без ограничения.">
         <Input
           className="num"
           inputMode="numeric"
