@@ -248,6 +248,42 @@ describe('почта берёт настройки отсюда', () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it('очередь писем: счётчики, последние письма с маской адреса и без тел; клиенту закрыта', async () => {
+    const { MailService } = await import('../mail/mail.service.js');
+    await api().get(MailService).enqueue({
+      recipient: 'ivan.petrov@example.test',
+      subject: 'Тема',
+      body: 'секретная-ссылка-в-теле',
+      kind: 'password_reset',
+    });
+
+    const response = await api().inject({
+      method: 'GET',
+      url: '/settings/mail/queue',
+      headers: auth(),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).not.toContain('секретная-ссылка-в-теле');
+    expect(response.body).not.toContain('ivan.petrov');
+    const queue = response.json<{
+      pending: number;
+      recent: { kind: string; recipient: string; status: string }[];
+    }>();
+    expect(queue.pending).toBeGreaterThanOrEqual(1);
+    expect(queue.recent[0]).toMatchObject({
+      kind: 'password_reset',
+      recipient: 'iv***@example.test',
+      status: 'pending',
+    });
+
+    const forbidden = await api().inject({
+      method: 'GET',
+      url: '/settings/mail/queue',
+      headers: { authorization: `Bearer ${clientToken}` },
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
+
   it('прежней настройки адреса пробного письма в списке нет', async () => {
     const response = await api().inject({ method: 'GET', url: '/settings', headers: auth() });
     const keys = response.json<{ settings: { key: string }[] }>().settings.map((row) => row.key);

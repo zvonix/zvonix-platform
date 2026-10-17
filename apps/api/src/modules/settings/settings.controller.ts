@@ -49,6 +49,13 @@ export class SettingsController {
     return { settings: await this.settings.set(body.settings, actor.userId) };
   }
 
+  /** Очередь писем: сколько ждёт, сколько не ушло и причина отказа у последних. Только администратору. */
+  @Roles('admin')
+  @Get('settings/mail/queue')
+  async queue(): Promise<Awaited<ReturnType<MailService['queueOverview']>>> {
+    return this.mail.queueOverview();
+  }
+
   /**
    * Пробное письмо.
    *

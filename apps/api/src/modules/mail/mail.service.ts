@@ -224,6 +224,50 @@ export class MailService implements OnApplicationShutdown {
     }
   }
 
+  /**
+   * Состояние очереди для админки: по нему видно, где остановились письма входа, подтверждения и восстановления
+   * (пробное письмо идёт мимо очереди и о ней ничего не говорит). Адреса маскируются, тела писем не отдаются:
+   * в них одноразовые ссылки.
+   */
+  async queueOverview(): Promise<{
+    configured: boolean;
+    pending: number;
+    failed: number;
+    sent: number;
+    oldest_pending_at: string | null;
+    recent: {
+      kind: string;
+      recipient: string;
+      status: string;
+      attempts: number;
+      last_error: string | null;
+      created_at: string;
+      sent_at: string | null;
+    }[];
+  }> {
+    const [configured, counts, rows] = await Promise.all([
+      this.isConfigured(),
+      this.repository.overview(),
+      this.repository.recent(10),
+    ]);
+    return {
+      configured,
+      pending: counts.pending,
+      failed: counts.failed,
+      sent: counts.sent,
+      oldest_pending_at: counts.oldestPendingAt?.toISOString() ?? null,
+      recent: rows.map((row) => ({
+        kind: row.kind,
+        recipient: maskEmail(row.recipient),
+        status: row.status,
+        attempts: row.attempts,
+        last_error: row.lastError,
+        created_at: row.createdAt.toISOString(),
+        sent_at: row.sentAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
   onApplicationShutdown(): void {
     this.connected?.transport.close();
     this.connected = undefined;
