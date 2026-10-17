@@ -394,7 +394,12 @@ function SettingsForm() {
                   </div>
                 ))}
             </div>
-            {section.prefix === 'mail.' && <TestLetter />}
+            {section.prefix === 'mail.' && (
+              <>
+                <TestLetter />
+                <MailQueue />
+              </>
+            )}
             {section.key === 'security' && <CaptchaWarning />}
           </section>
         )}
@@ -531,6 +536,108 @@ function TestLetter() {
         </p>
       )}
       {failure !== undefined && <ErrorNote error={failure} />}
+    </div>
+  );
+}
+
+interface MailQueueView {
+  readonly configured: boolean;
+  readonly pending: number;
+  readonly failed: number;
+  readonly sent: number;
+  readonly oldest_pending_at: string | null;
+  readonly recent: readonly {
+    kind: string;
+    recipient: string;
+    status: string;
+    attempts: number;
+    last_error: string | null;
+    created_at: string;
+    sent_at: string | null;
+  }[];
+}
+
+const MAIL_STATUS: Record<string, string> = {
+  pending: 'ждёт',
+  sent: 'отправлено',
+  failed: 'не ушло',
+};
+
+/**
+ * Очередь писем: письма входа, подтверждения почты и восстановления пароля уходят через неё, а пробное письмо —
+ * мимо. Когда пробное доходит, а обычные нет, причина видна здесь: письма не ставятся, ждут воркера или почтовый
+ * сервер отказывает (его ответ — в колонке «Причина»).
+ */
+function MailQueue() {
+  const queue = useQuery({
+    queryKey: ['settings', 'mail-queue'],
+    queryFn: () => request<MailQueueView>('/settings/mail/queue'),
+    refetchInterval: 15_000,
+  });
+  const data = queue.data;
+  const failure = asApiError(queue.error);
+  // Ждёт давно, а попыток не было — отправляющий процесс не работает.
+  const stuck =
+    data?.oldest_pending_at != null &&
+    Date.now() - new Date(data.oldest_pending_at).getTime() > 3 * 60_000;
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-border-soft pt-3">
+      <h3 className="font-semibold">Очередь писем</h3>
+      {failure !== undefined && <ErrorNote error={failure} />}
+      {data !== undefined && (
+        <>
+          <p className="num text-muted-foreground">
+            Ждут: {data.pending} · не ушли: {data.failed} · отправлены: {data.sent}
+          </p>
+          {stuck && (
+            <p role="alert" className="text-warn">
+              Письмо ждёт больше трёх минут: если в колонке «Попыток» нули, письма не отправляет
+              фоновый процесс (воркер); если там ошибка — отказывает почтовый сервер.
+            </p>
+          )}
+          {data.recent.length === 0 ? (
+            <p className="text-muted-foreground">
+              Очередь пуста: письма входа, подтверждения и восстановления в неё пока не ставились
+              (или превышен предел десяти писем в час на один адрес).
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-border bg-card">
+              <table className="w-full">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-2 py-1 font-normal">Когда</th>
+                    <th className="px-2 py-1 font-normal">Вид</th>
+                    <th className="px-2 py-1 font-normal">Кому</th>
+                    <th className="px-2 py-1 font-normal">Состояние</th>
+                    <th className="px-2 py-1 text-right font-normal">Попыток</th>
+                    <th className="px-2 py-1 font-normal">Причина</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.recent.map((row) => (
+                    <tr
+                      key={`${row.created_at}${row.recipient}${row.kind}`}
+                      className="border-t border-border-soft"
+                    >
+                      <td className="num px-2 py-1">{moment(row.created_at)}</td>
+                      <td className="px-2 py-1">{row.kind}</td>
+                      <td className="num px-2 py-1">{row.recipient}</td>
+                      <td className={`px-2 py-1 ${row.status === 'failed' ? 'text-crit' : ''}`}>
+                        {MAIL_STATUS[row.status] ?? row.status}
+                      </td>
+                      <td className="num px-2 py-1 text-right">{row.attempts}</td>
+                      <td className="whitespace-normal px-2 py-1 text-muted-foreground">
+                        {row.last_error ?? ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

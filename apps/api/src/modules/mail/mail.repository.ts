@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import { outboxMessages } from '@zvonix/db/schema';
 import { newId, type Id } from '@zvonix/shared';
@@ -158,6 +158,38 @@ export class MailRepository {
       .from(outboxMessages)
       .where(eq(outboxMessages.status, 'pending'));
     return row?.count ?? 0;
+  }
+
+  /** Состояние очереди для админки: сколько писем в каждом состоянии и самое давнее ожидающее. */
+  async overview(): Promise<{
+    pending: number;
+    failed: number;
+    sent: number;
+    oldestPendingAt: Date | null;
+  }> {
+    const [row] = await this.db
+      .select({
+        pending: sql<number>`count(*) filter (where ${outboxMessages.status} = 'pending')::int`,
+        failed: sql<number>`count(*) filter (where ${outboxMessages.status} = 'failed')::int`,
+        sent: sql<number>`count(*) filter (where ${outboxMessages.status} = 'sent')::int`,
+        oldestPendingAt: sql<Date | null>`min(${outboxMessages.createdAt}) filter (where ${outboxMessages.status} = 'pending')`,
+      })
+      .from(outboxMessages);
+    return {
+      pending: row?.pending ?? 0,
+      failed: row?.failed ?? 0,
+      sent: row?.sent ?? 0,
+      oldestPendingAt: row?.oldestPendingAt == null ? null : new Date(row.oldestPendingAt),
+    };
+  }
+
+  /** Последние письма очереди, свежие сверху. */
+  async recent(limit: number): Promise<OutboxMessageRow[]> {
+    return this.db
+      .select()
+      .from(outboxMessages)
+      .orderBy(desc(outboxMessages.createdAt))
+      .limit(limit);
   }
 
   /**
