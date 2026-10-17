@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef } from 'react';
@@ -37,6 +37,19 @@ function Confirm() {
       request<undefined>('/auth/email/confirm', { method: 'POST', body: { token } }),
   });
   const { mutate } = confirm;
+  // Что ждёт после подтверждения, зависит от настроек площадки: при допуске без администратора кабинет откроется
+  // сам. Какую роль выбрал человек, страница не знает, поэтому «сразу» — только когда допуск включён у обеих.
+  const mode = useQuery({
+    queryKey: ['public', 'registration'],
+    queryFn: () =>
+      request<{ client_auto_approve: boolean; partner_auto_approve: boolean }>(
+        '/public/registration',
+      ),
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const immediate =
+    mode.data !== undefined && mode.data.client_auto_approve && mode.data.partner_auto_approve;
 
   useEffect(() => {
     if (token === '' || sent.current) return;
@@ -58,8 +71,9 @@ function Confirm() {
       <>
         <p className="text-ok">Адрес подтверждён.</p>
         <p className="text-muted-foreground">
-          Доступ к кабинету откроется после проверки заявки администратором площадки — об этом
-          придёт письмо.
+          {immediate
+            ? 'Кабинет откроется в течение минуты — можно входить.'
+            : 'Доступ к кабинету откроется после проверки заявки администратором площадки — об этом придёт письмо.'}
         </p>
         <Link href="/login" className="font-semibold text-primary">
           Перейти ко входу
