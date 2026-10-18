@@ -402,6 +402,22 @@ export class MessagesRepository {
       .where(eq(messengerAccounts.id, id));
   }
 
+  /** Сколько сообщений этому номеру от этого клиента принято не раньше `since` (неотклонённых). */
+  async countToRecipient(clientId: Id<'client'>, recipient: string, since: Date): Promise<number> {
+    const [row] = await this.database.db
+      .select({ n: count() })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.clientId, clientId),
+          eq(messages.recipient, recipient),
+          gte(messages.createdAt, since),
+          ne(messages.status, 'failed'),
+        ),
+      );
+    return row?.n ?? 0;
+  }
+
   /** Было ли такое же сообщение этому номеру от этого клиента не раньше `since` (неотклонённое). */
   async hasRecentDuplicate(
     clientId: Id<'client'>,

@@ -49,6 +49,8 @@ beforeEach(async () => {
         'messaging.enabled': true,
         // Тесты шлют один и тот же текст одному номеру много раз: защита от повторов отключена (проверяется отдельно).
         'messages.duplicate_window_minutes': 0,
+        'messages.recipient_limit_per_hour': 0,
+        'messages.recipient_limit_per_day': 0,
         'bot.enabled': true,
         'messages.pace_seconds': 0,
       })

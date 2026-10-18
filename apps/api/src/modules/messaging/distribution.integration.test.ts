@@ -110,6 +110,8 @@ beforeAll(async () => {
         'messaging.enabled': true,
         // Повторные сообщения одному номеру здесь — предмет проверки, защита от повторов отключена.
         'messages.duplicate_window_minutes': 0,
+        'messages.recipient_limit_per_hour': 0,
+        'messages.recipient_limit_per_day': 0,
       })
     ).statusCode,
   ).toBe(200);

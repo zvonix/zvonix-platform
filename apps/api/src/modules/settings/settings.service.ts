@@ -176,6 +176,8 @@ export class SettingsService {
     readonly partnerToken: string;
     readonly paceSeconds: number;
     readonly duplicateWindowMinutes: number;
+    readonly recipientLimitPerHour: number;
+    readonly recipientLimitPerDay: number;
     readonly precheckEnabled: boolean;
     readonly precheckExistsDays: number;
     readonly precheckAbsentDays: number;
@@ -194,6 +196,8 @@ export class SettingsService {
       partnerToken: this.text(values, 'messaging.provider_partner_token'),
       paceSeconds: this.number(values, 'messages.pace_seconds'),
       duplicateWindowMinutes: this.number(values, 'messages.duplicate_window_minutes'),
+      recipientLimitPerHour: this.number(values, 'messages.recipient_limit_per_hour'),
+      recipientLimitPerDay: this.number(values, 'messages.recipient_limit_per_day'),
       precheckEnabled: this.flag(values, 'messages.precheck_enabled'),
       precheckExistsDays: this.number(values, 'messages.precheck_exists_days'),
       precheckAbsentDays: this.number(values, 'messages.precheck_absent_days'),

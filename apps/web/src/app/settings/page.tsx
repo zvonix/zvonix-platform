@@ -38,6 +38,8 @@ const SUBGROUPS: Record<string, string> = {
   'messages.pace_seconds': 'Отправка',
   'messages.max_wait_minutes': 'Отправка',
   'messages.duplicate_window_minutes': 'Отправка',
+  'messages.recipient_limit_per_hour': 'Отправка',
+  'messages.recipient_limit_per_day': 'Отправка',
   'messages.precheck_enabled': 'Проверка номера перед отправкой',
   'messages.precheck_exists_days': 'Проверка номера перед отправкой',
   'messages.precheck_absent_days': 'Проверка номера перед отправкой',
