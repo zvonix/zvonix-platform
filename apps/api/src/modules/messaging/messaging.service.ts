@@ -318,6 +318,10 @@ export class MessagingService {
         from: account.status,
         to: updated.status,
       });
+      // Первый вход в MAX: прогрев идёт от него, а не от создания записи (ADR-0078, ревизия 2026-10-18).
+      if (account.status === 'pending' && updated.status === 'active') {
+        await this.repository.restartWarmup(account.id, now);
+      }
       // Ограничение или блокировка со стороны MAX: аккаунту нужен новый прогрев.
       if (updated.status === 'unavailable' && updated.stateReason !== 'logged_out') {
         await this.repository.restartWarmup(account.id, now);

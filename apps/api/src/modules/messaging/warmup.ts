@@ -1,5 +1,6 @@
 import {
   spreadHourlyLimit,
+  WARMUP_IDLE_DAYS,
   WARMUP_DAYS,
   WARMUP_DEFAULT_CEILING,
   warmupDailyLimit,
@@ -25,7 +26,7 @@ export interface EffectiveLimits {
 export function effectiveLimits(
   account: Pick<
     MessengerAccountRow,
-    'warmupEnabled' | 'warmupStartedAt' | 'limitPerDay' | 'limitPerHour'
+    'warmupEnabled' | 'warmupStartedAt' | 'limitPerDay' | 'limitPerHour' | 'lastUsedAt'
   >,
   now: Date,
 ): EffectiveLimits {
@@ -36,7 +37,9 @@ export function effectiveLimits(
   const day =
     account.warmupStartedAt === null
       ? null
-      : Math.max(0, Math.floor((now.getTime() - account.warmupStartedAt.getTime()) / 86_400_000));
+      : isIdle(account, now)
+        ? 0
+        : Math.max(0, Math.floor((now.getTime() - account.warmupStartedAt.getTime()) / 86_400_000));
   const daily = day === null ? ceiling : warmupDailyLimit(day, ceiling);
   // Лимит в час из тарифа действует и во время прогрева: берётся меньшее из заданного и равномерной доли суток.
   const spread = spreadHourlyLimit(daily);
@@ -45,6 +48,21 @@ export function effectiveLimits(
     hourly: account.limitPerHour === null ? spread : Math.min(account.limitPerHour, spread),
     warmupDay: day !== null && day < WARMUP_DAYS ? day : null,
   };
+}
+
+/**
+ * Аккаунт молчал дольше {@link WARMUP_IDLE_DAYS}: считается неразогретым и начинает с первых суток. Молчание
+ * отсчитывается от последней отправки, а у ещё не работавшего — от начала прогрева (первого входа в MAX). Старые
+ * аккаунты без начала прогрева считаются прогретыми и под правило не попадают. Сам сброс записывается при отправке
+ * (`touchAccount`); здесь только то, что видно сейчас.
+ */
+export function isIdle(
+  account: Pick<MessengerAccountRow, 'warmupStartedAt' | 'lastUsedAt'>,
+  now: Date,
+): boolean {
+  if (account.warmupStartedAt === null) return false;
+  const last = Math.max(account.lastUsedAt?.getTime() ?? 0, account.warmupStartedAt.getTime());
+  return now.getTime() - last > WARMUP_IDLE_DAYS * 86_400_000;
 }
 
 /** Через сколько повторять, если аккаунт упёрся в предел: минуту — коротко, час — реже, сутки — ещё реже. */

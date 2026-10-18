@@ -37,6 +37,7 @@ const SUBGROUPS: Record<string, string> = {
   'messaging.provider_partner_token': 'Провайдер',
   'messages.pace_seconds': 'Отправка',
   'messages.max_wait_minutes': 'Отправка',
+  'messages.duplicate_window_minutes': 'Отправка',
   'messages.precheck_enabled': 'Проверка номера перед отправкой',
   'messages.precheck_exists_days': 'Проверка номера перед отправкой',
   'messages.precheck_absent_days': 'Проверка номера перед отправкой',

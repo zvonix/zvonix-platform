@@ -34,6 +34,7 @@ import {
   type MoneyAmount,
   type SmppReceiptEvent,
   type SmppReceiptMap,
+  WARMUP_IDLE_DAYS,
 } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
@@ -386,10 +387,42 @@ export class MessagesRepository {
 
   /** Аккаунт только что отправлял: от этого момента считается пауза и порядок выбора. */
   async touchAccount(id: Id<'messengerAccount'>, at: Date): Promise<void> {
+    // Молчал дольше срока — прогрев начинается заново (ADR-0078, ревизия 2026-10-18). В одном запросе: выражения
+    // `set` видят прежние значения строки, так что «молчал» проверяется по старой `last_used_at`.
+    const idle = sql`${messengerAccounts.warmupEnabled}
+      and ${messengerAccounts.warmupStartedAt} is not null
+      and greatest(coalesce(${messengerAccounts.lastUsedAt}, ${messengerAccounts.warmupStartedAt}), ${messengerAccounts.warmupStartedAt})
+        < ${at}::timestamptz - ${WARMUP_IDLE_DAYS} * interval '1 day'`;
     await this.database.db
       .update(messengerAccounts)
-      .set({ lastUsedAt: at })
+      .set({
+        lastUsedAt: at,
+        warmupStartedAt: sql`case when ${idle} then ${at}::timestamptz else ${messengerAccounts.warmupStartedAt} end`,
+      })
       .where(eq(messengerAccounts.id, id));
+  }
+
+  /** Было ли такое же сообщение этому номеру от этого клиента не раньше `since` (неотклонённое). */
+  async hasRecentDuplicate(
+    clientId: Id<'client'>,
+    recipient: string,
+    text: string,
+    since: Date,
+  ): Promise<boolean> {
+    const [row] = await this.database.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.clientId, clientId),
+          eq(messages.recipient, recipient),
+          eq(messages.text, text),
+          gte(messages.createdAt, since),
+          ne(messages.status, 'failed'),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
   }
 
   /** Окончательный отказ — внутри транзакции возврата денег. Только из ещё не отправленных состояний. */
