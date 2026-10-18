@@ -6,7 +6,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../../infra/tokens.js';
+import type { RedisService } from '../../infra/redis.js';
 import type { SettingsService } from '../settings/settings.service.js';
+import { PROVIDER_OUTAGE_KEY } from './provider-outage.js';
 import { GreenApiMessageProvider } from './green-api.provider.js';
 import { RecipientRejectedError } from './provider.js';
 
@@ -253,5 +255,55 @@ describe('отправка', () => {
         incomingWebhook: 'no',
       },
     });
+  });
+});
+
+describe('сбой провайдера для тревоги администратору', () => {
+  const store = new Map<string, string>();
+  const redis = {
+    connection: {
+      status: 'ready',
+      set: (key: string, value: string) => {
+        store.set(key, value);
+        return Promise.resolve('OK');
+      },
+      del: (key: string) => {
+        store.delete(key);
+        return Promise.resolve(1);
+      },
+    },
+  } as unknown as RedisService;
+
+  const watched = (): GreenApiMessageProvider => {
+    const settings = {
+      messaging: () => Promise.resolve({ partnerUrl: PARTNER_URL, partnerToken: PARTNER_TOKEN }),
+    } as unknown as SettingsService;
+    return new GreenApiMessageProvider(settings, logger, redis);
+  };
+  const outageReason = (): string | undefined =>
+    (JSON.parse(store.get(PROVIDER_OUTAGE_KEY) ?? '{}') as { reason?: string }).reason;
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  beforeEach(() => {
+    store.clear();
+  });
+
+  it('ответ 5xx записывается как сбой, успешный ответ его снимает', async () => {
+    respond = () => ({ status: 503, json: {} });
+    await expect(watched().qr(REF)).rejects.toThrow();
+    await settle();
+    expect(outageReason()).toBe('server');
+
+    respond = () => ({ json: { type: 'alreadyLogged' } });
+    await watched().qr(REF);
+    await settle();
+    expect(store.has(PROVIDER_OUTAGE_KEY)).toBe(false);
+  });
+
+  it('отказ по существу (4xx) сбоем провайдера не считается', async () => {
+    respond = () => ({ status: 401, json: {} });
+    await expect(watched().qr(REF)).rejects.toThrow();
+    await settle();
+    expect(store.has(PROVIDER_OUTAGE_KEY)).toBe(false);
   });
 });

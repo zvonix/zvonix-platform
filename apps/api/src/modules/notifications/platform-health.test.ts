@@ -3,6 +3,7 @@ import type { Logger } from '../../infra/tokens.js';
 import type { RedisService } from '../../infra/redis.js';
 import type { MailService } from '../mail/mail.service.js';
 import type { MessagesService } from '../messaging/messages.service.js';
+import { PROVIDER_OUTAGE_KEY } from '../messaging/provider-outage.js';
 import { PlatformHealthService, WORKER_HEARTBEAT_KEY } from './platform-health.service.js';
 
 const NOW = new Date('2026-10-18T12:00:00Z');
@@ -22,6 +23,7 @@ interface Setup {
   lastError?: string | null;
   messages?: { total: number; failed: number };
   mailFails?: boolean;
+  outage?: { at: string; reason: string; status?: number };
 }
 
 function build(setup: Setup = {}) {
@@ -30,7 +32,13 @@ function build(setup: Setup = {}) {
     connection: {
       status: setup.redisReady === false ? 'end' : 'ready',
       get: vi.fn((key: string) =>
-        Promise.resolve(key === WORKER_HEARTBEAT_KEY ? (setup.heartbeat ?? minutesAgo(0)) : null),
+        Promise.resolve(
+          key === WORKER_HEARTBEAT_KEY
+            ? (setup.heartbeat ?? minutesAgo(0))
+            : key === PROVIDER_OUTAGE_KEY && setup.outage !== undefined
+              ? JSON.stringify(setup.outage)
+              : null,
+        ),
       ),
       set,
     },
@@ -96,6 +104,24 @@ describe('поломки площадки', () => {
     expect(sick.map((p) => p.name)).toEqual(['Сообщения MAX']);
     expect(await build({ messages: { total: 4, failed: 4 } }).service.problems(NOW)).toEqual([]);
     expect(await build({ messages: { total: 20, failed: 5 } }).service.problems(NOW)).toEqual([]);
+  });
+
+  it('провайдер сообщений не отвечал недавно — «Сервис сообщений»; старый сбой и отсутствие записи молчат', async () => {
+    const fresh = await build({
+      outage: { at: minutesAgo(5), reason: 'timeout' },
+    }).service.problems(NOW);
+    expect(fresh.map((p) => p.name)).toEqual(['Сервис сообщений']);
+    expect(fresh[0]?.reason).toContain('не отвечает вовремя');
+
+    const server = await build({
+      outage: { at: minutesAgo(1), reason: 'server', status: 503 },
+    }).service.problems(NOW);
+    expect(server[0]?.reason).toContain('503');
+
+    expect(
+      await build({ outage: { at: minutesAgo(45), reason: 'network' } }).service.problems(NOW),
+    ).toEqual([]);
+    expect(await build().service.problems(NOW)).toEqual([]);
   });
 
   it('сбой чтения одного источника не гасит остальные', async () => {

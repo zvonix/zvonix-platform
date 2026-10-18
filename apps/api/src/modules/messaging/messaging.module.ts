@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RedisService } from '../../infra/redis.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { BillingModule } from '../billing/billing.module.js';
@@ -94,11 +95,16 @@ import { SmppService } from './smpp/smpp.service.js';
     },
     {
       provide: MESSAGE_PROVIDER,
-      inject: [APP_CONFIG, APP_LOGGER, SettingsService],
-      useFactory: (config: Config, logger: Logger, settings: SettingsService): MessageProvider =>
+      inject: [APP_CONFIG, APP_LOGGER, SettingsService, RedisService],
+      useFactory: (
+        config: Config,
+        logger: Logger,
+        settings: SettingsService,
+        redis: RedisService,
+      ): MessageProvider =>
         config.MESSENGER_PROVIDER === 'simulated'
           ? new SimulatedMessageProvider()
-          : new GreenApiMessageProvider(settings, logger),
+          : new GreenApiMessageProvider(settings, logger, redis),
     },
   ],
   exports: [MessagingService, MessagesService, BotsService, SmppServer],
