@@ -362,7 +362,15 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
     };
   }, [authorized, onClose]);
 
-  const failure = qr.error instanceof ApiError ? qr.error : undefined;
+  const [lastFailure, setLastFailure] = useState<ApiError | undefined>(undefined);
+  useEffect(() => {
+    if (qr.error instanceof ApiError) setLastFailure(qr.error);
+    else if (qr.data !== undefined) setLastFailure(undefined);
+  }, [qr.error, qr.data]);
+  const failure =
+    qr.data === undefined
+      ? (lastFailure ?? (qr.error instanceof ApiError ? qr.error : undefined))
+      : undefined;
   // Новый аккаунт у провайдера запускается до минуты и первое время отвечает «недоступен»: это ожидание,
   // а не ошибка. Красным показывается только то, что само не пройдёт — и «недоступен» дольше полутора минут.
   const [openedAt] = useState(() => Date.now());
