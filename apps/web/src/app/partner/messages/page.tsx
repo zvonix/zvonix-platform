@@ -323,6 +323,24 @@ function PasswordForm({ accountId, onSent }: { accountId: string; onSent: () => 
   );
 }
 
+/** Сколько ждём QR, прежде чем назвать причину: запуск нового аккаунта у провайдера занимает до минуты. */
+const QR_PATIENCE_MS = 90_000;
+
+/** Почему QR не появился — по коду ответа сервиса сообщений, без имени провайдера. */
+function stallReason(failure: ApiError): string {
+  const raw = failure.details['provider_status'];
+  const status = typeof raw === 'number' ? raw : undefined;
+  if (failure.details['provider_reason'] === 'timeout')
+    return 'Сервис сообщений не ответил вовремя.';
+  if (status === 401 || status === 403) return 'Сервис сообщений не принял ключ аккаунта.';
+  if (status === 404) return 'В сервисе сообщений нет такого аккаунта.';
+  if (status === 429) return 'Сервис сообщений просит подождать: слишком много запросов.';
+  if (status !== undefined && status >= 500) {
+    return `Сервис сообщений не отвечает (код ${String(status)}).`;
+  }
+  return 'Сервис сообщений не отвечает.';
+}
+
 /** QR-код входа: обновляется раз в три секунды, пока человек не отсканирует, потом закрывается. */
 function QrDialog({ account, onClose }: { account: Account; onClose: () => void }) {
   const qr = useQuery({
@@ -346,12 +364,18 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
 
   const failure = qr.error instanceof ApiError ? qr.error : undefined;
   // Новый аккаунт у провайдера запускается до минуты и первое время отвечает «недоступен»: это ожидание,
-  // а не ошибка. Красным показывается только то, что само не пройдёт.
-  const starting = failure !== undefined && failure.code === 'dependency_unavailable';
-  const error = starting ? undefined : failure;
+  // а не ошибка. Красным показывается только то, что само не пройдёт — и «недоступен» дольше полутора минут.
+  const [openedAt] = useState(() => Date.now());
+  const unavailable = failure !== undefined && failure.code === 'dependency_unavailable';
+  const stalled = unavailable && Date.now() - openedAt > QR_PATIENCE_MS;
+  const error = unavailable ? undefined : failure;
   const status = qr.data?.status;
   const waiting =
-    error === undefined && status !== 'qr' && status !== 'authorized' && status !== 'password';
+    error === undefined &&
+    !stalled &&
+    status !== 'qr' &&
+    status !== 'authorized' &&
+    status !== 'password';
 
   return (
     <FormDialog
@@ -364,6 +388,12 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
     >
       <div className="flex flex-col items-center gap-3 px-5 pb-5">
         {error !== undefined && <ErrorNote error={error} />}
+        {stalled && (
+          <p role="alert" className="text-center text-warn">
+            {stallReason(failure)} Попробуйте закрыть окно и открыть его снова позже; если не
+            проходит — сообщите администратору площадки.
+          </p>
+        )}
         {waiting && (
           // Одна надпись на всё ожидание: запуск аккаунта, пустой ответ, повторный запрос — человеку это одно и то же.
           <p role="status" className="text-muted-foreground">
@@ -393,7 +423,8 @@ function QrDialog({ account, onClose }: { account: Account; onClose: () => void 
         )}
         {!authorized && qr.data?.status !== 'password' && (
           <p className="text-center text-muted-foreground">
-            Код обновляется сам. В приложении MAX отключите пароль для входа, если он включён.
+            Код обновляется сам. Если в MAX включён облачный пароль, после сканирования введите его
+            здесь.
           </p>
         )}
       </div>
