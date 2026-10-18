@@ -96,6 +96,8 @@ function Overview() {
 
   return (
     <div className="flex max-w-[1100px] flex-col gap-5">
+      <PlatformProblems />
+
       <section aria-label="Требует внимания" className="grid gap-3 sm:grid-cols-3">
         <Attention
           href="/applications"
@@ -245,6 +247,39 @@ function Kpi({
 }
 
 /** Счётчик дел: ноль — спокойно, больше нуля — предупреждение (узлы — тревога). */
+/**
+ * Поломки самой площадки: почта не отправляет, воркер молчит, сообщения MAX не уходят. Пока всё в порядке — строки нет:
+ * о сломанной почте письмом не сообщить, поэтому это видно здесь и красной точкой в меню (ADR-0062).
+ */
+function PlatformProblems() {
+  const live = useLiveInterval();
+  const problems = useQuery({
+    queryKey: ['platform', 'problems'],
+    queryFn: () =>
+      request<{ count: number; problems: { name: string; reason: string }[] }>(
+        '/platform/problems',
+      ),
+    refetchInterval: live,
+  });
+  if (!problems.data || problems.data.count === 0) return null;
+  return (
+    <section
+      aria-label="Сбои площадки"
+      role="alert"
+      className="flex flex-col gap-1 rounded-lg border border-crit bg-card p-3"
+    >
+      <h2 className="font-semibold text-crit">Сбой на площадке</h2>
+      <ul className="flex flex-col gap-1">
+        {problems.data.problems.map((problem) => (
+          <li key={problem.name}>
+            <span className="font-medium">{problem.name}</span> — {problem.reason}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function Attention({
   href,
   label,

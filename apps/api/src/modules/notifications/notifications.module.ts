@@ -11,6 +11,8 @@ import { TelephonyModule } from '../telephony/telephony.module.js';
 import { CertificateStatusModule } from '../updates/certificate-status.module.js';
 import { AlertsService } from './alerts.service.js';
 import { LowBalanceService } from './low-balance.service.js';
+import { PlatformHealthController } from './platform-health.controller.js';
+import { PlatformHealthService } from './platform-health.service.js';
 import { PaymentNoticeService } from './payment-notice.service.js';
 import { SuspensionNoticeService } from './suspension-notice.service.js';
 
@@ -28,7 +30,20 @@ import { SuspensionNoticeService } from './suspension-notice.service.js';
     SettingsModule,
     TelephonyModule,
   ],
-  providers: [LowBalanceService, AlertsService, PaymentNoticeService, SuspensionNoticeService],
-  exports: [LowBalanceService, AlertsService, PaymentNoticeService, SuspensionNoticeService],
+  controllers: [PlatformHealthController],
+  providers: [
+    LowBalanceService,
+    AlertsService,
+    PaymentNoticeService,
+    SuspensionNoticeService,
+    PlatformHealthService,
+  ],
+  exports: [
+    LowBalanceService,
+    AlertsService,
+    PaymentNoticeService,
+    SuspensionNoticeService,
+    PlatformHealthService,
+  ],
 })
 export class NotificationsModule {}

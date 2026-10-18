@@ -67,7 +67,8 @@ function useCollapsed(): [boolean, (next: boolean) => void] {
 
 /** Раздел открыт: сам адрес или страница внутри него, например карточка `/partners/<id>`. */
 /**
- * Красная точка у «Серверов», когда что-то не в порядке: узел замолчал, мало памяти или диска, процессор перегружен.
+ * Красная точка у «Серверов», когда что-то не в порядке: узел замолчал, мало памяти или диска, процессор перегружен,
+ * не уходит почта, молчит воркер.
  * Только у этого пункта — он виден администратору и поддержке, остальным запрос не уходит.
  */
 function AttentionDot({ href }: { href: string }) {
@@ -80,8 +81,18 @@ function AttentionDot({ href }: { href: string }) {
     enabled: href === '/servers',
     refetchInterval: 60_000,
   });
-  if (href !== '/servers' || !attention.data || attention.data.count === 0) return null;
-  const text = attention.data.problems.map((p) => `${p.name}: ${p.reason}`).join('; ');
+  const platform = useQuery({
+    queryKey: ['platform', 'problems'],
+    queryFn: () =>
+      request<{ count: number; problems: { name: string; reason: string }[] }>(
+        '/platform/problems',
+      ),
+    enabled: href === '/servers',
+    refetchInterval: 60_000,
+  });
+  const problems = [...(attention.data?.problems ?? []), ...(platform.data?.problems ?? [])];
+  if (href !== '/servers' || problems.length === 0) return null;
+  const text = problems.map((p) => `${p.name}: ${p.reason}`).join('; ');
   return (
     <span
       role="img"
