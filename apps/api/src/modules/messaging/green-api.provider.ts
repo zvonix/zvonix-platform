@@ -254,7 +254,19 @@ export class GreenApiMessageProvider implements MessageProvider {
       reason: cause instanceof Error ? cause.name : 'unknown',
       ...(cause instanceof ProviderHttpError ? { status: cause.status } : {}),
     });
-    return dependencyUnavailable(UNAVAILABLE);
+    // Код ответа и вид сбоя — не секрет и не имя провайдера: по ним кабинет объясняет, почему QR не появился,
+    // а не только «подождите».
+    return dependencyUnavailable(UNAVAILABLE, {
+      details: {
+        provider_reason:
+          cause instanceof ProviderHttpError
+            ? 'refused'
+            : cause instanceof Error && cause.name === 'TimeoutError'
+              ? 'timeout'
+              : 'network',
+        ...(cause instanceof ProviderHttpError ? { provider_status: cause.status } : {}),
+      },
+    });
   }
 
   /** Низкий уровень: код ответа не прячется, чтобы отправка могла отличить «получатель негоден» от сбоя. */
