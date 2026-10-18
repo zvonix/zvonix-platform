@@ -27,14 +27,13 @@ import {
   type Rate,
   type Tariff,
 } from '@/lib/tariffs';
-import { CallsAndMax, MaxTariffs } from '../messages/terms';
 import { SetPrice } from './set-price';
 import { TariffLimits } from './tariff-limits';
 
 export default function PartnerPricesPage() {
   return (
-    <ConsoleShell title="Мои тарифы" cabinet="partner">
-      {() => <CallsAndMax calls={<PartnerTariffs />} max={<MaxTariffs />} />}
+    <ConsoleShell title="Тарифы" cabinet="partner">
+      {() => <PartnerTariffs />}
     </ConsoleShell>
   );
 }

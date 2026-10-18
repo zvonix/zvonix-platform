@@ -148,7 +148,7 @@ function PartnerOrder({ channelId }: { channelId: string }) {
         Цены — за вызов в <span className="num">{seconds}</span> с, с платой за соединение. Полный
         состав — в{' '}
         <Link href="/my/prices" className="underline underline-offset-2">
-          «Мои цены»
+          «Цены»
         </Link>
         .
       </p>

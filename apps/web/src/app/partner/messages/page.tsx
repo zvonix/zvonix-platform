@@ -91,7 +91,7 @@ function Accounts() {
               <NewAccountForm onCreate={(label) => create.mutateAsync(label)} />
             </FormDialog>
             <p className="text-muted-foreground">
-              Цена и лимиты — в тарифе: создайте тарифы на странице «Мои тарифы» и назначьте
+              Цена и лимиты — в тарифе: создайте тарифы на странице «Тарифы MAX» и назначьте
               аккаунтам здесь. Без своего тарифа аккаунт идёт за тарифом по умолчанию.
             </p>
           </div>

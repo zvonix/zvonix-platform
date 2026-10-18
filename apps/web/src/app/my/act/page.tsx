@@ -19,7 +19,7 @@ const CONFIG: StatementConfig = {
 
 export default function ActPage() {
   return (
-    <ConsoleShell title="Акт за месяц" cabinet="client">
+    <ConsoleShell title="Акт" cabinet="client">
       {() => <Statement config={CONFIG} />}
     </ConsoleShell>
   );

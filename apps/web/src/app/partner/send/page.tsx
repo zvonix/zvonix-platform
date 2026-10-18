@@ -14,7 +14,7 @@ import { useCabinets } from '@/lib/cabinets';
  */
 export default function PartnerSendPage() {
   return (
-    <ConsoleShell title="Отправить сообщение" cabinet="partner">
+    <ConsoleShell title="Сообщения MAX" cabinet="partner">
       {() => <Send />}
     </ConsoleShell>
   );
