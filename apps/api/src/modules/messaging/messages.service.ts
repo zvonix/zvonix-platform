@@ -213,6 +213,25 @@ export class MessagesService {
       if (earlier !== undefined) return this.sameOrRefuse(earlier, recipient, input.text);
     }
 
+    // Повтор одного и того же текста одному номеру за короткое время — главная причина блокировки аккаунтов и
+    // частая ошибка клиента (повторный запрос). Повтор по тому же внешнему номеру обработан выше как один и тот же
+    // запрос и сюда не доходит.
+    const { duplicateWindowMinutes } = await this.settings.messaging();
+    if (
+      duplicateWindowMinutes > 0 &&
+      (await this.repository.hasRecentDuplicate(
+        clientId,
+        recipient,
+        input.text,
+        new Date(Date.now() - duplicateWindowMinutes * 60_000),
+      ))
+    ) {
+      throw conflict(
+        `Такое же сообщение этому номеру уже принято за последние ${String(duplicateWindowMinutes)} мин`,
+        { details: { reason: 'duplicate_message', window_minutes: duplicateWindowMinutes } },
+      );
+    }
+
     // Сначала бот: у номера есть подписчик этого клиента (ADR-0077). Иначе — аккаунты партнёров.
     const viaBot = await this.bots.routeFor(clientId, recipient);
     if (viaBot === undefined && (await this.bots.fallbackForbidden(clientId))) {

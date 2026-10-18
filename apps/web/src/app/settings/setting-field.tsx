@@ -58,6 +58,8 @@ const LABELS: Record<string, string> = {
   'bot.own_monthly_fee': 'Плата клиента за своего бота в месяц, ₽',
   'bot.api_url': 'Адрес API ботов MAX',
   'messages.pace_seconds': 'Пауза между сообщениями аккаунта, секунд',
+  'messages.duplicate_window_minutes':
+    'Не принимать одинаковое сообщение одному номеру чаще, минут',
   'messages.precheck_enabled': 'Проверять наличие MAX у номера перед отправкой',
   'messages.precheck_exists_days': 'Помнить «у номера есть MAX», суток',
   'messages.precheck_absent_days': 'Помнить «у номера нет MAX», суток',

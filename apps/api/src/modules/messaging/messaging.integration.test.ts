@@ -219,6 +219,12 @@ describe('вход по QR-коду и состояние', () => {
     expect(qr.json<{ status: string; image: string }>()).toMatchObject({ status: 'qr' });
     expect(qr.json<{ image: string }>().image).toMatch(/^data:image\/png;base64,/u);
 
+    // Прогрев идёт от первого входа в MAX, а не от создания записи.
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update messenger_accounts set warmup_started_at = now() - interval '5 days' where id = ${id}`,
+      );
+    });
     simulateAccountState((await instanceOf(id)).instance, 'authorized', '79990001122');
     const after = await api().inject({
       method: 'GET',
@@ -235,6 +241,13 @@ describe('вход по QR-коду и состояние', () => {
       })
     ).json<{ accounts: AccountView[] }>().accounts;
     expect(listed[0]).toMatchObject({ status: 'active', phone: '79990001122' });
+    const restarted = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select warmup_started_at > now() - interval '5 minutes' as fresh from messenger_accounts where id = ${id}`,
+      );
+      return (result.rows[0] as { fresh: boolean }).fresh;
+    });
+    expect(restarted).toBe(true);
   });
 
   it('в MAX включён облачный пароль: QR просит его, неверный — 400, верный завершает вход', async () => {

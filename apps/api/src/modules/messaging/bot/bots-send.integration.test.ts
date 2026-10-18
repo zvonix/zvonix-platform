@@ -47,6 +47,8 @@ beforeEach(async () => {
     (
       await fx.put(adminToken, {
         'messaging.enabled': true,
+        // Тесты шлют один и тот же текст одному номеру много раз: защита от повторов отключена (проверяется отдельно).
+        'messages.duplicate_window_minutes': 0,
         'bot.enabled': true,
         'messages.pace_seconds': 0,
       })

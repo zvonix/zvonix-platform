@@ -87,6 +87,59 @@ afterAll(async () => {
   await app?.close();
 });
 
+describe('защита от повторов (messages.duplicate_window_minutes)', () => {
+  it('тот же текст тому же номеру за окно — отказ 409; другой текст и другой номер проходят', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const first = await send(client.token, { to: '79005550201', text: 'Здравствуйте!' });
+    expect(first.statusCode).toBe(201);
+
+    const again = await send(client.token, { to: '79005550201', text: 'Здравствуйте!' });
+    expect(again.statusCode).toBe(409);
+    expect(
+      again.json<{ error: { details: Record<string, unknown> } }>().error.details,
+    ).toMatchObject({
+      reason: 'duplicate_message',
+      window_minutes: 10,
+    });
+
+    expect(
+      (await send(client.token, { to: '79005550201', text: 'Здравствуйте, Иван!' })).statusCode,
+    ).toBe(201);
+    expect(
+      (await send(client.token, { to: '79005550202', text: 'Здравствуйте!' })).statusCode,
+    ).toBe(201);
+    // Отказ денег не списал: три принятых сообщения по 0,54, остальное на счёте.
+    expect(await balance(client.token)).toBe('8.38');
+  });
+
+  it('повтор по тому же внешнему номеру — это тот же запрос, а не дубль', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const payload = { to: '79005550203', text: 'Код 4321', externalId: 'dup-1' };
+    expect((await send(client.token, payload)).statusCode).toBe(201);
+    expect((await send(client.token, payload)).statusCode).toBeLessThan(300);
+  });
+
+  it('окно 0 — проверка выключена', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    expect((await put(adminToken, { 'messages.duplicate_window_minutes': 0 })).statusCode).toBe(
+      200,
+    );
+    try {
+      expect((await send(client.token, { to: '79005550204', text: 'Повтор' })).statusCode).toBe(
+        201,
+      );
+      expect((await send(client.token, { to: '79005550204', text: 'Повтор' })).statusCode).toBe(
+        201,
+      );
+    } finally {
+      await put(adminToken, { 'messages.duplicate_window_minutes': 10 });
+    }
+  });
+});
+
 describe('приём сообщения и деньги', () => {
   it('цена партнёра 0,45 + наценка 20 % = 0,54 клиенту: клиент платит, партнёр зарабатывает, площадка удерживает', async () => {
     const partner = await partnerWithAccount('0.45');
@@ -290,12 +343,50 @@ describe('автопрогрев и равномерная отправка (ADR
     expect((await messageOf(client.token, b))?.status).toBe('sent');
   });
 
+  it('молчал дольше 14 суток — после отправки прогрев начинается заново; работающий не сбрасывается', async () => {
+    const quiet = await partnerWithAccount('0.45', {}, true);
+    const client = await clientWithMoney('10');
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update messenger_accounts set warmup_started_at = now() - interval '40 days', last_used_at = now() - interval '20 days' where id = ${quiet.accountId}`,
+      );
+    });
+    await send(client.token, { to: '79005550101', text: 'После долгого молчания' });
+    await api().get(MessagesService).dispatchDue(new Date());
+    const restarted = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select warmup_started_at > now() - interval '5 minutes' as fresh from messenger_accounts where id = ${quiet.accountId}`,
+      );
+      return (result.rows[0] as { fresh: boolean }).fresh;
+    });
+    expect(restarted).toBe(true);
+  });
+
+  it('работающий аккаунт прогрев не теряет: последняя отправка двое суток назад', async () => {
+    const busy = await partnerWithAccount('0.45', {}, true);
+    const client = await clientWithMoney('10');
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update messenger_accounts set warmup_started_at = now() - interval '40 days', last_used_at = now() - interval '2 days' where id = ${busy.accountId}`,
+      );
+    });
+    await send(client.token, { to: '79005550102', text: 'Обычная работа' });
+    await api().get(MessagesService).dispatchDue(new Date());
+    const kept = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select warmup_started_at < now() - interval '30 days' as old from messenger_accounts where id = ${busy.accountId}`,
+      );
+      return (result.rows[0] as { old: boolean }).old;
+    });
+    expect(kept).toBe(true);
+  });
+
   it('суточный предел прогрева: после 12 сообщений за сутки следующее ждёт, даже если часовая доля свободна', async () => {
     const partner = await partnerWithAccount('0.45', {}, true);
     // Прогрев закончился давно: потолок 500 в сутки, 42 в час. Ставим предел суток 3 тарифом.
     await withDatabase(async (execute) => {
       await execute(
-        sql`update messenger_accounts set warmup_started_at = now() - interval '40 days', limit_per_day = 3 where id = ${partner.accountId}`,
+        sql`update messenger_accounts set warmup_started_at = now() - interval '40 days', last_used_at = now(), limit_per_day = 3 where id = ${partner.accountId}`,
       );
     });
     const client = await clientWithMoney('10');

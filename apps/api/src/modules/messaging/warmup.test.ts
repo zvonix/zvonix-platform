@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountLoad } from './messages.repository.js';
-import { accountReadyAt, effectiveLimits } from './warmup.js';
+import { accountReadyAt, effectiveLimits, isIdle } from './warmup.js';
 
 const NOW = new Date('2026-10-14T10:00:00Z');
 const load = (overrides: Partial<AccountLoad>): AccountLoad => ({
@@ -38,7 +38,11 @@ describe('лимит сообщений в час (тариф MAX)', () => {
     expect(effectiveLimits(account({ ...warming, limitPerHour: 40 }), NOW).hourly).toBe(1);
     // Заданный лимит ниже доли — действует заданный.
     const later = new Date('2026-12-14T10:00:00Z');
-    expect(effectiveLimits(account({ ...warming, limitPerHour: 5 }), later).hourly).toBe(5);
+    // Аккаунт работает — молчания нет, прогрев идёт обычным ходом.
+    const used = { lastUsedAt: new Date('2026-12-14T09:00:00Z') };
+    expect(effectiveLimits(account({ ...warming, ...used, limitPerHour: 5 }), later).hourly).toBe(
+      5,
+    );
   });
 
   it('исчерпанный час откладывает отправку, минута и сутки при этом не мешают', () => {
@@ -54,5 +58,50 @@ describe('лимит сообщений в час (тариф MAX)', () => {
     const reserve = { ...options, reservePercent: 20 };
     expect(accountReadyAt(acc, load({ hour: 7 }), NOW, reserve)).toBeUndefined();
     expect(accountReadyAt(acc, load({ hour: 8 }), NOW, reserve)).toBeDefined();
+  });
+});
+
+describe('прогрев и молчание аккаунта (ADR-0078, ревизия 2026-10-18)', () => {
+  const started = new Date('2026-08-01T00:00:00Z');
+  const warming = { warmupEnabled: true, warmupStartedAt: started, limitPerDay: 500 };
+
+  it('работающий аккаунт прогревается обычным ходом: через 40 суток — потолок', () => {
+    const at = new Date('2026-09-10T10:00:00Z');
+    const used = new Date('2026-09-10T09:00:00Z');
+    const limits = effectiveLimits(account({ ...warming, lastUsedAt: used }), at);
+    expect(limits.daily).toBe(500);
+    expect(limits.warmupDay).toBeNull();
+  });
+
+  it('молчал дольше 14 суток — снова первые сутки: 12 в сутки', () => {
+    const at = new Date('2026-09-10T10:00:00Z');
+    const used = new Date('2026-08-20T10:00:00Z'); // 21 сутки назад
+    const limits = effectiveLimits(account({ ...warming, lastUsedAt: used }), at);
+    expect(limits.daily).toBe(12);
+    expect(limits.warmupDay).toBe(0);
+  });
+
+  it('ровно 14 суток молчания — ещё не сброс, 15 — уже сброс', () => {
+    const at = new Date('2026-09-10T10:00:00Z');
+    const within = new Date(at.getTime() - 14 * 86_400_000);
+    const beyond = new Date(at.getTime() - 15 * 86_400_000);
+    expect(isIdle(account({ ...warming, lastUsedAt: within }), at)).toBe(false);
+    expect(isIdle(account({ ...warming, lastUsedAt: beyond }), at)).toBe(true);
+  });
+
+  it('ни разу не отправлял: молчание считается от начала прогрева', () => {
+    expect(isIdle(account(warming), new Date('2026-08-10T00:00:00Z'))).toBe(false);
+    expect(isIdle(account(warming), new Date('2026-08-20T00:00:00Z'))).toBe(true);
+  });
+
+  it('старый аккаунт без начала прогрева считается прогретым и не «засыпает»', () => {
+    const old = account({ warmupEnabled: true, warmupStartedAt: null, limitPerDay: 300 });
+    expect(isIdle(old, NOW)).toBe(false);
+    expect(effectiveLimits(old, NOW).daily).toBe(300);
+  });
+
+  it('прогрев выключен — молчание ничего не меняет', () => {
+    const off = account({ warmupEnabled: false, limitPerDay: 200, lastUsedAt: null });
+    expect(effectiveLimits(off, NOW).daily).toBe(200);
   });
 });

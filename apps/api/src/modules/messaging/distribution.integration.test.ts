@@ -104,7 +104,15 @@ beforeAll(async () => {
   await resetDatabase();
   app = await startApi();
   adminToken = (await fx.user('admin')).token;
-  expect((await fx.put(adminToken, { 'messaging.enabled': true })).statusCode).toBe(200);
+  expect(
+    (
+      await fx.put(adminToken, {
+        'messaging.enabled': true,
+        // Повторные сообщения одному номеру здесь — предмет проверки, защита от повторов отключена.
+        'messages.duplicate_window_minutes': 0,
+      })
+    ).statusCode,
+  ).toBe(200);
 });
 
 /** Каждая проверка начинается без чужих аккаунтов и сообщений: они перехватывали бы выбор по цене. */
