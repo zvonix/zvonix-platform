@@ -16,10 +16,12 @@ import { SettingsService } from '../settings/settings.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
 import { effectiveLimits } from './warmup.js';
 import { MessagingService } from './messaging.service.js';
+import { TestSendService } from './test-send.service.js';
 import {
   createAccountSchema,
   registerAccountSchema,
   sendPasswordSchema,
+  testMessageSchema,
   updateAccountSchema,
   warmupSchema,
 } from './schemas.js';
@@ -77,6 +79,7 @@ export class MessagingController {
   constructor(
     private readonly messaging: MessagingService,
     private readonly settings: SettingsService,
+    private readonly testSend: TestSendService,
   ) {}
 
   /** Аккаунты партнёра и признак «продукт включён»: выключенный раздел показывает это, а не пустоту. */
@@ -121,6 +124,22 @@ export class MessagingController {
       return { status: 'qr', image: `data:image/png;base64,${result.image}` };
     }
     return { status: result.kind === 'password_required' ? 'password' : result.kind };
+  }
+
+  /**
+   * Пробное сообщение через этот аккаунт (до семи в сутки на аккаунт, бесплатно, мимо журнала сообщений).
+   * `409` — аккаунт ещё не вошёл в MAX; `400` — номер не тот или у него нет MAX; `429` — пробные на сегодня кончились.
+   */
+  @Cabinets('partner')
+  @HttpCode(200)
+  @Post('partner/messenger/accounts/:id/test')
+  async test(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+    @Body(zodBody(testMessageSchema)) body: z.infer<typeof testMessageSchema>,
+  ): Promise<{ sent: true; remaining: number }> {
+    const result = await this.testSend.send({ userId: actor.userId, role: actor.role }, id, body);
+    return { sent: true, remaining: result.remaining };
   }
 
   /**

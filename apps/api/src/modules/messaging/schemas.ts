@@ -20,6 +20,12 @@ export const sendPasswordSchema = z.object({
   password: z.string().min(1, 'введите пароль').max(64, 'слишком длинный'),
 });
 
+/** Пробное сообщение: получатель и, по желанию, короткий текст. Без текста уходит «Проверка связи Zvonix». */
+export const testMessageSchema = z.object({
+  recipient: z.string().trim().min(5, 'введите номер').max(20, 'слишком длинный'),
+  text: z.string().trim().min(1, 'пустой текст').max(200, 'не длиннее 200 знаков').optional(),
+});
+
 /** Что партнёр меняет у аккаунта: только название. Цена и лимиты — в тарифе ([ADR-0075](../../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)). */
 export const updateAccountSchema = z.object({ label });
 

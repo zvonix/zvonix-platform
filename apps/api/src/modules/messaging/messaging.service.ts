@@ -170,6 +170,18 @@ export class MessagingService {
     return { partnerId: partner.id, account };
   }
 
+  /** Свой аккаунт, который вошёл в MAX и работает; иначе отказ с пояснением. Нужен там, где идёт настоящая отправка. */
+  async ownWorkingAccount(
+    userId: Id<'user'>,
+    id: string,
+  ): Promise<{ account: MessengerAccountRow; ref: ProviderAccountRef }> {
+    const { account } = await this.ownAccount(userId, id);
+    if (account.status !== 'active') {
+      throw conflict('Аккаунт ещё не вошёл в MAX: сначала войдите по QR-коду');
+    }
+    return { account, ref: this.refOf(account) };
+  }
+
   async listOwn(userId: Id<'user'>): Promise<MessengerAccountRow[]> {
     const partner = await this.billing.requirePartnerOwnedBy(userId);
     return this.repository.listOfPartner(partner.id);

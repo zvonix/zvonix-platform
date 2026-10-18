@@ -243,6 +243,17 @@ function AccountRow({
               Войти по QR
             </Button>
           )}
+          {account.status === 'active' && (
+            <FormDialog
+              label="Тест"
+              title={`Пробное сообщение через «${account.label}»`}
+              description="Бесплатно, до семи в сутки на аккаунт. Уходит именно через этот аккаунт."
+              variant="outline"
+              size="xs"
+            >
+              <TestMessageForm account={account} />
+            </FormDialog>
+          )}
           <FormDialog
             label="Название"
             title={`Аккаунт «${account.label}»`}
@@ -267,6 +278,70 @@ function AccountRow({
         </span>
       </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * Пробное сообщение: проверить, что вошедший аккаунт действительно отправляет. Результат показывается в окне, оно не
+ * закрывается — можно отправить ещё. Деньги не списываются, в журнал сообщений пробное не попадает.
+ */
+function TestMessageForm({ account }: { account: Account }) {
+  const [recipient, setRecipient] = useState('');
+  const [text, setText] = useState('');
+  const [result, setResult] = useState<number | undefined>(undefined);
+
+  return (
+    <DialogForm
+      submitLabel="Отправить"
+      canSubmit={recipient.trim() !== ''}
+      keepOpen
+      onSubmit={async () => {
+        setResult(undefined);
+        const answer = await request<{ sent: true; remaining: number }>(
+          `/partner/messenger/accounts/${account.id}/test`,
+          {
+            method: 'POST',
+            body: {
+              recipient: recipient.trim(),
+              ...(text.trim() === '' ? {} : { text: text.trim() }),
+            },
+          },
+        );
+        setResult(answer.remaining);
+      }}
+    >
+      <DialogField
+        label="Номер получателя"
+        wide
+        hint="Одиннадцать цифр: 79131234567. У номера должен быть MAX."
+      >
+        <Input
+          autoFocus
+          inputMode="tel"
+          autoComplete="off"
+          placeholder="79131234567"
+          value={recipient}
+          onChange={(event) => {
+            setRecipient(event.target.value);
+          }}
+        />
+      </DialogField>
+      <DialogField label="Текст" wide hint="Пусто — уйдёт «Проверка связи Zvonix».">
+        <Input
+          maxLength={200}
+          autoComplete="off"
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+          }}
+        />
+      </DialogField>
+      {result !== undefined && (
+        <p role="status" className="text-ok sm:col-span-2">
+          Отправлено. Пробных на сегодня осталось: {String(result)}.
+        </p>
+      )}
+    </DialogForm>
   );
 }
 
