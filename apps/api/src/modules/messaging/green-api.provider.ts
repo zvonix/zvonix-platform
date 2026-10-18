@@ -11,7 +11,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { dependencyUnavailable, type MessengerProviderId } from '@zvonix/shared';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import type { RedisService } from '../../infra/redis.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { clearProviderOutage, recordProviderOutage, type OutageReason } from './provider-outage.js';
 import {
   RecipientRejectedError,
   type AccessCheck,
@@ -64,6 +66,7 @@ export class GreenApiMessageProvider implements MessageProvider {
   constructor(
     private readonly settings: SettingsService,
     @Inject(APP_LOGGER) logger: Logger,
+    private readonly redis?: RedisService,
   ) {
     this.logger = logger.child('messenger-provider');
   }
@@ -278,6 +281,8 @@ export class GreenApiMessageProvider implements MessageProvider {
       reason: cause instanceof Error ? cause.name : 'unknown',
       ...(cause instanceof ProviderHttpError ? { status: cause.status } : {}),
     });
+    const outage = outageOf(cause);
+    if (outage !== undefined) void recordProviderOutage(this.redis, outage);
     // Код ответа и вид сбоя — не секрет и не имя провайдера: по ним кабинет объясняет, почему QR не появился,
     // а не только «подождите».
     return dependencyUnavailable(UNAVAILABLE, {
@@ -307,11 +312,22 @@ export class GreenApiMessageProvider implements MessageProvider {
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new ProviderHttpError(response.status);
+    // Провайдер ответил: прежний сбой снят (запись — по возможности, обращение не ждёт Redis).
+    void clearProviderOutage(this.redis);
     return (await response.json()) as T;
   }
 }
 
 /** Ответ провайдера с кодом отказа. Только внутри этого файла: наружу уходят наши ошибки. */
+/** Похоже ли это на поломку у провайдера или в сети; отказ по существу (4xx) — нет. */
+function outageOf(cause: unknown): { reason: OutageReason; status?: number } | undefined {
+  if (cause instanceof ProviderHttpError) {
+    return cause.status >= 500 ? { reason: 'server', status: cause.status } : undefined;
+  }
+  if (cause instanceof Error && cause.name === 'TimeoutError') return { reason: 'timeout' };
+  return cause instanceof Error ? { reason: 'network' } : undefined;
+}
+
 class ProviderHttpError extends Error {
   override readonly name = 'ProviderHttpError';
   constructor(readonly status: number) {

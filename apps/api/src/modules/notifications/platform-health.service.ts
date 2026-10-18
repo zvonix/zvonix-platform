@@ -11,6 +11,7 @@ import { isRedisReady, RedisService } from '../../infra/redis.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { MailService } from '../mail/mail.service.js';
 import { MessagesService } from '../messaging/messages.service.js';
+import { readProviderOutage } from '../messaging/provider-outage.js';
 
 /** Ключ в Redis: когда воркер в последний раз подал признак жизни. */
 export const WORKER_HEARTBEAT_KEY = 'zvonix:worker:heartbeat';
@@ -25,6 +26,9 @@ const MAIL_STUCK_MS = 10 * 60_000;
 const MESSAGES_ENOUGH = 10;
 
 const HOUR_MS = 3_600_000;
+
+/** Сбой провайдера старше этого уже ничего не говорит о нынешнем состоянии: с тех пор никто к нему не обращался. */
+const PROVIDER_OUTAGE_FRESH_MS = 30 * 60_000;
 
 export interface PlatformProblem {
   /** Что именно: «Почта», «Фоновый воркер», «Сообщения MAX». */
@@ -59,6 +63,7 @@ export class PlatformHealthService {
       ['воркер', () => this.workerProblem(now)],
       ['почта', () => this.mailProblem(now)],
       ['сообщения', () => this.messageProblem(now)],
+      ['провайдер', () => this.providerProblem(now)],
     ] as const;
     for (const [source, read] of sources) {
       try {
@@ -103,6 +108,27 @@ export class PlatformHealthService {
     return {
       name: 'Почта',
       reason: `письма не уходят (ждут ${String(queue.pending)})${detail}. Откройте «Настройки площадки» → «Почта и письма»`,
+    };
+  }
+
+  /**
+   * Провайдер сообщений не отвечает: последнее обращение к нему (вход по QR, отправка, проверка) кончилось таймаутом,
+   * обрывом или ответом 5xx и ни одно из следующих не удалось. Успешный ответ снимает запись.
+   */
+  private async providerProblem(now: Date): Promise<PlatformProblem | undefined> {
+    const outage = await readProviderOutage(this.redis);
+    if (outage === undefined || now.getTime() - outage.at.getTime() > PROVIDER_OUTAGE_FRESH_MS) {
+      return undefined;
+    }
+    const how =
+      outage.reason === 'timeout'
+        ? 'не отвечает вовремя'
+        : outage.reason === 'server'
+          ? `отвечает ошибкой ${String(outage.status ?? 'сервера')}`
+          : 'недоступен из сети';
+    return {
+      name: 'Сервис сообщений',
+      reason: `${how} (последний сбой ${outage.at.toISOString().slice(11, 16)} UTC): вход аккаунтов по QR и отправка могут не работать. Проверьте «Настройки площадки» → «Сообщения» → «Проверить ключ»`,
     };
   }
 
