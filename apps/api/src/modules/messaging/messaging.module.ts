@@ -4,6 +4,7 @@ import { AuditModule } from '../audit/audit.module.js';
 import { BillingModule } from '../billing/billing.module.js';
 import { CatalogModule } from '../catalog/catalog.module.js';
 import { LimitsModule } from '../limits/limits.module.js';
+import { TestSendService } from './test-send.service.js';
 import { PrioritiesModule } from '../priorities/priorities.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { SettingsService } from '../settings/settings.service.js';
@@ -71,6 +72,7 @@ import { SmppService } from './smpp/smpp.service.js';
   ],
   providers: [
     MessagingService,
+    TestSendService,
     MessagingRepository,
     MessengerTariffsService,
     MessengerTariffsRepository,
