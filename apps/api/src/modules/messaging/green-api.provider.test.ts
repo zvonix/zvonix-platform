@@ -62,9 +62,20 @@ afterEach(() => {
 });
 
 describe('проверка партнёрского ключа', () => {
+  it('удалённые аккаунты в число не входят: провайдер хранит их в том же списке', async () => {
+    respond = () => ({
+      json: [
+        { idInstance: 1, deleted: false },
+        { idInstance: 2, deleted: true },
+        { idInstance: 3 },
+      ],
+    });
+    expect(await provider().checkAccess()).toEqual({ state: 'ok', instances: 2, total: 3 });
+  });
+
   it('список инстансов — ключ принят, считается число аккаунтов', async () => {
     respond = () => ({ json: [{ idInstance: 1 }, { idInstance: 2 }] });
-    expect(await provider().checkAccess()).toEqual({ state: 'ok', instances: 2 });
+    expect(await provider().checkAccess()).toEqual({ state: 'ok', instances: 2, total: 2 });
     expect(calls[0]).toMatchObject({
       method: 'GET',
       url: `${PARTNER_URL}/partner/getInstances/${PARTNER_TOKEN}`,

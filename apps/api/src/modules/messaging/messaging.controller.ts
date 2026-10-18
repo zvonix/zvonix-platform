@@ -188,7 +188,11 @@ export class MessagingController {
       case 'ok':
         return {
           ok: true,
-          message: `Ключ принят. Аккаунтов у провайдера уже заведено: ${String(result.instances)}.`,
+          message: `Ключ принят. Аккаунтов у провайдера: ${String(result.instances)}${
+            result.total !== undefined && result.total > result.instances
+              ? ` (ещё ${String(result.total - result.instances)} удалённых не считаем)`
+              : ''
+          }.`,
         };
       case 'no_key':
         return { ok: false, message: 'Ключ не задан: впишите его и сохраните настройки.' };

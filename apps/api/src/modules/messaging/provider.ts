@@ -45,7 +45,7 @@ export type RecipientCheck = 'exists' | 'absent' | 'unknown' | 'limited';
  * `no_key` — ключ не задан, `rejected` — провайдер ключ не принял, `unreachable` — нет связи с провайдером.
  */
 export type AccessCheck =
-  | { readonly state: 'ok'; readonly instances: number }
+  | { readonly state: 'ok'; readonly instances: number; readonly total?: number }
   /** `host` — к какому адресу не удалось подключиться: администратор сам его вписал в настройках. */
   | { readonly state: 'unreachable'; readonly host: string }
   | { readonly state: 'no_key' | 'rejected' };

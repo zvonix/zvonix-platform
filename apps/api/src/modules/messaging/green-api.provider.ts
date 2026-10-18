@@ -25,6 +25,12 @@ import {
 
 const TIMEOUT_MS = 10_000;
 
+/**
+ * QR-код провайдер строит дольше обычного вызова: запрос на 10 секунд обрывался раньше ответа (по ответу площадки
+ * владельца — `provider_reason: timeout`, 2026-10-18). Предел выше, но ниже ожидания обратного прокси (45 с).
+ */
+const QR_TIMEOUT_MS = 30_000;
+
 const UNAVAILABLE = 'Мессенджер временно недоступен — повторите позже';
 
 /** Состояния провайдера → наши: незнакомое состояние не считается ни рабочим, ни сломанным. */
@@ -71,7 +77,18 @@ export class GreenApiMessageProvider implements MessageProvider {
         `${partnerUrl}/partner/getInstances/${encodeURIComponent(partnerToken)}`,
       );
       // Неверный ключ провайдер отвечает кодом 200 и ошибкой в теле, поэтому годится только список.
-      return Array.isArray(body) ? { state: 'ok', instances: body.length } : { state: 'rejected' };
+      if (!Array.isArray(body)) return { state: 'rejected' };
+      // Список провайдера хранит и удалённые аккаунты: в счёт идут только живые (поле `deleted`, если оно есть).
+      const alive = body.filter(
+        (item: unknown) =>
+          !(
+            typeof item === 'object' &&
+            item !== null &&
+            'deleted' in item &&
+            item.deleted === true
+          ),
+      );
+      return { state: 'ok', instances: alive.length, total: body.length };
     } catch (cause) {
       this.unavailable(cause);
       const refused =
@@ -107,6 +124,8 @@ export class GreenApiMessageProvider implements MessageProvider {
     const body = await this.call<{ type?: string; message?: string }>(
       'GET',
       `${this.base(ref)}/qr/${encodeURIComponent(ref.token)}`,
+      undefined,
+      QR_TIMEOUT_MS,
     );
     if (body.type === 'qrCode' && typeof body.message === 'string') {
       return { kind: 'qr', image: body.message };
@@ -240,9 +259,14 @@ export class GreenApiMessageProvider implements MessageProvider {
   }
 
   /** Один вызов провайдера: сбой превращается в наш отказ без подробностей, подробности — в журнал. */
-  private async call<T>(method: 'GET' | 'POST', url: string, body?: unknown): Promise<T> {
+  private async call<T>(
+    method: 'GET' | 'POST',
+    url: string,
+    body?: unknown,
+    timeoutMs: number = TIMEOUT_MS,
+  ): Promise<T> {
     try {
-      return await this.request<T>(method, url, body);
+      return await this.request<T>(method, url, body, timeoutMs);
     } catch (cause) {
       throw this.unavailable(cause);
     }
@@ -270,12 +294,17 @@ export class GreenApiMessageProvider implements MessageProvider {
   }
 
   /** Низкий уровень: код ответа не прячется, чтобы отправка могла отличить «получатель негоден» от сбоя. */
-  private async request<T>(method: 'GET' | 'POST', url: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: 'GET' | 'POST',
+    url: string,
+    body?: unknown,
+    timeoutMs: number = TIMEOUT_MS,
+  ): Promise<T> {
     const response = await fetch(url, {
       method,
       headers: body === undefined ? {} : { 'content-type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new ProviderHttpError(response.status);
     return (await response.json()) as T;
