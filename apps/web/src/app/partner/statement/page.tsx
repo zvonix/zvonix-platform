@@ -20,7 +20,7 @@ const CONFIG: StatementConfig = {
 
 export default function StatementPage() {
   return (
-    <ConsoleShell title="Выписка за месяц" cabinet="partner">
+    <ConsoleShell title="Выписка" cabinet="partner">
       {() => <Statement config={CONFIG} />}
     </ConsoleShell>
   );

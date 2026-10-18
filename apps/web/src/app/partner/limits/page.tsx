@@ -24,12 +24,11 @@ import {
 } from '@/lib/limits';
 import { moment } from '@/lib/format';
 import { LIMIT_WINDOW_NAME, limitRuleNote } from '@/lib/labels';
-import { CallsAndMax, MaxLimits } from '../messages/terms';
 
 export default function PartnerLimitsPage() {
   return (
     <ConsoleShell title="Лимиты" cabinet="partner">
-      {() => <CallsAndMax calls={<PartnerLimits />} max={<MaxLimits />} />}
+      {() => <PartnerLimits />}
     </ConsoleShell>
   );
 }

@@ -158,8 +158,7 @@ function TariffSection({ gateway }: { gateway: Gateway }) {
         Тариф
       </h3>
       <p className="text-muted-foreground">
-        Для всех карт шлюза без своего тарифа. Цены —{' '}
-        <Link href="/partner/prices">«Мои тарифы»</Link>.
+        Для всех карт шлюза без своего тарифа. Цены — <Link href="/partner/prices">«Тарифы»</Link>.
       </p>
       <TariffSelect
         value={gateway.tariff_id}

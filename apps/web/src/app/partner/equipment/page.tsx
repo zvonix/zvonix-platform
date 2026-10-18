@@ -38,7 +38,7 @@ import { PORT_COLUMNS, PortHeader, PortRow, Presence } from './ports';
 
 export default function PartnerEquipmentPage() {
   return (
-    <ConsoleShell title="Моё оборудование" cabinet="partner">
+    <ConsoleShell title="Оборудование" cabinet="partner">
       {() => <PartnerEquipment />}
     </ConsoleShell>
   );

@@ -58,7 +58,7 @@ interface PartnerCall {
 
 export default function PartnerCallsPage() {
   return (
-    <ConsoleShell title="Вызовы через меня" cabinet="partner">
+    <ConsoleShell title="Вызовы" cabinet="partner">
       {() => (
         <Suspense fallback={<p className="text-muted-foreground">Загружаем…</p>}>
           <PartnerCalls />

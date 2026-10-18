@@ -218,40 +218,34 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
    * и своей ценой — по направлению, где площадка открыла коридор. За площадкой
    * остаётся SIP-транк: он привязан к её узлу, и выбирать узел партнёру нечем.
    */
+  // Названия в группах «Звонки» и «Сообщения MAX» одинаковые: чьё это, говорит заголовок группы (владелец, 2026-10-17).
   partner: [
     {
       title: 'Общее',
       items: [
-        { href: '/partner/reports', label: 'Сводка', Icon: BarChart3 },
-        { href: '/partner/statement', label: 'Выписка за месяц', Icon: FileText },
-        { href: '/partner/money', label: 'Деньги', Icon: Wallet },
+        { href: '/partner/reports', label: 'Сводка', Icon: BarChart3, tab: true },
+        { href: '/partner/statement', label: 'Выписка', Icon: FileText },
+        { href: '/partner/money', label: 'Деньги', Icon: Wallet, tab: true },
       ],
     },
     {
       title: 'Звонки',
       items: [
-        { href: '/partner/calls', label: 'Вызовы через меня', short: 'Вызовы', Icon: PhoneCall },
-        {
-          href: '/partner/equipment',
-          label: 'Моё оборудование',
-          short: 'Оборудование',
-          Icon: Radio,
-        },
-        { href: '/partner/prices', label: 'Мои тарифы', short: 'Тарифы', Icon: ReceiptText },
+        { href: '/partner/calls', label: 'Вызовы', Icon: PhoneCall, tab: true },
+        { href: '/partner/equipment', label: 'Оборудование', Icon: Radio, tab: true },
+        { href: '/partner/prices', label: 'Тарифы', Icon: ReceiptText },
         { href: '/partner/limits', label: 'Лимиты', Icon: Gauge },
+        { href: '/partner/distribution', label: 'Распределение', Icon: Shuffle },
       ],
     },
     {
       title: 'Сообщения MAX',
       items: [
-        {
-          href: '/partner/messages',
-          label: 'Аккаунты MAX',
-          short: 'Аккаунты MAX',
-          Icon: MessageSquare,
-        },
-        { href: '/partner/distribution', label: 'Распределение', Icon: Shuffle },
-        { href: '/partner/send', label: 'Отправить сообщение', short: 'Отправить', Icon: Send },
+        { href: '/partner/send', label: 'Сообщения', Icon: Send },
+        { href: '/partner/messages', label: 'Аккаунты', Icon: MessageSquare },
+        { href: '/partner/max-tariffs', label: 'Тарифы', Icon: ReceiptText },
+        { href: '/partner/max-limits', label: 'Лимиты', Icon: Gauge },
+        { href: '/partner/max-distribution', label: 'Распределение', Icon: Shuffle },
       ],
     },
   ],
@@ -269,25 +263,27 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
     {
       title: 'Общее',
       items: [
-        { href: '/my/reports', label: 'Сводка', Icon: BarChart3 },
-        { href: '/my/act', label: 'Акт за месяц', Icon: FileText },
-        { href: '/my/money', label: 'Деньги', Icon: Wallet },
+        { href: '/my/reports', label: 'Сводка', Icon: BarChart3, tab: true },
+        { href: '/my/act', label: 'Акт', Icon: FileText },
+        { href: '/my/money', label: 'Деньги', Icon: Wallet, tab: true },
         { href: '/my/integration', label: 'Интеграция', Icon: KeyRound },
       ],
     },
     {
       title: 'Звонки',
       items: [
-        { href: '/my/calls', label: 'Вызовы', Icon: PhoneCall },
-        { href: '/my/channels', label: 'Мои линии', Icon: Route },
-        { href: '/my/prices', label: 'Мои цены', Icon: ReceiptText },
+        { href: '/my/calls', label: 'Вызовы', Icon: PhoneCall, tab: true },
+        { href: '/my/channels', label: 'Линии', Icon: Route },
+        { href: '/my/prices', label: 'Цены', Icon: ReceiptText },
         { href: '/my/priorities', label: 'Приоритеты', Icon: ListOrdered },
       ],
     },
     {
       title: 'Сообщения MAX',
       items: [
-        { href: '/my/messages', label: 'Сообщения MAX', short: 'Сообщения', Icon: MessageSquare },
+        { href: '/my/messages', label: 'Сообщения', Icon: MessageSquare, tab: true },
+        { href: '/my/max-prices', label: 'Цены', Icon: ReceiptText },
+        { href: '/my/max-priorities', label: 'Приоритеты', Icon: ListOrdered },
       ],
     },
   ],

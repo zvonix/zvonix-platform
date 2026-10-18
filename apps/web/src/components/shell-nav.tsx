@@ -26,6 +26,8 @@ interface NavItem {
   readonly Icon: LucideIcon;
   /** Подпись нижней вкладки телефона, когда полная в неё не помещается. */
   readonly short?: string;
+  /** Выносится в нижние вкладки телефона. Ни одного такого — берутся первые четыре пункта. */
+  readonly tab?: true;
 }
 
 export interface NavGroup {
@@ -376,7 +378,9 @@ export function MobileMenuButton({
  */
 export function MobileTabs({ groups, footer }: { groups: readonly NavGroup[]; footer: ReactNode }) {
   const pathname = usePathname();
-  const main = groups.flatMap((group) => group.items).slice(0, 4);
+  const all = groups.flatMap((group) => group.items);
+  const marked = all.filter((item) => item.tab === true);
+  const main = (marked.length > 0 ? marked : all).slice(0, 4);
 
   return (
     <nav

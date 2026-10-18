@@ -2,11 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
-import { SectionTabs, type SectionTab } from '@/components/section-tabs';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,7 +25,7 @@ import { bandRange, money, moneyFromInput, numberFromInput } from '@/lib/money';
  *
  * Тариф — именованный набор «цена за сообщение + лимиты». Он назначается аккаунту; аккаунт без своего тарифа идёт
  * за тарифом по умолчанию. Тот же порядок, что у тарифов звонков. Модуль общий для трёх страниц: «Аккаунты MAX»
- * (назначение), «Мои тарифы» (тарифы) и «Лимиты» (действующие лимиты) — вкладкой «Сообщения MAX».
+ * (назначение), «Тарифы MAX» (тарифы) и «Лимиты» (действующие лимиты) — вкладкой «Сообщения MAX».
  */
 
 export interface Account {
@@ -165,7 +164,7 @@ export function AccountTariffSelect({ account }: { account: Account }) {
 
   if (!tariffs.isPending && list.length === 0) {
     return (
-      <Link href="/partner/prices?tab=max" className="text-warn underline underline-offset-2">
+      <Link href="/partner/max-tariffs" className="text-warn underline underline-offset-2">
         Создайте тариф
       </Link>
     );
@@ -334,7 +333,7 @@ function TariffForm({ tariff }: { tariff?: Tariff }) {
   );
 }
 
-/** Вкладка «Сообщения MAX» страницы «Мои тарифы»: тарифы партнёра, как у звонков — создать, изменить, по умолчанию. */
+/** Вкладка «Сообщения MAX» страницы «Тарифы MAX»: тарифы партнёра, как у звонков — создать, изменить, по умолчанию. */
 export function MaxTariffs() {
   const queryClient = useQueryClient();
   const list = useMessengerTariffs();
@@ -452,7 +451,7 @@ export function MaxTariffs() {
 }
 
 /**
- * Вкладка «Сообщения MAX» страницы «Лимиты»: только просмотр — какие лимиты действуют у каждого аккаунта и по какому
+ * Страница «Лимиты MAX»: только просмотр — какие лимиты действуют у каждого аккаунта и по какому
  * тарифу. Меняются лимиты в тарифе: одно место правки вместо двух.
  */
 export function MaxLimits() {
@@ -467,7 +466,7 @@ export function MaxLimits() {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button asChild variant="outline">
-          <Link href="/partner/prices?tab=max">Изменить в тарифах</Link>
+          <Link href="/partner/max-tariffs">Изменить в тарифах</Link>
         </Button>
         <Hint label="Как работают лимиты MAX">
           <p>
@@ -518,17 +517,4 @@ export function MaxLimits() {
       </div>
     </div>
   );
-}
-
-/**
- * Страница с двумя половинами — «Звонки» и «Сообщения MAX». Вторая вкладка есть, только если сообщения на
- * площадке включены: закрытый продукт не должен обещать вкладку, которая ответит «раздел закрыт».
- */
-export function CallsAndMax({ calls, max }: { calls: ReactNode; max: ReactNode }) {
-  const accounts = useMessengerAccounts();
-  const tabs: SectionTab[] = [{ id: 'calls', label: 'Звонки', content: calls }];
-  if (accounts.data?.enabled === true) {
-    tabs.push({ id: 'max', label: 'Сообщения MAX', content: max });
-  }
-  return <SectionTabs tabs={tabs} />;
 }

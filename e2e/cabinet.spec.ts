@@ -107,8 +107,8 @@ test.describe('один вход — два кабинета', () => {
     await expect(switcher.getByText('Партнёр')).toHaveAttribute('aria-current', 'page');
 
     const rail = page.getByRole('navigation', { name: 'Разделы' });
-    await expect(rail.getByRole('link', { name: 'Моё оборудование' })).toBeVisible();
-    await expect(rail.getByRole('link', { name: 'Мои линии' })).toHaveCount(0);
+    await expect(rail.getByRole('link', { name: 'Оборудование' })).toBeVisible();
+    await expect(rail.getByRole('link', { name: 'Линии' })).toHaveCount(0);
   });
 
   test('у кого кабинет один, переключателя нет, а в меню — заявка на второй', async ({ page }) => {
@@ -346,7 +346,7 @@ test.describe('сообщения MAX (ADR-0071)', () => {
     await expect(row.getByText('Ждёт входа')).toBeVisible();
     // Цена — в тарифе (ADR-0075): без тарифа аккаунту предлагают его создать.
     await expect(row.getByRole('link', { name: 'Создайте тариф' })).toBeVisible();
-    await partner.goto('/partner/prices?tab=max');
+    await partner.goto('/partner/max-tariffs');
     await partner.getByRole('button', { name: 'Новый тариф' }).click();
     await partner.getByLabel('Название').fill('Основной');
     await partner.getByLabel('Цена за сообщение, ₽').fill('0,45');
@@ -369,14 +369,13 @@ test.describe('сообщения MAX (ADR-0071)', () => {
 
     // Распределение (ADR-0080): режим выбирается, сохраняется и переживает перезагрузку; веса видны в списке аккаунтов.
     await partner.goto('/partner/distribution');
-    // Вкладка «Звонки» открыта сама: режим выбирается и там, и у MAX.
+    // Распределение звонков — на своей странице, MAX — на своей: режим выбирается и там, и там.
     await expect(partner.getByText('Звонки: как выбирать карту')).toBeVisible();
-    await partner.getByRole('tab', { name: 'Сообщения MAX' }).click();
+    await partner.goto('/partner/max-distribution');
     await partner.getByRole('radio', { name: /По весам/u }).check();
     await expect(partner.getByLabel(/Вес аккаунта «Основной»/u)).toBeVisible();
     await partner.getByRole('button', { name: 'Сохранить' }).click();
     await partner.reload();
-    await partner.getByRole('tab', { name: 'Сообщения MAX' }).click();
     await expect(partner.getByRole('radio', { name: /По весам/u })).toBeChecked();
 
     await adminContext.close();
@@ -1017,8 +1016,8 @@ test.describe('SMPP у сотрудников', () => {
   });
 });
 
-test.describe('вкладки «Звонки» и «Сообщения MAX» у партнёра', () => {
-  test('цены и лимиты сообщений — вкладкой на тех же страницах, что и звонки', async ({
+test.describe('звонки и MAX у партнёра — отдельные разделы', () => {
+  test('тарифы и лимиты сообщений — на своих страницах, не вкладкой у звонков', async ({
     browser,
   }) => {
     const adminContext = await browser.newContext();
@@ -1034,21 +1033,16 @@ test.describe('вкладки «Звонки» и «Сообщения MAX» у 
     const page = await context.newPage();
     await signIn(page, PEOPLE.partner);
 
+    // Звонки и MAX — разные страницы, у каждого свой раздел меню: вкладок «Звонки / Сообщения MAX» нет.
     await page.goto('/partner/limits');
-    const tabs = page.getByRole('tablist');
-    await expect(tabs.getByRole('tab', { name: 'Звонки' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    await tabs.getByRole('tab', { name: 'Сообщения MAX' }).click();
-    await expect(page).toHaveURL(/tab=max/u);
+    await expect(page.getByRole('tab', { name: 'Сообщения MAX' })).toHaveCount(0);
+    await page.goto('/partner/max-limits');
     await expect(page.getByRole('columnheader', { name: 'В минуту' })).toBeVisible();
 
-    // Ссылка открывает нужную вкладку сразу.
-    await page.goto('/partner/prices?tab=max');
+    await page.goto('/partner/max-tariffs');
     await expect(page.getByRole('columnheader', { name: 'Цена за сообщение' })).toBeVisible();
-    await tabs.getByRole('tab', { name: 'Звонки' }).click();
-    await expect(page).not.toHaveURL(/tab=/u);
+    await page.goto('/partner/prices');
+    await expect(page.getByRole('tab', { name: 'Сообщения MAX' })).toHaveCount(0);
     await context.close();
   });
 
@@ -1312,7 +1306,7 @@ test.describe('кабинет клиента', () => {
     page,
   }) => {
     await signIn(page, PEOPLE.client);
-    await page.getByRole('link', { name: 'Приоритеты' }).click();
+    await page.locator('a[href="/my/priorities"]').click();
 
     await expect(page.getByRole('columnheader', { name: 'Цифра' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Найти партнёра' })).toBeVisible();
@@ -1327,7 +1321,7 @@ test.describe('кабинет клиента', () => {
     await expect(page.getByText('Диспетчерская')).toBeVisible();
   });
 
-  // Регрессия 2026-09-30: «Вызовы» клали в кэш список линий, «Мои линии» ждали в том же
+  // Регрессия 2026-09-30: «Вызовы» клали в кэш список линий, «Линии» ждали в том же
   // ключе объект, и переход по меню ронял страницу. Прямой заход этого не показывал.
   test('линии открываются переходом из меню после вызовов', async ({ page }) => {
     await signIn(page, PEOPLE.client);
@@ -1336,7 +1330,7 @@ test.describe('кабинет клиента', () => {
 
     await page
       .getByRole('navigation', { name: 'Разделы' })
-      .getByRole('link', { name: 'Мои линии' })
+      .getByRole('link', { name: 'Линии' })
       .click();
     await expect(page).toHaveURL(/\/my\/channels$/u);
     await expect(page.getByText('Диспетчерская')).toBeVisible();
