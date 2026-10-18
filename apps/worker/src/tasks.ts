@@ -15,6 +15,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   AlertsService,
+  PlatformHealthService,
   PaymentNoticeService,
   SuspensionNoticeService,
   ServersService,
@@ -202,6 +203,9 @@ const MESSAGE_DISPATCH_SECONDS = 5;
  */
 const PAYMENT_NOTICE_SECONDS = 60;
 
+/** Отметка «воркер жив» — раз в минуту; API считает его остановившимся после трёх пропусков (ADR-0062). */
+const HEARTBEAT_SECONDS = 60;
+
 /** Письмо партнёру об отключении оборудования — раз в 5 минут, как и остальные тревоги. */
 const SUSPENSION_NOTICE_SECONDS = 300;
 
@@ -221,6 +225,7 @@ export class BackgroundTasks {
     private readonly applications: ApplicationsService,
     private readonly lowBalance: LowBalanceService,
     private readonly alerts: AlertsService,
+    private readonly platformHealth: PlatformHealthService,
     private readonly servers: ServersService,
     private readonly paymentNotice: PaymentNoticeService,
     private readonly suspensionNotice: SuspensionNoticeService,
@@ -305,6 +310,11 @@ export class BackgroundTasks {
         name: 'notifications.alerts',
         everySeconds: ALERTS_SECONDS,
         run: (now) => this.alerts.notify(now),
+      },
+      {
+        name: 'platform.heartbeat',
+        everySeconds: HEARTBEAT_SECONDS,
+        run: (now) => this.platformHealth.recordWorkerHeartbeat(now),
       },
       {
         name: 'notifications.payment-decisions',
