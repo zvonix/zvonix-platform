@@ -287,11 +287,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
     },
     {
       title: 'Сообщения MAX',
-      items: [
-        { href: '/my/messages', label: 'Сообщения', Icon: MessageSquare, tab: true },
-        { href: '/my/max-prices', label: 'Цены', Icon: ReceiptText },
-        { href: '/my/max-priorities', label: 'Приоритеты', Icon: ListOrdered },
-      ],
+      items: [{ href: '/my/messages', label: 'Сообщения', Icon: MessageSquare, tab: true }],
     },
   ],
 };

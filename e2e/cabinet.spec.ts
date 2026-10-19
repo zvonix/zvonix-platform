@@ -570,7 +570,7 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/messages');
+    await page.goto('/my/messages?tab=smpp');
 
     await page.getByRole('button', { name: 'Создать подключение' }).click();
     const secret = page.getByRole('region', { name: 'Пароль SMPP' });
@@ -631,7 +631,7 @@ test.describe('бот MAX (ADR-0077)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/messages');
+    await page.goto('/my/messages?tab=bot');
     await page.getByRole('button', { name: 'Подключить бота' }).click();
     await expect(
       page.getByText(/^https:\/\/max\.ru\/e2ebot_bot\?start=[a-z0-9]{10}$/u),
@@ -684,7 +684,7 @@ test.describe('свой бот клиента (ADR-0077, этап 2)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/messages');
+    await page.goto('/my/messages?tab=bot');
 
     await page.getByRole('button', { name: 'Подключить своего бота', exact: true }).click();
     // Негодный токен — отказ в окне, бота нет.
@@ -1308,7 +1308,7 @@ test.describe('кабинет клиента', () => {
     await signIn(page, PEOPLE.client);
     await page.locator('a[href="/my/priorities"]').click();
 
-    await expect(page.getByRole('columnheader', { name: 'Цифра' })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Очерёдность' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Найти партнёра' })).toBeVisible();
     // Без партнёров с ценой список пуст и говорит об этом, а не молчит.
     await expect(page.getByRole('button', { name: 'Сохранить список' })).toBeDisabled();
