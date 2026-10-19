@@ -139,9 +139,9 @@ for (const script of SHELL_SCRIPTS) {
   }
 }
 
-// Служба обновления из кабинета (ADR-0074) — Python: он уже нужен выкладке для разбора ответов GitHub.
-{
-  const script = 'deploy/updater.py';
+// Служба обновления из кабинета (ADR-0074) и разбор миграций перед установкой (ADR-0086) — Python: он уже нужен
+// выкладке для разбора ответов GitHub.
+for (const script of ['deploy/updater.py', 'deploy/migration_scan.py']) {
   const file = path.join(ROOT, script);
   if (readFileSync(file, 'utf8').includes(String.fromCharCode(13))) {
     problems.push(`${script}: возврат каретки в файле, нужен только LF`);
@@ -170,5 +170,5 @@ if (problems.length > 0) {
 
 console.log(
   `Конфигурация узла и выкладки проверена: ${String(configs.length)} файлов XML, ` +
-    `${String(SHELL_SCRIPTS.length)} скрипта и служба обновления.`,
+    `${String(SHELL_SCRIPTS.length)} скрипта, служба обновления и разбор миграций.`,
 );
