@@ -1055,12 +1055,16 @@ def main():
     # Список копий и выданные файлы — при каждом запуске (таймер раз в десять минут): суточная копия появляется в
     # кабинете без заявки, а невзятая выдача не лежит дольше получаса.
     try:
-        ensure_uploads_dir()
         write_backups()
         purge_exports()
         purge_uploads()
     except Exception as error:  # noqa: BLE001 — сбой чтения копий не должен ронять выкладку
         print('список копий не записан: ' + str(error), file=sys.stderr)
+    # Отдельно: нет владельца каталога или диска — это не повод терять список копий.
+    try:
+        ensure_uploads_dir()
+    except Exception as error:  # noqa: BLE001
+        print('каталог загрузки копий не подготовлен: ' + str(error), file=sys.stderr)
     prune_runs()
 
 
