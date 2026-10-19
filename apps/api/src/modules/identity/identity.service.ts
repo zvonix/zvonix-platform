@@ -597,6 +597,30 @@ export class IdentityService {
   }
 
   /**
+   * Повторное подтверждение перед опасным действием (скачать копию базы, восстановить её): пароль и, если подключён,
+   * код второго фактора. Одной украденной сессии для этого недостаточно — как и для отключения второго фактора.
+   * Код принимается тем же способом, что при входе: один шаг — одно использование.
+   */
+  async confirmSensitive(
+    principal: Principal,
+    input: { password: string; code?: string | undefined },
+  ): Promise<void> {
+    const user = await this.repository.findById(principal.userId);
+    if (user === undefined) throw notFound('Пользователь не найден');
+    if (!(await verifyPassword(input.password, user.passwordHash))) {
+      throw unauthenticated('Неверный пароль');
+    }
+    if (user.totpSecret !== null && user.totpConfirmedAt !== null) {
+      if (input.code === undefined || input.code === '') {
+        throw validationFailed('Нужен код второго фактора');
+      }
+      if ((await this.acceptTotp(user, input.code, new Date())) === undefined) {
+        throw validationFailed('Код не подходит');
+      }
+    }
+  }
+
+  /**
    * Принимает код второго фактора и запоминает его шаг.
    *
    * Шаг записывается условием «больше записанного» в том же запросе: без этого два

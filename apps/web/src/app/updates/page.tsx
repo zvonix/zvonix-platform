@@ -34,7 +34,10 @@ type Action =
   | 'cert-issue'
   | 'cert-auto-on'
   | 'cert-auto-off'
-  | 'token-set';
+  | 'token-set'
+  | 'backup-create'
+  | 'backup-verify'
+  | 'backup-export';
 type Status = 'running' | 'succeeded' | 'failed';
 
 interface Release {
@@ -98,6 +101,9 @@ const ACTION_NAME: Record<Action, string> = {
   'cert-auto-on': 'Автопродление сертификата: включено',
   'cert-auto-off': 'Автопродление сертификата: выключено',
   'token-set': 'Токен GitHub',
+  'backup-create': 'Копия базы',
+  'backup-verify': 'Проверка копии',
+  'backup-export': 'Выдача копии',
 };
 
 const STATUS_NAME: Record<Status, string> = {

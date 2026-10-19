@@ -25,7 +25,10 @@ export type UpdateAction =
   | 'cert-issue'
   | 'cert-auto-on'
   | 'cert-auto-off'
-  | 'token-set';
+  | 'token-set'
+  | 'backup-create'
+  | 'backup-verify'
+  | 'backup-export';
 
 /** Лёгкие действия: чтение без изменений, не мешают идущей выкладке. */
 const LIGHT_ACTIONS: readonly UpdateAction[] = ['refresh', 'cert-check', 'token-set'];
@@ -51,6 +54,8 @@ export interface RunView {
   readonly id: string;
   readonly action: UpdateAction;
   readonly tag: string | null;
+  /** Копия, над которой идёт действие (проверка, выдача); у остальных заявок пусто. */
+  readonly target: string | null;
   readonly by: string;
   readonly requested_at: string;
   readonly status: RunStatus;
@@ -273,6 +278,7 @@ export class UpdatesService {
       id,
       action: raw['action'] as UpdateAction,
       tag: textOrNull(raw['tag']),
+      target: textOrNull(raw['target']),
       by: text(raw['by']),
       requested_at: text(raw['requested_at']),
       status: raw['status'] as RunStatus,
@@ -292,6 +298,8 @@ export class UpdatesService {
     tag: string | null,
     /** Только у `token-set`: токен уходит службе в заявке и больше нигде не пишется (ADR-0084). */
     secret?: { readonly token: string },
+    /** Копия для `backup-verify` и `backup-export`: служба проверит её по шаблону и по настоящему файлу. */
+    target?: string,
   ): Promise<QueuedRequest> {
     if (!(await this.isAvailable())) {
       throw conflict('Обновление из кабинета на этой площадке не настроено');
@@ -328,6 +336,7 @@ export class UpdatesService {
         tag: request.tag,
         by: request.by,
         at: request.requested_at,
+        ...(target === undefined ? {} : { target }),
         ...(secret === undefined ? {} : { token: secret.token }),
       }),
       // Заявка с токеном читается только владельцем и службой от root; остальные — как прежде.
@@ -341,9 +350,15 @@ export class UpdatesService {
       entityId: id,
       actorUserId: actor.userId,
       actorRole: actor.role,
-      after: { action, tag: request.tag },
+      after: { action, tag: request.tag, ...(target === undefined ? {} : { target }) },
     });
     return request;
+  }
+
+  /** Один запуск по идентификатору; нет такого — `undefined`. */
+  async findRun(id: string): Promise<RunView | undefined> {
+    if (!validId(id)) return undefined;
+    return (await this.readRun(id)) ?? undefined;
   }
 
   /** Отмена заявки, которую служба ещё не приняла. Принятую выкладку не остановить — ADR-0074. */

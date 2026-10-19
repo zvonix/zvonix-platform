@@ -23,3 +23,17 @@ export const githubTokenSchema = z.object({
     .max(255, 'токен слишком длинный')
     .regex(/^[A-Za-z0-9_]+$/u, 'токен записан неверно: допустимы буквы, цифры и подчёркивание'),
 });
+
+/** Повторное подтверждение перед опасным действием над копией (ADR-0086): пароль и, если подключён, код. */
+export const sensitiveConfirmSchema = z.object({
+  password: z.string().min(1, 'введите пароль').max(200),
+  code: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{6}$/u, 'код — шесть цифр')
+    .optional(),
+});
+
+export const backupTargetSchema = z.object({
+  id: z.string().max(200),
+});
