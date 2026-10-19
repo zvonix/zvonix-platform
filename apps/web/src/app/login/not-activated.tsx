@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
 
@@ -40,6 +40,18 @@ export function NotActivated({
     onSettled: onCaptchaSpent,
   });
 
+  const mode = useQuery({
+    queryKey: ['public', 'registration'],
+    queryFn: () =>
+      request<{ client_auto_approve: boolean; partner_auto_approve: boolean }>(
+        '/public/registration',
+      ),
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const immediate =
+    mode.data !== undefined && mode.data.client_auto_approve && mode.data.partner_auto_approve;
+
   if (error.details['status'] !== 'pending') {
     return (
       <p role="alert" className="text-crit">
@@ -49,6 +61,16 @@ export function NotActivated({
   }
 
   if (error.details['email_confirmed'] === true) {
+    // Допуск без администратора включён у обеих ролей — проверки администратором нет, и обещать её нельзя.
+    // Какую роль выбрал человек, экран не знает, поэтому «автоматически» — только когда включено у обеих.
+    if (immediate) {
+      return (
+        <p role="alert" className="text-muted-foreground">
+          Адрес подтверждён. Кабинет открывается автоматически, обычно за минуту. Подождите и
+          войдите снова.
+        </p>
+      );
+    }
     return (
       <p role="alert" className="text-muted-foreground">
         Адрес подтверждён. Заявка ждёт проверки администратором — войти можно будет после её
