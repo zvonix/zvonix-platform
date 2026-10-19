@@ -178,40 +178,16 @@ describe('резервные копии: список и заявки', () => {
 });
 
 describe('скачивание копии', () => {
-  it('без верного пароля — отказ; пять неудач — и верный пароль на время не проходит', async () => {
+  it('заявка на выдачу копии принимается без пароля и кода; неизвестная копия — «нет такой»', async () => {
     await clearRequests();
-    for (let n = 0; n < 5; n += 1) {
-      const wrong = await call('admin', 'POST', '/backups/export', {
-        id: DAILY,
-        password: 'не-тот-пароль',
-      });
-      expect(wrong.statusCode).toBe(401);
-    }
-    const blocked = await call('admin', 'POST', '/backups/export', {
-      id: DAILY,
-      password: TEST_PASSWORD,
-    });
-    expect(blocked.statusCode).toBe(429);
-    expect(await requests()).toEqual([]);
-    // Сбрасываем счётчик: дальше проверяется путь с верным паролем.
-    const { RedisService } = await import('../../infra/redis.js');
-    const redis = api().get(RedisService).connection;
-    const keys = await redis.keys('*backup.confirm*');
-    if (keys.length > 0) await redis.del(...keys);
-  });
-
-  it('верный пароль — заявка с копией; тело ответа не несёт пароля', async () => {
-    const response = await call('admin', 'POST', '/backups/export', {
-      id: DAILY,
-      password: TEST_PASSWORD,
-    });
+    const response = await call('admin', 'POST', '/backups/export', { id: DAILY });
     expect(response.statusCode).toBe(202);
-    expect(response.body).not.toContain(TEST_PASSWORD);
-    const queued = await requests();
-    expect(queued).toMatchObject([{ action: 'backup-export', target: DAILY }]);
-    // Пароль в заявку службе не попадает: она проверяет только копию.
-    expect(JSON.stringify(queued)).not.toContain(TEST_PASSWORD);
+    expect(await requests()).toMatchObject([{ action: 'backup-export', target: DAILY }]);
     await clearRequests();
+    expect(
+      (await call('admin', 'POST', '/backups/export', { id: 'daily/нет-такой.dump' })).statusCode,
+    ).toBe(404);
+    expect(await requests()).toEqual([]);
   });
 
   it('файл выдаётся один раз и только заказавшему, потом удаляется', async () => {
@@ -278,6 +254,70 @@ describe('скачивание копии', () => {
       return (result.rows as { action: string }[]).map((row) => row.action);
     });
     expect(audited).toContain('backup.downloaded');
+  });
+});
+
+describe('загрузка скачанной копии', () => {
+  const upload = (role: UserRole, body: Buffer) =>
+    api().inject({
+      method: 'PUT',
+      url: '/storage/backups',
+      headers: {
+        authorization: `Bearer ${tokens.get(role) ?? ''}`,
+        'x-zvonix-web': '1',
+        'content-type': 'application/octet-stream',
+      },
+      payload: body,
+    });
+  const uploads = async (): Promise<string[]> => {
+    try {
+      return await readdir(path.join(root, 'uploads'));
+    } catch {
+      return [];
+    }
+  };
+
+  it('только администратор', async () => {
+    for (const role of ['support', 'client', 'partner'] as const) {
+      expect((await upload(role, Buffer.from('PGDMP-копия'))).statusCode).toBe(403);
+    }
+    expect((await uploads()).length).toBe(0);
+  });
+
+  it('не копия (чужой файл, пустой) — отказ, файл не остаётся, заявки нет', async () => {
+    await clearRequests();
+    const stranger = await upload('admin', Buffer.from('это картинка, а не копия'));
+    expect(stranger.statusCode).toBe(400);
+    expect(stranger.body).toContain('не файл копии');
+    expect((await upload('admin', Buffer.alloc(0))).statusCode).toBe(400);
+    expect(await uploads()).toEqual([]);
+    expect(await requests()).toEqual([]);
+  });
+
+  it('копия принимается: файл в каталоге загрузки под идентификатором заявки; службе — заявка с ним', async () => {
+    await clearRequests();
+    const response = await upload('admin', Buffer.from('PGDMP-содержимое-копии'));
+    expect(response.statusCode).toBe(202);
+    const queued = await requests();
+    expect(queued).toHaveLength(1);
+    const [entry] = queued;
+    expect(entry).toMatchObject({ action: 'backup-import' });
+    const target = String(entry?.['target']);
+    expect(target).toMatch(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u);
+    expect(await uploads()).toEqual([`${target}.dump`]);
+    expect(
+      (await readFile(path.join(root, 'uploads', `${target}.dump`))).subarray(0, 5).toString(),
+    ).toBe('PGDMP');
+
+    const audited = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select action from audit_log where action = 'backup.uploaded'`,
+      );
+      return result.rows.length;
+    });
+    expect(audited).toBe(1);
+    await clearRequests();
+    rmSync(path.join(root, 'uploads'), { recursive: true, force: true });
   });
 });
 

@@ -3,7 +3,19 @@
  */
 
 import { createReadStream } from 'node:fs';
-import { Body, Controller, Get, HttpCode, Param, Post, StreamableFile } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+  Put,
+  Req,
+  StreamableFile,
+} from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
@@ -11,7 +23,7 @@ import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { BackupListing } from './backup-status.service.js';
 import { BackupsService } from './backups.service.js';
-import { backupTargetSchema, restoreSchema, sensitiveConfirmSchema } from './schemas.js';
+import { backupTargetSchema, restoreSchema } from './schemas.js';
 import type { QueuedRequest } from './updates.service.js';
 
 const actorOf = (principal: Principal) => ({
@@ -47,20 +59,39 @@ export class BackupsController {
     return { request: await this.backups.verify(actorOf(principal), body.id) };
   }
 
-  /** Подготовить копию к скачиванию: пароль и код второго фактора обязательны. */
+  /**
+   * Подготовить копию к скачиванию. Повторного пароля нет (владелец, 2026-10-19: вошёл — значит пароль уже введён);
+   * защиты — журнал действий, файл выдаётся один раз и удаляется, второй фактор администратора при входе.
+   */
   @Roles('admin')
   @HttpCode(202)
   @Post('backups/export')
   async requestExport(
     @CurrentUser() principal: Principal,
-    @Body(zodBody(backupTargetSchema.extend(sensitiveConfirmSchema.shape)))
-    body: z.infer<typeof backupTargetSchema> & z.infer<typeof sensitiveConfirmSchema>,
+    @Body(zodBody(backupTargetSchema)) body: z.infer<typeof backupTargetSchema>,
   ): Promise<{ request: QueuedRequest }> {
+    return { request: await this.backups.requestExport(actorOf(principal), body.id) };
+  }
+
+  /**
+   * Загрузить ранее скачанную копию: тело запроса — сам файл (`application/octet-stream`). Путь под `/storage/`: у
+   * nginx кабинета для него уже снят предел размера тела и выключена буферизация, отдельной настройки не требуется.
+   */
+  @Roles('admin')
+  @HttpCode(202)
+  @Put('storage/backups')
+  async upload(
+    @CurrentUser() principal: Principal,
+    @Req() request: FastifyRequest,
+    @Headers('content-length') length: string | undefined,
+  ): Promise<{ request: QueuedRequest }> {
+    const declared = length === undefined ? undefined : Number(length);
     return {
-      request: await this.backups.requestExport(principal, body.id, {
-        password: body.password,
-        code: body.code,
-      }),
+      request: await this.backups.receiveUpload(
+        actorOf(principal),
+        request.raw,
+        declared === undefined || Number.isNaN(declared) ? undefined : declared,
+      ),
     };
   }
 

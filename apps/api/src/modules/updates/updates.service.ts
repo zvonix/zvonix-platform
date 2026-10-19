@@ -29,7 +29,8 @@ export type UpdateAction =
   | 'backup-create'
   | 'backup-verify'
   | 'backup-export'
-  | 'backup-restore';
+  | 'backup-restore'
+  | 'backup-import';
 
 /** Лёгкие действия: чтение без изменений, не мешают идущей выкладке. */
 const LIGHT_ACTIONS: readonly UpdateAction[] = ['refresh', 'cert-check', 'token-set'];
@@ -142,7 +143,7 @@ export class UpdatesService {
     return path.join(this.config.UPDATER_DIR, 'requests');
   }
 
-  private async isAvailable(): Promise<boolean> {
+  async isAvailable(): Promise<boolean> {
     try {
       return (await stat(this.requestsDir)).isDirectory();
     } catch (error) {
@@ -299,7 +300,7 @@ export class UpdatesService {
     tag: string | null,
     /** Только у `token-set`: токен уходит службе в заявке и больше нигде не пишется (ADR-0084). */
     secret?: { readonly token: string },
-    /** Копия для `backup-verify` и `backup-export`: служба проверит её по шаблону и по настоящему файлу. */
+    /** Копия для `backup-verify` и `backup-export` (служба проверит её по шаблону и по настоящему файлу) либо идентификатор загруженного файла для `backup-import`. */
     target?: string,
     /** Только у `deploy`: администратор подтвердил выпуск с миграциями, меняющими данные. */
     allowRisky?: boolean,

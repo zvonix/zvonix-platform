@@ -2,14 +2,25 @@
  * Резервные копии из кабинета ([ADR-0086](../../../../../docs/adr/0086-rezervnye-kopii-v-kabinete.md)).
  *
  * Как и обновление, API ничего не запускает: создание, проверка и выдача копии — заявки службе от root. Скачивание
- * копии — самое чувствительное, что отдаёт кабинет (в ней вся база), поэтому перед ним — повторный пароль и код
- * второго фактора, не больше пяти неудачных попыток за 15 минут, запись в журнал; файл выдаётся один раз.
+ * копии — самое чувствительное, что отдаёт кабинет (в ней вся база): запись в журнал, файл выдаётся один раз и
+ * удаляется. Повторный пароль и код нужны только для восстановления (не больше пяти неудач за 15 минут).
  */
 
-import { stat, unlink } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir, open, rename, stat, unlink } from 'node:fs/promises';
+import { Transform, type Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
-import { notFound, rateLimited, type Id, type UserRole } from '@zvonix/shared';
+import {
+  conflict,
+  notFound,
+  rateLimited,
+  validationFailed,
+  type Id,
+  type UserRole,
+} from '@zvonix/shared';
+import { randomUUID } from 'node:crypto';
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { IdentityService, type Principal } from '../identity/identity.service.js';
@@ -29,6 +40,11 @@ interface Actor {
 
 /** Неудачные подтверждения: пять за пятнадцать минут, потом — ждать. */
 const CONFIRM_RULE: LimitRule = { name: 'backup.confirm', limit: 5, windowSeconds: 900 };
+
+/** Загружаемая копия: больше этого nginx кабинета (`/api/storage/`, 200 МБ) всё равно не пропустит. */
+const UPLOAD_MAX_BYTES = 200 * 1024 * 1024;
+/** Начало файла `pg_dump -Fc`: по нему отличается копия от случайного файла. */
+const DUMP_MAGIC = 'PGDMP';
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
@@ -57,21 +73,82 @@ export class BackupsService {
     return this.updates.request(actor, 'backup-verify', null, undefined, item.id);
   }
 
-  /** Выдача копии для скачивания: после повторного подтверждения. */
-  async requestExport(
-    principal: Principal,
-    id: string,
-    confirmation: { password: string; code?: string | undefined },
-  ): Promise<QueuedRequest> {
-    await this.confirm(principal, confirmation);
+  /** Выдача копии для скачивания: без повторного подтверждения, запись в журнал — при самом скачивании. */
+  async requestExport(actor: Actor, id: string): Promise<QueuedRequest> {
     const item = await this.known(id);
-    return this.updates.request(
-      { userId: principal.userId, role: principal.role, email: principal.email },
-      'backup-export',
-      null,
-      undefined,
-      item.id,
-    );
+    return this.updates.request(actor, 'backup-export', null, undefined, item.id);
+  }
+
+  /**
+   * Загрузка скачанной копии (например, на свежеустановленный сервер): файл принимается потоком в каталог загрузки,
+   * проверяется начало файла, и службе уходит заявка `backup-import` — она проверит копию целиком и положит её в список.
+   * Повторного пароля нет, как и при скачивании; восстановление из загруженной копии подтверждается отдельно.
+   */
+  async receiveUpload(
+    actor: Actor,
+    body: Readable,
+    declaredBytes: number | undefined,
+  ): Promise<QueuedRequest> {
+    if (!(await this.updates.isAvailable())) {
+      throw conflict('Обновление из кабинета на этой площадке не настроено');
+    }
+    if (declaredBytes !== undefined && declaredBytes > UPLOAD_MAX_BYTES) {
+      throw validationFailed('Файл слишком большой: загрузить можно до 200 МБ');
+    }
+    const directory = path.join(this.config.UPDATER_DIR, 'uploads');
+    await mkdir(directory, { recursive: true, mode: 0o750 });
+    const id = randomUUID();
+    // Временное имя не совпадает с идентификатором загрузки: недописанный файл служба не примет.
+    const part = path.join(directory, `${id}.part`);
+    const final = path.join(directory, `${id}.dump`);
+
+    let size = 0;
+    const limit = new Transform({
+      transform(chunk: Buffer, _encoding, done) {
+        size += chunk.length;
+        if (size > UPLOAD_MAX_BYTES) {
+          done(validationFailed('Файл слишком большой: загрузить можно до 200 МБ'));
+          return;
+        }
+        done(null, chunk);
+      },
+    });
+    try {
+      await pipeline(body, limit, createWriteStream(part, { flags: 'wx', mode: 0o600 }));
+      const head = Buffer.alloc(DUMP_MAGIC.length);
+      const handle = await open(part, 'r');
+      try {
+        await handle.read(head, 0, head.length, 0);
+      } finally {
+        await handle.close();
+      }
+      if (size === 0 || head.toString('latin1') !== DUMP_MAGIC) {
+        throw validationFailed(
+          'Это не файл копии Zvonix: ожидается файл, скачанный из этого раздела',
+        );
+      }
+      await rename(part, final);
+    } catch (error) {
+      await this.discard(part);
+      throw error;
+    }
+
+    let queued: QueuedRequest;
+    try {
+      queued = await this.updates.request(actor, 'backup-import', null, undefined, id);
+    } catch (error) {
+      await this.discard(final);
+      throw error;
+    }
+    await this.audit.record({
+      action: 'backup.uploaded',
+      entityType: 'backup',
+      entityId: queued.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      after: { size },
+    });
+    return queued;
   }
 
   /**

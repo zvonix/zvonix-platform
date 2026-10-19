@@ -10,7 +10,7 @@ import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import { APP_CONFIG, type Config } from '../../infra/tokens.js';
 
-type BackupKind = 'daily' | 'manual' | 'update' | 'before-restore';
+type BackupKind = 'daily' | 'manual' | 'update' | 'before-restore' | 'uploaded';
 
 export interface BackupItem {
   /** «вид/имя файла» — тем же словом называется копия в заявке службе. */
@@ -32,7 +32,7 @@ export interface BackupListing {
   readonly last_export: { at: string; by: string; id: string } | null;
 }
 
-const KINDS: readonly BackupKind[] = ['daily', 'manual', 'update', 'before-restore'];
+const KINDS: readonly BackupKind[] = ['daily', 'manual', 'update', 'before-restore', 'uploaded'];
 const EMPTY: BackupListing = { available: false, generated_at: null, items: [], last_export: null };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

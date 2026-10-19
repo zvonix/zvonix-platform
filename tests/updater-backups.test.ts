@@ -72,6 +72,7 @@ function runUpdater(extra: Record<string, string> = {}): void {
       ZVONIX_PG_PREFIX: `${python} ${slashes(path.join(dir, 'pg.py'))}`,
       ZVONIX_BACKUP_CMD: `${python} ${slashes(path.join(dir, 'backup.py'))}`,
       ZVONIX_EXPORT_OWNER: '',
+      ZVONIX_BACKUP_OWNER: '',
       ZVONIX_ENV_FILE: path.join(dir, 'нет-такого-файла'),
       ZVONIX_GITHUB_ENV: path.join(dir, 'нет-такого-файла'),
       FAKE_DIR: dir,
@@ -210,5 +211,58 @@ describe('выдача для скачивания', () => {
     utimesSync(file, old, old);
     runUpdater();
     expect(existsSync(file)).toBe(false);
+  });
+});
+
+describe('загруженная копия', () => {
+  const put = (id: string, content = 'PGDMP-копия'): void => {
+    mkdirSync(exchange('uploads'), { recursive: true });
+    writeFileSync(exchange('uploads', `${id}.dump`), content);
+  };
+
+  it('файл проверяется, становится копией вида «uploaded», исходный файл уходит; в список она попадает со всеми видами', () => {
+    const upload = randomUUID();
+    put(upload);
+    const id = enqueue({ action: 'backup-import', target: upload });
+    runUpdater();
+    expect(state(id)).toMatchObject({ status: 'succeeded', exit_code: 0 });
+    expect(existsSync(exchange('uploads', `${upload}.dump`))).toBe(false);
+    const imported = listing().items.filter((item) => item.kind === 'uploaded');
+    expect(imported).toHaveLength(1);
+    expect(imported[0]?.id).toMatch(/^uploaded\/uploaded-\d{8}-\d{6}\.dump$/u);
+    expect(readFileSync(path.join(dir, 'backups', imported[0]?.id ?? ''), 'utf8')).toBe(
+      'PGDMP-копия',
+    );
+    // Ни одна команда не тронула рабочую базу: только чтение оглавления.
+    expect(calls().filter((line) => !line.startsWith('pg_restore --list'))).toEqual([]);
+  });
+
+  it('в файле мало таблиц — не копия: провал, в список не попадает', () => {
+    const upload = randomUUID();
+    put(upload);
+    const id = enqueue({ action: 'backup-import', target: upload });
+    runUpdater({ FAKE_FEW_TABLES: '1' });
+    expect(state(id)).toMatchObject({ status: 'failed' });
+    expect(listing().items.filter((item) => item.kind === 'uploaded')).toEqual([]);
+  });
+
+  it('такого файла нет — провал; чужой путь в заявке (не идентификатор) — заявка отбрасывается', () => {
+    const missing = enqueue({ action: 'backup-import', target: randomUUID() });
+    const traversal = enqueue({ action: 'backup-import', target: '../../etc/passwd' });
+    runUpdater();
+    expect(state(missing)).toMatchObject({ status: 'failed' });
+    expect(existsSync(exchange('runs', traversal))).toBe(false);
+  });
+
+  it('загруженное и не принятое лежит не дольше часа', () => {
+    const stale = randomUUID();
+    put(stale);
+    const old = new Date(Date.now() - 2 * 3600 * 1000);
+    utimesSync(exchange('uploads', `${stale}.dump`), old, old);
+    const fresh = randomUUID();
+    put(fresh);
+    runUpdater();
+    expect(existsSync(exchange('uploads', `${stale}.dump`))).toBe(false);
+    expect(existsSync(exchange('uploads', `${fresh}.dump`))).toBe(true);
   });
 });
