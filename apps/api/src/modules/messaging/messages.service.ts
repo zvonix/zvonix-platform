@@ -34,6 +34,7 @@ import type { MessengerAccountRow } from './messaging.repository.js';
 import { BotsService } from './bot/bots.service.js';
 import { BotRecipientRejectedError } from './bot/bot.provider.js';
 import { MessagingService } from './messaging.service.js';
+import { TemplatesService } from './templates.service.js';
 import { AccountPicker } from './account-picker.js';
 import { accountReadyAt } from './warmup.js';
 import {
@@ -101,6 +102,7 @@ export class MessagesService {
     private readonly tariffs: TariffService,
     private readonly redis: RedisService,
     private readonly bots: BotsService,
+    private readonly templates: TemplatesService,
     private readonly picker: AccountPicker,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_LOGGER) logger: Logger,
@@ -469,7 +471,7 @@ export class MessagesService {
         message.botId,
         message.clientId,
         message.recipient,
-        message.text,
+        await this.templates.render(message),
       );
       await this.repository.markSent(message.id, messageId, now);
       await this.repository.markDelivered(message.id, now);
@@ -566,7 +568,7 @@ export class MessagesService {
       const { messageId } = await this.provider.sendText(
         this.messaging.refOf(account),
         message.recipient,
-        message.text,
+        await this.templates.render(message),
       );
       await this.repository.markSent(message.id, messageId, now);
       await this.repository.touchAccount(account.id, now);

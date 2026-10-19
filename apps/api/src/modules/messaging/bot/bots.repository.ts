@@ -4,7 +4,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, eq, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import { toDatabaseError } from '@zvonix/db';
 import { botConnections, botSubscribers, clients, messengerBots } from '@zvonix/db/schema';
 import { newId, type BotKind, type BotStatus, type Id, type MoneyAmount } from '@zvonix/shared';
@@ -181,8 +181,6 @@ export class BotsRepository {
     clientId: Id<'client'>,
     patch: {
       greeting?: string | null;
-      textBefore?: string | null;
-      textAfter?: string | null;
       fallbackAccounts?: boolean;
     },
   ): Promise<BotConnectionRow | undefined> {
@@ -278,13 +276,23 @@ export class BotsRepository {
     clientId: Id<'client'>;
     maxUserId: string;
     chatId: string;
+    /** Имя из профиля MAX, если человек его прислал (ADR-0087). */
+    firstName?: string | null;
   }): Promise<BotSubscriberRow> {
     const [row] = await this.database.db
       .insert(botSubscribers)
       .values({ id: newId<'botSubscriber'>(), ...draft })
       .onConflictDoUpdate({
         target: [botSubscribers.botId, botSubscribers.clientId, botSubscribers.maxUserId],
-        set: { chatId: draft.chatId, state: 'started', updatedAt: new Date() },
+        set: {
+          chatId: draft.chatId,
+          state: 'started',
+          updatedAt: new Date(),
+          // Прежнее имя не затирается пустым: при возврате после «СТОП» MAX может не прислать профиль.
+          ...(draft.firstName === undefined || draft.firstName === null
+            ? {}
+            : { firstName: draft.firstName }),
+        },
       })
       .returning();
     if (row === undefined) throw new Error('Подписчик не записан');
@@ -334,6 +342,23 @@ export class BotsRepository {
         ),
       );
     return row;
+  }
+
+  /** Имя человека с этим номером у клиента — для приветствия: то, что он сам прислал боту. Нет — `null`. */
+  async nameOf(clientId: Id<'client'>, phone: string): Promise<string | null> {
+    const [row] = await this.database.db
+      .select({ firstName: botSubscribers.firstName })
+      .from(botSubscribers)
+      .where(
+        and(
+          eq(botSubscribers.clientId, clientId),
+          eq(botSubscribers.phone, phone),
+          isNotNull(botSubscribers.firstName),
+        ),
+      )
+      .orderBy(desc(botSubscribers.updatedAt))
+      .limit(1);
+    return row?.firstName ?? null;
   }
 
   /** Подписчик перестал принимать сообщения бота (остановил бота в MAX): дальше ему не пишем. */

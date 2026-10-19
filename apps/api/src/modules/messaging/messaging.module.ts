@@ -30,6 +30,9 @@ import { MessagesRepository } from './messages.repository.js';
 import { AccountPicker } from './account-picker.js';
 import { DistributionController } from './distribution.controller.js';
 import { MessagesService } from './messages.service.js';
+import { TemplatesController } from './templates.controller.js';
+import { TemplatesRepository } from './templates.repository.js';
+import { TemplatesService } from './templates.service.js';
 import { MessagingController } from './messaging.controller.js';
 import { MessagingRepository } from './messaging.repository.js';
 import { MessagingService } from './messaging.service.js';
@@ -62,6 +65,7 @@ import { SmppService } from './smpp/smpp.service.js';
     DistributionController,
     MessengerTariffsController,
     ClientMessagesController,
+    TemplatesController,
     ClientApiMessagesController,
     ClientSmppController,
     StaffSmppController,
@@ -80,6 +84,8 @@ import { SmppService } from './smpp/smpp.service.js';
     AccountPicker,
     MessagesService,
     MessagesRepository,
+    TemplatesRepository,
+    TemplatesService,
     SmppRepository,
     SmppService,
     SmppServer,

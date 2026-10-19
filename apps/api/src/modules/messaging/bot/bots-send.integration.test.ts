@@ -105,7 +105,7 @@ const dispatch = async (): Promise<void> => {
 };
 
 /** Бот, клиент с деньгами и подписчик с номером: человек запустил бота и поделился контактом. */
-async function subscribed(chat = 555, user = 77, phone = '79001234567') {
+async function subscribed(chat = 555, user = 77, phone = '79001234567', name?: string) {
   const registered = await api().inject({
     method: 'PUT',
     url: '/bots/platform',
@@ -125,7 +125,7 @@ async function subscribed(chat = 555, user = 77, phone = '79001234567') {
   await event(botId, {
     update_type: 'bot_started',
     chat_id: chat,
-    user: { user_id: user },
+    user: { user_id: user, ...(name === undefined ? {} : { first_name: name }) },
     payload: code,
   });
   await event(botId, {
@@ -456,7 +456,7 @@ describe('плата за бота и условия клиента', () => {
   });
 });
 
-describe('тексты и порядок отправки бота клиента (этап 3)', () => {
+describe('настройки бота клиента и шаблон сообщения (этап 3, ADR-0087)', () => {
   const settingsPatch = (token: string, payload: Record<string, unknown>) =>
     api().inject({
       method: 'PATCH',
@@ -480,7 +480,7 @@ describe('тексты и порядок отправки бота клиент�
     await connectPlatform();
     const client = await fx.clientWithMoney('5');
     // Пока не подключён к боту — нечего настраивать.
-    expect((await settingsPatch(client.token, { textBefore: 'Привет' })).statusCode).toBe(404);
+    expect((await settingsPatch(client.token, { greeting: 'Привет' })).statusCode).toBe(404);
 
     await api().inject({
       method: 'POST',
@@ -489,39 +489,51 @@ describe('тексты и порядок отправки бота клиент�
     });
     expect((await settingsPatch(client.token, {})).statusCode).toBe(400);
     expect((await settingsPatch(client.token, { greeting: 'я'.repeat(301) })).statusCode).toBe(400);
-    expect((await settingsPatch(client.token, { textBefore: 'я'.repeat(151) })).statusCode).toBe(
-      400,
-    );
 
     const saved = await settingsPatch(client.token, {
       greeting: '  Здравствуйте! Вас приветствует {служба}  ',
-      textBefore: 'Такси Волна:',
-      textAfter: 'Отписаться: СТОП',
       fallbackAccounts: false,
     });
     expect(saved.statusCode).toBe(200);
     expect(saved.json<{ settings: Record<string, unknown> }>().settings).toEqual({
       greeting: 'Здравствуйте! Вас приветствует {служба}',
-      text_before: 'Такси Волна:',
-      text_after: 'Отписаться: СТОП',
       fallback_accounts: false,
     });
 
-    const cleared = await settingsPatch(client.token, { greeting: '', textBefore: null });
+    const cleared = await settingsPatch(client.token, { greeting: '' });
     expect(cleared.json<{ settings: Record<string, unknown> }>().settings).toMatchObject({
       greeting: null,
-      text_before: null,
-      text_after: 'Отписаться: СТОП',
+      fallback_accounts: false,
     });
   });
 
-  it('вставки до и после добавляются к каждому сообщению бота; слишком длинное уходит без вставок', async () => {
+  const putTemplate = (token: string, blocks: unknown[]) =>
+    api().inject({
+      method: 'PUT',
+      url: '/client/messages/template',
+      headers: bearer(token),
+      payload: { blocks },
+    });
+
+  it('шаблон: без него сообщение как написано; блоки собираются в порядке; слишком длинное уходит без вставок', async () => {
     await connectPlatform();
     const { client, phone } = await subscribed();
-    await settingsPatch(client.token, {
-      textBefore: 'Такси Волна:',
-      textAfter: 'СТОП — отписаться',
+    const initial = await api().inject({
+      method: 'GET',
+      url: '/client/messages/template',
+      headers: bearer(client.token),
     });
+    expect(initial.json()).toEqual({ blocks: [{ kind: 'body', when: 'always' }] });
+
+    expect(
+      (
+        await putTemplate(client.token, [
+          { kind: 'text', text: 'Такси Волна:', when: 'always' },
+          { kind: 'body', when: 'always' },
+          { kind: 'text', text: 'СТОП — отписаться', when: 'always' },
+        ])
+      ).statusCode,
+    ).toBe(200);
 
     await sendTo(client.token, phone);
     await api().get(MessagesService).dispatchDue(new Date());
@@ -536,6 +548,78 @@ describe('тексты и порядок отправки бота клиент�
     });
     await api().get(MessagesService).dispatchDue(new Date());
     expect(simulatedBotSent.at(-1)?.text).toBe(long);
+  });
+
+  it('шаблон отвергает неверный состав: нет текста клиента, два текста клиента, пустой блок, слишком много, чужое поле', async () => {
+    await connectPlatform();
+    const client = await fx.clientWithMoney('5');
+    const body = { kind: 'body', when: 'always' };
+    expect((await putTemplate(client.token, [])).statusCode).toBe(400);
+    expect(
+      (await putTemplate(client.token, [{ kind: 'text', text: 'а', when: 'always' }])).statusCode,
+    ).toBe(400);
+    expect((await putTemplate(client.token, [body, body])).statusCode).toBe(400);
+    expect(
+      (await putTemplate(client.token, [body, { kind: 'text', text: '  ', when: 'always' }]))
+        .statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await putTemplate(client.token, [
+          body,
+          { kind: 'text', text: 'я'.repeat(301), when: 'always' },
+        ])
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (await putTemplate(client.token, [body, { kind: 'body', when: 'first' }])).statusCode,
+    ).toBe(400);
+    expect((await putTemplate(client.token, [{ ...body, extra: 1 }])).statusCode).toBe(400);
+    expect(
+      (
+        await putTemplate(
+          client.token,
+          Array.from({ length: 13 }, (_unused, index) =>
+            index === 0 ? body : { kind: 'text', text: 'а', when: 'always' },
+          ),
+        )
+      ).statusCode,
+    ).toBe(400);
+  });
+
+  it('приветствие с именем из профиля MAX, «только первое» и ссылка на бота', async () => {
+    await connectPlatform();
+    const { client, phone } = await subscribed(556, 78, '79001234568', 'Иван');
+    expect(
+      (
+        await putTemplate(client.token, [
+          { kind: 'greeting', text: 'Здравствуйте, {имя}!', when: 'always' },
+          { kind: 'body', when: 'always' },
+          { kind: 'text', text: 'Мы теперь и в MAX', when: 'first' },
+          { kind: 'bot_link', when: 'always' },
+        ])
+      ).statusCode,
+    ).toBe(200);
+    const link = (
+      await api().inject({
+        method: 'GET',
+        url: '/client/messages/bot',
+        headers: bearer(client.token),
+      })
+    ).json<{ connection: { link: string } }>().connection.link;
+
+    const first = await sendTo(client.token, phone);
+    expect(first.statusCode).toBe(201);
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect(simulatedBotSent.at(-1)?.text).toBe(
+      `Здравствуйте, Иван!\nМашина подана\nМы теперь и в MAX\n${link}`,
+    );
+
+    // Второе сообщение тому же человеку: блок «только первое» уже не нужен.
+    const second = await sendTo(client.token, phone, { text: 'Машина у подъезда' });
+    expect(second.statusCode).toBe(201);
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect(simulatedBotSent.at(-1)?.text).toBe(`Здравствуйте, Иван!\nМашина у подъезда\n${link}`);
   });
 
   it('своё приветствие подставляет название службы; без него — стандартный текст', async () => {

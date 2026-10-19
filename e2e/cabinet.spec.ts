@@ -649,11 +649,13 @@ test.describe('бот MAX (ADR-0077)', () => {
     await expect(admin.getByText('своя')).toBeVisible();
 
     // Тексты бота: сохраняются и видны при следующем открытии окна.
-    await page.getByRole('button', { name: 'Тексты и порядок' }).click();
-    await page.getByLabel('Текст перед каждым сообщением').fill('Такси Волна:');
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    await page.getByLabel('Приветствие, когда ваш клиент запускает бота').fill('Привет от Волны');
     await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
-    await page.getByRole('button', { name: 'Тексты и порядок' }).click();
-    await expect(page.getByLabel('Текст перед каждым сообщением')).toHaveValue('Такси Волна:');
+    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
+    await expect(page.getByLabel('Приветствие, когда ваш клиент запускает бота')).toHaveValue(
+      'Привет от Волны',
+    );
     await page.keyboard.press('Escape');
 
     // Блок бота отдельно: «Отключено» бывает и у подключения SMPP того же клиента.
@@ -665,6 +667,37 @@ test.describe('бот MAX (ADR-0077)', () => {
 
     await adminContext.close();
     await clientContext.close();
+  });
+});
+
+test.describe('конструктор сообщения (ADR-0087)', () => {
+  test('клиент добавляет свой текст и приветствие, видит предпросмотр, шаблон сохраняется', async ({
+    page,
+  }) => {
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/messages?tab=text');
+
+    // Без шаблона есть один блок «Текст сообщения» — его не удалить.
+    await expect(page.getByRole('button', { name: /^Удалить:/u })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Сохранить', exact: true })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Приветствие', exact: true }).click();
+    await page.getByRole('button', { name: 'Свой текст', exact: true }).click();
+    await page.getByLabel('Свой текст', { exact: true }).fill('Такси Волна');
+    // Приветствие — выше текста сообщения.
+    await page.getByRole('button', { name: 'Выше' }).nth(1).click();
+    await page.getByLabel('Когда: Свой текст').selectOption('first');
+
+    const preview = page.getByRole('region', { name: 'Как это выглядит' });
+    await expect(preview).toContainText('Здравствуйте, Иван!');
+    await expect(preview).toContainText('Такси Волна');
+
+    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+    await expect(page.getByRole('status')).toHaveText('Сохранено');
+
+    await page.reload();
+    await expect(page.getByLabel('Свой текст', { exact: true })).toHaveValue('Такси Волна');
+    await expect(page.getByLabel('Когда: Свой текст')).toHaveValue('first');
   });
 });
 

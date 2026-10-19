@@ -1,4 +1,12 @@
-import { MESSAGE_MAX_LENGTH, MESSAGE_STATUSES, SMPP_RECEIPT_ACTIONS } from '@zvonix/shared';
+import {
+  MESSAGE_MAX_LENGTH,
+  MESSAGE_STATUSES,
+  SMPP_RECEIPT_ACTIONS,
+  TEMPLATE_BLOCKS_MAX,
+  TEMPLATE_BLOCK_KINDS,
+  TEMPLATE_TEXT_MAX,
+  TEMPLATE_WHEN,
+} from '@zvonix/shared';
 import { z } from 'zod';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 import { amount } from '../billing/schemas.js';
@@ -143,4 +151,45 @@ export const providerWebhookSchema = z.looseObject({
   instanceData: z
     .looseObject({ idInstance: z.union([z.string(), z.number()]).optional() })
     .optional(),
+});
+
+/**
+ * Шаблон сообщения клиента ([ADR-0087](../../../../../docs/adr/0087-konstruktor-soobshcheniya.md)). У `greeting` и
+ * `text` текст обязателен и не длиннее предела, у `body` и `bot_link` его нет; `body` — ровно один, всегда «всегда».
+ */
+const templateBlockSchema = z
+  .object({
+    kind: z.enum(TEMPLATE_BLOCK_KINDS),
+    text: z
+      .string()
+      .trim()
+      .max(TEMPLATE_TEXT_MAX, `не длиннее ${String(TEMPLATE_TEXT_MAX)} знаков`)
+      .optional(),
+    when: z.enum(TEMPLATE_WHEN),
+  })
+  .strict()
+  .refine(
+    (block) => block.kind === 'body' || block.kind === 'bot_link' || (block.text ?? '') !== '',
+    {
+      message: 'Введите текст блока',
+    },
+  )
+  .refine(
+    (block) => (block.kind !== 'body' && block.kind !== 'bot_link') || block.text === undefined,
+    {
+      message: 'У этого блока текста нет',
+    },
+  )
+  .refine((block) => block.kind !== 'body' || block.when === 'always', {
+    message: 'Текст сообщения идёт всегда',
+  });
+
+export const templateSchema = z.object({
+  blocks: z
+    .array(templateBlockSchema)
+    .min(1, 'Нужен хотя бы один блок')
+    .max(TEMPLATE_BLOCKS_MAX, `Не больше ${String(TEMPLATE_BLOCKS_MAX)} блоков`)
+    .refine((blocks) => blocks.filter((block) => block.kind === 'body').length === 1, {
+      message: 'В сообщении должен быть ровно один блок «Текст сообщения»',
+    }),
 });

@@ -8,7 +8,16 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  check,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
 import {
   MESSAGE_CHANNELS,
   MESSAGE_FAILURE_REASONS,
@@ -43,6 +52,7 @@ import {
   type MessengerPauseReason,
   type MessengerProviderId,
   type SmppReceiptAction,
+  type TemplateBlock,
 } from '@zvonix/shared';
 import { createdAt, idRef, money, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 import { clients, partners } from './billing.js';
@@ -461,6 +471,8 @@ export const botSubscribers = pgTable(
     chatId: text().notNull(),
     /** Номер из контакта, который человек прислал о себе; пусто — ещё не поделился. */
     phone: text(),
+    /** Имя из профиля MAX, как его прислал сам человек при запуске бота (ADR-0087): для приветствия. Пусто — не знаем. */
+    firstName: text(),
     state: text().$type<BotSubscriberState>().notNull().default('started'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -473,6 +485,25 @@ export const botSubscribers = pgTable(
       .on(t.clientId, t.phone)
       .where(sql`${t.phone} is not null and ${t.state} = 'started'`),
   ],
+);
+
+/**
+ * Шаблон сообщения клиента ([ADR-0087](../../../../docs/adr/0087-konstruktor-soobshcheniya.md)): упорядоченные блоки,
+ * из которых при отправке собирается итоговый текст. Нет строки — сообщение уходит как написал клиент. Состав блоков
+ * проверяет сервис, форму хранения — `jsonb`.
+ */
+export const messageTemplates = pgTable(
+  'message_templates',
+  {
+    id: primaryId<'messageTemplate'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    blocks: jsonb().$type<TemplateBlock[]>().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('message_templates_client_key').on(t.clientId)],
 );
 
 /**
