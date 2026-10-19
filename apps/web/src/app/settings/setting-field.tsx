@@ -48,6 +48,7 @@ const LABELS: Record<string, string> = {
   'notifications.low_balance_amount': 'Порог, ₽',
   'notifications.alerts_enabled':
     'Писать администраторам о неполадках и новых заявках на пополнение',
+  'notifications.support_staff_enabled': 'Писать сотрудникам о новых обращениях в поддержку',
   'messaging.enabled': 'Продукт «Сообщения MAX» включён',
   'messaging.provider_partner_url': 'Адрес партнёрского доступа провайдера',
   'messaging.provider_partner_token': 'Ключ партнёрского доступа провайдера',

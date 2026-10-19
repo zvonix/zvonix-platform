@@ -24,6 +24,8 @@ import type {
   UserRole,
   UserStatus,
   TestCallStatus,
+  TicketCategory,
+  TicketStatus,
 } from '@zvonix/shared';
 
 /**
@@ -665,3 +667,30 @@ export function messageTone(status: string): string {
   if (status === 'failed') return 'bg-crit-soft text-crit';
   return 'bg-warn-soft text-warn';
 }
+
+/** Состояния обращения в поддержку (ADR-0085). */
+export const TICKET_STATUS_NAME: Record<TicketStatus, string> = {
+  open: 'Ждёт ответа',
+  in_progress: 'В работе',
+  waiting_user: 'Ждём вас',
+  resolved: 'Решено',
+  closed: 'Закрыто',
+};
+
+/** Цвет подписи: ждущее ответа и «ждём вас» — внимание, решённое — хорошо, закрытое — спокойно. */
+export const TICKET_STATUS_TONE: Record<TicketStatus, string> = {
+  open: 'bg-warn-soft text-warn',
+  in_progress: 'bg-muted text-foreground',
+  waiting_user: 'bg-warn-soft text-warn',
+  resolved: 'bg-ok-soft text-ok',
+  closed: 'text-muted-foreground',
+};
+
+export const TICKET_CATEGORY_NAME: Record<TicketCategory, string> = {
+  bug: 'Ошибка',
+  feature: 'Нужна функция',
+  money: 'Деньги и выплаты',
+  messaging: 'Сообщения MAX',
+  calls: 'Звонки',
+  other: 'Другое',
+};

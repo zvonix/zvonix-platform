@@ -155,6 +155,7 @@ export class SettingsService {
     readonly alertsEnabled: boolean;
     readonly paymentDecisionEnabled: boolean;
     readonly partnerSuspensionEnabled: boolean;
+    readonly supportStaffEnabled: boolean;
   }> {
     const values = await this.values();
     return {
@@ -163,6 +164,7 @@ export class SettingsService {
       alertsEnabled: this.flag(values, 'notifications.alerts_enabled'),
       paymentDecisionEnabled: this.flag(values, 'notifications.payment_decision_enabled'),
       partnerSuspensionEnabled: this.flag(values, 'notifications.partner_suspension_enabled'),
+      supportStaffEnabled: this.flag(values, 'notifications.support_staff_enabled'),
     };
   }
 
