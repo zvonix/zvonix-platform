@@ -37,7 +37,8 @@ type Action =
   | 'token-set'
   | 'backup-create'
   | 'backup-verify'
-  | 'backup-export';
+  | 'backup-export'
+  | 'backup-restore';
 type Status = 'running' | 'succeeded' | 'failed';
 
 interface Release {
@@ -104,6 +105,7 @@ const ACTION_NAME: Record<Action, string> = {
   'backup-create': 'Копия базы',
   'backup-verify': 'Проверка копии',
   'backup-export': 'Выдача копии',
+  'backup-restore': 'Восстановление из копии',
 };
 
 const STATUS_NAME: Record<Status, string> = {

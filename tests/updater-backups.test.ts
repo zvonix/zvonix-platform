@@ -1,8 +1,7 @@
 /**
  * Служба обновления: резервные копии ([ADR-0086](../docs/adr/0086-rezervnye-kopii-v-kabinete.md)).
  *
- * Запускается настоящий `deploy/updater.py`; команды PostgreSQL и `zvonix-backup` подставные (один Python-скрипт,
- * имя команды — первым аргументом). Проверяется то, что нельзя увидеть по коду: что копия называется только
+ * Запускается настоящий `deploy/updater.py`; команды PostgreSQL и `zvonix-backup` подставные (`updater-fakes.ts`). Проверяется то, что нельзя увидеть по коду: что копия называется только
  * существующим файлом из каталога копий, что временная база убирается и при провале, что выданный файл
  * исчезает через полчаса, а рабочая база не затрагивается ни одной командой.
  */
@@ -22,6 +21,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FAKE_BACKUP, FAKE_PG } from './updater-fakes.js';
 
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -29,44 +29,6 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const python = process.platform === 'win32' ? 'python' : 'python3';
 const updater = path.join(root, 'deploy', 'updater.py');
 const slashes = (value: string): string => value.split(path.sep).join('/');
-
-/** Подставной PostgreSQL: команда — первый аргумент; всё, что вызвано, пишется в calls.log. */
-const FAKE_PG = `
-import os, sys
-name, args = sys.argv[1], sys.argv[2:]
-with open(os.environ["FAKE_DIR"] + "/calls.log", "a") as log:
-    log.write(name + " " + " ".join(args) + "\\n")
-if name == "pg_restore" and args[0] == "--list":
-    count = 3 if os.environ.get("FAKE_FEW_TABLES") else 12
-    for n in range(count):
-        print("%d; 1259 %d TABLE public t%d zvonix" % (n, n, n))
-    print("; Archive created")
-elif name == "pg_restore":
-    if os.environ.get("FAKE_RESTORE_FAIL"):
-        print("pg_restore: error: could not execute query")
-        sys.exit(1)
-elif name == "psql":
-    query = args[-1]
-    if "information_schema" in query:
-        print("14")
-    elif query.endswith("users"):
-        print("3")
-    elif query.endswith("payments"):
-        print("ERROR: relation does not exist")
-        sys.exit(1)
-    else:
-        print("0")
-`;
-
-const FAKE_BACKUP = `
-import os, sys
-kind = sys.argv[1]
-directory = os.environ["FAKE_DIR"] + "/backups/" + kind
-os.makedirs(directory, exist_ok=True)
-with open(directory + "/" + kind + "-20261019-120000.dump", "wb") as f:
-    f.write(b"new")
-print("копия базы: снята (" + kind + ")")
-`;
 
 let dir = '';
 

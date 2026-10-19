@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
@@ -49,6 +49,7 @@ interface Run {
 
 interface LogChunk {
   readonly text: string;
+  readonly next_offset: number;
   readonly run: Run;
 }
 
@@ -102,6 +103,7 @@ function Backups() {
   const queryClient = useQueryClient();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | undefined>(undefined);
   const [busy, setBusy] = useState<string | undefined>(undefined);
+  const [restoreRun, setRestoreRun] = useState<string | undefined>(undefined);
 
   const list = useQuery({
     queryKey: ['backups'],
@@ -212,6 +214,8 @@ function Backups() {
         )}
       </section>
 
+      {restoreRun !== undefined && <RestoreProgress id={restoreRun} onFinished={refresh} />}
+
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
@@ -271,6 +275,11 @@ function Backups() {
                       {busy === `verify:${backup.id}` ? 'Проверяем…' : 'Проверить'}
                     </Button>
                     <Download backup={backup} disabled={busy !== undefined} onDone={refresh} />
+                    <Restore
+                      backup={backup}
+                      disabled={busy !== undefined || restoreRun !== undefined}
+                      onStarted={setRestoreRun}
+                    />
                   </span>
                 </TableCell>
               </TableRow>
@@ -352,5 +361,172 @@ function Download({
         </DialogField>
       </DialogForm>
     </FormDialog>
+  );
+}
+
+/** Слово, которое нужно ввести: то же, что требует API. */
+const RESTORE_PHRASE = 'ВОССТАНОВИТЬ';
+
+/**
+ * «Восстановить»: самое опасное действие раздела. Окно говорит, что именно будет и что пропадёт, и требует пароль, код
+ * второго фактора и слово — случайным нажатием его не вызвать.
+ */
+function Restore({
+  backup,
+  disabled,
+  onStarted,
+}: {
+  backup: Backup;
+  disabled: boolean;
+  onStarted: (runId: string) => void;
+}) {
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [phrase, setPhrase] = useState('');
+
+  return (
+    <FormDialog
+      label="Восстановить"
+      title="Восстановить базу из копии"
+      description={`${KIND_NAME[backup.kind]}, ${moment(backup.created_at)}`}
+      variant="outline"
+      size="xs"
+      disabled={disabled}
+    >
+      <DialogForm
+        submitLabel="Восстановить"
+        tone="danger"
+        canSubmit={password !== '' && phrase === RESTORE_PHRASE}
+        onSubmit={async () => {
+          const queued = await request<{ request: { id: string } }>('/backups/restore', {
+            method: 'POST',
+            body: {
+              id: backup.id,
+              password,
+              phrase,
+              ...(code.trim() === '' ? {} : { code: code.trim() }),
+            },
+          });
+          setPassword('');
+          setCode('');
+          setPhrase('');
+          onStarted(queued.request.id);
+        }}
+      >
+        <div className="flex flex-col gap-1.5 sm:col-span-2">
+          <p className="font-medium text-crit">
+            Всё, что записано после {moment(backup.created_at)}, пропадёт из рабочей базы: платежи,
+            звонки, новые клиенты.
+          </p>
+          <p className="text-muted-foreground">
+            Сначала снимается страховочная копия нынешней базы, потом площадка останавливается на
+            несколько минут. Нынешняя база не удаляется, а откладывается на диске до следующего
+            восстановления. Если после восстановления службы не поднимутся, прежняя база вернётся
+            сама. После восстановления кабинет попросит войти заново — это нормально.
+          </p>
+        </div>
+        <DialogField label="Ваш пароль" wide>
+          <Input
+            type="password"
+            autoComplete="current-password"
+            autoFocus
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value);
+            }}
+          />
+        </DialogField>
+        <DialogField
+          label="Код второго фактора"
+          wide
+          hint="Если второй фактор не подключён — оставьте пустым."
+        >
+          <Input
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            onChange={(event) => {
+              setCode(event.target.value);
+            }}
+          />
+        </DialogField>
+        <DialogField label={`Для подтверждения введите слово ${RESTORE_PHRASE}`} wide>
+          <Input
+            autoComplete="off"
+            value={phrase}
+            onChange={(event) => {
+              setPhrase(event.target.value);
+            }}
+          />
+        </DialogField>
+      </DialogForm>
+    </FormDialog>
+  );
+}
+
+/**
+ * Ход восстановления. Пока оно идёт, API останавливается и не отвечает — это штатно, поэтому опрос не считает обрыв
+ * ошибкой, а пишет «площадка остановлена» и продолжает. Журнал — файл службы, он переживает всё.
+ */
+function RestoreProgress({ id, onFinished }: { id: string; onFinished: () => void }) {
+  const [text, setText] = useState('');
+  const [phase, setPhase] = useState<'running' | 'offline' | 'succeeded' | 'failed'>('running');
+  const offset = useRef(0);
+
+  useEffect(() => {
+    let stopped = false;
+    const poll = async (): Promise<void> => {
+      while (!stopped) {
+        try {
+          const chunk = await request<LogChunk>(
+            `/updates/${id}/log?offset=${String(offset.current)}`,
+          );
+          offset.current = chunk.next_offset;
+          if (chunk.text !== '') setText((previous) => previous + chunk.text);
+          if (chunk.run.status !== 'running') {
+            setPhase(chunk.run.status);
+            onFinished();
+            return;
+          }
+          setPhase('running');
+        } catch {
+          setPhase('offline');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    };
+    void poll();
+    return () => {
+      stopped = true;
+    };
+  }, [id, onFinished]);
+
+  return (
+    <section
+      aria-label="Восстановление"
+      className="flex flex-col gap-2 rounded-lg border border-warn bg-card p-3"
+    >
+      <h2 className="font-semibold">
+        {phase === 'succeeded'
+          ? 'Восстановление завершено'
+          : phase === 'failed'
+            ? 'Восстановление не удалось'
+            : 'Идёт восстановление'}
+      </h2>
+      {phase === 'offline' && (
+        <p role="status" className="text-warn">
+          Площадка остановлена на время восстановления: страница продолжит сама.
+        </p>
+      )}
+      {phase === 'failed' && (
+        <p role="alert" className="text-crit">
+          Прежняя база на месте или возвращена — смотрите журнал ниже.
+        </p>
+      )}
+      <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-[13px]">
+        {text}
+      </pre>
+    </section>
   );
 }

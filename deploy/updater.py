@@ -42,7 +42,7 @@ KEEP_RUNS = 30
 TAG_PATTERN = re.compile(r'^v?[0-9A-Za-z][0-9A-Za-z._-]*$')
 ID_PATTERN = re.compile(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json')
 ACTIONS = ('deploy', 'prepare', 'rollback', 'refresh', 'cert-check', 'cert-issue', 'cert-auto-on', 'cert-auto-off',
-           'token-set', 'backup-create', 'backup-verify', 'backup-export')
+           'token-set', 'backup-create', 'backup-verify', 'backup-export', 'backup-restore')
 
 # Сертификат кабинета (ADR-0083). Имена берутся из файлов root, а не из заявки: заявка не называет
 # домен, поэтому выпустить сертификат на чужое имя через неё нельзя.
@@ -107,7 +107,7 @@ def read_request(path):
         if not (isinstance(token, str) and TOKEN_PATTERN.match(token)):
             return None
     target = None
-    if action in ('backup-verify', 'backup-export'):
+    if action in ('backup-verify', 'backup-export', 'backup-restore'):
         target = request.get('target')
         if not (isinstance(target, str) and BACKUP_ID.match(target)):
             return None
@@ -173,6 +173,9 @@ def run_request(request_id, path, request):
         return
     if request['action'] == 'token-set':
         run_token_set(request['token'], log_path, run)
+        return
+    if request['action'] == 'backup-restore':
+        run_restore(request, request_id, log_path, run)
         return
     if request['action'].startswith('backup-'):
         run_backup(request, request_id, log_path, run)
@@ -646,14 +649,273 @@ def run_backup(request, request_id, log_path, run):
             lines.append(output.strip()[-3000:])
         elif action == 'backup-verify':
             code = verify_backup(request['target'], lines)
-        else:
+        elif action == 'backup-export':
             code = export_backup(request['target'], request_id, request['by'], lines)
+        else:
+            raise RuntimeError('неизвестное действие с копией')
     except Exception as error:  # noqa: BLE001 — сбой одной заявки не должен ронять службу
         lines.append('не удалось: ' + str(error))
         code = 1
     with open(log_path, 'w', encoding='utf-8') as handle:
         handle.write('\n'.join(line for line in lines if line) + '\n')
     os.chmod(log_path, 0o644)
+    write_backups()
+    write_state(run, status='succeeded' if code == 0 else 'failed', finished_at=now(), exit_code=code)
+
+
+# --- Восстановление из копии (ADR-0086, часть 2) ---------------------------------------------------------------
+# Рабочая база НЕ стирается. Копия разворачивается в новую базу, на ней прогоняются миграции текущего кода, службы
+# останавливаются, базы переименовываются (рабочая уходит в zvonix_replaced_<время>, новая становится рабочей), службы
+# запускаются. Не поднялись — имена возвращаются обратно. Прежнее состояние остаётся на диске до следующего
+# восстановления: вернуться можно обратным переименованием.
+try:
+    import fcntl
+except ImportError:  # Windows: только проверки службы; на сервере (Linux) замок всегда есть
+    fcntl = None
+
+LIVE_DB = 'zvonix'
+RESTORE_DB = 'zvonix_restore'
+SERVICES = shlex.split(os.environ.get('ZVONIX_SERVICES', 'zvonix-api zvonix-worker zvonix-web'))
+API_READY = os.environ.get('ZVONIX_API_READY', 'http://127.0.0.1:8000/health/ready')
+WEB_READY = os.environ.get('ZVONIX_WEB_READY', 'http://127.0.0.1:3000/login')
+# В проверках «готовность» — внешняя команда: код 0 значит «служба отвечает».
+READY_CMD = shlex.split(os.environ.get('ZVONIX_READY_CMD', ''))
+READY_ATTEMPTS = int(os.environ.get('ZVONIX_READY_ATTEMPTS', '90'))
+LOCK_FILE = os.environ.get('ZVONIX_LOCK_FILE', '/run/zvonix-deploy.lock')
+CURRENT_LINK = os.environ.get('ZVONIX_CURRENT', '/opt/zvonix/current')
+MIGRATE_CMD = shlex.split(os.environ.get('ZVONIX_MIGRATE_CMD', ''))
+# Проверка копии свежа сутки: старее — перед восстановлением она проверяется заново.
+CHECK_FRESH_SECONDS = 86400
+REPLACED_PATTERN = re.compile(r'^zvonix_(replaced|failed)_[0-9]{14}$')
+
+
+class Journal:
+    """Журнал заявки: каждая строка сразу на диск — кабинет читает его, пока идёт восстановление."""
+
+    def __init__(self, path):
+        self.path = path
+        with open(path, 'w', encoding='utf-8'):
+            pass
+        os.chmod(path, 0o644)
+
+    def line(self, text):
+        with open(self.path, 'a', encoding='utf-8') as handle:
+            handle.write(text + '\n')
+
+
+def psql_admin(statement):
+    """Команда в служебной базе postgres (рабочая и восстанавливаемая базы при этом могут быть заняты)."""
+    return run_long(pg('psql', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-At', '-c', statement), 600)
+
+
+def service_ready():
+    if READY_CMD:
+        return run_long(READY_CMD, 30)[0] == 0
+    for url in (API_READY, WEB_READY):
+        try:
+            with urllib.request.urlopen(url, timeout=3) as response:
+                if not 200 <= response.status < 300:
+                    return False
+        except Exception:  # noqa: BLE001 — не отвечает: значит, не готова
+            return False
+    return True
+
+
+def wait_ready():
+    for _ in range(READY_ATTEMPTS):
+        if service_ready():
+            return True
+        time.sleep(1)
+    return False
+
+
+def set_services(action, journal):
+    """Остановка идёт в обратном порядке запуска: сначала кабинет и воркер, потом API."""
+    names = list(reversed(SERVICES)) if action == 'stop' else SERVICES
+    ok = True
+    for name in names:
+        code, output = run_long(SYSTEMCTL + [action, name], 180)
+        if code != 0:
+            ok = False
+            journal.line(f'systemctl {action} {name}: {output.strip()[-200:]}')
+    return ok
+
+
+def database_names(prefix):
+    code, output = psql_admin(f"select datname from pg_database where datname like '{prefix}%' order by 1")
+    return [name.strip() for name in output.splitlines() if code == 0 and REPLACED_PATTERN.match(name.strip())]
+
+
+def default_migrate_command(release_dir, target_db):
+    live = read_env(ENV_FILE).get('DATABASE_URL', '')
+    if not live:
+        raise RuntimeError('в zvonix.env нет DATABASE_URL')
+    base, _, query = live.partition('?')
+    url = base.rsplit('/', 1)[0] + '/' + target_db + (('?' + query) if query else '')
+    script = 'set -a; . /etc/zvonix/zvonix.env; set +a; export DATABASE_URL="$1"; cd "$0" && exec node packages/db/dist/migrate.js'
+    return ['sudo', '-u', 'zvonix', 'sh', '-c', script, release_dir, url]
+
+
+def swap_back(journal, current_name, saved_name):
+    """Вернуть прежнюю базу под рабочее имя. Возвращает True, если получилось."""
+    steps = [f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS false',
+             f"select pg_terminate_backend(pid) from pg_stat_activity where datname = '{LIVE_DB}' and pid <> pg_backend_pid()",
+             f'ALTER DATABASE {LIVE_DB} RENAME TO {current_name}',
+             f'ALTER DATABASE {saved_name} RENAME TO {LIVE_DB}',
+             f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS true']
+    for statement in steps:
+        code, output = psql_admin(statement)
+        if code != 0:
+            journal.line('не удалось вернуть прежнюю базу: ' + output.strip()[-300:])
+            return False
+    return True
+
+
+def restore_database(target, journal):
+    """Восстановление. Возвращает код; до подмены имён любой провал оставляет рабочую базу нетронутой."""
+    path = backup_path(target)
+    if path is None:
+        journal.line('копия не найдена')
+        return 1
+
+    lock = None
+    if fcntl is not None:
+        lock = open(LOCK_FILE, 'w')
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            journal.line('сейчас идёт выкладка — восстановление не начато')
+            return 1
+    try:
+        return restore_locked(target, path, journal)
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def restore_locked(target, path, journal):
+    journal.line(f'Восстановление из {target}')
+    try:
+        free = shutil.disk_usage(BACKUP_ROOT).free
+    except OSError:
+        free = 0
+    if free < os.path.getsize(path) * 2:
+        journal.line('мало места на диске: нужно вдвое больше размера копии')
+        return 1
+
+    journal.line('1/7 Проверка копии')
+    check = ((read_json_file(backup_checks_file) or {}).get('checks', {})).get(target)
+    fresh = False
+    if isinstance(check, dict) and check.get('ok') is True:
+        try:
+            moment = datetime.fromisoformat(str(check.get('at')))
+            fresh = (datetime.now(timezone.utc) - moment).total_seconds() < CHECK_FRESH_SECONDS
+        except ValueError:
+            fresh = False
+    if fresh:
+        journal.line('копия проверена за последние сутки: ' + str(check.get('detail', '')))
+    else:
+        lines = []
+        code = verify_backup(target, lines)
+        for item in lines:
+            journal.line(item)
+        if code != 0:
+            journal.line('копия не годна — восстановление не начато, рабочая база не тронута')
+            return 1
+
+    journal.line('2/7 Страховочная копия рабочей базы («перед восстановлением»)')
+    code, output = run_long(BACKUP_CMD + ['before-restore'], 3600)
+    journal.line(output.strip()[-600:])
+    if code != 0:
+        journal.line('страховочная копия не снята — восстановление не начато, рабочая база не тронута')
+        return 1
+
+    journal.line('3/7 Копия разворачивается в новую базу ' + RESTORE_DB)
+    run_long(pg('dropdb', '--if-exists', RESTORE_DB), 300)
+    code, output = run_long(pg('createdb', '-O', 'zvonix', RESTORE_DB), 300)
+    if code == 0:
+        code, output = run_long(pg('pg_restore', '--no-owner', '--role=zvonix', '--exit-on-error', '-d', RESTORE_DB, path))
+    if code != 0:
+        journal.line('копия не развернулась: ' + output.strip()[-300:])
+        run_long(pg('dropdb', '--if-exists', RESTORE_DB), 300)
+        journal.line('рабочая база не тронута')
+        return 1
+
+    journal.line('4/7 Миграции текущего выпуска на новой базе')
+    try:
+        command = MIGRATE_CMD or default_migrate_command(os.path.realpath(CURRENT_LINK), RESTORE_DB)
+        code, output = run_long(command, 1800)
+    except Exception as error:  # noqa: BLE001 — нет env или выпуска: понятная причина, рабочая база цела
+        code, output = 1, str(error)
+    if code != 0:
+        journal.line('миграции не прошли: ' + output.strip()[-300:])
+        run_long(pg('dropdb', '--if-exists', RESTORE_DB), 300)
+        journal.line('рабочая база не тронута')
+        return 1
+
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+    replaced = 'zvonix_replaced_' + stamp
+    journal.line('5/7 Службы останавливаются')
+    if not set_services('stop', journal):
+        journal.line('не все службы остановились — запускаю обратно, рабочая база не тронута')
+        set_services('start', journal)
+        run_long(pg('dropdb', '--if-exists', RESTORE_DB), 300)
+        return 1
+
+    journal.line('6/7 Базы меняются местами: прежняя сохраняется как ' + replaced)
+    swapped = True
+    for statement in (f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS false',
+                      f"select pg_terminate_backend(pid) from pg_stat_activity where datname = '{LIVE_DB}' and pid <> pg_backend_pid()",
+                      f'ALTER DATABASE {LIVE_DB} RENAME TO {replaced}'):
+        code, output = psql_admin(statement)
+        if code != 0:
+            journal.line('подмена не удалась: ' + output.strip()[-300:])
+            psql_admin(f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS true')
+            swapped = False
+            break
+    if swapped:
+        code, output = psql_admin(f'ALTER DATABASE {RESTORE_DB} RENAME TO {LIVE_DB}')
+        if code != 0:
+            journal.line('подмена не удалась: ' + output.strip()[-300:])
+            psql_admin(f'ALTER DATABASE {replaced} RENAME TO {LIVE_DB}')
+            psql_admin(f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS true')
+            swapped = False
+    if not swapped:
+        set_services('start', journal)
+        run_long(pg('dropdb', '--if-exists', RESTORE_DB), 300)
+        journal.line('прежняя база возвращена, службы запущены')
+        return 1
+    psql_admin(f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS true')
+
+    journal.line('7/7 Службы запускаются')
+    set_services('start', journal)
+    if not wait_ready():
+        journal.line('службы не поднялись на восстановленной базе — возвращаю прежнюю')
+        set_services('stop', journal)
+        failed = 'zvonix_failed_' + stamp
+        if swap_back(journal, failed, replaced):
+            set_services('start', journal)
+            journal.line('прежняя база возвращена' + ('' if wait_ready() else ', но службы не отвечают: смотрите journalctl'))
+            journal.line('восстановленная база сохранена как ' + failed)
+        else:
+            journal.line('ВНИМАНИЕ: прежнюю базу вернуть не удалось; она сохранена как ' + replaced + ', вернуть: ALTER DATABASE')
+        return 1
+
+    # Хранится только последняя замещённая база: каждая — полная копия всех данных на диске.
+    for name in database_names('zvonix_'):
+        if name != replaced:
+            run_long(pg('dropdb', '--if-exists', name), 300)
+    journal.line('готово. Прежняя база сохранена как ' + replaced + ' до следующего восстановления')
+    return 0
+
+
+def run_restore(request, request_id, log_path, run):
+    journal = Journal(log_path)
+    try:
+        code = restore_database(request['target'], journal)
+    except Exception as error:  # noqa: BLE001 — сбой не должен оборвать службу; журнал расскажет
+        journal.line('восстановление прервано: ' + str(error))
+        code = 1
     write_backups()
     write_state(run, status='succeeded' if code == 0 else 'failed', finished_at=now(), exit_code=code)
 

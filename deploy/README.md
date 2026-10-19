@@ -176,7 +176,20 @@ full-upgrade` (блокировку dpkg в первые минуты держи
 «Скачать» (пароль и код второго фактора, файл выдаётся один раз). Ручные копии лежат в `/var/backups/zvonix/manual`
 (десять последних). Нет копии новее полутора суток — красная плашка в «Обзоре».
 
-**Восстановить** (останавливает площадку на время; делает человек, не выкладка):
+«Восстановить» (пароль, код второго фактора и слово «ВОССТАНОВИТЬ»): копия проверяется, снимается страховочная копия рабочей
+базы, копия разворачивается в **новую** базу, на ней идут миграции, службы останавливаются на несколько минут, базы
+переименовываются — рабочая уходит в `zvonix_replaced_<время>`, **не удаляясь**. Не поднялись службы — прежняя база
+возвращается сама. Вернуть вручную (если после восстановления выяснилось, что нужна была прежняя):
+
+```
+sudo systemctl stop zvonix-web zvonix-worker zvonix-api
+sudo -u postgres psql -c "ALTER DATABASE zvonix RENAME TO zvonix_after_restore"
+sudo -u postgres psql -c "ALTER DATABASE zvonix_replaced_<время> WITH ALLOW_CONNECTIONS true"
+sudo -u postgres psql -c "ALTER DATABASE zvonix_replaced_<время> RENAME TO zvonix"
+sudo systemctl start zvonix-api zvonix-worker zvonix-web
+```
+
+**Восстановить вручную** (останавливает площадку на время; делает человек, не выкладка):
 
 ```
 sudo systemctl stop zvonix-api zvonix-worker zvonix-web

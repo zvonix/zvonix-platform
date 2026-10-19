@@ -75,6 +75,27 @@ export class BackupsService {
   }
 
   /**
+   * Восстановление: заявка службе после повторного подтверждения. Службе нужен только идентификатор копии — пароль и
+   * слово остаются здесь. Что произойдёт, решает служба по ADR-0086: копия проверяется, снимается страховочная копия
+   * рабочей базы, рабочая база не стирается, а откладывается.
+   */
+  async requestRestore(
+    principal: Principal,
+    id: string,
+    confirmation: { password: string; code?: string | undefined },
+  ): Promise<QueuedRequest> {
+    await this.confirm(principal, confirmation);
+    const item = await this.known(id);
+    return this.updates.request(
+      { userId: principal.userId, role: principal.role, email: principal.email },
+      'backup-restore',
+      null,
+      undefined,
+      item.id,
+    );
+  }
+
+  /**
    * Файл выданной копии: только тому, кто её заказал, и только пока заявка выполнена. Удаляется сразу после
    * скачивания (вызывающий зовёт `discard`), а недокачанное служба убирает через полчаса.
    */

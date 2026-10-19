@@ -9,12 +9,14 @@
 # весить много); как их сохранять — deploy/README.md, «Копии и восстановление».
 set -euo pipefail
 
-# Вид копии: daily (по умолчанию, по таймеру) или manual (кнопка «Создать копию сейчас» в кабинете, ADR-0086).
+# Вид копии: daily (по умолчанию, по таймеру), manual (кнопка «Создать копию сейчас» в кабинете, ADR-0086) или
+# before-restore (страховочная копия перед восстановлением, ADR-0086).
 KIND="${1:-daily}"
 case "$KIND" in
   daily) KEEP_DAILY="${ZVONIX_KEEP_DAILY:-14}" ;;
   manual) KEEP_DAILY="${ZVONIX_KEEP_MANUAL:-10}" ;;
-  *) echo "Ошибка: вид копии — daily или manual" >&2; exit 1 ;;
+  before-restore) KEEP_DAILY="${ZVONIX_KEEP_BEFORE_RESTORE:-5}" ;;
+  *) echo "Ошибка: вид копии — daily, manual или before-restore" >&2; exit 1 ;;
 esac
 BACKUPS="/var/backups/zvonix/${KIND}"
 DATABASE="${ZVONIX_DATABASE:-zvonix}"
