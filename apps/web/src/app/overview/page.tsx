@@ -66,6 +66,11 @@ function Overview() {
     queryFn: () => request<{ total: number }>('/payments?status=pending&limit=1'),
     refetchInterval: live,
   });
+  const tickets = useQuery({
+    queryKey: ['overview', 'tickets'],
+    queryFn: () => request<{ total: number }>('/support/staff/tickets?status=open&limit=1'),
+    refetchInterval: live,
+  });
   const nodes = useQuery({
     queryKey: ['overview', 'nodes'],
     queryFn: () =>
@@ -98,12 +103,18 @@ function Overview() {
     <div className="flex max-w-[1100px] flex-col gap-5">
       <PlatformProblems />
 
-      <section aria-label="Требует внимания" className="grid gap-3 sm:grid-cols-3">
+      <section aria-label="Требует внимания" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Attention
           href="/applications"
           label="Заявки на рассмотрении"
           count={applications.data?.total}
           calm="нет новых"
+        />
+        <Attention
+          href="/support"
+          label="Обращения ждут ответа"
+          count={tickets.data?.total}
+          calm="все отвечены"
         />
         <Attention
           href="/payments"

@@ -158,14 +158,7 @@ function Backups() {
   }
   const { available, items, last_export: lastExport } = list.data;
 
-  if (!available) {
-    return (
-      <p className="max-w-[60ch] text-muted-foreground">
-        Служба копий на этом сервере ещё не отвечала. Она записывает список при каждом запуске, это
-        занимает до десяти минут после обновления.
-      </p>
-    );
-  }
+  if (!available) return <NoListing onRequested={refresh} />;
 
   const exportStale =
     lastExport === null || Date.now() - Date.parse(lastExport.at) > EXPORT_STALE_DAYS * DAY_MS;
@@ -527,6 +520,47 @@ function RestoreProgress({ id, onFinished }: { id: string; onFinished: () => voi
       <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-[13px]">
         {text}
       </pre>
+    </section>
+  );
+}
+
+/**
+ * Служба копий ещё не записала список: после обновления она подхватывает новый код по таймеру (до десяти минут). Кнопка
+ * не ждёт таймера: простая заявка будит службу сразу, и список появляется за несколько секунд.
+ */
+function NoListing({ onRequested }: { onRequested: () => void }) {
+  const ask = useMutation({
+    mutationFn: () => request('/updates/refresh', { method: 'POST', body: {} }),
+    onSuccess: () => {
+      onRequested();
+      // Служба просыпается по заявке и записывает список в конце прохода: пара повторных запросов вдогонку.
+      for (const delay of [3000, 6000, 10000]) setTimeout(onRequested, delay);
+    },
+  });
+  return (
+    <section className="flex max-w-[60ch] flex-col gap-3 rounded-lg border border-border bg-card p-4">
+      <p>
+        Служба копий на сервере ещё не записала список. После обновления она подхватывает новый код
+        сама, это занимает до десяти минут. Можно не ждать.
+      </p>
+      <div className="flex items-center gap-3">
+        <Button
+          type="button"
+          disabled={ask.isPending || ask.isSuccess}
+          onClick={() => {
+            ask.mutate();
+          }}
+        >
+          {ask.isSuccess
+            ? 'Запросили — список появится через несколько секунд'
+            : 'Запросить список сейчас'}
+        </Button>
+        {ask.isError && (
+          <span role="alert" className="text-crit">
+            {ask.error.message}
+          </span>
+        )}
+      </div>
     </section>
   );
 }

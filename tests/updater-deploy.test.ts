@@ -6,7 +6,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,4 +90,17 @@ describe('подтверждение «миграции меняют данны�
     const calls = runUpdater();
     expect(calls.flat()).not.toContain('--allow-risky');
   });
+});
+
+describe('после выкладки служба начинает работать новым кодом сразу', () => {
+  // На Windows (где идут проверки) exec не подменяет процесс, поэтому перезапуск самой себя там отключён.
+  it.skipIf(process.platform === 'win32')(
+    'перезапускается один раз: выкладка выполнена ровно раз, список копий записан, цикла нет',
+    () => {
+      enqueue({ action: 'deploy', tag: 'v1.2.3' });
+      const calls = runUpdater();
+      expect(calls).toEqual([['v1.2.3']]);
+      expect(existsSync(path.join(dir, 'exchange', 'backups.json'))).toBe(true);
+    },
+  );
 });
