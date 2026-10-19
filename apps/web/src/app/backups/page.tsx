@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
+import { waitForRun } from '@/lib/run-wait';
 
 /**
  * Резервные копии ([ADR-0086](../../../../../docs/adr/0086-rezervnye-kopii-v-kabinete.md)).
@@ -76,21 +77,6 @@ const ago = (value: string): string => {
   return `${String(days)} дн. назад`;
 };
 
-/** Ждёт, пока служба выполнит заявку; провал превращает в понятную ошибку с последней строкой журнала. */
-async function waitForRun(id: string, what: string): Promise<void> {
-  const deadline = Date.now() + 15 * 60_000;
-  for (;;) {
-    const chunk = await request<LogChunk>(`/updates/${id}/log?offset=0`);
-    if (chunk.run.status === 'succeeded') return;
-    if (chunk.run.status === 'failed') {
-      const last = chunk.text.trim().split('\n').pop() ?? '';
-      throw new Error(`${what} не удалось${last === '' ? '' : `: ${last}`}`);
-    }
-    if (Date.now() > deadline) throw new Error(`${what}: служба слишком долго не отвечает`);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
-}
-
 export default function BackupsPage() {
   return (
     <ConsoleShell title="Резервные копии" requireRole={['admin']}>
@@ -108,7 +94,7 @@ function Backups() {
   const list = useQuery({
     queryKey: ['backups'],
     queryFn: () => request<Listing>('/backups'),
-    refetchInterval: 15_000,
+    refetchInterval: 5_000,
   });
 
   const refresh = (): void => {
