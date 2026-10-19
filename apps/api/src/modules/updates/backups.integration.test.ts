@@ -280,3 +280,58 @@ describe('скачивание копии', () => {
     expect(audited).toContain('backup.downloaded');
   });
 });
+
+describe('восстановление из копии', () => {
+  const restore = (payload: Record<string, unknown>) =>
+    call('admin', 'POST', '/backups/restore', payload);
+
+  it('закрыто для всех, кроме администратора', async () => {
+    for (const role of ['support', 'client', 'partner'] as const) {
+      const response = await call(role, 'POST', '/backups/restore', {
+        id: DAILY,
+        password: TEST_PASSWORD,
+        phrase: 'ВОССТАНОВИТЬ',
+      });
+      expect(response.statusCode).toBe(403);
+    }
+  });
+
+  it('без слова «ВОССТАНОВИТЬ» заявки нет, пароль даже не проверяется', async () => {
+    await clearRequests();
+    expect((await restore({ id: DAILY, password: TEST_PASSWORD })).statusCode).toBe(400);
+    expect(
+      (await restore({ id: DAILY, password: TEST_PASSWORD, phrase: 'восстановить' })).statusCode,
+    ).toBe(400);
+    expect(await requests()).toEqual([]);
+  });
+
+  it('неверный пароль — отказ и заявки нет; неизвестная копия — «нет в списке»', async () => {
+    await clearRequests();
+    const wrong = await restore({ id: DAILY, password: 'не-тот-пароль', phrase: 'ВОССТАНОВИТЬ' });
+    expect(wrong.statusCode).toBe(401);
+    expect(await requests()).toEqual([]);
+
+    const unknown = await restore({
+      id: 'daily/нет-такой.dump',
+      password: TEST_PASSWORD,
+      phrase: 'ВОССТАНОВИТЬ',
+    });
+    expect(unknown.statusCode).toBe(404);
+    expect(await requests()).toEqual([]);
+  });
+
+  it('всё верно — заявка службе с копией, без пароля и слова', async () => {
+    await clearRequests();
+    const response = await restore({
+      id: DAILY,
+      password: TEST_PASSWORD,
+      phrase: 'ВОССТАНОВИТЬ',
+    });
+    expect(response.statusCode).toBe(202);
+    const queued = await requests();
+    expect(queued).toMatchObject([{ action: 'backup-restore', target: DAILY }]);
+    expect(JSON.stringify(queued)).not.toContain(TEST_PASSWORD);
+    expect(JSON.stringify(queued)).not.toContain('ВОССТАНОВИТЬ');
+    await clearRequests();
+  });
+});

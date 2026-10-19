@@ -11,7 +11,7 @@ import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { BackupListing } from './backup-status.service.js';
 import { BackupsService } from './backups.service.js';
-import { backupTargetSchema, sensitiveConfirmSchema } from './schemas.js';
+import { backupTargetSchema, restoreSchema, sensitiveConfirmSchema } from './schemas.js';
 import type { QueuedRequest } from './updates.service.js';
 
 const actorOf = (principal: Principal) => ({
@@ -58,6 +58,25 @@ export class BackupsController {
   ): Promise<{ request: QueuedRequest }> {
     return {
       request: await this.backups.requestExport(principal, body.id, {
+        password: body.password,
+        code: body.code,
+      }),
+    };
+  }
+
+  /**
+   * Восстановить рабочую базу из копии. Пароль, код второго фактора и слово «ВОССТАНОВИТЬ» обязательны. Площадка
+   * остановится на время восстановления; прежняя база сохраняется на диске до следующего восстановления.
+   */
+  @Roles('admin')
+  @HttpCode(202)
+  @Post('backups/restore')
+  async restore(
+    @CurrentUser() principal: Principal,
+    @Body(zodBody(restoreSchema)) body: z.infer<typeof restoreSchema>,
+  ): Promise<{ request: QueuedRequest }> {
+    return {
+      request: await this.backups.requestRestore(principal, body.id, {
         password: body.password,
         code: body.code,
       }),

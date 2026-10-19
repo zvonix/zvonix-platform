@@ -28,7 +28,8 @@ export type UpdateAction =
   | 'token-set'
   | 'backup-create'
   | 'backup-verify'
-  | 'backup-export';
+  | 'backup-export'
+  | 'backup-restore';
 
 /** Лёгкие действия: чтение без изменений, не мешают идущей выкладке. */
 const LIGHT_ACTIONS: readonly UpdateAction[] = ['refresh', 'cert-check', 'token-set'];
