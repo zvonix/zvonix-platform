@@ -188,7 +188,6 @@ full-upgrade` (блокировку dpkg в первые минуты держи
 ```
 sudo systemctl stop zvonix-web zvonix-worker zvonix-api
 sudo -u postgres psql -c "ALTER DATABASE zvonix RENAME TO zvonix_after_restore"
-sudo -u postgres psql -c "ALTER DATABASE zvonix_replaced_<время> WITH ALLOW_CONNECTIONS true"
 sudo -u postgres psql -c "ALTER DATABASE zvonix_replaced_<время> RENAME TO zvonix"
 sudo systemctl start zvonix-api zvonix-worker zvonix-web
 ```
