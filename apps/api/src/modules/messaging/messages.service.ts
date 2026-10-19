@@ -16,6 +16,7 @@ import {
   MESSAGE_MAX_LENGTH,
   Money,
   normalizeMsisdn,
+  rateLimited,
   validationFailed,
   type CommissionRule,
   type Id,
@@ -237,6 +238,9 @@ export class MessagesService {
     if (viaBot === undefined && (await this.bots.fallbackForbidden(clientId))) {
       throw validationFailed('Получатель не подписан на бота этого клиента');
     }
+    // Предел на номер — только для аккаунтов партнёров: бот пишет подписчику, который сам его позвал, и жалоб на
+    // аккаунт от этого не бывает.
+    if (viaBot === undefined) await this.assertRecipientLimit(clientId, recipient);
     const account =
       viaBot === undefined
         ? await this.picker.pick(new Date(), { sticky: { clientId, recipient } })
@@ -329,6 +333,34 @@ export class MessagesService {
   /** Сколько сообщений принято с `since` и сколько из них окончательно не отправлено — для тревоги. */
   health(since: Date): Promise<{ total: number; failed: number }> {
     return this.repository.healthSince(since);
+  }
+
+  /**
+   * Не больше N сообщений одному номеру от одного клиента за час и за сутки (настройки; 0 — без предела). Спам одному
+   * человеку — главная причина жалоб и блокировки аккаунта партнёра. Отказ до списания денег и постановки в очередь.
+   */
+  private async assertRecipientLimit(clientId: Id<'client'>, recipient: string): Promise<void> {
+    const { recipientLimitPerHour, recipientLimitPerDay } = await this.settings.messaging();
+    const now = Date.now();
+    for (const [limit, windowMs, label] of [
+      [recipientLimitPerHour, 3_600_000, 'час'],
+      [recipientLimitPerDay, 86_400_000, 'сутки'],
+    ] as const) {
+      if (limit <= 0) continue;
+      const sent = await this.repository.countToRecipient(
+        clientId,
+        recipient,
+        new Date(now - windowMs),
+      );
+      if (sent >= limit) {
+        throw rateLimited(
+          `Этому номеру уже отправлено ${String(sent)} сообщений за ${label}: больше ${String(limit)} в ${label} нельзя`,
+          {
+            details: { reason: 'recipient_limit', limit, window: label === 'час' ? 'hour' : 'day' },
+          },
+        );
+      }
+    }
   }
 
   /** Обзор для сотрудников: каждые из последних `days` суток (с нулями), плюс итог. */

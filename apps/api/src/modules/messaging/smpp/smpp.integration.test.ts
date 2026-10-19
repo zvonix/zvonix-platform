@@ -184,7 +184,16 @@ beforeAll(async () => {
   await resetDatabase();
   app = await startApi();
   adminToken = (await fx.user('admin')).token;
-  expect((await fx.put(adminToken, { 'messaging.enabled': true })).statusCode).toBe(200);
+  expect(
+    (
+      await fx.put(adminToken, {
+        'messaging.enabled': true,
+        // Тест шлёт один номер много раз (проверка частоты): предел на номер отключён.
+        'messages.recipient_limit_per_hour': 0,
+        'messages.recipient_limit_per_day': 0,
+      })
+    ).statusCode,
+  ).toBe(200);
   expect((await fx.put(adminToken, { 'messages.pace_seconds': 0 })).statusCode).toBe(200);
   port = await api().get(SmppServer).listen({ host: '127.0.0.1', port: 0 });
 });

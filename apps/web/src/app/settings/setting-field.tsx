@@ -60,6 +60,8 @@ const LABELS: Record<string, string> = {
   'messages.pace_seconds': 'Пауза между сообщениями аккаунта, секунд',
   'messages.duplicate_window_minutes':
     'Не принимать одинаковое сообщение одному номеру чаще, минут',
+  'messages.recipient_limit_per_hour': 'Сообщений одному номеру от клиента в час, не больше',
+  'messages.recipient_limit_per_day': 'Сообщений одному номеру от клиента в сутки, не больше',
   'messages.precheck_enabled': 'Проверять наличие MAX у номера перед отправкой',
   'messages.precheck_exists_days': 'Помнить «у номера есть MAX», суток',
   'messages.precheck_absent_days': 'Помнить «у номера нет MAX», суток',

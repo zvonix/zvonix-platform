@@ -66,6 +66,15 @@ beforeAll(async () => {
   expect((await put(adminToken, { 'messaging.enabled': true })).statusCode).toBe(200);
   // Паузу снимаем: сама пауза проверяется отдельным сценарием.
   expect((await put(adminToken, { 'messages.pace_seconds': 0 })).statusCode).toBe(200);
+  // Тесты шлют много сообщений одному номеру: предел на номер отключён (проверяется отдельно).
+  expect(
+    (
+      await put(adminToken, {
+        'messages.recipient_limit_per_hour': 0,
+        'messages.recipient_limit_per_day': 0,
+      })
+    ).statusCode,
+  ).toBe(200);
 });
 
 /**
@@ -137,6 +146,49 @@ describe('защита от повторов (messages.duplicate_window_minutes)
     } finally {
       await put(adminToken, { 'messages.duplicate_window_minutes': 10 });
     }
+  });
+});
+
+describe('предел сообщений одному номеру', () => {
+  it('сверх часового предела — 429 с пояснением, деньги не списываются; другой номер проходит', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    expect((await put(adminToken, { 'messages.recipient_limit_per_hour': 2 })).statusCode).toBe(
+      200,
+    );
+    try {
+      expect((await send(client.token, { to: '79005550301', text: 'Первое' })).statusCode).toBe(
+        201,
+      );
+      expect((await send(client.token, { to: '79005550301', text: 'Второе' })).statusCode).toBe(
+        201,
+      );
+      const before = await balance(client.token);
+      const third = await send(client.token, { to: '79005550301', text: 'Третье' });
+      expect(third.statusCode).toBe(429);
+      expect(third.json<{ error: { details?: { reason?: string } } }>().error.details?.reason).toBe(
+        'recipient_limit',
+      );
+      expect(await balance(client.token)).toBe(before);
+      expect((await send(client.token, { to: '79005550302', text: 'Другому' })).statusCode).toBe(
+        201,
+      );
+    } finally {
+      await put(adminToken, { 'messages.recipient_limit_per_hour': 0 });
+    }
+  });
+
+  it('суточный предел работает отдельно от часового; 0 — без предела', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    expect((await put(adminToken, { 'messages.recipient_limit_per_day': 1 })).statusCode).toBe(200);
+    try {
+      expect((await send(client.token, { to: '79005550303', text: 'Раз' })).statusCode).toBe(201);
+      expect((await send(client.token, { to: '79005550303', text: 'Два' })).statusCode).toBe(429);
+    } finally {
+      await put(adminToken, { 'messages.recipient_limit_per_day': 0 });
+    }
+    expect((await send(client.token, { to: '79005550303', text: 'Три' })).statusCode).toBe(201);
   });
 });
 
