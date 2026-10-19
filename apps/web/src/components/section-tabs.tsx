@@ -33,7 +33,11 @@ export function SectionTabs({
 
   return (
     <div className="flex flex-col gap-4">
-      <div role="tablist" aria-label="Раздел" className="flex gap-1 border-b border-border">
+      <div
+        role="tablist"
+        aria-label="Раздел"
+        className="flex gap-1 overflow-x-auto border-b border-border"
+      >
         {tabs.map((tab) => {
           const selected = tab === active;
           return (
@@ -47,7 +51,7 @@ export function SectionTabs({
               onClick={() => {
                 url.set({ [param]: tab === first ? '' : tab.id });
               }}
-              className={`-mb-px min-h-9 border-b-2 px-3 transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
+              className={`-mb-px min-h-9 shrink-0 whitespace-nowrap border-b-2 px-3 transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
                 selected
                   ? 'border-primary font-semibold text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground'

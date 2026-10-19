@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { ApiError, request } from '@/lib/api';
 import { money } from '@/lib/money';
-import { BOT_GREETING_MAX, BOT_INSERT_MAX } from '@zvonix/shared';
+import { BOT_GREETING_MAX } from '@zvonix/shared';
 
 interface Terms {
   readonly message_price: string;
@@ -32,8 +32,6 @@ interface BotState {
   readonly terms: Terms;
   readonly settings: {
     readonly greeting: string | null;
-    readonly text_before: string | null;
-    readonly text_after: string | null;
     readonly fallback_accounts: boolean;
   };
   readonly platform_terms: Terms;
@@ -94,12 +92,7 @@ export function BotConnection() {
     (candidate): candidate is ApiError => candidate instanceof ApiError,
   );
 
-  const saveSettings = async (patch: {
-    greeting: string;
-    textBefore: string;
-    textAfter: string;
-    fallbackAccounts: boolean;
-  }) => {
+  const saveSettings = async (patch: { greeting: string; fallbackAccounts: boolean }) => {
     store(
       await request<BotState>('/client/messages/bot/settings', { method: 'PATCH', body: patch }),
     );
@@ -173,7 +166,7 @@ export function BotConnection() {
             >
               {copied ? 'Скопировано' : 'Копировать ссылку'}
             </Button>
-            <FormDialog label="Тексты и порядок" title="Настройки бота" variant="outline" size="sm">
+            <FormDialog label="Настройки" title="Настройки бота" variant="outline" size="sm">
               <SettingsForm settings={data.settings} onSave={saveSettings} />
             </FormDialog>
             {connection.enabled ? (
@@ -357,33 +350,24 @@ function TextField({
 }
 
 /**
- * Окно настроек бота клиента: приветствие, вставки до и после каждого сообщения и порядок отправки. Пустое поле —
- * стандартный текст; `{служба}` в приветствии заменяется названием службы.
+ * Окно настроек бота клиента: приветствие и запасной путь через аккаунты. Тексты вокруг сообщений — во вкладке «Текст
+ * сообщения». Пустое поле — стандартный текст; `{служба}` в приветствии заменяется названием службы.
  */
 function SettingsForm({
   settings,
   onSave,
 }: {
   settings: BotState['settings'];
-  onSave: (patch: {
-    greeting: string;
-    textBefore: string;
-    textAfter: string;
-    fallbackAccounts: boolean;
-  }) => Promise<unknown>;
+  onSave: (patch: { greeting: string; fallbackAccounts: boolean }) => Promise<unknown>;
 }) {
   const [greeting, setGreeting] = useState(settings.greeting ?? '');
-  const [before, setBefore] = useState(settings.text_before ?? '');
-  const [after, setAfter] = useState(settings.text_after ?? '');
   const [fallback, setFallback] = useState(settings.fallback_accounts);
 
   return (
     <DialogForm
       submitLabel="Сохранить"
       canSubmit
-      onSubmit={() =>
-        onSave({ greeting, textBefore: before, textAfter: after, fallbackAccounts: fallback })
-      }
+      onSubmit={() => onSave({ greeting, fallbackAccounts: fallback })}
     >
       <TextField
         id="bot-greeting"
@@ -392,22 +376,6 @@ function SettingsForm({
         max={BOT_GREETING_MAX}
         placeholder="Стандартное. {служба} — название вашей службы"
         onChange={setGreeting}
-      />
-      <TextField
-        id="bot-before"
-        label="Текст перед каждым сообщением"
-        value={before}
-        max={BOT_INSERT_MAX}
-        placeholder="Например: Такси Волна:"
-        onChange={setBefore}
-      />
-      <TextField
-        id="bot-after"
-        label="Текст после каждого сообщения"
-        value={after}
-        max={BOT_INSERT_MAX}
-        placeholder="Например: Остановить уведомления — напишите СТОП"
-        onChange={setAfter}
       />
       <div className="flex items-start gap-3 sm:col-span-2">
         <Switch id="bot-fallback" checked={fallback} onCheckedChange={setFallback} />

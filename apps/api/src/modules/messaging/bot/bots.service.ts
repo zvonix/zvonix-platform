@@ -9,7 +9,6 @@ import {
   conflict,
   dependencyUnavailable,
   isDomainError,
-  MESSAGE_MAX_LENGTH,
   Money,
   normalizeMsisdn,
   notFound,
@@ -64,7 +63,13 @@ const TEXT = {
 export interface BotUpdate {
   readonly update_type?: string | undefined;
   readonly chat_id?: number | string | undefined;
-  readonly user?: { readonly user_id?: number | string | undefined } | undefined;
+  readonly user?:
+    | {
+        readonly user_id?: number | string | undefined;
+        readonly first_name?: string | undefined;
+        readonly name?: string | undefined;
+      }
+    | undefined;
   readonly payload?: string | undefined;
   readonly message?:
     | {
@@ -123,11 +128,9 @@ interface BotTerms {
   readonly monthly_fee: string;
 }
 
-/** Настройки бота клиента: свои тексты (пусто — стандартные) и запасной путь через аккаунты. */
+/** Настройки бота клиента: своё приветствие (пусто — стандартное) и запасной путь через аккаунты. */
 interface BotSettingsView {
   readonly greeting: string | null;
-  readonly text_before: string | null;
-  readonly text_after: string | null;
   readonly fallback_accounts: boolean;
 }
 
@@ -160,21 +163,6 @@ export interface BotClientView {
     readonly terms: BotTerms;
   };
   readonly subscribers: { readonly total: number; readonly with_phone: number };
-}
-
-/**
- * Текст сообщения бота с вставками клиента: до и после, каждая с новой строки. Не влезает в предел сообщения —
- * уходит без вставок: чем обрезать текст пассажиру, лучше отправить его целиком.
- */
-function composeText(
-  connection: { textBefore: string | null; textAfter: string | null } | undefined,
-  text: string,
-): string {
-  const parts = [connection?.textBefore, text, connection?.textAfter].filter(
-    (part): part is string => part !== null && part !== undefined && part !== '',
-  );
-  const composed = parts.join('\n');
-  return composed.length > MESSAGE_MAX_LENGTH ? text : composed;
 }
 
 /** Месяц по часам UTC, ГГГГ-ММ: за него берётся ежемесячная плата. */
@@ -226,6 +214,26 @@ export class BotsService {
 
   private linkOf(bot: BotRow, code: string): string {
     return `https://max.ru/${bot.username}?start=${code}`;
+  }
+
+  /**
+   * Что знает бот о получателе для шаблона сообщения (ADR-0087): имя, которое человек сам прислал, и ссылка клиента
+   * на бота, если бот подключён и работает.
+   */
+  async templateContext(
+    clientId: Id<'client'>,
+    recipient: string,
+  ): Promise<{ name: string | null; botLink: string | null }> {
+    const [name, connection] = await Promise.all([
+      this.repository.nameOf(clientId, recipient),
+      this.repository.findConnectionByClient(clientId),
+    ]);
+    if (connection?.enabled !== true) return { name, botLink: null };
+    const bot = await this.repository.findBot(connection.botId);
+    return {
+      name,
+      botLink: bot?.status === 'active' ? this.linkOf(bot, connection.code) : null,
+    };
   }
 
   // --- Бот площадки (администратор) ------------------------------------------------------------------
@@ -423,8 +431,6 @@ export class BotsService {
           : format(terms),
       settings: {
         greeting: connection?.greeting ?? null,
-        text_before: connection?.textBefore ?? null,
-        text_after: connection?.textAfter ?? null,
         fallback_accounts: connection?.fallbackAccounts ?? true,
       },
       platform_terms: format(platformTerms),
@@ -660,8 +666,6 @@ export class BotsService {
     clientId: Id<'client'>,
     patch: {
       greeting?: string | null | undefined;
-      textBefore?: string | null | undefined;
-      textAfter?: string | null | undefined;
       fallbackAccounts?: boolean | undefined;
     },
     now: Date = new Date(),
@@ -671,12 +675,8 @@ export class BotsService {
     const clean = (value: string | null | undefined): string | null | undefined =>
       value === undefined ? undefined : value === null || value.trim() === '' ? null : value.trim();
     const greeting = clean(patch.greeting);
-    const textBefore = clean(patch.textBefore);
-    const textAfter = clean(patch.textAfter);
     const after = await this.repository.setConnectionSettings(clientId, {
       ...(greeting === undefined ? {} : { greeting }),
-      ...(textBefore === undefined ? {} : { textBefore }),
-      ...(textAfter === undefined ? {} : { textAfter }),
       ...(patch.fallbackAccounts === undefined ? {} : { fallbackAccounts: patch.fallbackAccounts }),
     });
     await this.audit.record({
@@ -825,13 +825,8 @@ export class BotsService {
     if (bot?.status !== 'active') throw dependencyUnavailable('Бот сейчас недоступен');
     const subscriber = await this.repository.findReachable(clientId, bot.id, recipient);
     if (subscriber === undefined) throw new BotRecipientRejectedError('нет подписчика');
-    const connection = await this.repository.findConnectionByClient(clientId);
     try {
-      return await this.provider.send(
-        this.tokenOf(bot),
-        subscriber.chatId,
-        composeText(connection, text),
-      );
+      return await this.provider.send(this.tokenOf(bot), subscriber.chatId, text);
     } catch (cause) {
       if (cause instanceof BotRecipientRejectedError) {
         await this.repository.stopSubscriber(subscriber.id);
@@ -879,6 +874,7 @@ export class BotsService {
       clientId: connection.clientId,
       maxUserId: userId,
       chatId,
+      firstName: nameOf(update.user),
     });
     const client = await this.billing.clientWithBalance(connection.clientId);
     // Своё приветствие клиента: `{служба}` заменяется названием; пусто — стандартный текст.
@@ -920,6 +916,12 @@ export class BotsService {
     }
     await this.provider.send(token, chatId, TEXT.help);
   }
+}
+
+/** Имя из профиля MAX: короткое, без служебных символов — оно подставляется в приветствие (ADR-0087). */
+function nameOf(user: BotUpdate['user']): string | null {
+  const raw = (user?.first_name ?? user?.name ?? '').replace(/[\p{C}{}]/gu, '').trim();
+  return raw === '' ? null : raw.slice(0, 40);
 }
 
 /** Идентификаторы MAX приходят то числом, то строкой: храним строкой. */

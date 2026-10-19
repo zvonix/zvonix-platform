@@ -17,7 +17,6 @@ import {
 } from '@nestjs/common';
 import {
   BOT_GREETING_MAX,
-  BOT_INSERT_MAX,
   Money,
   parseId,
   permissionDenied,
@@ -47,12 +46,10 @@ const botText = (max: number) =>
     .nullable()
     .optional();
 
-/** Настройки бота клиента: тексты и запасной путь; что не названо — не меняется. */
+/** Настройки бота клиента: приветствие и запасной путь; что не названо — не меняется. */
 const botSettingsSchema = z
   .object({
     greeting: botText(BOT_GREETING_MAX),
-    textBefore: botText(BOT_INSERT_MAX),
-    textAfter: botText(BOT_INSERT_MAX),
     fallbackAccounts: z.boolean().optional(),
   })
   .refine((body) => Object.values(body).some((value) => value !== undefined), {

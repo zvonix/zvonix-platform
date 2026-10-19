@@ -102,6 +102,30 @@ export class MessagesRepository {
     return row;
   }
 
+  /**
+   * Уходило ли этому номеру от этого клиента что-то ещё (кроме самого сообщения): по нему шаблон решает, первое ли это
+   * сообщение человеку (ADR-0087). Считается ушедшим всё, что дошло до мессенджера.
+   */
+  async hasEarlierSent(
+    clientId: Id<'client'>,
+    recipient: string,
+    exceptId: MessageId,
+  ): Promise<boolean> {
+    const [row] = await this.database.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.clientId, clientId),
+          eq(messages.recipient, recipient),
+          ne(messages.id, exceptId),
+          inArray(messages.status, ['sent', 'delivered', 'read']),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
   async findByExternal(
     clientId: Id<'client'>,
     externalId: string,

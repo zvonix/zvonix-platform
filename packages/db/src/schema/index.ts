@@ -50,6 +50,7 @@ export { serverMetrics } from './server-metrics.js';
 export {
   botConnections,
   botSubscribers,
+  messageTemplates,
   messengerAccounts,
   partnerDistributions,
   messengerBots,

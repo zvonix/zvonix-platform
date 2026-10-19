@@ -19,3 +19,4 @@ export * from './messaging.js';
 export * from './payments.js';
 export * from './support.js';
 export * from './distribution.js';
+export * from './message-template.js';
