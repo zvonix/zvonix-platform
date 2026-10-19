@@ -178,7 +178,11 @@ function Updates() {
 
   // Что-то уже исполняется или ждёт службу (в том числе сама проверка): вторую заявку не принимаем.
   const working = running !== undefined || data?.queue.length !== 0;
-  const deploy = (tag: string) => act.mutateAsync({ path: '/updates/deploy', body: { tag } });
+  const deploy = (tag: string, allowRisky = false) =>
+    act.mutateAsync({
+      path: '/updates/deploy',
+      body: { tag, ...(allowRisky ? { allowRisky: true } : {}) },
+    });
 
   if (data === undefined) {
     return overview.error instanceof ApiError ? <ErrorNote error={overview.error} /> : null;
@@ -291,7 +295,7 @@ function Updates() {
               onPrepare={() =>
                 act.mutateAsync({ path: '/updates/prepare', body: { tag: newer[0]?.tag } })
               }
-              onInstall={() => deploy(newer[0]?.tag ?? '')}
+              onInstall={(allowRisky) => deploy(newer[0]?.tag ?? '', allowRisky)}
             />
           )}
         </section>
@@ -497,9 +501,16 @@ function NewVersion({
   prepared: Prepared | undefined;
   busy: boolean;
   onPrepare: () => Promise<unknown>;
-  onInstall: () => Promise<unknown>;
+  onInstall: (allowRisky: boolean) => Promise<unknown>;
 }) {
   const ready = prepared !== undefined && prepared.ok && prepared.fresh;
+  // Миграции выпуска меняют или удаляют данные: без галочки установка не идёт (ADR-0086, часть 3). То же держит и сам
+  // скрипт выкладки, так что кнопка в обход галочки только получит отказ в журнале.
+  const risky =
+    prepared?.checks.some(
+      (check) => check.name === 'Миграции выпуска' && check.status === 'warn',
+    ) === true;
+  const [understood, setUnderstood] = useState(false);
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
@@ -525,8 +536,8 @@ function NewVersion({
               confirmLabel="Установить"
               tone="neutral"
               variant="default"
-              disabled={busy}
-              onConfirm={onInstall}
+              disabled={busy || (risky && !understood)}
+              onConfirm={() => onInstall(risky && understood)}
             />
           ) : (
             <ConfirmAction
@@ -546,6 +557,24 @@ function NewVersion({
           )}
         </div>
       </div>
+      {ready && <Preflight />}
+      {ready && risky && (
+        <label className="flex items-start gap-2 rounded-md border border-warn bg-warn-soft p-2 text-warn">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={understood}
+            onChange={(event) => {
+              setUnderstood(event.target.checked);
+            }}
+          />
+          <span>
+            Понимаю: миграции этого выпуска меняют или удаляют данные в базе (см. строку «Миграции
+            выпуска» ниже). Копия базы перед ними снимется, но вернуть изменения можно будет только
+            из неё.
+          </span>
+        </label>
+      )}
       {prepared !== undefined && (
         <ul aria-label="Результат проверки" className="flex flex-col gap-1">
           {prepared.checks.map((check) => (
@@ -693,5 +722,46 @@ function RunConsole({ runId }: { runId: string }) {
           : text}
       </pre>
     </section>
+  );
+}
+
+interface PreflightData {
+  readonly backup: { newest_at: string | null; age_hours: number | null; verified: boolean | null };
+  readonly active_calls: number;
+  readonly pending_payments: number;
+}
+
+/**
+ * «Перед установкой»: что идёт на площадке прямо сейчас. Обновление останавливает службы на несколько секунд, поэтому
+ * лучше не попадать на заявку, которую подтверждают в эту минуту. Цифры — подсказка, решает человек.
+ */
+function Preflight() {
+  const data = useQuery({
+    queryKey: ['platform', 'preflight'],
+    queryFn: () => request<PreflightData>('/platform/preflight'),
+    refetchInterval: 10_000,
+  });
+  if (data.data === undefined) return null;
+  const { backup, active_calls: calls, pending_payments: payments } = data.data;
+  const stale = backup.age_hours === null || backup.age_hours > 36;
+  return (
+    <ul aria-label="Перед установкой" className="flex flex-col gap-1 rounded-md bg-muted p-2">
+      <li className={stale ? 'text-warn' : undefined}>
+        Последняя копия базы:{' '}
+        {backup.age_hours === null
+          ? 'нет'
+          : `${String(backup.age_hours)} ч назад${backup.verified === true ? ', проверена' : backup.verified === false ? ', НЕ годна' : ', не проверялась'}`}
+        {(stale || backup.verified === false) &&
+          ' — перед обновлением снимется своя, но лучше разобраться'}
+      </li>
+      <li className={calls > 0 ? 'text-warn' : undefined}>
+        Идут разговоры: {String(calls)}
+        {calls > 0 && ' — на узлах они продолжатся, но новые звонки на пару секунд могут не пройти'}
+      </li>
+      <li className={payments > 0 ? 'text-warn' : undefined}>
+        Заявки на пополнение ждут решения: {String(payments)}
+        {payments > 0 && ' — лучше разобрать до обновления'}
+      </li>
+    </ul>
   );
 }

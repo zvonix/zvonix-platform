@@ -33,7 +33,16 @@ export class UpdatesController {
     @CurrentUser() actor: Principal,
     @Body(zodBody(deployRequestSchema)) body: z.infer<typeof deployRequestSchema>,
   ): Promise<{ request: QueuedRequest }> {
-    return { request: await this.updates.request(actor, 'deploy', body.tag) };
+    return {
+      request: await this.updates.request(
+        actor,
+        'deploy',
+        body.tag,
+        undefined,
+        undefined,
+        body.allowRisky,
+      ),
+    };
   }
 
   /** Скачать выпуск и проверить его на копии базы, ничего не устанавливая (ADR-0074, этап 2). */

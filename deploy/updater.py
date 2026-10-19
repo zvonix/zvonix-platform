@@ -113,7 +113,9 @@ def read_request(path):
             return None
     return {'action': action, 'tag': tag if action in ('deploy', 'prepare') else None,
             'by': str(request.get('by', ''))[:200], 'at': str(request.get('at', ''))[:40],
-            'token': token, 'target': target}
+            'token': token, 'target': target,
+            # Подтверждение администратора: миграции выпуска меняют данные (ADR-0086, часть 3).
+            'allow_risky': action == 'deploy' and request.get('allow_risky') is True}
 
 
 def write_state(run, **fields):
@@ -181,7 +183,7 @@ def run_request(request_id, path, request):
         run_backup(request, request_id, log_path, run)
         return
 
-    arguments = {'deploy': [request['tag']], 'prepare': ['--prepare', request['tag']], 'rollback': ['--rollback']}
+    arguments = {'deploy': [request['tag']] + (['--allow-risky'] if request['allow_risky'] else []), 'prepare': ['--prepare', request['tag']], 'rollback': ['--rollback']}
     command = DEPLOY + arguments[request['action']]
     with open(log_path, 'wb', buffering=0) as log:
         os.chmod(log_path, 0o644)

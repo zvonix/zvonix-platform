@@ -4,6 +4,7 @@
 #   zvonix-deploy <метка>           скачать выпуск из GitHub Releases и перейти на него
 #   zvonix-deploy --archive <файл>  выложить архив, привезённый руками
 #   zvonix-deploy --rollback        вернуться на предыдущий выпуск
+#   zvonix-deploy --allow-risky …   то же, но разрешить миграции, которые меняют или удаляют данные (ADR-0086)
 #
 # Новый выпуск ставится рядом с работающим. Перед миграциями снимается копия базы
 # (/var/backups/zvonix, пять последних); без неё миграции не идут. Миграции применяются
@@ -22,6 +23,10 @@ BACKUPS=/var/backups/zvonix
 # Имя базы — то, что заводит deploy/server-setup.sh.
 DATABASE=zvonix
 SERVICES=(zvonix-api zvonix-worker zvonix-web)
+# Миграции, которые меняют или удаляют данные, без явного разрешения не идут (ADR-0086, часть 3).
+ALLOW_RISKY=0
+# Сколько секунд службы должны проработать после «готов», прежде чем выпуск признан поднявшимся.
+STABLE_SECONDS="${ZVONIX_STABLE_SECONDS:-8}"
 API_BASE=http://127.0.0.1:8000
 API_READY="${API_BASE}/health/ready"
 WEB_READY=http://127.0.0.1:3000/login
@@ -89,7 +94,16 @@ activate() {
   systemctl enable --now zvonix-backup.timer >/dev/null 2>&1 || echo "ВНИМАНИЕ: таймер копий не включён" >&2
   systemctl enable --now zvonix-updater.path zvonix-updater.timer >/dev/null 2>&1     || echo "ВНИМАНИЕ: обновление из кабинета не включено" >&2
   systemctl restart "${SERVICES[@]}"
-  wait_ready "$API_READY" && wait_ready "$WEB_READY"
+  wait_ready "$API_READY" && wait_ready "$WEB_READY" || return 1
+  # «Готов» не ловит службу, которая падает сразу после запуска (цикл перезапуска): ждём и проверяем, что все живы.
+  sleep "$STABLE_SECONDS"
+  local name
+  for name in "${SERVICES[@]}"; do
+    if ! systemctl is-active --quiet "$name"; then
+      echo "служба ${name} не работает через ${STABLE_SECONDS} с после запуска" >&2
+      return 1
+    fi
+  done
 }
 
 # Старые выпуски, кроме текущего и предыдущего: хранятся KEEP последних.
@@ -130,6 +144,11 @@ backup_database() {
   if [ ! -s "$file" ]; then
     rm -f -- "$file"
     die "копия базы пустая — миграции не применялись, работает прежний выпуск"
+  fi
+  # Оглавление читается — значит, файл целый; копия, которую нельзя восстановить, хуже её отсутствия (ADR-0086).
+  if [ "$(cd / && sudo -u postgres pg_restore --list "$file" | grep -c .)" -lt 10 ]; then
+    rm -f -- "$file"
+    die "копия базы не читается — миграции не применялись, работает прежний выпуск"
   fi
   echo "копия базы: ${file} ($(du -h "$file" | cut -f1))"
   while IFS= read -r old; do
@@ -362,6 +381,29 @@ check_daily_backup() {
   fi
 }
 
+# Что новые миграции выпуска сделают с данными (ADR-0086, часть 3). Код: 0 — только добавят, 3 — меняют или удаляют данные,
+# иной — разбор не удался. Новые — те, чьих файлов нет у работающего выпуска.
+migration_risk() {
+  local release="$1"
+  if [ ! -f "${release}/deploy/migration_scan.py" ]; then
+    echo "в выпуске нет разбора миграций"
+    return 1
+  fi
+  python3 "${release}/deploy/migration_scan.py" "${release}/packages/db/migrations" "${CURRENT}/packages/db/migrations" 2>&1
+}
+
+check_migrations() {
+  local output status=0
+  output="$(migration_risk "$1")" || status=$?
+  # «|» разделяет поля записи о проверке: в тексте операторов он не нужен.
+  output="$(printf '%s' "$output" | tr '|' '/')"
+  case "$status" in
+    0) check "Миграции выпуска" ok "$output" ;;
+    3) check "Миграции выпуска" warn "меняют или удаляют данные — нужно подтверждение: $(printf '%s' "$output" | tr '\n' ';' | cut -c1-700)" ;;
+    *) check "Миграции выпуска" fail "разбор миграций не удался: $(printf '%s' "$output" | tr '\n' ' ' | cut -c1-300)" ;;
+  esac
+}
+
 check_release_files() {
   local release="$1" tag="$2" first
   first="$(head -1 "${release}/RELEASE")"
@@ -445,6 +487,7 @@ run_checks() {
   check_release_files "$release" "$tag"
   # Репетиция имеет смысл, только если выпуск цел: иначе она упадёт по более глупой причине.
   if ! grep -q '|fail|' "$CHECKS"; then
+    check_migrations "$release"
     check_rehearsal "$release"
   fi
 
@@ -474,7 +517,7 @@ PY
 }
 
 install_release() {
-  local archive="$1" label="$2" prepared="${3:-}" release before
+  local archive="$1" label="$2" prepared="${3:-}" release before risk_output risk_status=0
 
   if [ -n "$prepared" ]; then
     step "Выпуск уже подготовлен и проверен: ${prepared}"
@@ -485,6 +528,14 @@ install_release() {
     run_checks "$release" "$label" \
       || die "проверка выпуска не пройдена — установка остановлена, работает прежний выпуск"
   fi
+
+  step "Разбор миграций"
+  risk_output="$(migration_risk "$release")" || risk_status=$?
+  printf '%s\n' "$risk_output"
+  if [ "$risk_status" -eq 3 ] && [ "$ALLOW_RISKY" != 1 ]; then
+    die "миграции выпуска меняют или удаляют данные — установка остановлена, работает прежний выпуск. Нужно подтверждение: в кабинете («Обновления» → проверка выпуска → галочка) или по SSH: zvonix-deploy --allow-risky <метка>"
+  fi
+  [ "$risk_status" -eq 0 ] || [ "$risk_status" -eq 3 ] || die "разбор миграций не удался — установка остановлена"
 
   step "Копия базы"
   backup_database "$label"
@@ -530,6 +581,17 @@ rollback() {
   update_local_node
   echo "ROLLBACK_OK ${target}"
 }
+
+# Ключ --allow-risky стоит где угодно среди аргументов; остальное разбирается ниже.
+ARGS=()
+for argument in "$@"; do
+  if [ "$argument" = "--allow-risky" ]; then
+    ALLOW_RISKY=1
+  else
+    ARGS+=("$argument")
+  fi
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
 
 case "${1:-}" in
   --prepare)

@@ -335,3 +335,54 @@ describe('восстановление из копии', () => {
     await clearRequests();
   });
 });
+
+describe('безопасное обновление (ADR-0086, часть 3)', () => {
+  const RELEASES = {
+    fetched_at: '2026-10-19T10:00:00+00:00',
+    releases: [{ tag: 'v9.9.9', name: 'v9.9.9', published_at: null, prerelease: false, notes: '' }],
+  };
+
+  it('подтверждение миграций уходит службе только тогда, когда администратор его дал', async () => {
+    await clearRequests();
+    await writeFile(path.join(root, 'releases.json'), JSON.stringify(RELEASES));
+
+    expect((await call('admin', 'POST', '/updates/deploy', { tag: 'v9.9.9' })).statusCode).toBe(
+      202,
+    );
+    const plain = (await requests())[0];
+    expect(plain).toMatchObject({ action: 'deploy', tag: 'v9.9.9' });
+    expect(plain).not.toHaveProperty('allow_risky');
+    await clearRequests();
+
+    const confirmed = await call('admin', 'POST', '/updates/deploy', {
+      tag: 'v9.9.9',
+      allowRisky: true,
+    });
+    expect(confirmed.statusCode).toBe(202);
+    expect((await requests())[0]).toMatchObject({ action: 'deploy', allow_risky: true });
+    await clearRequests();
+
+    // Не булево значение до службы не доходит.
+    expect(
+      (await call('admin', 'POST', '/updates/deploy', { tag: 'v9.9.9', allowRisky: 'yes' }))
+        .statusCode,
+    ).toBe(400);
+  });
+
+  it('«перед установкой»: только администратору, с цифрами о копии, разговорах и заявках', async () => {
+    for (const role of ['support', 'client', 'partner'] as const) {
+      expect((await call(role, 'GET', '/platform/preflight')).statusCode).toBe(403);
+    }
+    const response = await call('admin', 'GET', '/platform/preflight');
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{
+      backup: { newest_at: string | null; verified: boolean | null };
+      active_calls: number;
+      pending_payments: number;
+    }>();
+    // Список копий записан в этом файле выше: самая свежая — ежедневная, проверена.
+    expect(body.backup).toMatchObject({ newest_at: '2026-10-19T03:00:00+00:00', verified: true });
+    expect(body.active_calls).toBe(0);
+    expect(body.pending_payments).toBe(0);
+  });
+});

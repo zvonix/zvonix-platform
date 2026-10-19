@@ -301,6 +301,8 @@ export class UpdatesService {
     secret?: { readonly token: string },
     /** Копия для `backup-verify` и `backup-export`: служба проверит её по шаблону и по настоящему файлу. */
     target?: string,
+    /** Только у `deploy`: администратор подтвердил выпуск с миграциями, меняющими данные. */
+    allowRisky?: boolean,
   ): Promise<QueuedRequest> {
     if (!(await this.isAvailable())) {
       throw conflict('Обновление из кабинета на этой площадке не настроено');
@@ -338,6 +340,7 @@ export class UpdatesService {
         by: request.by,
         at: request.requested_at,
         ...(target === undefined ? {} : { target }),
+        ...(action === 'deploy' && allowRisky === true ? { allow_risky: true } : {}),
         ...(secret === undefined ? {} : { token: secret.token }),
       }),
       // Заявка с токеном читается только владельцем и службой от root; остальные — как прежде.
@@ -351,7 +354,12 @@ export class UpdatesService {
       entityId: id,
       actorUserId: actor.userId,
       actorRole: actor.role,
-      after: { action, tag: request.tag, ...(target === undefined ? {} : { target }) },
+      after: {
+        action,
+        tag: request.tag,
+        ...(target === undefined ? {} : { target }),
+        ...(action === 'deploy' && allowRisky === true ? { allow_risky: true } : {}),
+      },
     });
     return request;
   }
