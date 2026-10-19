@@ -3,6 +3,7 @@ import type { Logger } from '../../infra/tokens.js';
 import type { RedisService } from '../../infra/redis.js';
 import type { MailService } from '../mail/mail.service.js';
 import type { MessagesService } from '../messaging/messages.service.js';
+import type { BackupStatusService } from '../updates/backup-status.service.js';
 import { PROVIDER_OUTAGE_KEY } from '../messaging/provider-outage.js';
 import { PlatformHealthService, WORKER_HEARTBEAT_KEY } from './platform-health.service.js';
 
@@ -24,6 +25,8 @@ interface Setup {
   messages?: { total: number; failed: number };
   mailFails?: boolean;
   outage?: { at: string; reason: string; status?: number };
+  /** Время самой свежей копии; `null` — список есть, копий нет; не задано — служба список не писала. */
+  newestBackup?: string | null;
 }
 
 function build(setup: Setup = {}) {
@@ -59,7 +62,32 @@ function build(setup: Setup = {}) {
   const messages = {
     health: () => Promise.resolve(setup.messages ?? { total: 0, failed: 0 }),
   } as unknown as MessagesService;
-  return { service: new PlatformHealthService(redis, mail, messages, logger()), set };
+  const backups = {
+    listing: () =>
+      Promise.resolve(
+        setup.newestBackup === undefined
+          ? { available: false, generated_at: null, items: [], last_export: null }
+          : {
+              available: true,
+              generated_at: NOW.toISOString(),
+              items:
+                setup.newestBackup === null
+                  ? []
+                  : [
+                      {
+                        id: 'daily/x.dump',
+                        kind: 'daily',
+                        name: 'x.dump',
+                        size: 1,
+                        created_at: setup.newestBackup,
+                        check: null,
+                      },
+                    ],
+              last_export: null,
+            },
+      ),
+  } as unknown as BackupStatusService;
+  return { service: new PlatformHealthService(redis, mail, messages, backups, logger()), set };
 }
 
 describe('поломки площадки', () => {
@@ -121,6 +149,16 @@ describe('поломки площадки', () => {
     expect(
       await build({ outage: { at: minutesAgo(45), reason: 'network' } }).service.problems(NOW),
     ).toEqual([]);
+    expect(await build().service.problems(NOW)).toEqual([]);
+  });
+
+  it('копия старше полутора суток или копий нет — «Резервные копии»; служба не писала список — молчим', async () => {
+    const stale = await build({ newestBackup: minutesAgo(40 * 60) }).service.problems(NOW);
+    expect(stale.map((p) => p.name)).toEqual(['Резервные копии']);
+    expect(stale[0]?.reason).toContain('40 ч');
+    const none = await build({ newestBackup: null }).service.problems(NOW);
+    expect(none[0]?.reason).toContain('копий нет');
+    expect(await build({ newestBackup: minutesAgo(20 * 60) }).service.problems(NOW)).toEqual([]);
     expect(await build().service.problems(NOW)).toEqual([]);
   });
 

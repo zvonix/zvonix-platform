@@ -212,6 +212,48 @@ describe('вход со вторым фактором', () => {
   }, 120_000);
 });
 
+describe('повторное подтверждение опасного действия', () => {
+  async function confirm(account: Account, password: string, code?: string) {
+    const { IdentityService } = await import('./identity.service.js');
+    return api()
+      .get(IdentityService)
+      .confirmSensitive(
+        {
+          userId: account.id,
+          sessionId: 's',
+          role: 'client',
+          email: account.email,
+          fullName: 'Владелец',
+          secondFactorRequired: false,
+        } as never,
+        { password, code },
+      );
+  }
+
+  it('без второго фактора хватает пароля; неверный пароль — отказ', async () => {
+    const account = await createAccount();
+    await expect(confirm(account, TEST_PASSWORD)).resolves.toBeUndefined();
+    await expect(confirm(account, 'не-тот-пароль')).rejects.toThrow('Неверный пароль');
+  });
+
+  it('со вторым фактором нужен и пароль, и код; код работает один раз', async () => {
+    const account = await createAccount();
+    const secret = await enableTotp(account);
+
+    await expect(confirm(account, TEST_PASSWORD)).rejects.toThrow('Нужен код второго фактора');
+    await expect(confirm(account, TEST_PASSWORD, '000000')).rejects.toThrow('Код не подходит');
+    // Верный код при неверном пароле тоже не проходит.
+    await expect(confirm(account, 'не-тот-пароль', codeForStep(secret, 1))).rejects.toThrow(
+      'Неверный пароль',
+    );
+
+    const code = codeForStep(secret, 1);
+    await expect(confirm(account, TEST_PASSWORD, code)).resolves.toBeUndefined();
+    // Подсмотренный код второй раз не принимается (RFC 6238, 5.2).
+    await expect(confirm(account, TEST_PASSWORD, code)).rejects.toThrow('Код не подходит');
+  }, 120_000);
+});
+
 describe('отключение второго фактора', () => {
   it('требует и пароль, и код', async () => {
     const account = await createAccount();

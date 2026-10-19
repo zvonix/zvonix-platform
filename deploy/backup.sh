@@ -9,9 +9,15 @@
 # весить много); как их сохранять — deploy/README.md, «Копии и восстановление».
 set -euo pipefail
 
-BACKUPS=/var/backups/zvonix/daily
+# Вид копии: daily (по умолчанию, по таймеру) или manual (кнопка «Создать копию сейчас» в кабинете, ADR-0086).
+KIND="${1:-daily}"
+case "$KIND" in
+  daily) KEEP_DAILY="${ZVONIX_KEEP_DAILY:-14}" ;;
+  manual) KEEP_DAILY="${ZVONIX_KEEP_MANUAL:-10}" ;;
+  *) echo "Ошибка: вид копии — daily или manual" >&2; exit 1 ;;
+esac
+BACKUPS="/var/backups/zvonix/${KIND}"
 DATABASE="${ZVONIX_DATABASE:-zvonix}"
-KEEP_DAILY="${ZVONIX_KEEP_DAILY:-14}"
 
 die() {
   echo "Ошибка: $*" >&2
@@ -22,7 +28,7 @@ die() {
 
 install -d -o postgres -g postgres -m 0700 /var/backups/zvonix "$BACKUPS"
 
-file="${BACKUPS}/daily-$(date +%Y%m%d-%H%M%S).dump"
+file="${BACKUPS}/${KIND}-$(date +%Y%m%d-%H%M%S).dump"
 # Из корня: у postgres нет прав на рабочий каталог root, и pg_dump ругался бы на него.
 (cd / && sudo -u postgres pg_dump --format=custom --file="$file" "$DATABASE") || {
   rm -f -- "$file"
@@ -75,7 +81,7 @@ fi
 while IFS= read -r old; do
   rm -f -- "$old"
   echo "удалена старая копия ${old}"
-done < <(find "$BACKUPS" -maxdepth 1 -type f -name 'daily-*.dump' -printf '%T@ %p\n' \
+done < <(find "$BACKUPS" -maxdepth 1 -type f -name "${KIND}-*.dump" -printf '%T@ %p\n' \
   | sort -rn | tail -n +$((KEEP_DAILY + 1)) | cut -d' ' -f2-)
 
 # Локальная копия снята и проверена, но отправка вне сервера не удалась: служба должна упасть, чтобы это увидели.

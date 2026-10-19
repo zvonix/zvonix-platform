@@ -11,6 +11,7 @@ import { isRedisReady, RedisService } from '../../infra/redis.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { MailService } from '../mail/mail.service.js';
 import { MessagesService } from '../messaging/messages.service.js';
+import { BackupStatusService } from '../updates/backup-status.service.js';
 import { readProviderOutage } from '../messaging/provider-outage.js';
 
 /** Ключ в Redis: когда воркер в последний раз подал признак жизни. */
@@ -26,6 +27,9 @@ const MAIL_STUCK_MS = 10 * 60_000;
 const MESSAGES_ENOUGH = 10;
 
 const HOUR_MS = 3_600_000;
+
+/** Суточная копия снимается раз в сутки; больше полутора суток тишины — копия не снимается (ADR-0086). */
+const BACKUP_STALE_MS = 36 * HOUR_MS;
 
 /** Сбой провайдера старше этого уже ничего не говорит о нынешнем состоянии: с тех пор никто к нему не обращался. */
 const PROVIDER_OUTAGE_FRESH_MS = 30 * 60_000;
@@ -45,6 +49,7 @@ export class PlatformHealthService {
     private readonly redis: RedisService,
     private readonly mail: MailService,
     private readonly messages: MessagesService,
+    private readonly backups: BackupStatusService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('platform-health');
@@ -64,6 +69,7 @@ export class PlatformHealthService {
       ['почта', () => this.mailProblem(now)],
       ['сообщения', () => this.messageProblem(now)],
       ['провайдер', () => this.providerProblem(now)],
+      ['копии', () => this.backupProblem(now)],
     ] as const;
     for (const [source, read] of sources) {
       try {
@@ -129,6 +135,27 @@ export class PlatformHealthService {
     return {
       name: 'Сервис сообщений',
       reason: `${how} (последний сбой ${outage.at.toISOString().slice(11, 16)} UTC): вход аккаунтов по QR и отправка могут не работать. Проверьте «Настройки площадки» → «Сообщения» → «Проверить ключ»`,
+    };
+  }
+
+  /**
+   * Резервная копия не снимается: самая свежая старше полутора суток. Пока служба ни разу не записала список
+   * (старая площадка, разработка), молчим: «нет данных» не значит «нет копий».
+   */
+  private async backupProblem(now: Date): Promise<PlatformProblem | undefined> {
+    const listing = await this.backups.listing();
+    if (!listing.available) return undefined;
+    const newest = listing.items.reduce<number>(
+      (latest, item) => Math.max(latest, Date.parse(item.created_at)),
+      0,
+    );
+    if (newest > 0 && now.getTime() - newest <= BACKUP_STALE_MS) return undefined;
+    return {
+      name: 'Резервные копии',
+      reason:
+        newest === 0
+          ? 'копий нет: база ничем не защищена. Откройте «Резервные копии» и создайте копию'
+          : `свежей копии нет уже ${String(Math.floor((now.getTime() - newest) / HOUR_MS))} ч: ежедневная копия не снимается. Откройте «Резервные копии»`,
     };
   }
 

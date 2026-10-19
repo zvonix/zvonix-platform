@@ -12,11 +12,14 @@
   runs/<id>/log        вывод выкладки построчно
   releases.json        список выпусков из GitHub (токен — только у root)
   certificate.json     состояние сертификата кабинета (ADR-0083): даты, имена, автопродление
+  backups.json         резервные копии, итог их проверки и последнее скачивание (ADR-0086)
+  exports/<id>.dump    копия, выданная для скачивания; API отдаёт и удаляет, служба убирает за полчаса
 """
 import json
 import os
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -39,7 +42,7 @@ KEEP_RUNS = 30
 TAG_PATTERN = re.compile(r'^v?[0-9A-Za-z][0-9A-Za-z._-]*$')
 ID_PATTERN = re.compile(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json')
 ACTIONS = ('deploy', 'prepare', 'rollback', 'refresh', 'cert-check', 'cert-issue', 'cert-auto-on', 'cert-auto-off',
-           'token-set')
+           'token-set', 'backup-create', 'backup-verify', 'backup-export')
 
 # Сертификат кабинета (ADR-0083). Имена берутся из файлов root, а не из заявки: заявка не называет
 # домен, поэтому выпустить сертификат на чужое имя через неё нельзя.
@@ -103,9 +106,14 @@ def read_request(path):
         token = request.get('token')
         if not (isinstance(token, str) and TOKEN_PATTERN.match(token)):
             return None
+    target = None
+    if action in ('backup-verify', 'backup-export'):
+        target = request.get('target')
+        if not (isinstance(target, str) and BACKUP_ID.match(target)):
+            return None
     return {'action': action, 'tag': tag if action in ('deploy', 'prepare') else None,
             'by': str(request.get('by', ''))[:200], 'at': str(request.get('at', ''))[:40],
-            'token': token}
+            'token': token, 'target': target}
 
 
 def write_state(run, **fields):
@@ -146,7 +154,7 @@ def run_request(request_id, path, request):
     os.makedirs(run_dir, mode=0o755, exist_ok=True)
     os.chmod(run_dir, 0o755)
     run = {'id': request_id, 'action': request['action'], 'tag': request['tag'], 'by': request['by'],
-           'requested_at': request['at'], 'status': 'running', 'started_at': now(),
+           'target': request['target'], 'requested_at': request['at'], 'status': 'running', 'started_at': now(),
            'finished_at': None, 'exit_code': None}
     write_state(run)
     # Заявка принята: после этого API её уже не отменит. Удаление — после записи состояния,
@@ -165,6 +173,9 @@ def run_request(request_id, path, request):
         return
     if request['action'] == 'token-set':
         run_token_set(request['token'], log_path, run)
+        return
+    if request['action'].startswith('backup-'):
+        run_backup(request, request_id, log_path, run)
         return
 
     arguments = {'deploy': [request['tag']], 'prepare': ['--prepare', request['tag']], 'rollback': ['--rollback']}
@@ -428,6 +439,225 @@ def run_certificate(action, log_path, run):
     write_state(run, status='succeeded' if code == 0 else 'failed', finished_at=now(), exit_code=code)
 
 
+# --- Резервные копии (ADR-0086) -------------------------------------------------------------------------------
+# Каталоги копий закрыты для всех, кроме postgres и root; API копии не читает, а просит службу. Идентификатор
+# копии — «вид/имя файла»; он проверяется по шаблону и по настоящему файлу в каталоге, а не склеивается в путь.
+BACKUP_ROOT = os.environ.get('ZVONIX_BACKUPS_DIR', '/var/backups/zvonix')
+BACKUP_ID = re.compile(r'^(daily|manual|update|before-restore)/([A-Za-z0-9][A-Za-z0-9._-]{0,120}\.dump)$')
+BACKUP_CMD = shlex.split(os.environ.get('ZVONIX_BACKUP_CMD', '/usr/local/sbin/zvonix-backup'))
+# Команды PostgreSQL выполняются от его владельца; в проверках префикс пустой, а команды подставные.
+PG_PREFIX = shlex.split(os.environ.get('ZVONIX_PG_PREFIX', 'sudo -u postgres'))
+PG_BIN_DIR = os.environ.get('ZVONIX_PG_BIN_DIR', '')
+VERIFY_DB = 'zvonix_verify'
+# Копия для скачивания кладётся в exports/ владельцем кабинета: API отдаёт файл и сам его удаляет.
+EXPORT_OWNER = os.environ.get('ZVONIX_EXPORT_OWNER', 'zvonix')
+EXPORT_TTL = 1800
+# Меньше стольких таблиц в «настоящей» копии быть не может: пустое оглавление — повреждённый файл.
+MIN_TABLES = 10
+backups_file = os.path.join(ROOT, 'backups.json')
+backup_checks_file = os.path.join(ROOT, 'backup-checks.json')
+last_export_file = os.path.join(ROOT, 'last-export.json')
+exports_dir = os.path.join(ROOT, 'exports')
+
+
+def backup_dir(kind):
+    return BACKUP_ROOT if kind == 'update' else os.path.join(BACKUP_ROOT, kind)
+
+
+def backup_path(backup_id):
+    """Путь копии по идентификатору или None: шаблон, настоящий файл, не ссылка."""
+    match = BACKUP_ID.match(backup_id or '')
+    if match is None:
+        return None
+    path = os.path.join(backup_dir(match.group(1)), match.group(2))
+    if os.path.islink(path) or not os.path.isfile(path):
+        return None
+    return path
+
+
+def list_backups():
+    """Копии по всем каталогам, свежие первыми: [{id, kind, name, size, created_at}]."""
+    items = []
+    for kind in ('daily', 'manual', 'update', 'before-restore'):
+        try:
+            names = os.listdir(backup_dir(kind))
+        except OSError:
+            continue
+        for name in names:
+            backup_id = kind + '/' + name
+            path = backup_path(backup_id)
+            if path is None:
+                continue
+            info = os.stat(path)
+            items.append({'id': backup_id, 'kind': kind, 'name': name, 'size': info.st_size,
+                          'created_at': datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat(timespec='seconds')})
+    items.sort(key=lambda item: item['created_at'], reverse=True)
+    return items
+
+
+def read_json_file(path):
+    try:
+        with open(path, encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_backups():
+    """backups.json для кабинета: копии, итог последней проверки каждой и последнее скачивание."""
+    checks = (read_json_file(backup_checks_file) or {}).get('checks', {})
+    items = list_backups()
+    for item in items:
+        check = checks.get(item['id'])
+        item['check'] = check if isinstance(check, dict) else None
+    write_atomic(backups_file, json.dumps({'generated_at': now(), 'items': items,
+                                           'last_export': read_json_file(last_export_file)}, ensure_ascii=False))
+
+
+def pg(name, *arguments):
+    """Команда PostgreSQL от его владельца; имя — из фиксированного набора, значения — только аргументами."""
+    program = os.path.join(PG_BIN_DIR, name) if PG_BIN_DIR else name
+    return PG_PREFIX + [program] + list(arguments)
+
+
+def run_long(command, timeout=3600):
+    """(код, вывод) долгой команды; нет команды или вышло время — (127, текст)."""
+    try:
+        done = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                              timeout=timeout, env={**os.environ, 'LC_ALL': 'C'})
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return 127, str(error)
+    return done.returncode, done.stdout.decode('utf-8', 'replace')
+
+
+def remember_check(backup_id, ok, detail):
+    checks = (read_json_file(backup_checks_file) or {}).get('checks', {})
+    checks[backup_id] = {'at': now(), 'ok': ok, 'detail': detail[:300]}
+    # Только существующие копии: запись о давно удалённой не должна копиться.
+    existing = {item['id'] for item in list_backups()}
+    write_atomic(backup_checks_file, json.dumps({'checks': {key: value for key, value in checks.items()
+                                                            if key in existing}}, ensure_ascii=False))
+
+
+def verify_backup(backup_id, lines):
+    """Копия разворачивается во временную базу и проверяется. Рабочая база не затрагивается. Возвращает код."""
+    path = backup_path(backup_id)
+    if path is None:
+        lines.append('копия не найдена')
+        return 1
+    ok, detail = False, ''
+    try:
+        code, output = run_long(pg('pg_restore', '--list', path), 600)
+        entries = [line for line in output.splitlines() if line.strip() and not line.startswith(';')]
+        if code != 0 or sum(1 for line in entries if re.search(r'\sTABLE\s+public\s', line)) < MIN_TABLES:
+            detail = 'оглавление копии не читается или в ней нет таблиц'
+            return 1
+        lines.append('оглавление читается')
+        run_long(pg('dropdb', '--if-exists', VERIFY_DB), 300)
+        code, output = run_long(pg('createdb', VERIFY_DB), 300)
+        if code != 0:
+            detail = 'временная база не создана: ' + output.strip()[-200:]
+            return 1
+        code, output = run_long(pg('pg_restore', '--no-owner', '--exit-on-error', '-d', VERIFY_DB, path))
+        if code != 0:
+            detail = 'копия не разворачивается: ' + output.strip()[-200:]
+            return 1
+        lines.append('копия развёрнута во временной базе')
+        code, output = run_long(pg('psql', '-d', VERIFY_DB, '-At', '-c',
+                                   "select count(*) from information_schema.tables where table_schema = 'public'"), 300)
+        tables = output.strip().splitlines()[-1] if code == 0 and output.strip() else '?'
+        counts = []
+        for table, name in (('users', 'пользователей'), ('clients', 'клиентов'), ('partners', 'партнёров'),
+                            ('payments', 'платежей')):
+            code, output = run_long(pg('psql', '-d', VERIFY_DB, '-At', '-c', 'select count(*) from ' + table), 300)
+            if code == 0 and output.strip():
+                counts.append(name + ' ' + output.strip().splitlines()[-1])
+        detail = 'таблиц ' + tables + (', ' + ', '.join(counts) if counts else '')
+        ok = True
+        return 0
+    finally:
+        # Временная база убирается всегда; рабочая от неё не зависит.
+        run_long(pg('dropdb', '--if-exists', VERIFY_DB), 300)
+        lines.append(('копия годна: ' if ok else 'копия не годна: ') + detail)
+        remember_check(backup_id, ok, detail)
+
+
+def export_backup(backup_id, request_id, by, lines):
+    """Копия для скачивания: файл в exports/ владельцем кабинета; API отдаёт его один раз и удаляет."""
+    path = backup_path(backup_id)
+    if path is None:
+        lines.append('копия не найдена')
+        return 1
+    os.makedirs(exports_dir, exist_ok=True)
+    # Каталог выдачи принадлежит владельцу кабинета: он сам удаляет скачанный файл.
+    if EXPORT_OWNER:
+        shutil.chown(exports_dir, user=EXPORT_OWNER)
+    os.chmod(exports_dir, 0o750)
+    try:
+        free = shutil.disk_usage(exports_dir).free
+    except OSError:
+        free = 0
+    size = os.path.getsize(path)
+    if free < size * 12 // 10 + 64 * 1024 * 1024:
+        lines.append('мало места на диске для выдачи копии')
+        return 1
+    target = os.path.join(exports_dir, request_id + '.dump')
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, 'wb') as out, open(path, 'rb') as source:
+            shutil.copyfileobj(source, out, 1024 * 1024)
+        if EXPORT_OWNER:
+            shutil.chown(target, user=EXPORT_OWNER)
+    except Exception:
+        try:
+            os.unlink(target)
+        except OSError:
+            pass
+        raise
+    write_atomic(last_export_file, json.dumps({'at': now(), 'id': backup_id, 'by': by}, ensure_ascii=False))
+    lines.append('копия подготовлена к скачиванию (' + str(size) + ' байт); файл будет удалён после скачивания')
+    return 0
+
+
+def purge_exports():
+    """Выданные, но не скачанные копии не лежат дольше получаса: в них вся база."""
+    try:
+        names = os.listdir(exports_dir)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(exports_dir, name)
+        try:
+            if time.time() - os.lstat(path).st_mtime > EXPORT_TTL:
+                os.unlink(path)
+        except OSError:
+            continue
+
+
+def run_backup(request, request_id, log_path, run):
+    """Заявки на копии: создать сейчас, проверить, выдать для скачивания."""
+    lines = []
+    action = request['action']
+    try:
+        if action == 'backup-create':
+            lines.append('$ zvonix-backup manual')
+            code, output = run_long(BACKUP_CMD + ['manual'], 3600)
+            lines.append(output.strip()[-3000:])
+        elif action == 'backup-verify':
+            code = verify_backup(request['target'], lines)
+        else:
+            code = export_backup(request['target'], request_id, request['by'], lines)
+    except Exception as error:  # noqa: BLE001 — сбой одной заявки не должен ронять службу
+        lines.append('не удалось: ' + str(error))
+        code = 1
+    with open(log_path, 'w', encoding='utf-8') as handle:
+        handle.write('\n'.join(line for line in lines if line) + '\n')
+    os.chmod(log_path, 0o644)
+    write_backups()
+    write_state(run, status='succeeded' if code == 0 else 'failed', finished_at=now(), exit_code=code)
+
+
 def prune_runs():
     try:
         names = sorted(os.listdir(runs_dir), key=lambda n: os.lstat(os.path.join(runs_dir, n)).st_mtime)
@@ -467,6 +697,13 @@ def main():
         cert_status()
     except Exception as error:  # noqa: BLE001 — сбой чтения сертификата не должен ронять выкладку
         print('состояние сертификата не записано: ' + str(error), file=sys.stderr)
+    # Список копий и выданные файлы — при каждом запуске (таймер раз в десять минут): суточная копия появляется в
+    # кабинете без заявки, а невзятая выдача не лежит дольше получаса.
+    try:
+        write_backups()
+        purge_exports()
+    except Exception as error:  # noqa: BLE001 — сбой чтения копий не должен ронять выкладку
+        print('список копий не записан: ' + str(error), file=sys.stderr)
     prune_runs()
 
 
