@@ -32,6 +32,7 @@ const SUBGROUPS: Record<string, string> = {
   'notifications.payment_decision_enabled': 'Клиенту',
   'notifications.partner_suspension_enabled': 'Партнёру',
   'notifications.alerts_enabled': 'Администраторам',
+  'notifications.support_staff_enabled': 'Администраторам',
   'messaging.enabled': 'Продукт',
   'messaging.provider_partner_url': 'Провайдер',
   'messaging.provider_partner_token': 'Провайдер',

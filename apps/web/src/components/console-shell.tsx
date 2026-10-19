@@ -14,6 +14,7 @@ import {
   HardDrive,
   Inbox,
   LayoutDashboard,
+  LifeBuoy,
   ListOrdered,
   MessageSquare,
   KeyRound,
@@ -111,6 +112,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/applications', label: 'Заявки', Icon: Inbox },
         { href: '/users', label: 'Учётные записи', Icon: Users },
+        { href: '/support', label: 'Обращения', Icon: LifeBuoy },
       ],
     },
     {
@@ -169,6 +171,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/applications', label: 'Заявки', Icon: Inbox },
         { href: '/users', label: 'Учётные записи', Icon: Users },
+        { href: '/support', label: 'Обращения', Icon: LifeBuoy },
       ],
     },
     {
@@ -226,6 +229,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/partner/reports', label: 'Сводка', Icon: BarChart3, tab: true },
         { href: '/partner/statement', label: 'Выписка', Icon: FileText },
         { href: '/partner/money', label: 'Деньги', Icon: Wallet, tab: true },
+        { href: '/partner/support', label: 'Поддержка', Icon: LifeBuoy },
       ],
     },
     {
@@ -267,6 +271,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/my/act', label: 'Акт', Icon: FileText },
         { href: '/my/money', label: 'Деньги', Icon: Wallet, tab: true },
         { href: '/my/integration', label: 'Интеграция', Icon: KeyRound },
+        { href: '/my/support', label: 'Поддержка', Icon: LifeBuoy },
       ],
     },
     {
@@ -417,6 +422,14 @@ export function ConsoleShell({
       {user.full_name}
       <div className="truncate">{user.email}</div>
       {SEES_RELEASE.includes(user.role) ? <ReleaseVersion /> : null}
+      {current === undefined ? null : (
+        <Link
+          href={current === 'partner' ? '/partner/support' : '/my/support'}
+          className="mt-2 block underline"
+        >
+          Нашли ошибку или нужна функция? Напишите в поддержку
+        </Link>
+      )}
     </>
   );
   // У партнёра на телефоне — нижние вкладки: он работает с телефона в поле.

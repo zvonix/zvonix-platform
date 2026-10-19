@@ -22,6 +22,7 @@ import { SettingsHttpModule } from './modules/settings/settings-http.module.js';
 import { SettingsModule } from './modules/settings/settings.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { PaymentsModule } from './modules/payments/payments.module.js';
+import { SupportModule } from './modules/support/support.module.js';
 import { ServersModule } from './modules/servers/servers.module.js';
 import { SiteModule } from './modules/site/site.module.js';
 import { ReportsModule } from './modules/reports/reports.module.js';
@@ -51,6 +52,7 @@ import { TelephonyModule } from './modules/telephony/telephony.module.js';
     ReportsModule,
     NotificationsModule,
     PaymentsModule,
+    SupportModule,
     ServersModule,
     SiteModule,
     UpdatesModule,

@@ -96,6 +96,7 @@ describe('реестр фоновых задач', () => {
       'applications.auto-approve-partners',
       'notifications.low-balance',
       'notifications.alerts',
+      'support.close-resolved',
       'platform.heartbeat',
       'notifications.payment-decisions',
       'notifications.partner-suspension',

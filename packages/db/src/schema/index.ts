@@ -45,6 +45,7 @@ export { failureThresholds } from './quality.js';
 export { outboxMessages, authTokens } from './mail.js';
 export { applications } from './applications.js';
 export { payments } from './payments.js';
+export { supportTickets, supportTicketMessages } from './support.js';
 export { serverMetrics } from './server-metrics.js';
 export {
   botConnections,

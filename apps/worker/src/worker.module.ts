@@ -18,6 +18,7 @@ import {
   MessagingModule,
   NodesModule,
   NotificationsModule,
+  SupportModule,
   RecordingsModule,
   ServersModule,
   SettingsModule,
@@ -47,6 +48,7 @@ import { BackgroundTasks } from './tasks.js';
     ApplicationsModule,
     // Письмо клиенту о низком балансе (ADR-0060).
     NotificationsModule,
+    SupportModule,
     // Замеры нагрузки площадки и уборка их истории (ADR-0065).
     ServersModule,
   ],
