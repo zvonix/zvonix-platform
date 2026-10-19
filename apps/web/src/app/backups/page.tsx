@@ -21,11 +21,11 @@ import { waitForRun } from '@/lib/run-wait';
 /**
  * Резервные копии ([ADR-0086](../../../../../docs/adr/0086-rezervnye-kopii-v-kabinete.md)).
  *
- * Кабинет только просит: создание, проверка и выдача копии — заявки службе на сервере. Скачивание — после повторного
- * ввода пароля и кода второго фактора: в копии вся база.
+ * Кабинет только просит: создание, проверка, выдача и приём загруженной копии — заявки службе на сервере. Восстановление —
+ * после повторного ввода пароля, кода второго фактора и слова: оно заменяет рабочие данные.
  */
 
-type Kind = 'daily' | 'manual' | 'update' | 'before-restore';
+type Kind = 'daily' | 'manual' | 'update' | 'before-restore' | 'uploaded';
 
 interface Backup {
   readonly id: string;
@@ -59,6 +59,7 @@ const KIND_NAME: Record<Kind, string> = {
   manual: 'Вручную',
   update: 'Перед обновлением',
   'before-restore': 'Перед восстановлением',
+  uploaded: 'Загруженная',
 };
 
 const DAY_MS = 86_400_000;
@@ -89,6 +90,7 @@ function Backups() {
   const queryClient = useQueryClient();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | undefined>(undefined);
   const [busy, setBusy] = useState<string | undefined>(undefined);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [restoreRun, setRestoreRun] = useState<string | undefined>(undefined);
 
   const list = useQuery({
@@ -134,6 +136,35 @@ function Backups() {
     },
   });
 
+  /** Загрузка скачанной ранее копии (после переустановки сервера): файл целиком, потом проверка службой. */
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      setBusy('upload');
+      setMessage(undefined);
+      try {
+        const queued = await request<{ request: { id: string } }>('/storage/backups', {
+          method: 'PUT',
+          file,
+          timeoutMs: 600_000,
+        });
+        await waitForRun(queued.request.id, 'Загрузка копии');
+        setMessage({
+          ok: true,
+          text: 'Копия загружена и появилась в списке. Нажмите «Проверить», потом «Восстановить».',
+        });
+      } catch (error) {
+        setMessage({
+          ok: false,
+          text:
+            error instanceof ApiError || error instanceof Error ? error.message : 'Не получилось',
+        });
+      } finally {
+        setBusy(undefined);
+        refresh();
+      }
+    },
+  });
+
   if (list.isPending) return <p className="text-muted-foreground">Загружаем…</p>;
   if (list.error !== null) {
     return (
@@ -162,20 +193,44 @@ function Backups() {
               {lastExport === null ? 'ни разу' : ago(lastExport.at)}
             </span>
           </p>
-          <Button
-            type="button"
-            disabled={busy !== undefined}
-            onClick={() => {
-              act.mutate({
-                key: 'create',
-                path: '/backups/create',
-                what: 'Копию',
-                done: 'Копия снята.',
-              });
-            }}
-          >
-            {busy === 'create' ? 'Снимаем копию…' : 'Создать копию сейчас'}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInput}
+              type="file"
+              className="sr-only"
+              aria-label="Файл копии"
+              tabIndex={-1}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file !== undefined) upload.mutate(file);
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy !== undefined}
+              onClick={() => {
+                fileInput.current?.click();
+              }}
+            >
+              {busy === 'upload' ? 'Загружаем копию…' : 'Загрузить копию'}
+            </Button>
+            <Button
+              type="button"
+              disabled={busy !== undefined}
+              onClick={() => {
+                act.mutate({
+                  key: 'create',
+                  path: '/backups/create',
+                  what: 'Копию',
+                  done: 'Копия снята.',
+                });
+              }}
+            >
+              {busy === 'create' ? 'Снимаем копию…' : 'Создать копию сейчас'}
+            </Button>
+          </div>
         </div>
         {exportStale && (
           <p role="note" className="text-warn">
@@ -270,7 +325,7 @@ function Backups() {
   );
 }
 
-/** «Скачать»: пароль и код второго фактора, потом служба готовит файл, и браузер его забирает. */
+/** «Скачать»: служба готовит файл, и браузер его забирает. Файл отдаётся один раз. */
 function Download({
   backup,
   disabled,
@@ -280,9 +335,6 @@ function Download({
   disabled: boolean;
   onDone: () => void;
 }) {
-  const [password, setPassword] = useState('');
-  const [code, setCode] = useState('');
-
   return (
     <FormDialog
       label="Скачать"
@@ -294,14 +346,12 @@ function Download({
     >
       <DialogForm
         submitLabel="Подготовить и скачать"
-        canSubmit={password !== ''}
+        canSubmit
         onSubmit={async () => {
           const queued = await request<{ request: { id: string } }>('/backups/export', {
             method: 'POST',
-            body: { id: backup.id, password, ...(code.trim() === '' ? {} : { code: code.trim() }) },
+            body: { id: backup.id },
           });
-          setPassword('');
-          setCode('');
           await waitForRun(queued.request.id, 'Подготовить копию');
           // Файл отдаётся один раз и только заказавшему; сессия — в cookie, поэтому достаточно перейти по адресу.
           window.location.assign(`/api/backups/exports/${queued.request.id}`);
@@ -312,32 +362,6 @@ function Download({
           В копии вся база, включая данные людей. Сохраните файл в надёжном месте и не пересылайте
           его.
         </p>
-        <DialogField label="Ваш пароль" wide>
-          <Input
-            type="password"
-            autoComplete="current-password"
-            autoFocus
-            value={password}
-            onChange={(event) => {
-              setPassword(event.target.value);
-            }}
-          />
-        </DialogField>
-        <DialogField
-          label="Код второго фактора"
-          wide
-          hint="Шесть цифр из приложения. Если второй фактор не подключён — оставьте пустым."
-        >
-          <Input
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            value={code}
-            onChange={(event) => {
-              setCode(event.target.value);
-            }}
-          />
-        </DialogField>
       </DialogForm>
     </FormDialog>
   );

@@ -42,7 +42,7 @@ KEEP_RUNS = 30
 TAG_PATTERN = re.compile(r'^v?[0-9A-Za-z][0-9A-Za-z._-]*$')
 ID_PATTERN = re.compile(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.json')
 ACTIONS = ('deploy', 'prepare', 'rollback', 'refresh', 'cert-check', 'cert-issue', 'cert-auto-on', 'cert-auto-off',
-           'token-set', 'backup-create', 'backup-verify', 'backup-export', 'backup-restore')
+           'token-set', 'backup-create', 'backup-verify', 'backup-export', 'backup-restore', 'backup-import')
 
 # Сертификат кабинета (ADR-0083). Имена берутся из файлов root, а не из заявки: заявка не называет
 # домен, поэтому выпустить сертификат на чужое имя через неё нельзя.
@@ -110,6 +110,11 @@ def read_request(path):
     if action in ('backup-verify', 'backup-export', 'backup-restore'):
         target = request.get('target')
         if not (isinstance(target, str) and BACKUP_ID.match(target)):
+            return None
+    if action == 'backup-import':
+        # Идентификатор загруженного файла (uploads/<id>.dump); путь из заявки не берётся.
+        target = request.get('target')
+        if not (isinstance(target, str) and UPLOAD_ID.match(target)):
             return None
     return {'action': action, 'tag': tag if action in ('deploy', 'prepare') else None,
             'by': str(request.get('by', ''))[:200], 'at': str(request.get('at', ''))[:40],
@@ -448,7 +453,8 @@ def run_certificate(action, log_path, run):
 # Каталоги копий закрыты для всех, кроме postgres и root; API копии не читает, а просит службу. Идентификатор
 # копии — «вид/имя файла»; он проверяется по шаблону и по настоящему файлу в каталоге, а не склеивается в путь.
 BACKUP_ROOT = os.environ.get('ZVONIX_BACKUPS_DIR', '/var/backups/zvonix')
-BACKUP_ID = re.compile(r'^(daily|manual|update|before-restore)/([A-Za-z0-9][A-Za-z0-9._-]{0,120}\.dump)$')
+BACKUP_KINDS = ('daily', 'manual', 'update', 'before-restore', 'uploaded')
+BACKUP_ID = re.compile(r'^(daily|manual|update|before-restore|uploaded)/([A-Za-z0-9][A-Za-z0-9._-]{0,120}\.dump)$')
 BACKUP_CMD = shlex.split(os.environ.get('ZVONIX_BACKUP_CMD', '/usr/local/sbin/zvonix-backup'))
 # Команды PostgreSQL выполняются от его владельца; в проверках префикс пустой, а команды подставные.
 PG_PREFIX = shlex.split(os.environ.get('ZVONIX_PG_PREFIX', 'sudo -u postgres'))
@@ -466,6 +472,13 @@ backups_file = os.path.join(ROOT, 'backups.json')
 backup_checks_file = os.path.join(ROOT, 'backup-checks.json')
 last_export_file = os.path.join(ROOT, 'last-export.json')
 exports_dir = os.path.join(ROOT, 'exports')
+# Загруженные копии: файл кладёт API (администратор загружает скачанную копию, например после переустановки сервера),
+# служба проверяет его и переносит в каталог копий. Дольше часа загруженный, но не принятый файл не лежит.
+uploads_dir = os.path.join(ROOT, 'uploads')
+UPLOAD_ID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+UPLOAD_TTL = 3600
+# Владелец файлов в каталоге копий: pg_restore работает от него и должен читать загруженный файл.
+BACKUP_OWNER = os.environ.get('ZVONIX_BACKUP_OWNER', 'postgres')
 
 
 def backup_dir(kind):
@@ -486,7 +499,7 @@ def backup_path(backup_id):
 def list_backups():
     """Копии по всем каталогам, свежие первыми: [{id, kind, name, size, created_at}]."""
     items = []
-    for kind in ('daily', 'manual', 'update', 'before-restore'):
+    for kind in BACKUP_KINDS:
         try:
             names = os.listdir(backup_dir(kind))
         except OSError:
@@ -628,6 +641,68 @@ def export_backup(backup_id, request_id, by, lines):
     return 0
 
 
+def import_backup(upload_id, lines):
+    """Загруженный файл проверяется и становится копией вида `uploaded`. Возвращает код."""
+    source = os.path.join(uploads_dir, upload_id + '.dump')
+    if os.path.islink(source) or not os.path.isfile(source):
+        lines.append('загруженный файл не найден')
+        return 1
+    code, output = run_long(pg('pg_restore', '--list', source), 600)
+    entries = [line for line in output.splitlines() if line.strip() and not line.startswith(';')]
+    tables = sum(1 for line in entries if re.search(r'\sTABLE\s+public\s', line))
+    if code != 0 or tables < MIN_TABLES:
+        lines.append('это не копия Zvonix: файл не читается или в нём нет таблиц')
+        return 1
+    lines.append('оглавление читается, таблиц: ' + str(tables))
+    folder = backup_dir('uploaded')
+    os.makedirs(folder, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
+    name = 'uploaded-' + stamp + '.dump'
+    target = os.path.join(folder, name)
+    if os.path.exists(target):
+        lines.append('копия с таким временем уже есть, повторите через секунду')
+        return 1
+    try:
+        free = shutil.disk_usage(folder).free
+    except OSError:
+        free = 0
+    if free < os.path.getsize(source) + 256 * 1024 * 1024:
+        lines.append('мало места на диске для копии')
+        return 1
+    # Тот же диск — переименование; иначе копирование. Файл виден postgres: от его имени идёт pg_restore.
+    shutil.move(source, target)
+    os.chmod(target, 0o640)
+    if BACKUP_OWNER:
+        shutil.chown(folder, user=BACKUP_OWNER)
+        shutil.chown(target, user=BACKUP_OWNER)
+    os.chmod(folder, 0o750)
+    lines.append('копия принята: uploaded/' + name)
+    return 0
+
+
+def ensure_uploads_dir():
+    """Каталог загрузки принадлежит владельцу кабинета: API кладёт туда файл, служба его забирает."""
+    os.makedirs(uploads_dir, exist_ok=True)
+    if EXPORT_OWNER:
+        shutil.chown(uploads_dir, user=EXPORT_OWNER)
+    os.chmod(uploads_dir, 0o750)
+
+
+def purge_uploads():
+    """Загруженное и не принятое службой не лежит дольше часа: в файле вся база."""
+    try:
+        names = os.listdir(uploads_dir)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(uploads_dir, name)
+        try:
+            if time.time() - os.lstat(path).st_mtime > UPLOAD_TTL:
+                os.unlink(path)
+        except OSError:
+            continue
+
+
 def purge_exports():
     """Выданные, но не скачанные копии не лежат дольше получаса: в них вся база."""
     try:
@@ -656,6 +731,8 @@ def run_backup(request, request_id, log_path, run):
             code = verify_backup(request['target'], lines)
         elif action == 'backup-export':
             code = export_backup(request['target'], request_id, request['by'], lines)
+        elif action == 'backup-import':
+            code = import_backup(request['target'], lines)
         else:
             raise RuntimeError('неизвестное действие с копией')
     except Exception as error:  # noqa: BLE001 — сбой одной заявки не должен ронять службу
@@ -980,8 +1057,14 @@ def main():
     try:
         write_backups()
         purge_exports()
+        purge_uploads()
     except Exception as error:  # noqa: BLE001 — сбой чтения копий не должен ронять выкладку
         print('список копий не записан: ' + str(error), file=sys.stderr)
+    # Отдельно: нет владельца каталога или диска — это не повод терять список копий.
+    try:
+        ensure_uploads_dir()
+    except Exception as error:  # noqa: BLE001
+        print('каталог загрузки копий не подготовлен: ' + str(error), file=sys.stderr)
     prune_runs()
 
 

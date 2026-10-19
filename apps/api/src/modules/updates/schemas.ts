@@ -29,7 +29,7 @@ export const githubTokenSchema = z.object({
 });
 
 /** Повторное подтверждение перед опасным действием над копией (ADR-0086): пароль и, если подключён, код. */
-export const sensitiveConfirmSchema = z.object({
+const sensitiveConfirmSchema = z.object({
   password: z.string().min(1, 'введите пароль').max(200),
   code: z
     .string()

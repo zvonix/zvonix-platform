@@ -91,6 +91,8 @@ type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 interface RequestOptions {
   readonly method?: Method;
   readonly body?: unknown;
+  /** Файл целиком в теле запроса (`application/octet-stream`) — загрузка копии; вместе с `body` не используется. */
+  readonly file?: Blob;
   readonly signal?: AbortSignal;
   /** Предел ожидания ответа вместе с телом, мс. По умолчанию — 20 с. */
   readonly timeoutMs?: number;
@@ -125,6 +127,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const headers: Record<string, string> = { 'X-Zvonix-Web': '1' };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+  if (options.file !== undefined) headers['Content-Type'] = 'application/octet-stream';
 
   const external = options.signal;
   external?.throwIfAborted();
@@ -153,6 +156,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
         // от того, как вызвали; здесь оно задано явно, чтобы не зависеть от версии.
         credentials: 'same-origin',
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+        ...(options.file === undefined ? {} : { body: options.file }),
         signal: controller.signal,
       });
     } catch (cause) {
