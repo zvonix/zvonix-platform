@@ -39,7 +39,7 @@ export const backupTargetSchema = z.object({
 });
 
 /** Восстановление: то же подтверждение плюс слово — случайное нажатие стирает рабочую базу. */
-export const RESTORE_PHRASE = 'ВОССТАНОВИТЬ';
+const RESTORE_PHRASE = 'ВОССТАНОВИТЬ';
 export const restoreSchema = backupTargetSchema.extend({
   ...sensitiveConfirmSchema.shape,
   phrase: z.literal(RESTORE_PHRASE, { error: `введите слово ${RESTORE_PHRASE}` }),
