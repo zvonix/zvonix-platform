@@ -952,6 +952,7 @@ def main():
     os.makedirs(runs_dir, mode=0o755, exist_ok=True)
     # Заявки — по одной, пока очередь не пуста: новая могла прийти, пока шла выкладка.
     done = set()
+    deployed = False
     while True:
         queue = [item for item in pending() if item[1] not in done]
         if not queue:
@@ -959,6 +960,13 @@ def main():
         _, request_id, path, request = queue[0]
         done.add(request_id)
         run_request(request_id, path, request)
+        deployed = deployed or request['action'] in ('deploy', 'rollback')
+    # Выкладка заменяет сам updater.py и скрипты рядом с ним, а эта служба всё ещё исполняет прежний код из памяти.
+    # Перезапуск самой себя — чтобы список копий, сертификат и прочее заработали новым кодом сразу, а не через десять
+    # минут по таймеру. Один раз: признак в окружении не даёт зациклиться. На Windows (проверки) exec не подменяет процесс.
+    if deployed and os.name != 'nt' and not os.environ.get('ZVONIX_UPDATER_REEXEC'):
+        os.environ['ZVONIX_UPDATER_REEXEC'] = '1'
+        os.execv(sys.executable, [sys.executable, os.path.abspath(sys.argv[0])])
     if releases_stale():
         refresh_releases(None)
     # Состояние сертификата обновляется при каждом запуске (таймер — раз в десять минут): даты

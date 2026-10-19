@@ -103,6 +103,30 @@ function AttentionDot({ href }: { href: string }) {
   );
 }
 
+/**
+ * Сколько обращений в поддержку ждёт ответа — число у пункта «Обращения». Запрос уходит только у этого пункта, а он
+ * виден лишь администратору и поддержке (ADR-0085).
+ */
+function TicketCount({ href }: { href: string }) {
+  const tickets = useQuery({
+    queryKey: ['support', 'waiting'],
+    queryFn: () => request<{ total: number }>('/support/staff/tickets?status=open&limit=1'),
+    enabled: href === '/support',
+    refetchInterval: 60_000,
+  });
+  if (href !== '/support' || !tickets.data || tickets.data.total === 0) return null;
+  return (
+    <span
+      role="img"
+      aria-label={`Ждут ответа: ${String(tickets.data.total)}`}
+      title="Ждут ответа"
+      className="num ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-crit px-1.5 text-[11px] font-semibold text-white"
+    >
+      {tickets.data.total}
+    </span>
+  );
+}
+
 export function isCurrent(pathname: string, href: string): boolean {
   const path = href.split('?')[0] ?? href;
   return pathname === path || pathname.startsWith(`${path}/`);
@@ -267,6 +291,7 @@ export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; foote
                         item.label
                       )}
                       <AttentionDot href={item.href} />
+                      <TicketCount href={item.href} />
                     </Link>
                   );
                 })}
@@ -346,6 +371,7 @@ function AllSections({
                     <item.Icon size={17} strokeWidth={2} aria-hidden />
                     {item.label}
                     <AttentionDot href={item.href} />
+                    <TicketCount href={item.href} />
                   </Link>
                 );
               })}
