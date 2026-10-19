@@ -453,12 +453,15 @@ BACKUP_CMD = shlex.split(os.environ.get('ZVONIX_BACKUP_CMD', '/usr/local/sbin/zv
 # Команды PostgreSQL выполняются от его владельца; в проверках префикс пустой, а команды подставные.
 PG_PREFIX = shlex.split(os.environ.get('ZVONIX_PG_PREFIX', 'sudo -u postgres'))
 PG_BIN_DIR = os.environ.get('ZVONIX_PG_BIN_DIR', '')
-VERIFY_DB = 'zvonix_verify'
+# Имя рабочей базы — из окружения только ради репетиции на настоящей PostgreSQL рядом с рабочей: на сервере оно всегда `zvonix`.
+LIVE_DB = os.environ.get('ZVONIX_LIVE_DB', 'zvonix')
+DB_OWNER = os.environ.get('ZVONIX_DB_OWNER', 'zvonix')
+VERIFY_DB = LIVE_DB + '_verify'
 # Копия для скачивания кладётся в exports/ владельцем кабинета: API отдаёт файл и сам его удаляет.
 EXPORT_OWNER = os.environ.get('ZVONIX_EXPORT_OWNER', 'zvonix')
 EXPORT_TTL = 1800
 # Меньше стольких таблиц в «настоящей» копии быть не может: пустое оглавление — повреждённый файл.
-MIN_TABLES = 10
+MIN_TABLES = int(os.environ.get('ZVONIX_MIN_TABLES', '10'))
 backups_file = os.path.join(ROOT, 'backups.json')
 backup_checks_file = os.path.join(ROOT, 'backup-checks.json')
 last_export_file = os.path.join(ROOT, 'last-export.json')
@@ -675,8 +678,7 @@ try:
 except ImportError:  # Windows: только проверки службы; на сервере (Linux) замок всегда есть
     fcntl = None
 
-LIVE_DB = 'zvonix'
-RESTORE_DB = 'zvonix_restore'
+RESTORE_DB = LIVE_DB + '_restore'
 SERVICES = shlex.split(os.environ.get('ZVONIX_SERVICES', 'zvonix-api zvonix-worker zvonix-web'))
 API_READY = os.environ.get('ZVONIX_API_READY', 'http://127.0.0.1:8000/health/ready')
 WEB_READY = os.environ.get('ZVONIX_WEB_READY', 'http://127.0.0.1:3000/login')
@@ -688,7 +690,7 @@ CURRENT_LINK = os.environ.get('ZVONIX_CURRENT', '/opt/zvonix/current')
 MIGRATE_CMD = shlex.split(os.environ.get('ZVONIX_MIGRATE_CMD', ''))
 # Проверка копии свежа сутки: старее — перед восстановлением она проверяется заново.
 CHECK_FRESH_SECONDS = 86400
-REPLACED_PATTERN = re.compile(r'^zvonix_(replaced|failed)_[0-9]{14}$')
+REPLACED_PATTERN = re.compile('^' + re.escape(LIVE_DB) + r'_(replaced|failed)_[0-9]{14}$')
 
 
 class Journal:
@@ -763,6 +765,8 @@ def swap_back(journal, current_name, saved_name):
     steps = [f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS false',
              f"select pg_terminate_backend(pid) from pg_stat_activity where datname = '{LIVE_DB}' and pid <> pg_backend_pid()",
              f'ALTER DATABASE {LIVE_DB} RENAME TO {current_name}',
+             # Отложенная база остаётся доступной: в неё можно заглянуть и забрать данные вручную.
+             f'ALTER DATABASE {current_name} WITH ALLOW_CONNECTIONS true',
              f'ALTER DATABASE {saved_name} RENAME TO {LIVE_DB}',
              f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS true']
     for statement in steps:
@@ -834,9 +838,9 @@ def restore_locked(target, path, journal):
 
     journal.line('3/7 Копия разворачивается в новую базу ' + RESTORE_DB)
     run_long(pg('dropdb', '--if-exists', RESTORE_DB), 300)
-    code, output = run_long(pg('createdb', '-O', 'zvonix', RESTORE_DB), 300)
+    code, output = run_long(pg('createdb', '-O', DB_OWNER, RESTORE_DB), 300)
     if code == 0:
-        code, output = run_long(pg('pg_restore', '--no-owner', '--role=zvonix', '--exit-on-error', '-d', RESTORE_DB, path))
+        code, output = run_long(pg('pg_restore', '--no-owner', '--role=' + DB_OWNER, '--exit-on-error', '-d', RESTORE_DB, path))
     if code != 0:
         journal.line('копия не развернулась: ' + output.strip()[-300:])
         run_long(pg('dropdb', '--if-exists', RESTORE_DB), 300)
@@ -856,7 +860,7 @@ def restore_locked(target, path, journal):
         return 1
 
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
-    replaced = 'zvonix_replaced_' + stamp
+    replaced = LIVE_DB + '_replaced_' + stamp
     journal.line('5/7 Службы останавливаются')
     if not set_services('stop', journal):
         journal.line('не все службы остановились — запускаю обратно, рабочая база не тронута')
@@ -888,13 +892,15 @@ def restore_locked(target, path, journal):
         journal.line('прежняя база возвращена, службы запущены')
         return 1
     psql_admin(f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS true')
+    # Прежняя база остаётся доступной: в неё можно заглянуть и забрать данные вручную.
+    psql_admin(f'ALTER DATABASE {replaced} WITH ALLOW_CONNECTIONS true')
 
     journal.line('7/7 Службы запускаются')
     set_services('start', journal)
     if not wait_ready():
         journal.line('службы не поднялись на восстановленной базе — возвращаю прежнюю')
         set_services('stop', journal)
-        failed = 'zvonix_failed_' + stamp
+        failed = LIVE_DB + '_failed_' + stamp
         if swap_back(journal, failed, replaced):
             set_services('start', journal)
             journal.line('прежняя база возвращена' + ('' if wait_ready() else ', но службы не отвечают: смотрите journalctl'))
@@ -904,7 +910,7 @@ def restore_locked(target, path, journal):
         return 1
 
     # Хранится только последняя замещённая база: каждая — полная копия всех данных на диске.
-    for name in database_names('zvonix_'):
+    for name in database_names(LIVE_DB + '_'):
         if name != replaced:
             run_long(pg('dropdb', '--if-exists', name), 300)
     journal.line('готово. Прежняя база сохранена как ' + replaced + ' до следующего восстановления')
