@@ -73,8 +73,7 @@ export default async function HowItWorksPage() {
           </li>
           <li className="rounded-lg border border-border bg-card p-4">
             <span className="font-medium text-foreground">После разговора</span> — списывается
-            стоимость по тарифу партнёра с наценкой площадки; повторная отправка итога вызова не
-            списывает второй раз.
+            стоимость по вашему тарифу; повторная отправка итога вызова не списывает второй раз.
           </li>
           <li className="rounded-lg border border-border bg-card p-4">
             <span className="font-medium text-foreground">Не дозвонились</span> — резерв снимается,

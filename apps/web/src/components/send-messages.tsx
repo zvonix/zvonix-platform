@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MESSAGE_MAX_LENGTH } from '@zvonix/shared';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,9 +36,9 @@ const PRICE_KEY = ['client', 'messages', 'price'] as const;
 /**
  * Отправка сообщений MAX и журнал отправленного — общая часть кабинета клиента и кабинета партнёра
  * ([ADR-0071](../../../../docs/adr/0071-soobscheniya-max.md)): деньги списываются со счёта **клиентского**
- * кабинета по цене, как у всех. `between` — то, что стоит между формой и журналом (у клиента — SMPP).
+ * кабинета по цене, как у всех.
  */
-export function SendMessages({ between }: { between?: ReactNode }) {
+export function SendMessages() {
   const queryClient = useQueryClient();
   const [to, setTo] = useState('');
   const [text, setText] = useState('');
@@ -151,8 +151,6 @@ export function SendMessages({ between }: { between?: ReactNode }) {
           </form>
         </section>
       )}
-
-      {between}
 
       {listError !== undefined && <ErrorNote error={listError} />}
 

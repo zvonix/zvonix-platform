@@ -160,9 +160,9 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
         />
         <Hint label="Как работают приоритеты">
           <p>
-            Цифра 1 — первыми, дальше 2, 3… Если у нескольких партнёров одна цифра, они используются
-            по очереди (сначала дешевле). Когда у партнёров с цифрой 1 всё занято или исчерпаны
-            лимиты, берутся партнёры с цифрой 2 и так далее.
+            Очерёдность 1 — первыми, дальше 2, 3… Если у нескольких партнёров одна очерёдность, они
+            используются по очереди (сначала дешевле). Когда у партнёров с очерёдностью 1 всё занято
+            или исчерпаны лимиты, берутся партнёры с очерёдностью 2 и так далее.
           </p>
           <p className="mt-2">
             Пусто — партнёр идёт после всех названных. «Не использовать» — не берётся совсем. Для
@@ -178,10 +178,10 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2">
           <span>Выбрано: {picked.size}</span>
           <Input
-            aria-label="Цифра для выбранных"
+            aria-label="Очерёдность для выбранных"
             className="num w-[80px]"
             inputMode="numeric"
-            placeholder="цифра"
+            placeholder="номер"
             value={bulk}
             onChange={(event) => {
               setBulk(event.target.value);
@@ -237,7 +237,7 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
               <TableHead className="h-8 text-right">
                 {product === 'calls' ? 'Цена за вызов' : 'Цена за сообщение'}
               </TableHead>
-              <TableHead className="h-8">Цифра</TableHead>
+              <TableHead className="h-8">Очерёдность</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -283,7 +283,7 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Input
-                        aria-label={`Цифра: ${offer.name}`}
+                        aria-label={`Очерёдность: ${offer.name}`}
                         className="num w-[70px]"
                         inputMode="numeric"
                         autoComplete="off"
@@ -316,7 +316,7 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
 
       {invalid.length > 0 && (
         <p className="text-warn">
-          Цифра — целое число от 1 до {CLIENT_PRIORITY_MAX}. Исправьте:{' '}
+          Очерёдность — целое число от 1 до {CLIENT_PRIORITY_MAX}. Исправьте:{' '}
           {invalid.map((offer) => offer.name).join(', ')}.
         </p>
       )}
