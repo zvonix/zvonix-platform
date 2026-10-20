@@ -37,6 +37,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await withDatabase(async (execute) => {
+    await execute(sql`delete from message_stops`);
     await execute(sql`delete from messages`);
     await execute(sql`delete from bot_subscribers`);
     await execute(sql`delete from bot_connections`);
@@ -219,10 +220,16 @@ describe('отправка ботом и деньги', () => {
     await dispatch();
     expect(await messageOf(client.token, id)).toMatchObject({
       status: 'failed',
-      failure_reason: 'recipient_not_in_max',
+      failure_reason: 'recipient_stopped',
     });
     expect(await fx.balance(client.token)).toBe('10');
     expect(simulatedBotSent.filter((item) => item.text === 'Машина подана')).toHaveLength(0);
+    // «СТОП» боту — отказ и для аккаунтов партнёров: номер в общем списке «не писать» (ADR-0088).
+    const listed = await withDatabase(async (execute) => {
+      const result = await execute(sql`select source from message_stops where phone = ${phone}`);
+      return result.rows as { source: string }[];
+    });
+    expect(listed).toEqual([{ source: 'bot' }]);
   });
 
   it('MAX отказал (чат закрыт) — возврат, подписчик помечен остановленным', async () => {

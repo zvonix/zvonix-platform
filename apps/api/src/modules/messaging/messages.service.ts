@@ -34,6 +34,7 @@ import type { MessengerAccountRow } from './messaging.repository.js';
 import { BotsService } from './bot/bots.service.js';
 import { BotRecipientRejectedError } from './bot/bot.provider.js';
 import { MessagingService } from './messaging.service.js';
+import { StopsService } from './stops.service.js';
 import { TemplatesService } from './templates.service.js';
 import { AccountPicker } from './account-picker.js';
 import { accountReadyAt } from './warmup.js';
@@ -103,6 +104,7 @@ export class MessagesService {
     private readonly redis: RedisService,
     private readonly bots: BotsService,
     private readonly templates: TemplatesService,
+    private readonly stops: StopsService,
     private readonly picker: AccountPicker,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_LOGGER) logger: Logger,
@@ -233,6 +235,13 @@ export class MessagesService {
         `Такое же сообщение этому номеру уже принято за последние ${String(duplicateWindowMinutes)} мин`,
         { details: { reason: 'duplicate_message', window_minutes: duplicateWindowMinutes } },
       );
+    }
+
+    // Человек ответил «СТОП»: ему не пишет никто, и денег это не стоит (ADR-0088).
+    if (await this.stops.isStopped(recipient)) {
+      throw conflict('Получатель отказался от сообщений', {
+        details: { reason: 'recipient_stopped' },
+      });
     }
 
     // Сначала бот: у номера есть подписчик этого клиента (ADR-0077). Иначе — аккаунты партнёров.
@@ -470,6 +479,10 @@ export class MessagesService {
 
   /** Сообщение бота: подписчику клиента, без пауз и лимитов аккаунтов (ADR-0077). Доставлено — как только MAX приняло. */
   private async dispatchBot(message: MessageRow, now: Date): Promise<boolean> {
+    if (await this.stops.isStopped(message.recipient)) {
+      await this.fail(message, 'recipient_stopped', now);
+      return false;
+    }
     if (message.botId === null) {
       await this.fail(message, 'platform', now);
       return false;
@@ -516,6 +529,11 @@ export class MessagesService {
     precheck: PrecheckMemory | null,
   ): Promise<boolean> {
     if (message.route === 'bot') return this.dispatchBot(message, now);
+    // «СТОП» мог прийти уже после приёма: на отправке проверяем ещё раз.
+    if (await this.stops.isStopped(message.recipient)) {
+      await this.fail(message, 'recipient_stopped', now);
+      return false;
+    }
     let account =
       message.accountId === null ? undefined : await this.repository.findAccount(message.accountId);
     if (account === undefined || account.status === 'retired') {

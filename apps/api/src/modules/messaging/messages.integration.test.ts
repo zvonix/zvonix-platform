@@ -83,6 +83,7 @@ beforeAll(async () => {
  */
 beforeEach(async () => {
   await withDatabase(async (execute) => {
+    await execute(sql`delete from message_stops`);
     await execute(sql`delete from messages`);
     await execute(sql`delete from messenger_accounts`);
     // Правила наценки, заведённые проверками; общее правило из миграции (2000 год) остаётся.
@@ -817,6 +818,63 @@ describe('не ушло — деньги возвращаются', () => {
     expect(await messageOf(client.token, id)).toMatchObject({
       status: 'failed',
       failure_reason: 'wait_expired',
+    });
+    expect(await balance(client.token)).toBe('10');
+  });
+});
+
+describe('«СТОП» (ADR-0088)', () => {
+  const stopFrom = (secret: string, phone: string, text = 'СТОП') =>
+    api().inject({
+      method: 'POST',
+      url: `/webhooks/messenger/${secret}`,
+      payload: {
+        typeWebhook: 'incomingMessageReceived',
+        instanceData: { idInstance: 1 },
+        senderData: { chatId: `${phone}@c.us` },
+        messageData: { typeMessage: 'textMessage', textMessageData: { textMessage: text } },
+      },
+    });
+
+  it('«СТОП» на аккаунт закрывает номер для всех клиентов; обычный ответ не закрывает; чужой адрес закрыт', async () => {
+    await partnerWithAccount('0.45');
+    const first = await clientWithMoney('10');
+    const second = await clientWithMoney('10');
+    const secret = api().get(MessagingService).webhookSecret();
+
+    expect((await stopFrom(secret, '79005550071', 'спасибо')).statusCode).toBe(200);
+    expect((await send(first.token, { to: '79005550071', text: 'раз' })).statusCode).toBe(201);
+
+    expect((await stopFrom(secret, '79005550071')).statusCode).toBe(200);
+    expect((await stopFrom(secret, '79005550071')).statusCode).toBe(200);
+    expect((await stopFrom('чужой-адрес', '79005550072')).statusCode).toBe(403);
+
+    for (const client of [first, second]) {
+      const refused = await send(client.token, { to: '79005550071', text: 'ещё' });
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json<{ error: { details: { reason: string } } }>().error.details.reason).toBe(
+        'recipient_stopped',
+      );
+    }
+    // Отказ до списания денег: у второго клиента остаток целый.
+    expect(await balance(second.token)).toBe('10');
+    expect((await send(second.token, { to: '79005550073', text: 'другому' })).statusCode).toBe(201);
+  });
+
+  it('«СТОП» пришёл после приёма: сообщение не уходит, деньги возвращаются', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const secret = api().get(MessagingService).webhookSecret();
+    const accepted = await send(client.token, { to: '79005550074', text: 'Привет' });
+    expect(accepted.statusCode).toBe(201);
+    const id = accepted.json<{ message: MessageView }>().message.id;
+
+    await stopFrom(secret, '79005550074');
+    await api().get(MessagesService).dispatchDue(new Date());
+
+    expect(await messageOf(client.token, id)).toMatchObject({
+      status: 'failed',
+      failure_reason: 'recipient_stopped',
     });
     expect(await balance(client.token)).toBe('10');
   });

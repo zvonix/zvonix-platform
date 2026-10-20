@@ -65,14 +65,20 @@ export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
 /**
  * Почему сообщение не отправлено — **наши** причины, не слова провайдера (ADR-0071):
  * `recipient_not_in_max` — у номера нет аккаунта MAX; `account_unavailable` — аккаунт вышел из MAX или
- * не отвечал; `wait_expired` — ждало отправки дольше допустимого; `platform` — наша сторона.
+ * не отвечал; `wait_expired` — ждало отправки дольше допустимого; `platform` — наша сторона;
+ * `recipient_stopped` — получатель ответил «СТОП» ([ADR-0088](../../../docs/adr/0088-otchety-i-zashchita-akkauntov-max.md)).
  */
 export const MESSAGE_FAILURE_REASONS = [
   'recipient_not_in_max',
   'account_unavailable',
   'wait_expired',
   'platform',
+  'recipient_stopped',
 ] as const;
+
+/** Откуда номер попал в список «не писать»: ответ на аккаунт партнёра или «СТОП» боту. */
+export const MESSAGE_STOP_SOURCES = ['account', 'bot'] as const;
+export type MessageStopSource = (typeof MESSAGE_STOP_SOURCES)[number];
 export type MessageFailureReason = (typeof MESSAGE_FAILURE_REASONS)[number];
 
 /** Сколько раз пробуем отправить при временных сбоях, прежде чем вернуть деньги. */

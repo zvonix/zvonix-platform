@@ -27,6 +27,7 @@ import { AuditService } from '../../audit/audit.service.js';
 import { BillingService } from '../../billing/billing.service.js';
 import type { Principal } from '../../identity/identity.service.js';
 import { SettingsService } from '../../settings/settings.service.js';
+import { StopsService } from '../stops.service.js';
 import {
   BOT_PROVIDER,
   BotRecipientRejectedError,
@@ -177,6 +178,7 @@ export class BotsService {
     private readonly settings: SettingsService,
     private readonly billing: BillingService,
     private readonly audit: AuditService,
+    private readonly stops: StopsService,
     @Inject(BOT_PROVIDER) private readonly provider: BotProvider,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
@@ -911,6 +913,10 @@ export class BotsService {
     const text = message?.body?.text?.trim().toLowerCase();
     if (text === 'стоп' || text === '/stop' || text === 'stop') {
       await this.repository.stopUser(bot.id, userId);
+      // «СТОП» боту — это отказ и для аккаунтов партнёров: номер, если он известен, закрывается для всех (ADR-0088).
+      for (const subscriber of await this.repository.subscribersOf(bot.id, userId)) {
+        if (subscriber.phone !== null) await this.stops.stop(subscriber.phone, 'bot');
+      }
       await this.provider.send(token, chatId, TEXT.stopped);
       return;
     }

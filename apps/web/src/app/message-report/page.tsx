@@ -26,6 +26,7 @@ interface Counts {
   readonly account_unavailable: number;
   readonly wait_expired: number;
   readonly platform: number;
+  readonly recipient_stopped: number;
   readonly settled: number;
   readonly settled_read: number;
 }
@@ -209,6 +210,7 @@ function reasons(row: Counts): string {
     [MESSAGE_FAILURE_NAME['recipient_not_in_max'] ?? '', row.not_in_max],
     [MESSAGE_FAILURE_NAME['account_unavailable'] ?? '', row.account_unavailable],
     [MESSAGE_FAILURE_NAME['wait_expired'] ?? '', row.wait_expired],
+    [MESSAGE_FAILURE_NAME['recipient_stopped'] ?? '', row.recipient_stopped],
     [MESSAGE_FAILURE_NAME['platform'] ?? '', row.platform],
   ];
   const shown = parts

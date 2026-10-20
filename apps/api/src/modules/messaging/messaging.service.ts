@@ -126,6 +126,7 @@ export class MessagingService {
   private async configureWebhook(row: MessengerAccountRow): Promise<void> {
     try {
       await this.provider.configureWebhook(this.refOf(row), this.webhookUrl());
+      await this.repository.markIncomingWebhook(row.id);
     } catch (cause) {
       this.logger.warn('Адрес статусов доставки у провайдера не задан', {
         account_id: row.id,
@@ -304,6 +305,8 @@ export class MessagingService {
   /** Сверяет аккаунт с провайдером и записывает состояние. Сбой провайдера состояние не меняет. */
   async refreshOne(account: MessengerAccountRow, now = new Date()): Promise<MessengerAccountRow> {
     const observed = await this.provider.state(this.refOf(account));
+    // Прежние аккаунты узнают о входящих («СТОП», ADR-0088) при первой же сверке, один раз.
+    if (!account.incomingWebhook) await this.configureWebhook(account);
     const next = statusAfter(account.status, observed.state) ?? account.status;
     const updated = await this.repository.setState(account.id, {
       status: next,

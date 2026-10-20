@@ -660,6 +660,7 @@ export const MESSAGE_FAILURE_NAME: Record<string, string> = {
   account_unavailable: 'Аккаунт отправки недоступен',
   wait_expired: 'Не ушло за отведённое время',
   platform: 'Сбой на нашей стороне',
+  recipient_stopped: 'Получатель ответил «СТОП»',
 };
 
 export function messageTone(status: string): string {
