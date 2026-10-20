@@ -38,7 +38,8 @@ type Action =
   | 'backup-create'
   | 'backup-verify'
   | 'backup-export'
-  | 'backup-restore';
+  | 'backup-restore'
+  | 'backup-import';
 type Status = 'running' | 'succeeded' | 'failed';
 
 interface Release {
@@ -106,6 +107,7 @@ const ACTION_NAME: Record<Action, string> = {
   'backup-verify': 'Проверка копии',
   'backup-export': 'Выдача копии',
   'backup-restore': 'Восстановление из копии',
+  'backup-import': 'Загрузка копии',
 };
 
 const STATUS_NAME: Record<Status, string> = {

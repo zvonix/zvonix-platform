@@ -600,7 +600,7 @@ def verify_backup(backup_id, lines):
     finally:
         # Временная база убирается всегда; рабочая от неё не зависит.
         run_long(pg('dropdb', '--if-exists', VERIFY_DB), 300)
-        lines.append(('копия годна: ' if ok else 'копия не годна: ') + detail)
+        lines.append(('копия проверена: ' if ok else 'копия не прошла проверку: ') + detail)
         remember_check(backup_id, ok, detail)
 
 
@@ -642,26 +642,20 @@ def export_backup(backup_id, request_id, by, lines):
 
 
 def import_backup(upload_id, lines):
-    """Загруженный файл проверяется и становится копией вида `uploaded`. Возвращает код."""
+    """Загруженный файл становится копией вида `uploaded`. Возвращает код.
+
+    Проверка идёт уже в каталоге копий и от владельца PostgreSQL: pg_restore работает от его имени и не прочитает файл из
+    каталога загрузки (там он принадлежит кабинету и закрыт для остальных). Не копия — файл удаляется.
+    """
     source = os.path.join(uploads_dir, upload_id + '.dump')
     if os.path.islink(source) or not os.path.isfile(source):
         lines.append('загруженный файл не найден')
         return 1
-    code, output = run_long(pg('pg_restore', '--list', source), 600)
-    entries = [line for line in output.splitlines() if line.strip() and not line.startswith(';')]
-    tables = sum(1 for line in entries if re.search(r'\sTABLE\s+public\s', line))
-    if code != 0 or tables < MIN_TABLES:
-        lines.append('это не копия Zvonix: файл не читается или в нём нет таблиц')
-        return 1
-    lines.append('оглавление читается, таблиц: ' + str(tables))
     folder = backup_dir('uploaded')
     os.makedirs(folder, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
-    name = 'uploaded-' + stamp + '.dump'
-    target = os.path.join(folder, name)
-    if os.path.exists(target):
-        lines.append('копия с таким временем уже есть, повторите через секунду')
-        return 1
+    if BACKUP_OWNER:
+        shutil.chown(folder, user=BACKUP_OWNER)
+    os.chmod(folder, 0o750)
     try:
         free = shutil.disk_usage(folder).free
     except OSError:
@@ -669,13 +663,30 @@ def import_backup(upload_id, lines):
     if free < os.path.getsize(source) + 256 * 1024 * 1024:
         lines.append('мало места на диске для копии')
         return 1
-    # Тот же диск — переименование; иначе копирование. Файл виден postgres: от его имени идёт pg_restore.
-    shutil.move(source, target)
-    os.chmod(target, 0o640)
+    # Имя не оканчивается на `.dump`: пока файл не проверен, в списке копий его нет.
+    incoming = os.path.join(folder, 'incoming-' + upload_id + '.part')
+    shutil.move(source, incoming)
+    os.chmod(incoming, 0o640)
     if BACKUP_OWNER:
-        shutil.chown(folder, user=BACKUP_OWNER)
-        shutil.chown(target, user=BACKUP_OWNER)
-    os.chmod(folder, 0o750)
+        shutil.chown(incoming, user=BACKUP_OWNER)
+    code, output = run_long(pg('pg_restore', '--list', incoming), 600)
+    entries = [line for line in output.splitlines() if line.strip() and not line.startswith(';')]
+    tables = sum(1 for line in entries if re.search(r'\sTABLE\s+public\s', line))
+    if code != 0 or tables < MIN_TABLES:
+        os.unlink(incoming)
+        lines.append('это не копия Zvonix: файл не читается или в нём нет таблиц')
+        if code != 0 and output.strip():
+            lines.append(output.strip()[-300:])
+        return 1
+    lines.append('оглавление читается, таблиц: ' + str(tables))
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
+    name = 'uploaded-' + stamp + '.dump'
+    target = os.path.join(folder, name)
+    if os.path.exists(target):
+        os.unlink(incoming)
+        lines.append('копия с таким временем уже есть, повторите через секунду')
+        return 1
+    os.rename(incoming, target)
     lines.append('копия принята: uploaded/' + name)
     return 0
 
@@ -689,18 +700,21 @@ def ensure_uploads_dir():
 
 
 def purge_uploads():
-    """Загруженное и не принятое службой не лежит дольше часа: в файле вся база."""
-    try:
-        names = os.listdir(uploads_dir)
-    except OSError:
-        return
-    for name in names:
-        path = os.path.join(uploads_dir, name)
+    """Загруженное и не принятое службой не лежит дольше часа: в файле вся база. Недопроверенное (`incoming-*.part`) — тоже."""
+    for folder in (uploads_dir, backup_dir('uploaded')):
         try:
-            if time.time() - os.lstat(path).st_mtime > UPLOAD_TTL:
-                os.unlink(path)
+            names = os.listdir(folder)
         except OSError:
             continue
+        for name in names:
+            if folder != uploads_dir and not name.startswith('incoming-'):
+                continue
+            path = os.path.join(folder, name)
+            try:
+                if time.time() - os.lstat(path).st_mtime > UPLOAD_TTL:
+                    os.unlink(path)
+            except OSError:
+                continue
 
 
 def purge_exports():
@@ -903,7 +917,7 @@ def restore_locked(target, path, journal):
         for item in lines:
             journal.line(item)
         if code != 0:
-            journal.line('копия не годна — восстановление не начато, рабочая база не тронута')
+            journal.line('копия не прошла проверку — восстановление не начато, рабочая база не тронута')
             return 1
 
     journal.line('2/7 Страховочная копия рабочей базы («перед восстановлением»)')

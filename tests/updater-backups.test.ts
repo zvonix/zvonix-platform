@@ -235,6 +235,11 @@ describe('загруженная копия', () => {
     );
     // Ни одна команда не тронула рабочую базу: только чтение оглавления.
     expect(calls().filter((line) => !line.startsWith('pg_restore --list'))).toEqual([]);
+    // Оглавление читается уже из каталога копий (его читает postgres), а не из закрытого каталога загрузки.
+    const listed = calls().filter((line) => line.startsWith('pg_restore --list'));
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toContain('uploaded');
+    expect(listed[0]).not.toContain('uploads');
   });
 
   it('в файле мало таблиц — не копия: провал, в список не попадает', () => {
@@ -244,6 +249,11 @@ describe('загруженная копия', () => {
     runUpdater({ FAKE_FEW_TABLES: '1' });
     expect(state(id)).toMatchObject({ status: 'failed' });
     expect(listing().items.filter((item) => item.kind === 'uploaded')).toEqual([]);
+    // Негодный файл не остаётся нигде: ни в каталоге загрузки, ни в каталоге копий.
+    expect(existsSync(exchange('uploads', `${upload}.dump`))).toBe(false);
+    expect(existsSync(path.join(dir, 'backups', 'uploaded', `incoming-${upload}.part`))).toBe(
+      false,
+    );
   });
 
   it('такого файла нет — провал; чужой путь в заявке (не идентификатор) — заявка отбрасывается', () => {
