@@ -302,7 +302,7 @@ export class MessengerWebhookController {
     } else if (body.typeWebhook === 'stateInstanceChanged') {
       await this.messaging.refreshByInstance(String(instance));
     } else if (body.typeWebhook === 'incomingMessageReceived') {
-      await this.stops.handleIncoming(body);
+      await this.stops.handleIncoming(body, String(instance));
     }
     return {};
   }

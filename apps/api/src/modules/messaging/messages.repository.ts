@@ -719,6 +719,29 @@ export class MessagesRepository {
   }
 
   /**
+   * Чьё сообщение этот номер получил с аккаунта последним (не раньше `since`): по нему «СТОП» относится к клиенту, а не ко
+   * всем (ADR-0088). Аккаунт — по идентификатору инстанса у провайдера.
+   */
+  async lastClientSentTo(
+    instanceId: string,
+    recipient: string,
+    since: Date,
+  ): Promise<Id<'client'> | undefined> {
+    const result = await this.database.db.execute(sql`
+      select m.client_id as "clientId"
+        from messages m
+        join messenger_accounts a on a.id = m.account_id
+       where a.provider_instance_id = ${instanceId}
+         and m.recipient = ${recipient}
+         and m.route = 'account'
+         and m.status in ('sent', 'delivered', 'read')
+         and m.sent_at >= ${since}
+       order by m.sent_at desc
+       limit 1`);
+    return (result.rows[0] as { clientId: Id<'client'> } | undefined)?.clientId;
+  }
+
+  /**
    * Отчёт для сотрудников за окно: по клиентам и по аккаунтам. «Не прочитано» считается только у ушедших через аккаунты и
    * старше суток (`settledBefore`): у бота статуса «прочитано» нет, а свежее сообщение ещё не успели прочитать.
    */

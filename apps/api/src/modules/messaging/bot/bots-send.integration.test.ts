@@ -226,10 +226,14 @@ describe('отправка ботом и деньги', () => {
     expect(simulatedBotSent.filter((item) => item.text === 'Машина подана')).toHaveLength(0);
     // «СТОП» боту — отказ и для аккаунтов партнёров: номер в общем списке «не писать» (ADR-0088).
     const listed = await withDatabase(async (execute) => {
-      const result = await execute(sql`select source from message_stops where phone = ${phone}`);
-      return result.rows as { source: string }[];
+      const result = await execute(
+        sql`select source, client_id as "clientId" from message_stops where phone = ${phone}`,
+      );
+      return result.rows as { source: string; clientId: string | null }[];
     });
-    expect(listed).toEqual([{ source: 'bot' }]);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.source).toBe('bot');
+    expect(listed[0]?.clientId).not.toBeNull();
   });
 
   it('MAX отказал (чат закрыт) — возврат, подписчик помечен остановленным', async () => {

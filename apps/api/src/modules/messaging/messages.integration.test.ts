@@ -856,6 +856,104 @@ describe('не ушло — деньги возвращаются', () => {
 });
 
 describe('«СТОП» (ADR-0088)', () => {
+  const stopFromInstance = (instance: string, phone: string) =>
+    api().inject({
+      method: 'POST',
+      url: `/webhooks/messenger/${api().get(MessagingService).webhookSecret()}`,
+      payload: {
+        typeWebhook: 'incomingMessageReceived',
+        instanceData: { idInstance: instance },
+        senderData: { chatId: `${phone}@c.us` },
+        messageData: { typeMessage: 'textMessage', textMessageData: { textMessage: 'СТОП' } },
+      },
+    });
+
+  it('«СТОП» после сообщения клиента останавливает только его; другой клиент пишет; список и снятие запрета', async () => {
+    const partner = await partnerWithAccount('0.45');
+    const first = await clientWithMoney('10');
+    const second = await clientWithMoney('10');
+    await send(first.token, { to: '79005550091', text: 'от первого' });
+    await api().get(MessagesService).dispatchDue(new Date());
+
+    expect((await stopFromInstance(partner.instance, '79005550091')).statusCode).toBe(200);
+
+    const refused = await send(first.token, { to: '79005550091', text: 'ещё от первого' });
+    expect(refused.statusCode).toBe(409);
+    expect((await send(second.token, { to: '79005550091', text: 'от второго' })).statusCode).toBe(
+      201,
+    );
+
+    const listed = await api().inject({
+      method: 'GET',
+      url: '/messages/stops?phone=79005550091',
+      headers: bearer(adminToken),
+    });
+    expect(listed.statusCode).toBe(200);
+    const body = listed.json<{
+      total: number;
+      stops: { id: string; phone: string; source: string; client_name: string | null }[];
+    }>();
+    expect(body.total).toBe(1);
+    expect(body.stops[0]).toMatchObject({ phone: '+7 900 ***-**-91', source: 'account' });
+    expect(body.stops[0]?.client_name).toMatch(/^Такси /u);
+    expect(JSON.stringify(body)).not.toContain('79005550091');
+
+    const none = await api().inject({
+      method: 'GET',
+      url: '/messages/stops?phone=abc',
+      headers: bearer(adminToken),
+    });
+    expect(none.json<{ total: number }>().total).toBe(0);
+    expect(
+      (
+        await api().inject({
+          method: 'GET',
+          url: '/messages/stops',
+          headers: bearer(first.token),
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    const id = body.stops[0]?.id ?? '';
+    expect(
+      (
+        await api().inject({
+          method: 'DELETE',
+          url: `/messages/stops/${id}`,
+          headers: bearer(first.token),
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await api().inject({
+          method: 'DELETE',
+          url: `/messages/stops/${id}`,
+          headers: bearer(adminToken),
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await api().inject({
+          method: 'DELETE',
+          url: `/messages/stops/${id}`,
+          headers: bearer(adminToken),
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect((await send(first.token, { to: '79005550091', text: 'снова' })).statusCode).toBe(201);
+
+    const audited = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select before from audit_log where action = 'message_stop.removed'`,
+      );
+      return JSON.stringify(result.rows);
+    });
+    expect(audited).toContain('+7 900 ***-**-91');
+    expect(audited).not.toContain('79005550091');
+  });
+
   const stopFrom = (secret: string, phone: string, text = 'СТОП') =>
     api().inject({
       method: 'POST',
@@ -868,7 +966,7 @@ describe('«СТОП» (ADR-0088)', () => {
       },
     });
 
-  it('«СТОП» на аккаунт закрывает номер для всех клиентов; обычный ответ не закрывает; чужой адрес закрыт', async () => {
+  it('«СТОП» без истории переписки закрывает номер для всех клиентов; обычный ответ не закрывает; чужой адрес закрыт', async () => {
     await partnerWithAccount('0.45');
     const first = await clientWithMoney('10');
     const second = await clientWithMoney('10');

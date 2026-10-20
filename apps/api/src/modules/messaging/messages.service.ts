@@ -239,7 +239,7 @@ export class MessagesService {
     }
 
     // Человек ответил «СТОП»: ему не пишет никто, и денег это не стоит (ADR-0088).
-    if (await this.stops.isStopped(recipient)) {
+    if (await this.stops.isStopped(recipient, clientId)) {
       throw conflict('Получатель отказался от сообщений', {
         details: { reason: 'recipient_stopped' },
       });
@@ -480,7 +480,7 @@ export class MessagesService {
 
   /** Сообщение бота: подписчику клиента, без пауз и лимитов аккаунтов (ADR-0077). Доставлено — как только MAX приняло. */
   private async dispatchBot(message: MessageRow, now: Date): Promise<boolean> {
-    if (await this.stops.isStopped(message.recipient)) {
+    if (await this.stops.isStopped(message.recipient, message.clientId)) {
       await this.fail(message, 'recipient_stopped', now);
       return false;
     }
@@ -531,7 +531,7 @@ export class MessagesService {
   ): Promise<boolean> {
     if (message.route === 'bot') return this.dispatchBot(message, now);
     // «СТОП» мог прийти уже после приёма: на отправке проверяем ещё раз.
-    if (await this.stops.isStopped(message.recipient)) {
+    if (await this.stops.isStopped(message.recipient, message.clientId)) {
       await this.fail(message, 'recipient_stopped', now);
       return false;
     }
