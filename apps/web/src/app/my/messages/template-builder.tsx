@@ -14,6 +14,7 @@ import {
   TEMPLATE_TEXT_MAX,
   composeMessage,
   type TemplateBlock,
+  type TemplateVia,
   type TemplateWhen,
 } from '@zvonix/shared';
 
@@ -94,8 +95,15 @@ export function TemplateBuilder() {
 
   const blocks = rows.map(blockOf);
   const link = bot.data?.connection?.link ?? 'https://max.ru/ваш_бот?start=код';
-  const preview = (first: boolean): string =>
-    composeMessage(blocks, { body: SAMPLE_BODY, name: 'Иван', botLink: link, first });
+  // Через аккаунты имя человека неизвестно, поэтому приветствие там без него: показываем то, что действительно уйдёт.
+  const preview = (route: 'bot' | 'account', first: boolean): string =>
+    composeMessage(blocks, {
+      body: SAMPLE_BODY,
+      name: route === 'bot' ? 'Иван' : null,
+      botLink: link,
+      first,
+      route,
+    });
   const full = rows.length >= TEMPLATE_BLOCKS_MAX;
   const empty = rows.some(
     (row) => (row.kind === 'greeting' || row.kind === 'text') && (row.text ?? '').trim() === '',
@@ -103,7 +111,7 @@ export function TemplateBuilder() {
   const error = save.error instanceof ApiError ? save.error : undefined;
 
   return (
-    <div className="flex max-w-2xl flex-col gap-4">
+    <div className="flex max-w-4xl flex-col gap-4">
       <div className="flex items-center gap-1">
         <h2 className="font-semibold">Текст сообщения</h2>
         <Hint label="Как собирается сообщение">
@@ -113,8 +121,9 @@ export function TemplateBuilder() {
             иначе пропадает.
           </p>
           <p className="mt-2">
-            «Только первое» — блок идёт лишь в первом сообщении этому человеку. Ссылка на бота
-            пропускается, если бот не подключён.
+            «Только первое» — блок идёт лишь в первом сообщении этому человеку. «Где» — через бота,
+            через аккаунты партнёров или везде. Ссылка на бота пропускается, если бот не подключён;
+            имя человека известно только боту.
           </p>
         </Hint>
       </div>
@@ -156,6 +165,20 @@ export function TemplateBuilder() {
               >
                 <option value="always">Всегда</option>
                 <option value="first">Только первое</option>
+              </select>
+            )}
+            {row.kind !== 'body' && (
+              <select
+                aria-label={`Где: ${KIND_NAME[row.kind]}`}
+                value={row.via ?? 'all'}
+                onChange={(event) => {
+                  patch(row.key, { via: event.target.value as TemplateVia });
+                }}
+                className="h-9 rounded-md border border-input bg-transparent px-2"
+              >
+                <option value="all">Везде</option>
+                <option value="bot">Только бот</option>
+                <option value="account">Только аккаунты</option>
               </select>
             )}
             <div className="flex shrink-0 gap-1">
@@ -206,7 +229,7 @@ export function TemplateBuilder() {
           [
             ['Приветствие', { kind: 'greeting', text: TEMPLATE_GREETING_DEFAULT, when: 'always' }],
             ['Свой текст', { kind: 'text', text: '', when: 'always' }],
-            ['Ссылка на бота', { kind: 'bot_link', when: 'always' }],
+            ['Ссылка на бота', { kind: 'bot_link', when: 'always', via: 'account' }],
           ] as const
         ).map(([label, block]) => (
           <Button
@@ -226,16 +249,28 @@ export function TemplateBuilder() {
 
       <section aria-label="Как это выглядит" className="flex flex-col gap-2">
         <h3 className="font-semibold">Как это выглядит</h3>
-        {([true, false] as const).map((first) => (
-          <div key={String(first)} className="flex flex-col gap-1">
-            <span className="text-muted-foreground">
-              {first ? 'Первое сообщение человеку' : 'Следующие сообщения'}
-            </span>
-            <pre className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 font-sans">
-              {preview(first)}
-            </pre>
-          </div>
-        ))}
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(
+            [
+              ['bot', 'Через бота'],
+              ['account', 'Через аккаунты партнёров'],
+            ] as const
+          ).map(([route, title]) => (
+            <div key={route} className="flex flex-col gap-2">
+              <span className="font-medium">{title}</span>
+              {([true, false] as const).map((first) => (
+                <div key={String(first)} className="flex flex-col gap-1">
+                  <span className="text-muted-foreground">
+                    {first ? 'Первое сообщение человеку' : 'Следующие сообщения'}
+                  </span>
+                  <pre className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 font-sans">
+                    {preview(route, first)}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </section>
 
       {error !== undefined && <ErrorNote error={error} />}

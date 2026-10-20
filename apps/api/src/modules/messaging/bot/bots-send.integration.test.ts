@@ -622,6 +622,37 @@ describe('настройки бота клиента и шаблон сообщ�
     expect(simulatedBotSent.at(-1)?.text).toBe(`Здравствуйте, Иван!\nМашина у подъезда\n${link}`);
   });
 
+  it('«где»: блок «только аккаунты» в сообщение бота не попадает, «только бот» — попадает; неверное значение отвергается', async () => {
+    await connectPlatform();
+    const { client, phone } = await subscribed(557, 79, '79001234569', 'Пётр');
+    expect(
+      (
+        await putTemplate(client.token, [
+          { kind: 'body', when: 'always' },
+          { kind: 'text', text: 'только в боте', when: 'always', via: 'bot' },
+          { kind: 'text', text: 'только через аккаунты', when: 'always', via: 'account' },
+        ])
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await putTemplate(client.token, [
+          { kind: 'body', when: 'always' },
+          { kind: 'text', text: 'а', when: 'always', via: 'почта' },
+        ])
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (await putTemplate(client.token, [{ kind: 'body', when: 'always', via: 'bot' }])).statusCode,
+    ).toBe(400);
+
+    await sendTo(client.token, phone);
+    await api().get(MessagesService).dispatchDue(new Date());
+    const sent = simulatedBotSent.at(-1)?.text ?? '';
+    expect(sent).toContain('только в боте');
+    expect(sent).not.toContain('только через аккаунты');
+  });
+
   it('своё приветствие подставляет название службы; без него — стандартный текст', async () => {
     await connectPlatform();
     const client = await fx.clientWithMoney('5');

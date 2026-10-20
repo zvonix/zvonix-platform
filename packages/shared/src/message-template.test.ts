@@ -7,6 +7,7 @@ const ctx = {
   name: 'Иван',
   botLink: 'https://max.ru/b?start=x',
   first: true,
+  route: 'account' as const,
 };
 
 describe('сборка сообщения из шаблона', () => {
@@ -59,5 +60,20 @@ describe('сборка сообщения из шаблона', () => {
     const long = 'я'.repeat(3990);
     const blocks: TemplateBlock[] = [body, { kind: 'text', text: 'ы'.repeat(100), when: 'always' }];
     expect(composeMessage(blocks, { ...ctx, body: long })).toBe(long);
+  });
+
+  it('«где»: блок только для бота не попадает в сообщение через аккаунты, и наоборот; без «где» — везде', () => {
+    const blocks: TemplateBlock[] = [
+      body,
+      { kind: 'text', text: 'для бота', when: 'always', via: 'bot' },
+      { kind: 'bot_link', when: 'always', via: 'account' },
+      { kind: 'text', text: 'везде', when: 'always' },
+    ];
+    expect(composeMessage(blocks, ctx)).toBe(
+      'Ваша машина прибыла\nhttps://max.ru/b?start=x\nвезде',
+    );
+    expect(composeMessage(blocks, { ...ctx, route: 'bot' })).toBe(
+      'Ваша машина прибыла\nдля бота\nвезде',
+    );
   });
 });

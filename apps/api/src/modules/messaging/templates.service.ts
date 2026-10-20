@@ -42,6 +42,7 @@ export class TemplatesService {
     clientId: Id<'client'>;
     recipient: string;
     text: string;
+    route: 'bot' | 'account';
   }): Promise<string> {
     const blocks = await this.repository.find(message.clientId);
     if (blocks === undefined) return message.text;
@@ -60,6 +61,7 @@ export class TemplatesService {
       name: known.name,
       botLink: known.botLink,
       first,
+      route: message.route,
     });
   }
 }

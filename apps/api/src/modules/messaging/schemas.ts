@@ -5,6 +5,7 @@ import {
   TEMPLATE_BLOCKS_MAX,
   TEMPLATE_BLOCK_KINDS,
   TEMPLATE_TEXT_MAX,
+  TEMPLATE_VIA,
   TEMPLATE_WHEN,
 } from '@zvonix/shared';
 import { z } from 'zod';
@@ -166,6 +167,7 @@ const templateBlockSchema = z
       .max(TEMPLATE_TEXT_MAX, `не длиннее ${String(TEMPLATE_TEXT_MAX)} знаков`)
       .optional(),
     when: z.enum(TEMPLATE_WHEN),
+    via: z.enum(TEMPLATE_VIA).optional(),
   })
   .strict()
   .refine(
@@ -180,9 +182,12 @@ const templateBlockSchema = z
       message: 'У этого блока текста нет',
     },
   )
-  .refine((block) => block.kind !== 'body' || block.when === 'always', {
-    message: 'Текст сообщения идёт всегда',
-  });
+  .refine(
+    (block) => block.kind !== 'body' || (block.when === 'always' && (block.via ?? 'all') === 'all'),
+    {
+      message: 'Текст сообщения идёт всегда и везде',
+    },
+  );
 
 export const templateSchema = z.object({
   blocks: z
