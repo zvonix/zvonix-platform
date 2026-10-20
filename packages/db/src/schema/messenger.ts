@@ -168,6 +168,12 @@ export const messengerAccounts = pgTable(
     stopLine: boolean().notNull().default(true),
 
     /**
+     * «Рекомендованная работа» (ADR-0088): к лимитам тарифа добавляется профиль площадки (пауза, минута, час, сутки) — действует
+     * меньшее из двух. Значения профиля задаёт администратор и партнёру не показывает. По умолчанию включена.
+     */
+    recommended: boolean().notNull().default(true),
+
+    /**
      * Пауза здоровья ([ADR-0079](../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)): до этого
      * времени сообщения на аккаунт не идут. `healthSince` — с какого момента считать долю «нет MAX» после отправки.
      */

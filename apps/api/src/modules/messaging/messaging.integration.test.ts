@@ -178,6 +178,7 @@ describe('заведение аккаунта', () => {
       'paused_until',
       'phone',
       'price',
+      'recommended',
       'state_checked_at',
       'state_reason',
       'status',

@@ -44,6 +44,7 @@ export interface Account {
   readonly limit_per_day: number | null;
   readonly warmup_enabled: boolean;
   readonly stop_line: boolean;
+  readonly recommended: boolean;
   readonly warmup_day: number | null;
   readonly paused_until: string | null;
   readonly daily_limit_now: number | null;
@@ -136,6 +137,41 @@ export function StopLineSwitch({ account }: { account: Account }) {
         <p>
           К каждому сообщению добавляется строка «Чтобы отписаться, ответьте СТОП». Человек, который
           ответит так, больше не получит сообщений. Меньше жалоб — аккаунт реже блокируют.
+        </p>
+      </Hint>
+    </label>
+  );
+}
+
+/**
+ * «Рекомендованная работа»: аккаунт отправляет в безопасном для мессенджера темпе, который задала площадка (ADR-0088).
+ * Значения партнёру не показываются; поставить свои лимиты можно только ниже — в тарифе.
+ */
+export function RecommendedSwitch({ account }: { account: Account }) {
+  const queryClient = useQueryClient();
+  const change = useMutation({
+    mutationFn: (recommended: boolean) =>
+      request<unknown>(`/partner/messenger/accounts/${account.id}`, {
+        method: 'PATCH',
+        body: { recommended },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+  });
+  return (
+    <label className="inline-flex items-center gap-2 text-muted-foreground">
+      Рекомендованная работа
+      <Switch
+        aria-label={`Рекомендованная работа аккаунта «${account.label}»`}
+        checked={account.recommended}
+        disabled={change.isPending}
+        onCheckedChange={(recommended) => {
+          change.mutate(recommended);
+        }}
+      />
+      <Hint label="Что такое рекомендованная работа">
+        <p>
+          Аккаунт отправляет в темпе, который площадка считает безопасным: реже блокировки. Ваши
+          лимиты из тарифа остаются, действует меньший из двух. Значения темпа задаёт площадка.
         </p>
       </Hint>
     </label>

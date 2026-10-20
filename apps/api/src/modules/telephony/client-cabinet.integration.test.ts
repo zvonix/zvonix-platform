@@ -401,8 +401,9 @@ describe('сводки (ADR-0059)', () => {
       calls: Record<string, unknown>[];
     }>().calls;
     expect(own.find((call) => call['status'] === 'completed')?.['earned']).toBe('10');
-    // Клиентской цены и маржи в ответе партнёру нет (ADR-0014).
-    expect(JSON.stringify(own)).not.toMatch(/11\.5|margin|"client"/u);
+    // Клиентской цены и маржи в ответе партнёру нет (ADR-0014). Цена ищется значением в кавычках: голое «11.5» совпадало бы
+    // со временем вида «…:11.512Z» в каждом шестидесятом прогоне.
+    expect(JSON.stringify(own)).not.toMatch(/"11\.5"|margin|"client"/u);
   }, 120_000);
 
   it('клиенту закрыт разрез по партнёру и SIM, открыт по оператору', async () => {

@@ -38,7 +38,7 @@ import { MessagingService } from './messaging.service.js';
 import { StopsService } from './stops.service.js';
 import { TemplatesService } from './templates.service.js';
 import { AccountPicker } from './account-picker.js';
-import { accountReadyAt } from './warmup.js';
+import { accountReadyAt, withRecommended } from './warmup.js';
 import {
   MessagesRepository,
   type AccountLoad,
@@ -535,8 +535,10 @@ export class MessagesService {
       await this.fail(message, 'recipient_stopped', now);
       return false;
     }
+    const profile = (await this.settings.messaging()).recommended;
     let account =
       message.accountId === null ? undefined : await this.repository.findAccount(message.accountId);
+    if (account !== undefined) account = withRecommended(account, profile);
     if (account === undefined || account.status === 'retired') {
       await this.fail(message, 'account_unavailable', now);
       return false;

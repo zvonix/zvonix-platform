@@ -366,13 +366,18 @@ export class MessagingService {
   async updateOwn(
     actor: MessagingActor,
     id: string,
-    patch: { label?: string | undefined; stopLine?: boolean | undefined },
+    patch: {
+      label?: string | undefined;
+      stopLine?: boolean | undefined;
+      recommended?: boolean | undefined;
+    },
   ): Promise<MessengerAccountRow> {
     const { account } = await this.ownAccount(actor.userId, id);
 
     const updated = await this.repository.setOwnerFields(account.id, {
       ...(patch.label === undefined ? {} : { label: patch.label }),
       ...(patch.stopLine === undefined ? {} : { stopLine: patch.stopLine }),
+      ...(patch.recommended === undefined ? {} : { recommended: patch.recommended }),
     });
     if (updated === undefined) throw notFound('Аккаунт не найден');
     await this.audit.record({
@@ -381,8 +386,16 @@ export class MessagingService {
       entityId: account.id,
       actorUserId: actor.userId,
       actorRole: actor.role,
-      before: { label: account.label, stop_line: account.stopLine },
-      after: { label: updated.label, stop_line: updated.stopLine },
+      before: {
+        label: account.label,
+        stop_line: account.stopLine,
+        recommended: account.recommended,
+      },
+      after: {
+        label: updated.label,
+        stop_line: updated.stopLine,
+        recommended: updated.recommended,
+      },
     });
     return updated;
   }

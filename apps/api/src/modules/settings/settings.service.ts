@@ -177,6 +177,13 @@ export class SettingsService {
     readonly partnerUrl: string;
     readonly partnerToken: string;
     readonly paceSeconds: number;
+    /** Профиль «рекомендованной работы» аккаунта (ADR-0088); 0 — без ограничения. */
+    readonly recommended: {
+      readonly paceSeconds: number;
+      readonly perMinute: number;
+      readonly perHour: number;
+      readonly perDay: number;
+    };
     readonly duplicateWindowMinutes: number;
     readonly recipientLimitPerHour: number;
     readonly recipientLimitPerDay: number;
@@ -197,6 +204,12 @@ export class SettingsService {
       partnerUrl: this.text(values, 'messaging.provider_partner_url').replace(/\/+$/u, ''),
       partnerToken: this.text(values, 'messaging.provider_partner_token'),
       paceSeconds: this.number(values, 'messages.pace_seconds'),
+      recommended: {
+        paceSeconds: this.number(values, 'messages.recommended_pace_seconds'),
+        perMinute: this.number(values, 'messages.recommended_per_minute'),
+        perHour: this.number(values, 'messages.recommended_per_hour'),
+        perDay: this.number(values, 'messages.recommended_per_day'),
+      },
       duplicateWindowMinutes: this.number(values, 'messages.duplicate_window_minutes'),
       recipientLimitPerHour: this.number(values, 'messages.recipient_limit_per_hour'),
       recipientLimitPerDay: this.number(values, 'messages.recipient_limit_per_day'),

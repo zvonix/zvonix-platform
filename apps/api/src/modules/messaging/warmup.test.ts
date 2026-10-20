@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountLoad } from './messages.repository.js';
-import { accountReadyAt, effectiveLimits, isIdle } from './warmup.js';
+import { accountReadyAt, effectiveLimits, isIdle, withRecommended } from './warmup.js';
 
 const NOW = new Date('2026-10-14T10:00:00Z');
 const load = (overrides: Partial<AccountLoad>): AccountLoad => ({
@@ -103,5 +103,53 @@ describe('прогрев и молчание аккаунта (ADR-0078, рев�
   it('прогрев выключен — молчание ничего не меняет', () => {
     const off = account({ warmupEnabled: false, limitPerDay: 200, lastUsedAt: null });
     expect(effectiveLimits(off, NOW).daily).toBe(200);
+  });
+});
+
+describe('рекомендованная работа (ADR-0088)', () => {
+  const profile = { paceSeconds: 20, perMinute: 2, perHour: 15, perDay: 80 };
+  const own = (overrides: Record<string, unknown> = {}) => ({
+    recommended: true,
+    limitPerMinute: null as number | null,
+    limitPerHour: null as number | null,
+    limitPerDay: null as number | null,
+    ...overrides,
+  });
+
+  it('действует меньшее из тарифа и профиля; нет лимита в тарифе — берётся профиль', () => {
+    expect(withRecommended(own(), profile)).toMatchObject({
+      limitPerMinute: 2,
+      limitPerHour: 15,
+      limitPerDay: 80,
+      recommendedPaceSeconds: 20,
+    });
+    expect(
+      withRecommended(own({ limitPerMinute: 1, limitPerHour: 100, limitPerDay: 500 }), profile),
+    ).toMatchObject({ limitPerMinute: 1, limitPerHour: 15, limitPerDay: 80 });
+  });
+
+  it('профиль не поднимает лимит выше тарифа; нули профиля — без ограничения; галочка снята — аккаунт как есть', () => {
+    expect(
+      withRecommended(own({ limitPerMinute: 1 }), {
+        paceSeconds: 0,
+        perMinute: 0,
+        perHour: 0,
+        perDay: 0,
+      }),
+    ).toMatchObject({ limitPerMinute: 1, limitPerHour: null, limitPerDay: null });
+    const off = own({ recommended: false, limitPerMinute: 50 });
+    expect(withRecommended(off, profile)).toBe(off);
+  });
+
+  it('пауза профиля удлиняет паузу между сообщениями, но не сокращает общую', () => {
+    const last = new Date(NOW.getTime() - 10_000);
+    const base = account({ lastUsedAt: last });
+    const limited = withRecommended({ ...base, recommended: true }, profile);
+    expect(accountReadyAt(limited, load({}), NOW, options)?.getTime()).toBe(
+      last.getTime() + 20_000,
+    );
+    expect(
+      accountReadyAt(limited, load({}), NOW, { paceSeconds: 60, withBacklog: false })?.getTime(),
+    ).toBe(last.getTime() + 60_000);
   });
 });
