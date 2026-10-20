@@ -284,6 +284,17 @@ describe('загрузка скачанной копии', () => {
     expect((await uploads()).length).toBe(0);
   });
 
+  it('каталог загрузки недоступен для записи — понятный отказ «сервер не принимает», а не внутренняя ошибка', async () => {
+    rmSync(path.join(root, 'uploads'), { recursive: true, force: true });
+    // Вместо каталога — файл: создать каталог и писать в него нельзя, как при запрете записи у службы.
+    await writeFile(path.join(root, 'uploads'), 'не каталог');
+    const refused = await upload('admin', Buffer.from('PGDMP-копия'));
+    expect(refused.statusCode).toBe(503);
+    expect(refused.body).toContain('не принимает загрузку копий');
+    expect(await requests()).toEqual([]);
+    rmSync(path.join(root, 'uploads'), { force: true });
+  });
+
   it('не копия (чужой файл, пустой) — отказ, файл не остаётся, заявки нет', async () => {
     await clearRequests();
     const stranger = await upload('admin', Buffer.from('это картинка, а не копия'));
