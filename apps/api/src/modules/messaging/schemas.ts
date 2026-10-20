@@ -36,7 +36,12 @@ export const testMessageSchema = z.object({
 });
 
 /** Что партнёр меняет у аккаунта: только название. Цена и лимиты — в тарифе ([ADR-0075](../../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)). */
-export const updateAccountSchema = z.object({ label });
+/** Партнёр меняет своё: название и/или «строку про СТОП» (ADR-0088). */
+export const updateAccountSchema = z
+  .object({ label: label.optional(), stopLine: z.boolean().optional() })
+  .refine((body) => body.label !== undefined || body.stopLine !== undefined, {
+    message: 'Нечего менять',
+  });
 
 /** Автопрогрев аккаунта: включить или выключить. */
 export const warmupSchema = z.object({ enabled: z.boolean() });

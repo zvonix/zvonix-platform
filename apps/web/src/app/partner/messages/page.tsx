@@ -24,6 +24,7 @@ import {
   ACCOUNTS_KEY,
   AccountTariffSelect,
   RenameForm,
+  StopLineSwitch,
   useMessengerAccounts,
   type Account,
 } from './terms';
@@ -204,7 +205,10 @@ function AccountRow({
       </TableCell>
 
       <TableCell>
-        <AccountTariffSelect account={account} />
+        <div className="flex flex-col items-start gap-1.5">
+          <AccountTariffSelect account={account} />
+          <StopLineSwitch account={account} />
+        </div>
       </TableCell>
 
       <TableCell className="num text-right">

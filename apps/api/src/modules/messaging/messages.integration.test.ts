@@ -43,6 +43,7 @@ interface MessageView {
   status: string;
   failure_reason: string | null;
   cost: string | null;
+  stop_line: boolean;
 }
 
 const owed = async (partnerId: string): Promise<string> =>
@@ -294,10 +295,41 @@ describe('отправка воркером', () => {
     expect(await api().get(MessagesService).dispatchDue(new Date())).toBeGreaterThanOrEqual(1);
 
     expect(await messageOf(client.token, id)).toMatchObject({ status: 'sent' });
+    // По умолчанию у аккаунта включена строка про «СТОП» (ADR-0088): она добавляется в конец.
     expect(simulatedSent.find((item) => item.recipient === '79005550011')).toMatchObject({
       instanceId: partner.instance,
-      text: 'Ваш заказ принят',
+      text: 'Ваш заказ принят\n\nЧтобы отписаться, ответьте СТОП',
     });
+    expect(await messageOf(client.token, id)).toMatchObject({ stop_line: true });
+  });
+
+  it('партнёр выключает «СТОП» у аккаунта: текст уходит как написан, клиент видит, что строки не было; чужой аккаунт не тронуть', async () => {
+    const partner = await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const accountId = await withDatabase(async (execute) => {
+      const result = await execute(sql`select id from messenger_accounts limit 1`);
+      return (result.rows[0] as { id: string }).id;
+    });
+    const patch = (token: string, body: Record<string, unknown>) =>
+      api().inject({
+        method: 'PATCH',
+        url: `/partner/messenger/accounts/${accountId}`,
+        headers: bearer(token),
+        payload: body,
+      });
+
+    expect((await patch(partner.ownerToken, {})).statusCode).toBe(400);
+    expect((await patch(client.token, { stopLine: false })).statusCode).toBe(403);
+    const off = await patch(partner.ownerToken, { stopLine: false });
+    expect(off.statusCode).toBe(200);
+    expect(off.json<{ account: { stop_line: boolean } }>().account.stop_line).toBe(false);
+
+    const id = (await send(client.token, { to: '79005550081', text: 'Без строки' })).json<{
+      message: MessageView;
+    }>().message.id;
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect(simulatedSent.find((item) => item.recipient === '79005550081')?.text).toBe('Без строки');
+    expect(await messageOf(client.token, id)).toMatchObject({ stop_line: false });
   });
 
   it('пауза аккаунта: второе сообщение ждёт, потом уходит', async () => {

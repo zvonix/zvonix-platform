@@ -17,6 +17,7 @@ import {
   Money,
   normalizeMsisdn,
   rateLimited,
+  STOP_LINE,
   validationFailed,
   type CommissionRule,
   type Id,
@@ -591,12 +592,20 @@ export class MessagesService {
     }
 
     try {
+      const rendered = await this.templates.render(message);
+      // Строка про «СТОП» — решение партнёра по аккаунту; не влезает в предел мессенджера — сообщение уходит без неё.
+      const stopLine =
+        account.stopLine && rendered.length + STOP_LINE.length + 2 <= MESSAGE_MAX_LENGTH;
       const { messageId } = await this.provider.sendText(
         this.messaging.refOf(account),
         message.recipient,
-        await this.templates.render(message),
+        stopLine
+          ? `${rendered}
+
+${STOP_LINE}`
+          : rendered,
       );
-      await this.repository.markSent(message.id, messageId, now);
+      await this.repository.markSent(message.id, messageId, now, stopLine);
       await this.repository.touchAccount(account.id, now);
       return true;
     } catch (cause) {

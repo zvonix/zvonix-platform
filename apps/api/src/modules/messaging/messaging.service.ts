@@ -366,11 +366,14 @@ export class MessagingService {
   async updateOwn(
     actor: MessagingActor,
     id: string,
-    patch: { label: string },
+    patch: { label?: string | undefined; stopLine?: boolean | undefined },
   ): Promise<MessengerAccountRow> {
     const { account } = await this.ownAccount(actor.userId, id);
 
-    const updated = await this.repository.setLabel(account.id, patch.label);
+    const updated = await this.repository.setOwnerFields(account.id, {
+      ...(patch.label === undefined ? {} : { label: patch.label }),
+      ...(patch.stopLine === undefined ? {} : { stopLine: patch.stopLine }),
+    });
     if (updated === undefined) throw notFound('Аккаунт не найден');
     await this.audit.record({
       action: 'messenger_account.terms_changed',
@@ -378,8 +381,8 @@ export class MessagingService {
       entityId: account.id,
       actorUserId: actor.userId,
       actorRole: actor.role,
-      before: { label: account.label },
-      after: { label: updated.label },
+      before: { label: account.label, stop_line: account.stopLine },
+      after: { label: updated.label, stop_line: updated.stopLine },
     });
     return updated;
   }
