@@ -13,6 +13,10 @@ export type TemplateBlockKind = (typeof TEMPLATE_BLOCK_KINDS)[number];
 export const TEMPLATE_WHEN = ['always', 'first'] as const;
 export type TemplateWhen = (typeof TEMPLATE_WHEN)[number];
 
+/** Где блок действует: везде, только в сообщениях бота или только в сообщениях через аккаунты партнёров. */
+export const TEMPLATE_VIA = ['all', 'bot', 'account'] as const;
+export type TemplateVia = (typeof TEMPLATE_VIA)[number];
+
 export const TEMPLATE_BLOCKS_MAX = 12;
 export const TEMPLATE_TEXT_MAX = 300;
 export const TEMPLATE_GREETING_DEFAULT = 'Здравствуйте, {имя}!';
@@ -24,6 +28,8 @@ export interface TemplateBlock {
   readonly text?: string | undefined;
   /** У `body` всегда `always`. */
   readonly when: TemplateWhen;
+  /** Не задано — везде (так хранятся шаблоны, собранные до появления выбора). У `body` всегда везде. */
+  readonly via?: TemplateVia | undefined;
 }
 
 export interface TemplateContext {
@@ -35,6 +41,8 @@ export interface TemplateContext {
   readonly botLink: string | null;
   /** Это первое сообщение клиента этому человеку. */
   readonly first: boolean;
+  /** Каким путём уйдёт сообщение. */
+  readonly route: 'bot' | 'account';
 }
 
 /** Нет имени — убираем `{имя}` вместе с соседней запятой или пробелом: «Здравствуйте, {имя}!» → «Здравствуйте!». */
@@ -55,7 +63,10 @@ function withName(text: string, name: string | null): string {
 export function composeMessage(blocks: readonly TemplateBlock[], context: TemplateContext): string {
   const parts: string[] = [];
   for (const block of blocks) {
-    if (block.kind !== 'body' && block.when === 'first' && !context.first) continue;
+    if (block.kind !== 'body') {
+      if (block.when === 'first' && !context.first) continue;
+      if (block.via !== undefined && block.via !== 'all' && block.via !== context.route) continue;
+    }
     let part: string | null;
     switch (block.kind) {
       case 'body':

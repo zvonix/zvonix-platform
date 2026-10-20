@@ -18,6 +18,8 @@ import {
   LifeBuoy,
   ListOrdered,
   MessageSquare,
+  PenLine,
+  Plug,
   KeyRound,
   Plus,
   LogOut,
@@ -287,7 +289,12 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
     },
     {
       title: 'Сообщения MAX',
-      items: [{ href: '/my/messages', label: 'Сообщения', Icon: MessageSquare, tab: true }],
+      items: [
+        { href: '/my/messages', label: 'Сообщения', Icon: MessageSquare, tab: true },
+        { href: '/my/message-text', label: 'Текст сообщения', Icon: PenLine },
+        { href: '/my/message-connections', label: 'Подключения', Icon: Plug },
+        { href: '/my/max-priorities', label: 'Приоритеты', Icon: ListOrdered },
+      ],
     },
   ],
 };

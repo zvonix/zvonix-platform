@@ -570,7 +570,7 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/messages?tab=smpp');
+    await page.goto('/my/message-connections');
 
     await page.getByRole('button', { name: 'Создать подключение' }).click();
     const secret = page.getByRole('region', { name: 'Пароль SMPP' });
@@ -631,7 +631,7 @@ test.describe('бот MAX (ADR-0077)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/messages?tab=bot');
+    await page.goto('/my/message-connections');
     await page.getByRole('button', { name: 'Подключить бота' }).click();
     await expect(
       page.getByText(/^https:\/\/max\.ru\/e2ebot_bot\?start=[a-z0-9]{10}$/u),
@@ -675,7 +675,9 @@ test.describe('конструктор сообщения (ADR-0087)', () => {
     page,
   }) => {
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/messages?tab=text');
+    // Пункт меню «Текст сообщения» — рядом со «Сообщения», а не вкладка.
+    await page.locator('a[href="/my/message-text"]').click();
+    await expect(page).toHaveURL(/\/my\/message-text$/u);
 
     // Без шаблона есть один блок «Текст сообщения» — его не удалить.
     await expect(page.getByRole('button', { name: /^Удалить:/u })).toHaveCount(0);
@@ -687,10 +689,14 @@ test.describe('конструктор сообщения (ADR-0087)', () => {
     // Приветствие — выше текста сообщения.
     await page.getByRole('button', { name: 'Выше' }).nth(1).click();
     await page.getByLabel('Когда: Свой текст').selectOption('first');
+    await page.getByLabel('Где: Свой текст').selectOption('bot');
 
     const preview = page.getByRole('region', { name: 'Как это выглядит' });
     await expect(preview).toContainText('Здравствуйте, Иван!');
     await expect(preview).toContainText('Такси Волна');
+    // Через аккаунты имя неизвестно, и «только бот» туда не попадает.
+    await expect(preview.getByText('Через аккаунты партнёров')).toBeVisible();
+    await expect(preview).toContainText('Здравствуйте!');
 
     await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText('Сохранено');
@@ -698,6 +704,7 @@ test.describe('конструктор сообщения (ADR-0087)', () => {
     await page.reload();
     await expect(page.getByLabel('Свой текст', { exact: true })).toHaveValue('Такси Волна');
     await expect(page.getByLabel('Когда: Свой текст')).toHaveValue('first');
+    await expect(page.getByLabel('Где: Свой текст')).toHaveValue('bot');
   });
 });
 
@@ -717,7 +724,7 @@ test.describe('свой бот клиента (ADR-0077, этап 2)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/messages?tab=bot');
+    await page.goto('/my/message-connections');
 
     await page.getByRole('button', { name: 'Подключить своего бота', exact: true }).click();
     // Негодный токен — отказ в окне, бота нет.
