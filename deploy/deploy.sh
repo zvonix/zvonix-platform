@@ -86,7 +86,7 @@ activate() {
     # обновления выкладкой не перезапускается — она сама её и запускает.
     install -m 0755 "${release}/deploy/updater.py" /usr/local/sbin/zvonix-updater
     install -d -o root -g root -m 0755 /var/lib/zvonix-updater /var/lib/zvonix-updater/runs
-    install -d -o zvonix -g zvonix -m 0750 /var/lib/zvonix-updater/requests
+    install -d -o zvonix -g zvonix -m 0750 /var/lib/zvonix-updater/requests /var/lib/zvonix-updater/uploads
   fi
   point "$CURRENT" "$release"
   systemctl daemon-reload

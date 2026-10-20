@@ -166,7 +166,8 @@ function Backups() {
   });
 
   if (list.isPending) return <p className="text-muted-foreground">Загружаем…</p>;
-  if (list.error !== null) {
+  // Неудавшееся обновление списка при уже полученных данных страницу не закрывает: покажется прежний список.
+  if (list.error !== null && list.data === undefined) {
     return (
       <p role="alert" className="text-crit">
         {list.error.message}
@@ -353,8 +354,14 @@ function Download({
             body: { id: backup.id },
           });
           await waitForRun(queued.request.id, 'Подготовить копию');
-          // Файл отдаётся один раз и только заказавшему; сессия — в cookie, поэтому достаточно перейти по адресу.
-          window.location.assign(`/api/backups/exports/${queued.request.id}`);
+          // Файл отдаётся один раз и только заказавшему; сессия — в cookie. Ссылкой, а не переходом по адресу: переход
+          // обрывал бы идущие запросы страницы, и список копий показывал бы «Запрос не выполнен».
+          const link = document.createElement('a');
+          link.href = `/api/backups/exports/${queued.request.id}`;
+          link.download = '';
+          document.body.append(link);
+          link.click();
+          link.remove();
           onDone();
         }}
       >

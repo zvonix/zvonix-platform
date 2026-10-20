@@ -6,14 +6,15 @@
  * удаляется. Повторный пароль и код нужны только для восстановления (не больше пяти неудач за 15 минут).
  */
 
-import { createWriteStream } from 'node:fs';
-import { mkdir, open, rename, stat, unlink } from 'node:fs/promises';
+import { constants, createWriteStream } from 'node:fs';
+import { access, mkdir, open, rename, stat, unlink } from 'node:fs/promises';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
+  dependencyUnavailable,
   notFound,
   rateLimited,
   validationFailed,
@@ -21,7 +22,7 @@ import {
   type UserRole,
 } from '@zvonix/shared';
 import { randomUUID } from 'node:crypto';
-import { APP_CONFIG, type Config } from '../../infra/tokens.js';
+import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { IdentityService, type Principal } from '../identity/identity.service.js';
 import { RateLimitService, type LimitRule } from '../limits/rate-limit.service.js';
@@ -57,6 +58,7 @@ export class BackupsService {
     private readonly identity: IdentityService,
     private readonly limits: RateLimitService,
     private readonly audit: AuditService,
+    @Inject(APP_LOGGER) private readonly logger: Logger,
   ) {}
 
   listing(): Promise<BackupListing> {
@@ -96,7 +98,16 @@ export class BackupsService {
       throw validationFailed('Файл слишком большой: загрузить можно до 200 МБ');
     }
     const directory = path.join(this.config.UPDATER_DIR, 'uploads');
-    await mkdir(directory, { recursive: true, mode: 0o750 });
+    try {
+      await mkdir(directory, { recursive: true, mode: 0o750 });
+      await access(directory, constants.W_OK);
+    } catch (error) {
+      // Каталог создаёт служба обновления, а писать в него API разрешает только свежий выпуск: не «внутренняя ошибка».
+      this.logger.error('Каталог загрузки копий недоступен для записи', error, { directory });
+      throw dependencyUnavailable(
+        'Сервер пока не принимает загрузку копий: подождите несколько минут после обновления и повторите',
+      );
+    }
     const id = randomUUID();
     // Временное имя не совпадает с идентификатором загрузки: недописанный файл служба не примет.
     const part = path.join(directory, `${id}.part`);
