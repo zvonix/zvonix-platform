@@ -5,6 +5,7 @@ const body: TemplateBlock = { kind: 'body', when: 'always' };
 const ctx = {
   body: 'Ваша машина прибыла',
   name: 'Иван',
+  company: 'Салон Лотос',
   botLink: 'https://max.ru/b?start=x',
   first: true,
   route: 'account' as const,
@@ -74,6 +75,25 @@ describe('сборка сообщения из шаблона', () => {
     );
     expect(composeMessage(blocks, { ...ctx, route: 'bot' })).toBe(
       'Ваша машина прибыла\nдля бота\nвезде',
+    );
+  });
+
+  it('«Пустая строка» отделяет части; не в начале, не подряд и не в конце', () => {
+    const brk: TemplateBlock = { kind: 'break', when: 'always' };
+    const text: TemplateBlock = { kind: 'text', text: 'Салон', when: 'always' };
+    expect(composeMessage([brk, body, brk, brk, text, brk], ctx)).toBe(
+      'Ваша машина прибыла\n\nСалон',
+    );
+  });
+
+  it('{название} подставляется в приветствие и в свой текст; многострочный текст сохраняется', () => {
+    const blocks: TemplateBlock[] = [
+      { kind: 'greeting', text: 'Добро пожаловать в {название}, {имя}!', when: 'always' },
+      body,
+      { kind: 'text', text: 'Адрес: ул. Мира, 1\nТел. 000', when: 'always' },
+    ];
+    expect(composeMessage(blocks, ctx)).toBe(
+      'Добро пожаловать в Салон Лотос, Иван!\nВаша машина прибыла\nАдрес: ул. Мира, 1\nТел. 000',
     );
   });
 });
