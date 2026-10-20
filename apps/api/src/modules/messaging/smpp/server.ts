@@ -46,6 +46,7 @@ const ERROR_CODE: Record<NonNullable<MessageRow['failureReason']>, number> = {
   account_unavailable: 2,
   wait_expired: 3,
   platform: 4,
+  recipient_stopped: 5,
 };
 
 export interface ListenOptions {

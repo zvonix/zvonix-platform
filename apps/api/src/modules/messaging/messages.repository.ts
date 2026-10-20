@@ -54,6 +54,7 @@ interface ReportCounts {
   readonly account_unavailable: number;
   readonly wait_expired: number;
   readonly platform: number;
+  readonly recipient_stopped: number;
   /** Ушли через аккаунты и лежат дольше суток, ушедшие успешно; из них прочитанные — `settled_read`. */
   readonly settled: number;
   readonly settled_read: number;
@@ -730,6 +731,7 @@ export class MessagesRepository {
              (count(*) filter (where m.failure_reason = 'account_unavailable'))::int as account_unavailable,
              (count(*) filter (where m.failure_reason = 'wait_expired'))::int as wait_expired,
              (count(*) filter (where m.failure_reason = 'platform'))::int as platform,
+             (count(*) filter (where m.failure_reason = 'recipient_stopped'))::int as recipient_stopped,
              (count(*) filter (where m.route = 'account' and m.sent_at < ${settledBefore}
                                  and m.status in ('sent', 'delivered', 'read')))::int as settled,
              (count(*) filter (where m.route = 'account' and m.sent_at < ${settledBefore}

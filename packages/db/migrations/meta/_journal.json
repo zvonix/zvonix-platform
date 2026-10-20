@@ -449,6 +449,13 @@
       "when": 1792409572946,
       "tag": "0063_konstruktor_soobshcheniya",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1792482001673,
+      "tag": "0064_spisok_ne_pisat",
+      "breakpoints": true
     }
   ]
 }

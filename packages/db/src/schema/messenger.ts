@@ -22,6 +22,7 @@ import {
   MESSAGE_CHANNELS,
   MESSAGE_FAILURE_REASONS,
   MESSAGE_STATUSES,
+  MESSAGE_STOP_SOURCES,
   MESSENGER_ACCOUNT_REASONS,
   DISTRIBUTION_MODES,
   DISTRIBUTION_PRODUCTS,
@@ -45,6 +46,7 @@ import {
   type DistributionProduct,
   type MessageChannel,
   type MessageFailureReason,
+  type MessageStopSource,
   type MessageRoute,
   type MessageStatus,
   type MessengerAccountReason,
@@ -158,6 +160,9 @@ export const messengerAccounts = pgTable(
      */
     warmupEnabled: boolean().notNull().default(true),
     warmupStartedAt: timestamptz(),
+
+    /** Инстансу уже сказано присылать входящие («СТОП», ADR-0088): новые аккаунты — сразу, прежним — при ближайшей сверке. */
+    incomingWebhook: boolean().notNull().default(false),
 
     /**
      * Пауза здоровья ([ADR-0079](../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)): до этого
@@ -504,6 +509,25 @@ export const messageTemplates = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex('message_templates_client_key').on(t.clientId)],
+);
+
+/**
+ * Номера, которые ответили «СТОП» ([ADR-0088](../../../../docs/adr/0088-otchety-i-zashchita-akkauntov-max.md)): им не пишет ни
+ * один клиент и ни по одному пути. Хранится номер и время — текст ответа не сохраняется.
+ */
+export const messageStops = pgTable(
+  'message_stops',
+  {
+    id: primaryId<'messageStop'>(),
+    /** Номер в каноническом виде, как `messages.recipient`. */
+    phone: text().notNull(),
+    source: text().$type<MessageStopSource>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('message_stops_phone_key').on(t.phone),
+    check('message_stops_source_check', sql`${oneOf(t.source, MESSAGE_STOP_SOURCES)}`),
+  ],
 );
 
 /**

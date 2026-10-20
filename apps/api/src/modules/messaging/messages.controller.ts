@@ -19,6 +19,7 @@ import type { MachinePrincipal } from '../machine/machine.service.js';
 import type { MessageRow } from './messages.repository.js';
 import { MessagesService } from './messages.service.js';
 import { MessagingService } from './messaging.service.js';
+import { StopsService } from './stops.service.js';
 import {
   messagesOverviewQuerySchema,
   messagesQuerySchema,
@@ -271,6 +272,7 @@ export class MessengerWebhookController {
   constructor(
     private readonly messaging: MessagingService,
     private readonly messages: MessagesService,
+    private readonly stops: StopsService,
   ) {}
 
   @Public()
@@ -296,6 +298,8 @@ export class MessengerWebhookController {
       }
     } else if (body.typeWebhook === 'stateInstanceChanged') {
       await this.messaging.refreshByInstance(String(instance));
+    } else if (body.typeWebhook === 'incomingMessageReceived') {
+      await this.stops.handleIncoming(body);
     }
     return {};
   }

@@ -140,6 +140,14 @@ export class MessagingRepository {
     return row;
   }
 
+  /** Инстансу сказано присылать входящие («СТОП»): повторно не говорим. */
+  async markIncomingWebhook(id: MessengerAccountId): Promise<void> {
+    await this.database.db
+      .update(messengerAccounts)
+      .set({ incomingWebhook: true })
+      .where(eq(messengerAccounts.id, id));
+  }
+
   /** Вес и приоритет аккаунта в распределении партнёра. */
   async setRank(
     id: MessengerAccountId,

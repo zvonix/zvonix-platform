@@ -45,6 +45,8 @@ import { SmppServer } from './smpp/server.js';
 import { ClientSmppController, StaffSmppController } from './smpp/smpp.controller.js';
 import { SmppRepository } from './smpp/smpp.repository.js';
 import { SmppService } from './smpp/smpp.service.js';
+import { StopsRepository } from './stops.repository.js';
+import { StopsService } from './stops.service.js';
 
 /**
  * Сообщения MAX через аккаунты партнёров ([ADR-0071](../../../../../docs/adr/0071-soobscheniya-max.md)).
@@ -86,6 +88,8 @@ import { SmppService } from './smpp/smpp.service.js';
     MessagesRepository,
     TemplatesRepository,
     TemplatesService,
+    StopsRepository,
+    StopsService,
     SmppRepository,
     SmppService,
     SmppServer,

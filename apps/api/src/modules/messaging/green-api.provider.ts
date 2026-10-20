@@ -253,7 +253,7 @@ export class GreenApiMessageProvider implements MessageProvider {
       webhookUrl: url,
       outgoingWebhook: 'yes',
       stateWebhook: 'yes',
-      incomingWebhook: 'no',
+      incomingWebhook: 'yes',
     });
   }
 

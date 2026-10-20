@@ -243,7 +243,7 @@ describe('отправка', () => {
     expect(await provider().checkRecipient(REF, '79001234567')).toBe('unknown');
   });
 
-  it('вебхук: включаются статусы отправленного и смена состояния, входящие выключены', async () => {
+  it('вебхук: включаются статусы отправленного, смена состояния и входящие («СТОП», ADR-0088)', async () => {
     respond = () => ({ json: { saveSettings: true } });
     await provider().configureWebhook(REF, 'https://cp.test/webhooks/messenger/секрет');
     expect(calls[0]).toMatchObject({
@@ -252,7 +252,7 @@ describe('отправка', () => {
         webhookUrl: 'https://cp.test/webhooks/messenger/секрет',
         outgoingWebhook: 'yes',
         stateWebhook: 'yes',
-        incomingWebhook: 'no',
+        incomingWebhook: 'yes',
       },
     });
   });
