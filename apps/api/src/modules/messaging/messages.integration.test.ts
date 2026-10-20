@@ -1090,6 +1090,47 @@ describe('наценка правилами (ADR-0073)', () => {
   });
 });
 
+describe('отчёт для сотрудников', () => {
+  it('по клиенту и по аккаунту: ушло, причины отказов; клиенту закрыто', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    await send(client.token, { to: '79005550011', text: 'раз' });
+    await send(client.token, { to: '79005550000', text: 'нет MAX' });
+    await api().get(MessagesService).dispatchDue(new Date());
+
+    const response = await api().inject({
+      method: 'GET',
+      url: '/messages/report?days=7',
+      headers: bearer(adminToken),
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{
+      days: number;
+      clients: { name: string; total: number; sent: number; failed: number; not_in_max: number }[];
+      accounts: { label: string; partner_name: string; total: number; not_in_max: number }[];
+    }>();
+    expect(body.days).toBe(7);
+    expect(body.clients).toHaveLength(1);
+    expect(body.clients[0]).toMatchObject({ total: 2, sent: 1, failed: 1, not_in_max: 1 });
+    expect(body.accounts).toHaveLength(1);
+    expect(body.accounts[0]).toMatchObject({ total: 2, not_in_max: 1 });
+    expect(body.accounts[0]?.partner_name).not.toBe('');
+
+    const denied = await api().inject({
+      method: 'GET',
+      url: '/messages/report',
+      headers: bearer(client.token),
+    });
+    expect(denied.statusCode).toBe(403);
+    const tooLong = await api().inject({
+      method: 'GET',
+      url: '/messages/report?days=400',
+      headers: bearer(adminToken),
+    });
+    expect(tooLong.statusCode).toBe(400);
+  });
+});
+
 describe('обзор для сотрудников', () => {
   it('сутки с нулями, принято/доставлено/не отправлено; деньги без возвращённых; клиенту закрыто', async () => {
     await partnerWithAccount('0.45');

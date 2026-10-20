@@ -250,6 +250,15 @@ MAX либо нет связи; `retired` — списан (в списках е
 "revenue": "6.48", "margin": "1.08" }, …] }`: каждые сутки периода (с нулями). `revenue` и `margin` — без
 возвращённых сообщений. Используется блоком «Сообщения MAX» на странице «Обзор».
 
+## Отчёт для сотрудников
+
+`GET /messages/report?days=7` (роли `admin`, `support`; `days` 1–90, по умолчанию 7). `200` →
+`{ "days": 7, "clients": [{ "client_id", "name", …счётчики }], "accounts": [{ "account_id", "label", "partner_name", "status",
+"state_reason", "paused_until", "pause_reason", …счётчики }] }`. Счётчики одни и те же: `total` (принято), `sent` (ушло), `delivered`,
+`read`, `failed`, причины отказов `not_in_max`, `account_unavailable`, `wait_expired`, `platform`, а также `settled` (ушли через
+аккаунты, старше суток, успешно) и `settled_read` (из них прочитано) — по ним считается «не прочитано». У сообщений бота
+`read` не бывает, поэтому они в `settled` не входят. Страница «Отчёты MAX» ([ADR-0088](../adr/0088-otchety-i-zashchita-akkauntov-max.md)).
+
 ## Проверка ключа провайдера
 
 `POST /messenger/provider/test` (только администратор) → `200` `{ "ok": true, "message": "Ключ принят. Аккаунтов у
