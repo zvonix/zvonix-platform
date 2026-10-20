@@ -107,10 +107,7 @@ export class BackupsController {
     @Body(zodBody(restoreSchema)) body: z.infer<typeof restoreSchema>,
   ): Promise<{ request: QueuedRequest }> {
     return {
-      request: await this.backups.requestRestore(principal, body.id, {
-        password: body.password,
-        code: body.code,
-      }),
+      request: await this.backups.requestRestore(principal, body.id),
     };
   }
 

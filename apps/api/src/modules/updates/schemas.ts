@@ -28,23 +28,12 @@ export const githubTokenSchema = z.object({
     .regex(/^[A-Za-z0-9_]+$/u, 'токен записан неверно: допустимы буквы, цифры и подчёркивание'),
 });
 
-/** Повторное подтверждение перед опасным действием над копией (ADR-0086): пароль и, если подключён, код. */
-const sensitiveConfirmSchema = z.object({
-  password: z.string().min(1, 'введите пароль').max(200),
-  code: z
-    .string()
-    .trim()
-    .regex(/^[0-9]{6}$/u, 'код — шесть цифр')
-    .optional(),
-});
-
 export const backupTargetSchema = z.object({
   id: z.string().max(200),
 });
 
-/** Восстановление: то же подтверждение плюс слово — случайное нажатие стирает рабочую базу. */
+/** Восстановление: слово — случайное нажатие стирает рабочую базу. */
 const RESTORE_PHRASE = 'ВОССТАНОВИТЬ';
 export const restoreSchema = backupTargetSchema.extend({
-  ...sensitiveConfirmSchema.shape,
   phrase: z.literal(RESTORE_PHRASE, { error: `введите слово ${RESTORE_PHRASE}` }),
 });

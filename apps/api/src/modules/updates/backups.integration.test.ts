@@ -158,6 +158,33 @@ describe('резервные копии: список и заявки', () => {
     expect(listing.items[1]?.check).toBeNull();
   });
 
+  it('идущая проверка видна в списке: после обновления страницы кабинет не считает копию непроверенной', async () => {
+    const id = '33333333-3333-4333-8333-333333333333';
+    await mkdir(path.join(root, 'runs', id), { recursive: true });
+    await writeFile(
+      path.join(root, 'runs', id, 'state.json'),
+      JSON.stringify({
+        id,
+        action: 'backup-verify',
+        tag: null,
+        target: DAILY,
+        by: emails.get('admin'),
+        requested_at: '2026-10-20T10:00:00+00:00',
+        status: 'running',
+        started_at: '2026-10-20T10:00:01+00:00',
+        finished_at: null,
+        exit_code: null,
+      }),
+    );
+    const listing = (await call('admin', 'GET', '/backups')).json<{
+      active: { action: string; target: string }[];
+    }>();
+    expect(listing.active).toEqual([{ action: 'backup-verify', target: DAILY }]);
+    rmSync(path.join(root, 'runs', id), { recursive: true, force: true });
+    const after = (await call('admin', 'GET', '/backups')).json<{ active: unknown[] }>();
+    expect(after.active).toEqual([]);
+  });
+
   it('создание и проверка — заявки службе; чужой идентификатор копии — «нет в списке»', async () => {
     const created = await call('admin', 'POST', '/backups/create');
     expect(created.statusCode).toBe(202);
@@ -340,48 +367,32 @@ describe('восстановление из копии', () => {
     for (const role of ['support', 'client', 'partner'] as const) {
       const response = await call(role, 'POST', '/backups/restore', {
         id: DAILY,
-        password: TEST_PASSWORD,
         phrase: 'ВОССТАНОВИТЬ',
       });
       expect(response.statusCode).toBe(403);
     }
   });
 
-  it('без слова «ВОССТАНОВИТЬ» заявки нет, пароль даже не проверяется', async () => {
+  it('без слова «ВОССТАНОВИТЬ» заявки нет', async () => {
     await clearRequests();
-    expect((await restore({ id: DAILY, password: TEST_PASSWORD })).statusCode).toBe(400);
-    expect(
-      (await restore({ id: DAILY, password: TEST_PASSWORD, phrase: 'восстановить' })).statusCode,
-    ).toBe(400);
+    expect((await restore({ id: DAILY })).statusCode).toBe(400);
+    expect((await restore({ id: DAILY, phrase: 'восстановить' })).statusCode).toBe(400);
     expect(await requests()).toEqual([]);
   });
 
-  it('неверный пароль — отказ и заявки нет; неизвестная копия — «нет в списке»', async () => {
+  it('неизвестная копия — «нет в списке», заявки нет', async () => {
     await clearRequests();
-    const wrong = await restore({ id: DAILY, password: 'не-тот-пароль', phrase: 'ВОССТАНОВИТЬ' });
-    expect(wrong.statusCode).toBe(401);
-    expect(await requests()).toEqual([]);
-
-    const unknown = await restore({
-      id: 'daily/нет-такой.dump',
-      password: TEST_PASSWORD,
-      phrase: 'ВОССТАНОВИТЬ',
-    });
+    const unknown = await restore({ id: 'daily/нет-такой.dump', phrase: 'ВОССТАНОВИТЬ' });
     expect(unknown.statusCode).toBe(404);
     expect(await requests()).toEqual([]);
   });
 
-  it('всё верно — заявка службе с копией, без пароля и слова', async () => {
+  it('всё верно — заявка службе с копией, без слова', async () => {
     await clearRequests();
-    const response = await restore({
-      id: DAILY,
-      password: TEST_PASSWORD,
-      phrase: 'ВОССТАНОВИТЬ',
-    });
+    const response = await restore({ id: DAILY, phrase: 'ВОССТАНОВИТЬ' });
     expect(response.statusCode).toBe(202);
     const queued = await requests();
     expect(queued).toMatchObject([{ action: 'backup-restore', target: DAILY }]);
-    expect(JSON.stringify(queued)).not.toContain(TEST_PASSWORD);
     expect(JSON.stringify(queued)).not.toContain('ВОССТАНОВИТЬ');
     await clearRequests();
   });

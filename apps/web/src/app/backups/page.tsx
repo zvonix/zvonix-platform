@@ -22,7 +22,7 @@ import { waitForRun } from '@/lib/run-wait';
  * Резервные копии ([ADR-0086](../../../../../docs/adr/0086-rezervnye-kopii-v-kabinete.md)).
  *
  * Кабинет только просит: создание, проверка, выдача и приём загруженной копии — заявки службе на сервере. Восстановление —
- * после повторного ввода пароля, кода второго фактора и слова: оно заменяет рабочие данные.
+ * после ввода слова «ВОССТАНОВИТЬ»: оно заменяет рабочие данные.
  */
 
 type Kind = 'daily' | 'manual' | 'update' | 'before-restore' | 'uploaded';
@@ -37,6 +37,7 @@ interface Backup {
 }
 
 interface Listing {
+  readonly active: readonly { action: string; target: string }[];
   readonly available: boolean;
   readonly generated_at: string | null;
   readonly items: Backup[];
@@ -174,7 +175,7 @@ function Backups() {
       </p>
     );
   }
-  const { available, items, last_export: lastExport } = list.data;
+  const { available, items, last_export: lastExport, active } = list.data;
 
   if (!available) return <NoListing onRequested={refresh} />;
 
@@ -276,7 +277,11 @@ function Backups() {
                 <TableCell>{KIND_NAME[backup.kind]}</TableCell>
                 <TableCell className="num text-right">{size(backup.size)}</TableCell>
                 <TableCell className="whitespace-normal">
-                  {backup.check === null ? (
+                  {active.some(
+                    (job) => job.target === backup.id && job.action === 'backup-verify',
+                  ) ? (
+                    <span className="text-muted-foreground">идёт проверка…</span>
+                  ) : backup.check === null ? (
                     <span className="text-muted-foreground">не проверялась</span>
                   ) : backup.check.ok ? (
                     <span className="text-ok">
@@ -378,8 +383,8 @@ function Download({
 const RESTORE_PHRASE = 'ВОССТАНОВИТЬ';
 
 /**
- * «Восстановить»: самое опасное действие раздела. Окно говорит, что именно будет и что пропадёт, и требует пароль, код
- * второго фактора и слово — случайным нажатием его не вызвать.
+ * «Восстановить»: самое опасное действие раздела. Окно говорит, что именно будет и что пропадёт, и требует слово —
+ * случайным нажатием его не вызвать. Пароля и кода нет: вошёл — значит, они уже были введены (владелец, 2026-10-20).
  */
 function Restore({
   backup,
@@ -390,8 +395,6 @@ function Restore({
   disabled: boolean;
   onStarted: (runId: string) => void;
 }) {
-  const [password, setPassword] = useState('');
-  const [code, setCode] = useState('');
   const [phrase, setPhrase] = useState('');
 
   return (
@@ -406,19 +409,12 @@ function Restore({
       <DialogForm
         submitLabel="Восстановить"
         tone="danger"
-        canSubmit={password !== '' && phrase === RESTORE_PHRASE}
+        canSubmit={phrase === RESTORE_PHRASE}
         onSubmit={async () => {
           const queued = await request<{ request: { id: string } }>('/backups/restore', {
             method: 'POST',
-            body: {
-              id: backup.id,
-              password,
-              phrase,
-              ...(code.trim() === '' ? {} : { code: code.trim() }),
-            },
+            body: { id: backup.id, phrase },
           });
-          setPassword('');
-          setCode('');
           setPhrase('');
           onStarted(queued.request.id);
         }}
@@ -435,32 +431,6 @@ function Restore({
             сама. После восстановления кабинет попросит войти заново — это нормально.
           </p>
         </div>
-        <DialogField label="Ваш пароль" wide>
-          <Input
-            type="password"
-            autoComplete="current-password"
-            autoFocus
-            value={password}
-            onChange={(event) => {
-              setPassword(event.target.value);
-            }}
-          />
-        </DialogField>
-        <DialogField
-          label="Код второго фактора"
-          wide
-          hint="Если второй фактор не подключён — оставьте пустым."
-        >
-          <Input
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            value={code}
-            onChange={(event) => {
-              setCode(event.target.value);
-            }}
-          />
-        </DialogField>
         <DialogField label={`Для подтверждения введите слово ${RESTORE_PHRASE}`} wide>
           <Input
             autoComplete="off"

@@ -30,10 +30,18 @@ export interface BackupListing {
   readonly items: readonly BackupItem[];
   /** Когда и кем копию последний раз скачивали; `null` — никогда. */
   readonly last_export: { at: string; by: string; id: string } | null;
+  /** Что служба делает с копиями сейчас: после обновления страницы список показывает «идёт проверка», а не «не проверялась». */
+  readonly active: readonly { action: string; target: string }[];
 }
 
 const KINDS: readonly BackupKind[] = ['daily', 'manual', 'update', 'before-restore', 'uploaded'];
-const EMPTY: BackupListing = { available: false, generated_at: null, items: [], last_export: null };
+const EMPTY: BackupListing = {
+  available: false,
+  generated_at: null,
+  items: [],
+  last_export: null,
+  active: [],
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -101,6 +109,7 @@ export class BackupStatusService {
               id: typeof last['id'] === 'string' ? last['id'] : '',
             }
           : null,
+      active: [],
     };
   }
 }

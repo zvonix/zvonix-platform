@@ -3,7 +3,8 @@
  *
  * Как и обновление, API ничего не запускает: создание, проверка и выдача копии — заявки службе от root. Скачивание
  * копии — самое чувствительное, что отдаёт кабинет (в ней вся база): запись в журнал, файл выдаётся один раз и
- * удаляется. Повторный пароль и код нужны только для восстановления (не больше пяти неудач за 15 минут).
+ * удаляется. Повторного пароля и кода нет нигде: вошёл администратор — значит, пароль и второй фактор уже были
+ * (владелец, 2026-10-20); восстановление защищает слово «ВОССТАНОВИТЬ» и журнал.
  */
 
 import { constants, createWriteStream } from 'node:fs';
@@ -16,7 +17,6 @@ import {
   conflict,
   dependencyUnavailable,
   notFound,
-  rateLimited,
   validationFailed,
   type Id,
   type UserRole,
@@ -24,8 +24,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
-import { IdentityService, type Principal } from '../identity/identity.service.js';
-import { RateLimitService, type LimitRule } from '../limits/rate-limit.service.js';
+import type { Principal } from '../identity/identity.service.js';
 import {
   BackupStatusService,
   type BackupItem,
@@ -38,9 +37,6 @@ interface Actor {
   readonly role: UserRole;
   readonly email: string;
 }
-
-/** Неудачные подтверждения: пять за пятнадцать минут, потом — ждать. */
-const CONFIRM_RULE: LimitRule = { name: 'backup.confirm', limit: 5, windowSeconds: 900 };
 
 /** Загружаемая копия: больше этого nginx кабинета (`/api/storage/`, 200 МБ) всё равно не пропустит. */
 const UPLOAD_MAX_BYTES = 200 * 1024 * 1024;
@@ -55,14 +51,20 @@ export class BackupsService {
     @Inject(APP_CONFIG) private readonly config: Config,
     private readonly updates: UpdatesService,
     private readonly status: BackupStatusService,
-    private readonly identity: IdentityService,
-    private readonly limits: RateLimitService,
     private readonly audit: AuditService,
     @Inject(APP_LOGGER) private readonly logger: Logger,
   ) {}
 
-  listing(): Promise<BackupListing> {
-    return this.status.listing();
+  async listing(): Promise<BackupListing> {
+    const listing = await this.status.listing();
+    if (!listing.available) return listing;
+    const running = (await this.updates.recentRuns()).filter(
+      (run) => run.status === 'running' && run.target !== null && run.action.startsWith('backup-'),
+    );
+    return {
+      ...listing,
+      active: running.map((run) => ({ action: run.action, target: run.target ?? '' })),
+    };
   }
 
   create(actor: Actor): Promise<QueuedRequest> {
@@ -163,16 +165,10 @@ export class BackupsService {
   }
 
   /**
-   * Восстановление: заявка службе после повторного подтверждения. Службе нужен только идентификатор копии — пароль и
-   * слово остаются здесь. Что произойдёт, решает служба по ADR-0086: копия проверяется, снимается страховочная копия
+   * Восстановление: заявка службе. Слово «ВОССТАНОВИТЬ» проверяет схема запроса; службе нужен только идентификатор копии. Что произойдёт, решает служба по ADR-0086: копия проверяется, снимается страховочная копия
    * рабочей базы, рабочая база не стирается, а откладывается.
    */
-  async requestRestore(
-    principal: Principal,
-    id: string,
-    confirmation: { password: string; code?: string | undefined },
-  ): Promise<QueuedRequest> {
-    await this.confirm(principal, confirmation);
+  async requestRestore(principal: Principal, id: string): Promise<QueuedRequest> {
     const item = await this.known(id);
     return this.updates.request(
       { userId: principal.userId, role: principal.role, email: principal.email },
@@ -235,23 +231,5 @@ export class BackupsService {
     const item = (await this.status.listing()).items.find((entry) => entry.id === id);
     if (item === undefined) throw notFound('Такой копии нет в списке');
     return item;
-  }
-
-  private async confirm(
-    principal: Principal,
-    confirmation: { password: string; code?: string | undefined },
-  ): Promise<void> {
-    const subject = principal.userId;
-    const verdict = await this.limits.check(CONFIRM_RULE, subject);
-    if (!verdict.allowed) {
-      throw rateLimited('Слишком много неверных подтверждений: попробуйте через 15 минут');
-    }
-    try {
-      await this.identity.confirmSensitive(principal, confirmation);
-    } catch (error) {
-      // Считаются только неудачи: верное подтверждение лимит не расходует.
-      await this.limits.hit(CONFIRM_RULE, subject);
-      throw error;
-    }
   }
 }
