@@ -9,6 +9,7 @@ import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -42,6 +43,7 @@ export interface Account {
   readonly limit_per_hour: number | null;
   readonly limit_per_day: number | null;
   readonly warmup_enabled: boolean;
+  readonly stop_line: boolean;
   readonly warmup_day: number | null;
   readonly paused_until: string | null;
   readonly daily_limit_now: number | null;
@@ -105,6 +107,41 @@ function limitsText(
 // --- Аккаунт: название и тариф ----------------------------------------------------------------
 
 /** Название аккаунта. Цена и лимиты — в тарифе. */
+/**
+ * «СТОП» в сообщениях: при включённой галочке к каждому сообщению через аккаунт добавляется строка «Чтобы отписаться,
+ * ответьте СТОП» (ADR-0088). Ответ «СТОП» принимается всегда, независимо от галочки.
+ */
+export function StopLineSwitch({ account }: { account: Account }) {
+  const queryClient = useQueryClient();
+  const change = useMutation({
+    mutationFn: (stopLine: boolean) =>
+      request<unknown>(`/partner/messenger/accounts/${account.id}`, {
+        method: 'PATCH',
+        body: { stopLine },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+  });
+  return (
+    <label className="inline-flex items-center gap-2 text-muted-foreground">
+      «СТОП» в сообщениях
+      <Switch
+        aria-label={`Строка про СТОП в сообщениях аккаунта «${account.label}»`}
+        checked={account.stop_line}
+        disabled={change.isPending}
+        onCheckedChange={(stopLine) => {
+          change.mutate(stopLine);
+        }}
+      />
+      <Hint label="Что такое «СТОП» в сообщениях">
+        <p>
+          К каждому сообщению добавляется строка «Чтобы отписаться, ответьте СТОП». Человек, который
+          ответит так, больше не получит сообщений. Меньше жалоб — аккаунт реже блокируют.
+        </p>
+      </Hint>
+    </label>
+  );
+}
+
 export function RenameForm({ account }: { account: Account }) {
   const queryClient = useQueryClient();
   const [label, setLabel] = useState(account.label);

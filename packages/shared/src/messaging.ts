@@ -35,6 +35,12 @@ export const SENDABLE_ACCOUNT_STATUSES: readonly MessengerAccountStatus[] = ['ac
 /** Предел длины текста: столько принимает мессенджер за одно сообщение. */
 export const MESSAGE_MAX_LENGTH = 4000;
 
+/**
+ * Строка, которую площадка добавляет в конец сообщения через аккаунт партнёра, если у аккаунта включена «строка про СТОП»
+ * ([ADR-0088](../../../docs/adr/0088-otchety-i-zashchita-akkauntov-max.md)). Одна на всех: так ответ «СТОП» узнаётся однозначно.
+ */
+export const STOP_LINE = 'Чтобы отписаться, ответьте СТОП';
+
 /** Цена партнёра за одно сообщение, в рублях: меньше копейки нет смысла, больше сотни — опечатка. */
 export const MESSAGE_PRICE_MIN_RUBLES = '0.01';
 export const MESSAGE_PRICE_MAX_RUBLES = '100';

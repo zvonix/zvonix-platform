@@ -16,6 +16,7 @@ import {
   type TemplateBlock,
   type TemplateVia,
   type TemplateWhen,
+  STOP_LINE,
 } from '@zvonix/shared';
 
 /** Блок с ключом: ключ нужен только списку на экране, чтобы поле не «прыгало» при перестановке. */
@@ -340,6 +341,14 @@ export function TemplateBuilder() {
                     </span>
                     <pre className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 font-sans">
                       {text}
+                      {route === 'account' && (
+                        <span className="mt-2 block border-t border-dashed border-border pt-2 text-muted-foreground">
+                          {STOP_LINE}
+                          <span className="block text-xs">
+                            если у аккаунта партнёра включён «СТОП»
+                          </span>
+                        </span>
+                      )}
                     </pre>
                   </div>
                 );

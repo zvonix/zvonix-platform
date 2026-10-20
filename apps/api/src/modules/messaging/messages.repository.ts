@@ -421,10 +421,15 @@ export class MessagesRepository {
   }
 
   /** Ушло в мессенджер. Условие на `sending`: повторный разбор не затирает продвинувшийся статус. */
-  async markSent(id: MessageId, providerMessageId: string, at: Date): Promise<void> {
+  async markSent(
+    id: MessageId,
+    providerMessageId: string,
+    at: Date,
+    stopLine = false,
+  ): Promise<void> {
     await this.database.db
       .update(messages)
-      .set({ status: 'sent', providerMessageId, sentAt: at })
+      .set({ status: 'sent', providerMessageId, sentAt: at, stopLine })
       .where(and(eq(messages.id, id), eq(messages.status, 'sending')));
   }
 

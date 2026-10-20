@@ -222,10 +222,13 @@ export class MessagingRepository {
     return row;
   }
 
-  async setLabel(id: MessengerAccountId, label: string): Promise<MessengerAccountRow | undefined> {
+  async setOwnerFields(
+    id: MessengerAccountId,
+    fields: { label?: string; stopLine?: boolean },
+  ): Promise<MessengerAccountRow | undefined> {
     const [row] = await this.database.db
       .update(messengerAccounts)
-      .set({ label })
+      .set(fields)
       .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
       .returning();
     return row;

@@ -42,6 +42,8 @@ interface ClientMessageView {
   readonly status: string;
   /** Наши причины, не слова провайдера. */
   readonly failure_reason: string | null;
+  /** В конец сообщения добавлена строка про «СТОП». */
+  readonly stop_line: boolean;
   /** Списано, ₽. Не отправлено — `null`: деньги возвращены. */
   readonly cost: string | null;
   readonly created_at: string;
@@ -59,6 +61,7 @@ const toClientView = (row: MessageRow): ClientMessageView => ({
   text: row.text,
   status: row.status,
   failure_reason: row.failureReason,
+  stop_line: row.stopLine,
   cost: row.status === 'failed' ? null : Money.format(row.clientAmount),
   created_at: row.createdAt.toISOString(),
   sent_at: iso(row.sentAt),

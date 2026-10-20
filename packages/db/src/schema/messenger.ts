@@ -164,6 +164,9 @@ export const messengerAccounts = pgTable(
     /** Инстансу уже сказано присылать входящие («СТОП», ADR-0088): новые аккаунты — сразу, прежним — при ближайшей сверке. */
     incomingWebhook: boolean().notNull().default(false),
 
+    /** Добавлять в конец сообщений через этот аккаунт строку про «СТОП» (ADR-0088). Решает партнёр; по умолчанию да. */
+    stopLine: boolean().notNull().default(true),
+
     /**
      * Пауза здоровья ([ADR-0079](../../../../docs/adr/0079-raspredelenie-soobscheniy-i-zdorove-akkauntov.md)): до этого
      * времени сообщения на аккаунт не идут. `healthSince` — с какого момента считать долю «нет MAX» после отправки.
@@ -252,6 +255,9 @@ export const messages = pgTable(
 
     /** Идентификатор сообщения у провайдера; по нему приходят статусы доставки. */
     providerMessageId: text(),
+
+    /** К ушедшему тексту добавлена строка про «СТОП» (ADR-0088): клиент видит, что получатель её получил. */
+    stopLine: boolean().notNull().default(false),
 
     /** Деньги, зафиксированные при приёме: клиент платит = партнёру + наценка площадки. */
     clientAmount: money().notNull(),
