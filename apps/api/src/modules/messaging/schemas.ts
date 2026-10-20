@@ -171,16 +171,12 @@ const templateBlockSchema = z
   })
   .strict()
   .refine(
-    (block) => block.kind === 'body' || block.kind === 'bot_link' || (block.text ?? '') !== '',
-    {
-      message: 'Введите текст блока',
-    },
+    (block) => (block.kind !== 'greeting' && block.kind !== 'text') || (block.text ?? '') !== '',
+    { message: 'Введите текст блока' },
   )
   .refine(
-    (block) => (block.kind !== 'body' && block.kind !== 'bot_link') || block.text === undefined,
-    {
-      message: 'У этого блока текста нет',
-    },
+    (block) => block.kind === 'greeting' || block.kind === 'text' || block.text === undefined,
+    { message: 'У этого блока текста нет' },
   )
   .refine(
     (block) => block.kind !== 'body' || (block.when === 'always' && (block.via ?? 'all') === 'all'),

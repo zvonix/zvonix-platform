@@ -22,9 +22,12 @@ export class TemplatesController {
 
   @Cabinets('client')
   @Get('client/messages/template')
-  async get(@CurrentUser() actor: Principal): Promise<{ blocks: readonly TemplateBlock[] }> {
+  async get(
+    @CurrentUser() actor: Principal,
+  ): Promise<{ blocks: readonly TemplateBlock[]; company: string }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    return { blocks: await this.templates.get(client.id) };
+    // Название нужно кабинету для предпросмотра: `{название}` подставляется им же.
+    return { blocks: await this.templates.get(client.id), company: client.name };
   }
 
   /** Заменяет шаблон целиком: порядок блоков и есть содержимое. */
@@ -33,8 +36,8 @@ export class TemplatesController {
   async save(
     @CurrentUser() actor: Principal,
     @Body(zodBody(templateSchema)) body: z.infer<typeof templateSchema>,
-  ): Promise<{ blocks: readonly TemplateBlock[] }> {
+  ): Promise<{ blocks: readonly TemplateBlock[]; company: string }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    return { blocks: await this.templates.save(client.id, body.blocks) };
+    return { blocks: await this.templates.save(client.id, body.blocks), company: client.name };
   }
 }

@@ -5,6 +5,7 @@
 
 import { Injectable } from '@nestjs/common';
 import { composeMessage, type Id, type TemplateBlock, validationFailed } from '@zvonix/shared';
+import { BillingService } from '../billing/billing.service.js';
 import { BotsService } from './bot/bots.service.js';
 import { MessagesRepository } from './messages.repository.js';
 import { TemplatesRepository } from './templates.repository.js';
@@ -18,6 +19,7 @@ export class TemplatesService {
     private readonly repository: TemplatesRepository,
     private readonly messages: MessagesRepository,
     private readonly bots: BotsService,
+    private readonly billing: BillingService,
   ) {}
 
   async get(clientId: Id<'client'>): Promise<readonly TemplateBlock[]> {
@@ -46,7 +48,9 @@ export class TemplatesService {
   }): Promise<string> {
     const blocks = await this.repository.find(message.clientId);
     if (blocks === undefined) return message.text;
-    const [first, known] = await Promise.all([
+    // Название компании — только если шаблон его просит: почти весь трафик обходится без лишнего запроса.
+    const needsCompany = blocks.some((block) => (block.text ?? '').includes('{название}'));
+    const [first, known, company] = await Promise.all([
       blocks.some((block) => block.when === 'first' && block.kind !== 'body')
         ? this.messages
             .hasEarlierSent(message.clientId, message.recipient, message.id)
@@ -55,10 +59,14 @@ export class TemplatesService {
       blocks.some((block) => block.kind === 'greeting' || block.kind === 'bot_link')
         ? this.bots.templateContext(message.clientId, message.recipient)
         : Promise.resolve({ name: null, botLink: null }),
+      needsCompany
+        ? this.billing.clientWithBalance(message.clientId).then((client) => client.name)
+        : Promise.resolve(''),
     ]);
     return composeMessage(blocks, {
       body: message.text,
       name: known.name,
+      company,
       botLink: known.botLink,
       first,
       route: message.route,

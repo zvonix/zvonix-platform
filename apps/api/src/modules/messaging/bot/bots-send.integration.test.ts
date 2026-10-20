@@ -523,7 +523,9 @@ describe('настройки бота клиента и шаблон сообщ�
       url: '/client/messages/template',
       headers: bearer(client.token),
     });
-    expect(initial.json()).toEqual({ blocks: [{ kind: 'body', when: 'always' }] });
+    const initialBody = initial.json<{ blocks: unknown; company: string }>();
+    expect(initialBody.blocks).toEqual([{ kind: 'body', when: 'always' }]);
+    expect(initialBody.company).toMatch(/^Такси /u);
 
     expect(
       (
@@ -651,6 +653,36 @@ describe('настройки бота клиента и шаблон сообщ�
     const sent = simulatedBotSent.at(-1)?.text ?? '';
     expect(sent).toContain('только в боте');
     expect(sent).not.toContain('только через аккаунты');
+  });
+
+  it('«Пустая строка», многострочный текст и {название}: уходят как собраны; GET отдаёт название компании', async () => {
+    await connectPlatform();
+    const { client, phone } = await subscribed(558, 80, '79001234570', 'Ольга');
+    const saved = await putTemplate(client.token, [
+      { kind: 'greeting', text: 'Добро пожаловать в {название}, {имя}!', when: 'always' },
+      { kind: 'break', when: 'always' },
+      { kind: 'body', when: 'always' },
+      { kind: 'break', when: 'always' },
+      { kind: 'text', text: 'Адрес: ул. Мира, 1\nТел. 000', when: 'always' },
+    ]);
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json<{ company: string }>().company).not.toBe('');
+    // У «Пустой строки» текста нет.
+    expect(
+      (
+        await putTemplate(client.token, [
+          { kind: 'break', text: 'а', when: 'always' },
+          { kind: 'body', when: 'always' },
+        ])
+      ).statusCode,
+    ).toBe(400);
+
+    await sendTo(client.token, phone);
+    await api().get(MessagesService).dispatchDue(new Date());
+    const sent = simulatedBotSent.at(-1)?.text ?? '';
+    expect(sent).toMatch(
+      /^Добро пожаловать в .+, Ольга!\n\nМашина подана\n\nАдрес: ул. Мира, 1\nТел. 000$/u,
+    );
   });
 
   it('своё приветствие подставляет название службы; без него — стандартный текст', async () => {
