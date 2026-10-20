@@ -1,0 +1,1 @@
+ALTER TABLE "messenger_accounts" ADD COLUMN "recommended" boolean DEFAULT true NOT NULL;

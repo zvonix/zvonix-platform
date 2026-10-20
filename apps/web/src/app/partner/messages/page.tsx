@@ -23,6 +23,7 @@ import { money } from '@/lib/money';
 import {
   ACCOUNTS_KEY,
   AccountTariffSelect,
+  RecommendedSwitch,
   RenameForm,
   StopLineSwitch,
   useMessengerAccounts,
@@ -207,6 +208,7 @@ function AccountRow({
       <TableCell>
         <div className="flex flex-col items-start gap-1.5">
           <AccountTariffSelect account={account} />
+          <RecommendedSwitch account={account} />
           <StopLineSwitch account={account} />
         </div>
       </TableCell>

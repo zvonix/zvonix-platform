@@ -18,6 +18,42 @@ export interface EffectiveLimits {
   readonly warmupDay: number | null;
 }
 
+/** Профиль «рекомендованной работы» (настройки площадки, ADR-0088); 0 — без ограничения. */
+export interface RecommendedProfile {
+  readonly paceSeconds: number;
+  readonly perMinute: number;
+  readonly perHour: number;
+  readonly perDay: number;
+}
+
+/** Аккаунт с наложенным профилем: к лимитам добавлена минимальная пауза, которую нужно выдержать. */
+export type WithRecommended<T> = T & { readonly recommendedPaceSeconds?: number };
+
+/** Меньшее из двух пределов; пусто или 0 у профиля — предел тарифа остаётся как есть. */
+const tighter = (own: number | null, recommended: number): number | null =>
+  recommended <= 0 ? own : own === null ? recommended : Math.min(own, recommended);
+
+/**
+ * Рекомендованная работа: у аккаунта с включённой галочкой действует меньшее из лимита тарифа и профиля площадки, а пауза между
+ * сообщениями — не меньше рекомендованной. Профиль только сужает: поднять лимит выше тарифа он не может. Выключенная галочка
+ * оставляет аккаунт как есть.
+ */
+export function withRecommended<
+  T extends Pick<
+    MessengerAccountRow,
+    'recommended' | 'limitPerMinute' | 'limitPerHour' | 'limitPerDay'
+  >,
+>(account: T, profile: RecommendedProfile): WithRecommended<T> {
+  if (!account.recommended) return account;
+  return {
+    ...account,
+    limitPerMinute: tighter(account.limitPerMinute, profile.perMinute),
+    limitPerHour: tighter(account.limitPerHour, profile.perHour),
+    limitPerDay: tighter(account.limitPerDay, profile.perDay),
+    recommendedPaceSeconds: profile.paceSeconds,
+  };
+}
+
 /**
  * Лимиты аккаунта. Автопрогрев выключен — ровно то, что задал тариф. Включён: потолок — лимит в сутки из тарифа
  * (нет его — {@link WARMUP_DEFAULT_CEILING}), пока идёт прогрев — меньшая сегодняшняя доля, плюс часовая доля суток,
@@ -84,7 +120,7 @@ export function accountReadyAt(
     | 'limitPerMinute'
     | 'lastUsedAt'
     | 'pausedUntil'
-  >,
+  > & { readonly recommendedPaceSeconds?: number },
   load: AccountLoad,
   now: Date,
   options: { paceSeconds: number; withBacklog: boolean; reservePercent?: number },
@@ -92,8 +128,9 @@ export function accountReadyAt(
   const at = now.getTime();
   if (account.pausedUntil !== null && account.pausedUntil.getTime() > at)
     return account.pausedUntil;
-  if (options.paceSeconds > 0 && account.lastUsedAt !== null) {
-    const ready = account.lastUsedAt.getTime() + options.paceSeconds * 1000;
+  const pace = Math.max(options.paceSeconds, account.recommendedPaceSeconds ?? 0);
+  if (pace > 0 && account.lastUsedAt !== null) {
+    const ready = account.lastUsedAt.getTime() + pace * 1000;
     if (ready > at) return new Date(ready);
   }
   const queue = options.withBacklog ? load.backlog : 0;

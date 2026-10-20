@@ -59,6 +59,10 @@ const LABELS: Record<string, string> = {
   'bot.own_monthly_fee': 'Плата клиента за своего бота в месяц, ₽',
   'bot.api_url': 'Адрес API ботов MAX',
   'messages.pace_seconds': 'Пауза между сообщениями аккаунта, секунд',
+  'messages.recommended_pace_seconds': 'Пауза между сообщениями, секунд',
+  'messages.recommended_per_minute': 'Сообщений в минуту, не больше',
+  'messages.recommended_per_hour': 'Сообщений в час, не больше',
+  'messages.recommended_per_day': 'Сообщений в сутки, не больше',
   'messages.duplicate_window_minutes':
     'Не принимать одинаковое сообщение одному номеру чаще, минут',
   'messages.recipient_limit_per_hour': 'Сообщений одному номеру от клиента в час, не больше',

@@ -11,10 +11,12 @@ import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { BillingService } from '../billing/billing.service.js';
 import { DistributionService } from '../limits/distribution.service.js';
 import { PrioritiesService } from '../priorities/priorities.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { DEFAULT_DISTRIBUTION, quietEndsAt, type DistributionSettings } from '@zvonix/shared';
 import { chooseByMode, isFree, type Candidate } from './distribution.js';
 import { MessagesRepository, type AccountLoad } from './messages.repository.js';
 import { MessagingRepository, type MessengerAccountRow } from './messaging.repository.js';
+import { withRecommended } from './warmup.js';
 
 /** Сколько аккаунтов смотрится за один заход: хватает, чтобы найти свободный, и не читает все. */
 const CANDIDATES = 12;
@@ -43,6 +45,7 @@ export class AccountPicker {
     private readonly billing: BillingService,
     private readonly distribution: DistributionService,
     private readonly priorities: PrioritiesService,
+    private readonly settings: SettingsService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('account-picker');
@@ -102,6 +105,7 @@ export class AccountPicker {
     first: boolean,
   ): Promise<{ account?: MessengerAccountRow; fallback?: MessengerAccountRow }> {
     const { scope, sticky, paceSeconds } = options;
+    const profile = (await this.settings.messaging()).recommended;
     const verified = new Set<string>();
     const excluded: Id<'partner'>[] = [...(tier.exceptPartners ?? [])];
     let offset = 0;
@@ -133,7 +137,7 @@ export class AccountPicker {
           }
           verified.add(account.partnerId);
         }
-        usable.push(account);
+        usable.push(withRecommended(account, profile));
       }
       // Исключили недопущенных партнёров: страница сдвинулась, читаем заново с той же позиции.
       if (dropped) continue;

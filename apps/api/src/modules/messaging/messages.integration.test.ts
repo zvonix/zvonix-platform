@@ -67,6 +67,17 @@ beforeAll(async () => {
   expect((await put(adminToken, { 'messaging.enabled': true })).statusCode).toBe(200);
   // Паузу снимаем: сама пауза проверяется отдельным сценарием.
   expect((await put(adminToken, { 'messages.pace_seconds': 0 })).statusCode).toBe(200);
+  // «Рекомендованная работа» отключена нулями: её темп (20 с, 2 в минуту) тормозил бы тесты, которые шлют подряд (проверяется отдельно).
+  expect(
+    (
+      await put(adminToken, {
+        'messages.recommended_pace_seconds': 0,
+        'messages.recommended_per_minute': 0,
+        'messages.recommended_per_hour': 0,
+        'messages.recommended_per_day': 0,
+      })
+    ).statusCode,
+  ).toBe(200);
   // Тесты шлют много сообщений одному номеру: предел на номер отключён (проверяется отдельно).
   expect(
     (
@@ -852,6 +863,67 @@ describe('не ушло — деньги возвращаются', () => {
       failure_reason: 'wait_expired',
     });
     expect(await balance(client.token)).toBe('10');
+  });
+});
+
+describe('рекомендованная работа (ADR-0088)', () => {
+  const profile = (values: Record<string, number>) =>
+    put(adminToken, {
+      'messages.recommended_pace_seconds': values['pace'] ?? 0,
+      'messages.recommended_per_minute': values['minute'] ?? 0,
+      'messages.recommended_per_hour': values['hour'] ?? 0,
+      'messages.recommended_per_day': values['day'] ?? 0,
+    });
+
+  afterAll(async () => {
+    await profile({});
+  });
+
+  it('лимит профиля сужает тариф: второе сообщение ждёт в очереди; выключенная галочка снимает ограничение; партнёр значений не видит', async () => {
+    const partner = await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const accountId = await withDatabase(async (execute) => {
+      const result = await execute(sql`select id from messenger_accounts limit 1`);
+      return (result.rows[0] as { id: string }).id;
+    });
+    const patch = (body: Record<string, unknown>) =>
+      api().inject({
+        method: 'PATCH',
+        url: `/partner/messenger/accounts/${accountId}`,
+        headers: bearer(partner.ownerToken),
+        payload: body,
+      });
+    await withDatabase(async (execute) => {
+      await execute(sql`update messenger_accounts set warmup_enabled = false`);
+    });
+
+    expect((await profile({ minute: 1 })).statusCode).toBe(200);
+    const status = async (id: string) => (await messageOf(client.token, id))?.status;
+    const first = (await send(client.token, { to: '79005550101', text: 'раз' })).json<{
+      message: MessageView;
+    }>().message.id;
+    const second = (await send(client.token, { to: '79005550102', text: 'два' })).json<{
+      message: MessageView;
+    }>().message.id;
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect(await status(first)).toBe('sent');
+    expect(await status(second)).toBe('queued');
+
+    // Партнёр видит только галочку, но не цифры профиля.
+    const view = await patch({ recommended: true });
+    expect(view.statusCode).toBe(200);
+    expect(view.json<{ account: Record<string, unknown> }>().account).toMatchObject({
+      recommended: true,
+      limit_per_minute: null,
+    });
+
+    // Галочку сняли — аккаунт работает по своему тарифу, без профиля.
+    expect((await patch({ recommended: false })).statusCode).toBe(200);
+    await api()
+      .get(MessagesService)
+      .dispatchDue(new Date(Date.now() + 2 * 60_000));
+    expect(await status(second)).toBe('sent');
+    expect((await patch({})).statusCode).toBe(400);
   });
 });
 
