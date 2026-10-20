@@ -22,6 +22,7 @@ import { MessagingService } from './messaging.service.js';
 import {
   messagesOverviewQuerySchema,
   messagesQuerySchema,
+  messagesReportQuerySchema,
   providerWebhookSchema,
   sendMessageSchema,
 } from './schemas.js';
@@ -224,6 +225,24 @@ export class StaffMessagesController {
         failed: row.failed,
         revenue: Money.format(row.revenue),
         margin: Money.format(row.margin),
+      })),
+    };
+  }
+
+  /** Отчёт: отказы и причины, доля прочитанных — по клиентам и по аккаунтам (ADR-0088). */
+  @Roles('admin', 'support')
+  @Get('messages/report')
+  async report(
+    @Query(zodQuery(messagesReportQuerySchema)) query: z.infer<typeof messagesReportQuerySchema>,
+  ) {
+    const report = await this.messages.report(query.days);
+    return {
+      days: query.days,
+      clients: report.clients.map(({ clientId, ...rest }) => ({ client_id: clientId, ...rest })),
+      accounts: report.accounts.map(({ accountId, partnerName, ...rest }) => ({
+        account_id: accountId,
+        partner_name: partnerName,
+        ...rest,
       })),
     };
   }

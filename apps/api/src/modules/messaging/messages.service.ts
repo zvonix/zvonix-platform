@@ -386,6 +386,14 @@ export class MessagesService {
     return series;
   }
 
+  /** Отчёт для сотрудников за `days` суток: по клиентам и по аккаунтам (ADR-0088). */
+  report(days: number, now: Date = new Date()) {
+    return this.repository.report(
+      new Date(now.getTime() - days * 86_400_000),
+      new Date(now.getTime() - 86_400_000),
+    );
+  }
+
   list(filter: MessageFilter): Promise<{ rows: MessageRow[]; total: number }> {
     return this.repository.list(filter);
   }

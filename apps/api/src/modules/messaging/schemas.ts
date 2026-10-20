@@ -115,6 +115,15 @@ export const messagesOverviewQuerySchema = z.object({
     .pipe(z.number().int().min(-720).max(840)),
 });
 
+/** Отчёт для сотрудников: за сколько суток (по умолчанию неделя). */
+export const messagesReportQuerySchema = z.object({
+  days: z
+    .string()
+    .optional()
+    .transform((raw) => Number(raw ?? '7'))
+    .pipe(z.number().int().min(1).max(90)),
+});
+
 /** Сотрудник отключает или возвращает подключение SMPP клиента. */
 export const staffSmppSchema = z.object({ enabled: z.boolean() });
 

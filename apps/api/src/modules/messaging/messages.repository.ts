@@ -43,6 +43,37 @@ export type MessageRow = typeof messages.$inferSelect;
 export type MessageId = Id<'message'>;
 
 /** Нагрузка на аккаунт: отправки за минуту, час, сутки и очередь, которая за ним стоит. */
+/** Счётчики отчёта: одни и те же по клиенту и по аккаунту. */
+interface ReportCounts {
+  readonly total: number;
+  readonly sent: number;
+  readonly delivered: number;
+  readonly read: number;
+  readonly failed: number;
+  readonly not_in_max: number;
+  readonly account_unavailable: number;
+  readonly wait_expired: number;
+  readonly platform: number;
+  /** Ушли через аккаунты и лежат дольше суток, ушедшие успешно; из них прочитанные — `settled_read`. */
+  readonly settled: number;
+  readonly settled_read: number;
+}
+
+export interface ClientReportRow extends ReportCounts {
+  readonly clientId: Id<'client'>;
+  readonly name: string;
+}
+
+export interface AccountReportRow extends ReportCounts {
+  readonly accountId: Id<'messengerAccount'>;
+  readonly label: string;
+  readonly partnerName: string;
+  readonly status: string;
+  readonly stateReason: string | null;
+  readonly pausedUntil: string | null;
+  readonly pauseReason: string | null;
+}
+
 export interface AccountLoad {
   minute: number;
   hour: number;
@@ -679,6 +710,51 @@ export class MessagesRepository {
         margin: string;
       }[]
     ).map((row) => ({ ...row, revenue: BigInt(row.revenue), margin: BigInt(row.margin) }));
+  }
+
+  /**
+   * Отчёт для сотрудников за окно: по клиентам и по аккаунтам. «Не прочитано» считается только у ушедших через аккаунты и
+   * старше суток (`settledBefore`): у бота статуса «прочитано» нет, а свежее сообщение ещё не успели прочитать.
+   */
+  async report(
+    since: Date,
+    settledBefore: Date,
+  ): Promise<{ clients: ClientReportRow[]; accounts: AccountReportRow[] }> {
+    const counts = sql`
+             count(*)::int as total,
+             (count(*) filter (where m.status in ('sent', 'delivered', 'read')))::int as sent,
+             (count(*) filter (where m.status in ('delivered', 'read')))::int as delivered,
+             (count(*) filter (where m.status = 'read'))::int as read,
+             (count(*) filter (where m.status = 'failed'))::int as failed,
+             (count(*) filter (where m.failure_reason = 'recipient_not_in_max'))::int as not_in_max,
+             (count(*) filter (where m.failure_reason = 'account_unavailable'))::int as account_unavailable,
+             (count(*) filter (where m.failure_reason = 'wait_expired'))::int as wait_expired,
+             (count(*) filter (where m.failure_reason = 'platform'))::int as platform,
+             (count(*) filter (where m.route = 'account' and m.sent_at < ${settledBefore}
+                                 and m.status in ('sent', 'delivered', 'read')))::int as settled,
+             (count(*) filter (where m.route = 'account' and m.sent_at < ${settledBefore}
+                                 and m.status = 'read'))::int as settled_read`;
+    const byClient = await this.database.db.execute(sql`
+      select m.client_id as "clientId", c.name as name, ${counts}
+        from messages m
+        join clients c on c.id = m.client_id
+       where m.created_at >= ${since}
+       group by m.client_id, c.name
+       order by count(*) desc`);
+    const byAccount = await this.database.db.execute(sql`
+      select m.account_id as "accountId", a.label as label, p.name as "partnerName",
+             a.status as status, a.state_reason as "stateReason", a.paused_until as "pausedUntil",
+             a.pause_reason as "pauseReason", ${counts}
+        from messages m
+        join messenger_accounts a on a.id = m.account_id
+        join partners p on p.id = a.partner_id
+       where m.created_at >= ${since}
+       group by m.account_id, a.label, p.name, a.status, a.state_reason, a.paused_until, a.pause_reason
+       order by count(*) desc`);
+    return {
+      clients: byClient.rows as unknown as ClientReportRow[],
+      accounts: byAccount.rows as unknown as AccountReportRow[],
+    };
   }
 
   /** Принято и окончательно не отправлено с `since`: по этому судят, что отправка в целом сломалась. */
