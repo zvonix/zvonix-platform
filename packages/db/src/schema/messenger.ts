@@ -527,11 +527,19 @@ export const messageStops = pgTable(
     id: primaryId<'messageStop'>(),
     /** Номер в каноническом виде, как `messages.recipient`. */
     phone: text().notNull(),
+    /** Чьи сообщения человек остановил; пусто — запрет общий, для всех клиентов (не удалось понять, кому он отвечал). */
+    clientId: idRef<'client'>().references(() => clients.id, { onDelete: 'restrict' }),
     source: text().$type<MessageStopSource>().notNull(),
     createdAt: createdAt(),
   },
   (t) => [
-    uniqueIndex('message_stops_phone_key').on(t.phone),
+    uniqueIndex('message_stops_global_key')
+      .on(t.phone)
+      .where(sql`${t.clientId} is null`),
+    uniqueIndex('message_stops_client_key')
+      .on(t.phone, t.clientId)
+      .where(sql`${t.clientId} is not null`),
+    index('message_stops_client_idx').on(t.clientId),
     check('message_stops_source_check', sql`${oneOf(t.source, MESSAGE_STOP_SOURCES)}`),
   ],
 );

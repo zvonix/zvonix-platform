@@ -45,6 +45,7 @@ import { SmppServer } from './smpp/server.js';
 import { ClientSmppController, StaffSmppController } from './smpp/smpp.controller.js';
 import { SmppRepository } from './smpp/smpp.repository.js';
 import { SmppService } from './smpp/smpp.service.js';
+import { StaffStopsController } from './stops.controller.js';
 import { StopsRepository } from './stops.repository.js';
 import { StopsService } from './stops.service.js';
 
@@ -72,6 +73,7 @@ import { StopsService } from './stops.service.js';
     ClientSmppController,
     StaffSmppController,
     StaffMessagesController,
+    StaffStopsController,
     MessengerWebhookController,
     StaffBotController,
     ClientBotController,

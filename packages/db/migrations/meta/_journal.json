@@ -463,6 +463,13 @@
       "when": 1792486997075,
       "tag": "0065_stroka_pro_stop",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1792489748342,
+      "tag": "0066_stop_po_klientu",
+      "breakpoints": true
     }
   ]
 }

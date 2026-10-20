@@ -158,6 +158,16 @@ export const messagesQuerySchema = z.object({
   offset: z.string().optional().transform(boundedOffset),
 });
 
+/** Список «не писать»: поиск по полному номеру и страница. */
+export const stopsQuerySchema = z.object({
+  phone: optional(z.string().trim().max(30)),
+  limit: z
+    .string()
+    .optional()
+    .transform((raw) => boundedLimit(raw, 200)),
+  offset: z.string().optional().transform(boundedOffset),
+});
+
 /** Уведомление провайдера: берём только нужное, остальное игнорируем (состав полей у него меняется). */
 export const providerWebhookSchema = z.looseObject({
   typeWebhook: z.string().optional(),

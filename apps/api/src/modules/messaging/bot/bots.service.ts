@@ -913,9 +913,11 @@ export class BotsService {
     const text = message?.body?.text?.trim().toLowerCase();
     if (text === 'стоп' || text === '/stop' || text === 'stop') {
       await this.repository.stopUser(bot.id, userId);
-      // «СТОП» боту — это отказ и для аккаунтов партнёров: номер, если он известен, закрывается для всех (ADR-0088).
+      // «СТОП» боту — отказ и для аккаунтов партнёров, но только тем клиентам, чьим подписчиком человек был (ADR-0088).
       for (const subscriber of await this.repository.subscribersOf(bot.id, userId)) {
-        if (subscriber.phone !== null) await this.stops.stop(subscriber.phone, 'bot');
+        if (subscriber.phone !== null) {
+          await this.stops.stop(subscriber.phone, 'bot', subscriber.clientId);
+        }
       }
       await this.provider.send(token, chatId, TEXT.stopped);
       return;
