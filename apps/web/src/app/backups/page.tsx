@@ -280,12 +280,12 @@ function Backups() {
                     <span className="text-muted-foreground">не проверялась</span>
                   ) : backup.check.ok ? (
                     <span className="text-ok">
-                      годна · {ago(backup.check.at)}
+                      проверена · {ago(backup.check.at)}
                       <span className="block text-muted-foreground">{backup.check.detail}</span>
                     </span>
                   ) : (
                     <span className="text-crit">
-                      не годна
+                      не прошла проверку
                       <span className="block text-muted-foreground">{backup.check.detail}</span>
                     </span>
                   )}
