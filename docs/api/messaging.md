@@ -282,6 +282,14 @@ MAX либо нет связи; `retired` — списан (в списках е
 аккаунты, старше суток, успешно) и `settled_read` (из них прочитано) — по ним считается «не прочитано». У сообщений бота
 `read` не бывает, поэтому они в `settled` не входят. Страница «Отчёты MAX» ([ADR-0088](../adr/0088-otchety-i-zashchita-akkauntov-max.md)).
 
+### Журнал аккаунтов в отчёте ([ADR-0088](../adr/0088-otchety-i-zashchita-akkauntov-max.md))
+
+`GET /messages/report` дополнительно отдаёт `journal`: `sent_via_accounts` (ушло через аккаунты), `blocked` (блокировок аккаунтов за
+период), `accounts` — по каждому аккаунту, у которого есть записи: `checks` (`exists`, `absent`, `unknown`, `limited` — настоящие запросы
+«есть ли у номера MAX» к провайдеру; повтор из памяти не пишется, **номер не хранится**), счётчики событий `blocked`, `suspended`,
+`logged_out`, `health_paused`; `recent` — до 30 последних событий (`kind`: `unavailable` с `reason`, `active`, `health_paused`).
+«Блокировок на 1000 сообщений» = `blocked / sent_via_accounts × 1000`. Проверки номеров хранятся `retention.messages_days`, история аккаунтов — год.
+
 ## Проверка ключа провайдера
 
 `POST /messenger/provider/test` (только администратор) → `200` `{ "ok": true, "message": "Ключ принят. Аккаунтов у

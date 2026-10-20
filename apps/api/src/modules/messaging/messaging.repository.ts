@@ -5,10 +5,11 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, count, eq, lt, ne, or, isNull, sql } from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
-import { messengerAccounts } from '@zvonix/db/schema';
+import { messengerAccountEvents, messengerAccounts } from '@zvonix/db/schema';
 import {
   newId,
   type Id,
+  type MessengerAccountEventKind,
   type MessengerAccountReason,
   type MessengerAccountStatus,
   type MessengerPauseReason,
@@ -162,6 +163,17 @@ export class MessagingRepository {
       .where(and(eq(messengerAccounts.id, id), ne(messengerAccounts.status, 'retired')))
       .returning();
     return row;
+  }
+
+  /** Событие в истории аккаунта (ADR-0088). */
+  async addEvent(
+    accountId: MessengerAccountId,
+    kind: MessengerAccountEventKind,
+    reason: MessengerAccountReason | null,
+  ): Promise<void> {
+    await this.database.db
+      .insert(messengerAccountEvents)
+      .values({ id: newId<'messengerAccountEvent'>(), accountId, kind, reason });
   }
 
   /** Пауза здоровья: условный переход — аккаунт, уже стоящий на паузе, повторно не ставится. */

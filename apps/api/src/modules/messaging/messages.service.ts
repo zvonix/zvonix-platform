@@ -57,6 +57,8 @@ const DISPATCH_BATCH = 50;
 
 const EMPTY_LOAD: AccountLoad = { minute: 0, hour: 0, day: 0, backlog: 0 };
 const HEALTH_WINDOW_MS = 86_400_000;
+/** История состояния аккаунтов хранится год (ADR-0088). */
+const EVENTS_KEEP_DAYS = 365;
 
 /** Повтор после временного сбоя: 1, 2, 4, 8 минут — и возврат. */
 const BACKOFF_BASE_SECONDS = 60;
@@ -396,12 +398,14 @@ export class MessagesService {
     return series;
   }
 
-  /** Отчёт для сотрудников за `days` суток: по клиентам и по аккаунтам (ADR-0088). */
-  report(days: number, now: Date = new Date()) {
-    return this.repository.report(
-      new Date(now.getTime() - days * 86_400_000),
-      new Date(now.getTime() - 86_400_000),
-    );
+  /** Отчёт для сотрудников за `days` суток: по клиентам, по аккаунтам и журнал аккаунтов (ADR-0088). */
+  async report(days: number, now: Date = new Date()) {
+    const since = new Date(now.getTime() - days * 86_400_000);
+    const [counts, journal] = await Promise.all([
+      this.repository.report(since, new Date(now.getTime() - 86_400_000)),
+      this.repository.journal(since, 30),
+    ]);
+    return { ...counts, journal };
   }
 
   list(filter: MessageFilter): Promise<{ rows: MessageRow[]; total: number }> {
@@ -460,6 +464,12 @@ export class MessagesService {
     const paused = `messaging:max:pause:${account.id}`;
     if ((await this.redis.connection.exists(paused).catch(() => 0)) === 1) return 'unknown';
     const result = await this.provider.checkRecipient(this.messaging.refOf(account), recipient);
+    await this.repository.addNumberCheck(account.id, result).catch((cause: unknown) => {
+      this.logger.warn('Проверка номера не записана в журнал', {
+        account_id: account.id,
+        reason: cause instanceof Error ? cause.name : 'unknown',
+      });
+    });
     if (result === 'limited') {
       // Предел проверок у мессенджера: пока он не снят, аккаунт только отправляет, а не спрашивает.
       await this.redis.connection
@@ -734,6 +744,11 @@ ${STOP_LINE}`
   /** Стирает тексты старше срока хранения (персональные данные). */
   async purgeTexts(now: Date = new Date()): Promise<number> {
     const { textDays } = await this.settings.messaging();
+    // Журналы проверок номеров живут столько же, сколько тексты; история аккаунтов — год.
+    await this.repository.purgeJournals(
+      new Date(now.getTime() - textDays * 86_400_000),
+      new Date(now.getTime() - EVENTS_KEEP_DAYS * 86_400_000),
+    );
     return this.repository.purgeTexts(new Date(now.getTime() - textDays * 86_400_000));
   }
 }

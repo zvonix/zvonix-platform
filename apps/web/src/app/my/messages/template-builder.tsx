@@ -328,7 +328,18 @@ export function TemplateBuilder() {
             ] as const
           ).map(([route, title]) => (
             <div key={route} className="flex flex-col gap-2">
-              <span className="font-medium">{title}</span>
+              <span className="flex items-center gap-1 font-medium">
+                {title}
+                {route === 'account' && (
+                  <Hint label="Про строку «СТОП»">
+                    <p>
+                      Если партнёр включил у своего аккаунта «СТОП», в конце сообщения добавляется
+                      строка «{STOP_LINE}». Какой аккаунт отправит, заранее неизвестно, поэтому
+                      строка показана серым.
+                    </p>
+                  </Hint>
+                )}
+              </span>
               {([true, false] as const).map((first) => {
                 const text = preview(route, first);
                 return (
@@ -344,9 +355,6 @@ export function TemplateBuilder() {
                       {route === 'account' && (
                         <span className="mt-2 block border-t border-dashed border-border pt-2 text-muted-foreground">
                           {STOP_LINE}
-                          <span className="block text-xs">
-                            если у аккаунта партнёра включён «СТОП»
-                          </span>
                         </span>
                       )}
                     </pre>

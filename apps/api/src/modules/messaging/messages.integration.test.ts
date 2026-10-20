@@ -866,6 +866,35 @@ describe('не ушло — деньги возвращаются', () => {
   });
 });
 
+describe('журнал аккаунтов: срок хранения (ADR-0088)', () => {
+  it('старые проверки номеров и события стираются вместе с текстами; свежие остаются', async () => {
+    await partnerWithAccount('0.45');
+    await withDatabase(async (execute) => {
+      const accountId = (
+        (await execute(sql`select id from messenger_accounts limit 1`)).rows[0] as { id: string }
+      ).id;
+      await execute(sql`delete from number_checks`);
+      await execute(sql`delete from messenger_account_events`);
+      await execute(sql`insert into number_checks (id, account_id, result, created_at) values
+        (gen_random_uuid(), ${accountId}::uuid, 'exists', now() - interval '60 days'),
+        (gen_random_uuid(), ${accountId}::uuid, 'absent', now() - interval '1 day')`);
+      await execute(sql`insert into messenger_account_events (id, account_id, kind, reason, created_at) values
+        (gen_random_uuid(), ${accountId}::uuid, 'unavailable', 'blocked', now() - interval '400 days'),
+        (gen_random_uuid(), ${accountId}::uuid, 'unavailable', 'blocked', now() - interval '10 days')`);
+    });
+    await api().get(MessagesService).purgeTexts(new Date());
+    const left = await withDatabase(async (execute) => ({
+      checks: (await execute(sql`select count(*)::int as n from number_checks`)).rows[0] as {
+        n: number;
+      },
+      events: (await execute(sql`select count(*)::int as n from messenger_account_events`))
+        .rows[0] as { n: number },
+    }));
+    expect(left.checks.n).toBe(1);
+    expect(left.events.n).toBe(1);
+  });
+});
+
 describe('рекомендованная работа (ADR-0088)', () => {
   const profile = (values: Record<string, number>) =>
     put(adminToken, {
@@ -1352,10 +1381,16 @@ describe('наценка правилами (ADR-0073)', () => {
 
 describe('отчёт для сотрудников', () => {
   it('по клиенту и по аккаунту: ушло, причины отказов; клиенту закрыто', async () => {
-    await partnerWithAccount('0.45');
+    // Предыдущие проверки могли выключить предпроверку номеров: журнал проверок пишется, только когда она идёт.
+    await put(adminToken, { 'messages.precheck_enabled': true });
+    const partner = await partnerWithAccount('0.45');
     const client = await clientWithMoney('10');
-    await send(client.token, { to: '79005550011', text: 'раз' });
-    await send(client.token, { to: '79005550000', text: 'нет MAX' });
+    // Результат проверки номера помнится в Redis (в том числе от прошлых прогонов): без этого настоящего запроса к провайдеру не было бы.
+    await api()
+      .get(RedisService)
+      .connection.del('messaging:max:79005570011', 'messaging:max:79005570000');
+    await send(client.token, { to: '79005570011', text: 'раз' });
+    await send(client.token, { to: '79005570000', text: 'нет MAX' });
     await api().get(MessagesService).dispatchDue(new Date());
 
     const response = await api().inject({
@@ -1375,6 +1410,45 @@ describe('отчёт для сотрудников', () => {
     expect(body.accounts).toHaveLength(1);
     expect(body.accounts[0]).toMatchObject({ total: 2, not_in_max: 1 });
     expect(body.accounts[0]?.partner_name).not.toBe('');
+
+    // Журнал аккаунтов (ADR-0088): проверки номеров у провайдера без самих номеров; событие — аккаунт вышел из MAX и вернулся.
+    simulateAccountState(partner.instance, 'not_authorized');
+    await api()
+      .get(MessagingService)
+      .refreshDue(new Date(Date.now() + 10 * MINUTE));
+    simulateAccountState(partner.instance, 'authorized', '79990003344');
+    await api()
+      .get(MessagingService)
+      .refreshDue(new Date(Date.now() + 20 * MINUTE));
+    const withJournal = (
+      await api().inject({
+        method: 'GET',
+        url: '/messages/report?days=7',
+        headers: bearer(adminToken),
+      })
+    ).json<{
+      journal: {
+        sent_via_accounts: number;
+        blocked: number;
+        accounts: {
+          checks: { exists: number; absent: number };
+          logged_out: number;
+        }[];
+        recent: { kind: string; reason: string | null }[];
+      };
+    }>().journal;
+    expect(withJournal.sent_via_accounts).toBe(1);
+    expect(withJournal.blocked).toBe(0);
+    expect(withJournal.accounts).toHaveLength(1);
+    expect(withJournal.accounts[0]?.checks).toMatchObject({ exists: 1, absent: 1 });
+    expect(withJournal.accounts[0]?.logged_out).toBe(1);
+    // Новые сверху: вернулся, вышел, а самое первое — вход аккаунта в MAX при заведении.
+    expect(withJournal.recent.map((event) => event.kind)).toEqual([
+      'active',
+      'unavailable',
+      'active',
+    ]);
+    expect(JSON.stringify(withJournal)).not.toMatch(/79005570011|79005570000/u);
 
     const denied = await api().inject({
       method: 'GET',

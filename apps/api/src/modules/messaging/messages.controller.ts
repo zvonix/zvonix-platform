@@ -248,6 +248,39 @@ export class StaffMessagesController {
         partner_name: partnerName,
         ...rest,
       })),
+      // Журнал аккаунтов (ADR-0088): проверки номеров и события состояния; для «блокировок на тысячу сообщений».
+      journal: {
+        sent_via_accounts: report.accounts.reduce((sum, row) => sum + row.sent, 0),
+        blocked: report.journal.accounts.reduce((sum, row) => sum + row.blocked, 0),
+        accounts: report.journal.accounts.map(
+          ({
+            accountId,
+            partnerName,
+            checks_exists,
+            checks_absent,
+            checks_unknown,
+            checks_limited,
+            ...rest
+          }) => ({
+            account_id: accountId,
+            partner_name: partnerName,
+            checks: {
+              exists: checks_exists,
+              absent: checks_absent,
+              unknown: checks_unknown,
+              limited: checks_limited,
+            },
+            ...rest,
+          }),
+        ),
+        recent: report.journal.recent.map((event) => ({
+          account_id: event.accountId,
+          label: event.label,
+          kind: event.kind,
+          reason: event.reason,
+          at: event.createdAt.toISOString(),
+        })),
+      },
     };
   }
 

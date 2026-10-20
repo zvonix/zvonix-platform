@@ -23,7 +23,14 @@ import {
   sql,
 } from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
-import { messages, messengerAccounts, partnerDistributions, smppAccounts } from '@zvonix/db/schema';
+import {
+  messages,
+  messengerAccountEvents,
+  messengerAccounts,
+  numberChecks,
+  partnerDistributions,
+  smppAccounts,
+} from '@zvonix/db/schema';
 import {
   newId,
   type Id,
@@ -32,6 +39,7 @@ import {
   type MessageRoute,
   type MessageStatus,
   type MoneyAmount,
+  type NumberCheckResult,
   type SmppReceiptEvent,
   type SmppReceiptMap,
   WARMUP_IDLE_DAYS,
@@ -73,6 +81,30 @@ export interface AccountReportRow extends ReportCounts {
   readonly stateReason: string | null;
   readonly pausedUntil: string | null;
   readonly pauseReason: string | null;
+}
+
+/** Журнал аккаунта за окно: проверки номеров и события состояния (ADR-0088). */
+export interface AccountJournalRow {
+  readonly accountId: Id<'messengerAccount'>;
+  readonly label: string;
+  readonly partnerName: string;
+  readonly status: string;
+  readonly checks_exists: number;
+  readonly checks_absent: number;
+  readonly checks_unknown: number;
+  readonly checks_limited: number;
+  readonly blocked: number;
+  readonly suspended: number;
+  readonly logged_out: number;
+  readonly health_paused: number;
+}
+
+export interface AccountEventRow {
+  readonly accountId: Id<'messengerAccount'>;
+  readonly label: string;
+  readonly kind: string;
+  readonly reason: string | null;
+  readonly createdAt: Date;
 }
 
 export interface AccountLoad {
@@ -718,6 +750,24 @@ export class MessagesRepository {
     ).map((row) => ({ ...row, revenue: BigInt(row.revenue), margin: BigInt(row.margin) }));
   }
 
+  /** Настоящая проверка «есть ли у номера MAX» у провайдера (ADR-0088); номер не записывается. */
+  async addNumberCheck(
+    accountId: Id<'messengerAccount'>,
+    result: NumberCheckResult,
+  ): Promise<void> {
+    await this.database.db
+      .insert(numberChecks)
+      .values({ id: newId<'numberCheck'>(), accountId, result });
+  }
+
+  /** Старые записи журналов (проверки номеров и история аккаунтов): `checksBefore` и `eventsBefore` — граница хранения. */
+  async purgeJournals(checksBefore: Date, eventsBefore: Date): Promise<void> {
+    await this.database.db.delete(numberChecks).where(lt(numberChecks.createdAt, checksBefore));
+    await this.database.db
+      .delete(messengerAccountEvents)
+      .where(lt(messengerAccountEvents.createdAt, eventsBefore));
+  }
+
   /**
    * Чьё сообщение этот номер получил с аккаунта последним (не раньше `since`): по нему «СТОП» относится к клиенту, а не ко
    * всем (ADR-0088). Аккаунт — по идентификатору инстанса у провайдера.
@@ -739,6 +789,56 @@ export class MessagesRepository {
        order by m.sent_at desc
        limit 1`);
     return (result.rows[0] as { clientId: Id<'client'> } | undefined)?.clientId;
+  }
+
+  /**
+   * Журнал аккаунтов за окно: по каждому аккаунту, у которого что-то было, — проверки номеров по итогам и события состояния, и
+   * последние события лентой. Аккаунт без единой записи в строки не попадает.
+   */
+  async journal(
+    since: Date,
+    recentLimit: number,
+  ): Promise<{ accounts: AccountJournalRow[]; recent: AccountEventRow[] }> {
+    const accounts = await this.database.db.execute(sql`
+      select a.id as "accountId", a.label as label, p.name as "partnerName", a.status as status,
+             coalesce(c.exists, 0)::int as checks_exists, coalesce(c.absent, 0)::int as checks_absent,
+             coalesce(c.unknown, 0)::int as checks_unknown, coalesce(c.limited, 0)::int as checks_limited,
+             coalesce(e.blocked, 0)::int as blocked, coalesce(e.suspended, 0)::int as suspended,
+             coalesce(e.logged_out, 0)::int as logged_out, coalesce(e.health_paused, 0)::int as health_paused
+        from messenger_accounts a
+        join partners p on p.id = a.partner_id
+        left join (
+          select account_id,
+                 count(*) filter (where result = 'exists') as exists,
+                 count(*) filter (where result = 'absent') as absent,
+                 count(*) filter (where result = 'unknown') as unknown,
+                 count(*) filter (where result = 'limited') as limited
+            from number_checks where created_at >= ${since} group by account_id
+        ) c on c.account_id = a.id
+        left join (
+          select account_id,
+                 count(*) filter (where kind = 'unavailable' and reason = 'blocked') as blocked,
+                 count(*) filter (where kind = 'unavailable' and reason = 'suspended') as suspended,
+                 count(*) filter (where kind = 'unavailable' and reason = 'logged_out') as logged_out,
+                 count(*) filter (where kind = 'health_paused') as health_paused
+            from messenger_account_events where created_at >= ${since} group by account_id
+        ) e on e.account_id = a.id
+       where c.account_id is not null or e.account_id is not null`);
+    const recent = await this.database.db.execute(sql`
+      select e.account_id as "accountId", a.label as label, e.kind as kind, e.reason as reason, e.created_at as "createdAt"
+        from messenger_account_events e
+        join messenger_accounts a on a.id = e.account_id
+       where e.created_at >= ${since}
+       order by e.created_at desc
+       limit ${recentLimit}`);
+    return {
+      accounts: accounts.rows as unknown as AccountJournalRow[],
+      recent: (
+        recent.rows as unknown as (Omit<AccountEventRow, 'createdAt'> & {
+          createdAt: string | Date;
+        })[]
+      ).map((row) => ({ ...row, createdAt: new Date(row.createdAt) })),
+    };
   }
 
   /**

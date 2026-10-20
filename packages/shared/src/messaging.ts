@@ -82,6 +82,17 @@ export const MESSAGE_FAILURE_REASONS = [
   'recipient_stopped',
 ] as const;
 
+/**
+ * События аккаунта для истории ([ADR-0088](../../../docs/adr/0088-otchety-i-zashchita-akkauntov-max.md)): стал недоступен (с причиной
+ * из `MESSENGER_ACCOUNT_REASONS`), вернулся в работу, поставлен на паузу здоровья.
+ */
+export const MESSENGER_ACCOUNT_EVENT_KINDS = ['unavailable', 'active', 'health_paused'] as const;
+export type MessengerAccountEventKind = (typeof MESSENGER_ACCOUNT_EVENT_KINDS)[number];
+
+/** Итог настоящего запроса «есть ли у номера MAX» к провайдеру. */
+export const NUMBER_CHECK_RESULTS = ['exists', 'absent', 'unknown', 'limited'] as const;
+export type NumberCheckResult = (typeof NUMBER_CHECK_RESULTS)[number];
+
 /** Откуда номер попал в список «не писать»: ответ на аккаунт партнёра или «СТОП» боту. */
 export const MESSAGE_STOP_SOURCES = ['account', 'bot'] as const;
 export type MessageStopSource = (typeof MESSAGE_STOP_SOURCES)[number];

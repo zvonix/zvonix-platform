@@ -15,6 +15,7 @@ import {
   rateLimited,
   validationFailed,
   type Id,
+  type MessengerAccountEventKind,
   type MessengerAccountReason,
   type MessengerAccountStatus,
   type UserRole,
@@ -321,6 +322,7 @@ export class MessagingService {
         from: account.status,
         to: updated.status,
       });
+      await this.journal(account.id, updated.status, updated.stateReason);
       // Первый вход в MAX: прогрев идёт от него, а не от создания записи (ADR-0078, ревизия 2026-10-18).
       if (account.status === 'pending' && updated.status === 'active') {
         await this.repository.restartWarmup(account.id, now);
@@ -481,6 +483,7 @@ export class MessagingService {
       sent: figures.ok,
       until: until.toISOString(),
     });
+    await this.recordEvent(id, 'health_paused', null);
     await this.audit.record({
       action: 'messenger_account.paused',
       entityType: 'messenger_account',
@@ -489,6 +492,34 @@ export class MessagingService {
       after: { paused_until: until.toISOString(), reason: 'absent_rate', ...figures },
     });
     return true;
+  }
+
+  /** Запись в историю аккаунта; сбой журнала не должен ронять сверку или паузу — только в лог. */
+  private async recordEvent(
+    accountId: MessengerAccountId,
+    kind: MessengerAccountEventKind,
+    reason: MessengerAccountReason | null,
+  ): Promise<void> {
+    try {
+      await this.repository.addEvent(accountId, kind, reason);
+    } catch (cause) {
+      this.logger.warn('Событие аккаунта MAX не записано в историю', {
+        account_id: accountId,
+        kind,
+        reason: cause instanceof Error ? cause.name : 'unknown',
+      });
+    }
+  }
+
+  /** Смена состояния аккаунта в историю: недоступен (с причиной) или вернулся в работу. */
+  private journal(
+    accountId: MessengerAccountId,
+    status: MessengerAccountStatus,
+    reason: MessengerAccountReason | null,
+  ): Promise<void> {
+    if (status === 'unavailable') return this.recordEvent(accountId, 'unavailable', reason);
+    if (status === 'active') return this.recordEvent(accountId, 'active', null);
+    return Promise.resolve();
   }
 
   /** Администратор снимает паузу раньше срока. */
