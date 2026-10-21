@@ -37,6 +37,7 @@ export function MoneyOperation({
   doneText,
   variant,
   invalidate,
+  reasonOptional = false,
 }: {
   /** Адрес действия: `/partners/<id>/payout`. */
   path: string;
@@ -52,6 +53,8 @@ export function MoneyOperation({
   variant?: 'outline';
   /** Корни запросов, которые устарели после операции. */
   invalidate: readonly string[];
+  /** Основание можно не писать (пополнение): сервер запишет «Ручное пополнение». */
+  reasonOptional?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState('');
@@ -63,7 +66,11 @@ export function MoneyOperation({
     mutationFn: () =>
       request<Posted>(path, {
         method: 'POST',
-        body: { amount: numberFromInput(amount), idempotencyKey: key, description: reason },
+        body: {
+          amount: numberFromInput(amount),
+          idempotencyKey: key,
+          ...(reason.trim() === '' ? {} : { description: reason }),
+        },
       }),
     onSuccess: (posted) => {
       setDone(posted);
@@ -77,7 +84,7 @@ export function MoneyOperation({
 
   const typed = numberFromInput(amount);
   const valid = moneyFromInput(amount) !== undefined && Number(typed) > 0;
-  const ready = valid && reason.trim() !== '';
+  const ready = valid && (reasonOptional || reason.trim() !== '');
 
   return (
     <div className="flex flex-col gap-1">
@@ -109,7 +116,7 @@ export function MoneyOperation({
               }}
             />
           </DialogField>
-          <DialogField label="Основание" wide>
+          <DialogField label={reasonOptional ? 'Основание (необязательно)' : 'Основание'} wide>
             <Input
               autoComplete="off"
               placeholder={reasonPlaceholder}

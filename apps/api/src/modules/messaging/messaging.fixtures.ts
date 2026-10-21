@@ -119,6 +119,14 @@ export function fixtures(api: () => NestFastifyApplication, adminToken: () => st
       payload: { name: 'Основной', price, isDefault: true, ...limits },
     });
     expect(tariff.statusCode).toBe(201);
+    // Свои лимиты в тарифе действуют, только пока «рекомендованная работа» снята (ADR-0090): тесты лимитов тарифа её снимают.
+    if (Object.keys(limits).length > 0) {
+      await withDatabase(async (execute) => {
+        await execute(
+          sql`update messenger_accounts set recommended = false where id = ${accountId}`,
+        );
+      });
+    }
     return { partnerId, ownerToken: owner.token, accountId, instance };
   }
 

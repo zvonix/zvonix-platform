@@ -215,7 +215,7 @@ function AccountRow({
         )}
       </TableCell>
 
-      <TableCell className="num text-right">
+      <TableCell className={`num text-right ${account.recommended ? 'text-faint' : ''}`}>
         <span className="block">
           {account.limit_per_minute === null ? '—' : `${String(account.limit_per_minute)} в минуту`}
         </span>
@@ -225,6 +225,11 @@ function AccountRow({
         <span className="block text-faint">
           {account.limit_per_day === null ? '—' : `${String(account.limit_per_day)} в сутки`}
         </span>
+        {account.recommended && (
+          <span className="block whitespace-normal font-sans text-muted-foreground">
+            не действуют: рекомендованная работа
+          </span>
+        )}
         {account.paused_until !== null && (
           <span className="block text-warn">Пауза: много «нет MAX» после отправки</span>
         )}

@@ -74,6 +74,13 @@ export const depositSchema = z.object({
   description: z.string().trim().min(2, 'слишком короткое').max(500, 'слишком длинное'),
 });
 
+/** Пополнение: основание можно не писать — в журнале останется «Ручное пополнение» ([ADR-0090](../../../../../docs/adr/0090-dengi-admina-i-limity-akkaunta.md)). */
+export const topUpSchema = depositSchema.extend({
+  description: depositSchema.shape.description
+    .optional()
+    .transform((value) => value ?? 'Ручное пополнение'),
+});
+
 /**
  * Объявление партнёра о том, слушает ли он записи своих вызовов
  * ([ADR-0036](../../../../../docs/adr/0036-dostup-partnyora-k-zapisyam.md)).

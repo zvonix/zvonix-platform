@@ -290,6 +290,57 @@ test.describe('ручное пополнение партнёра', () => {
   });
 });
 
+test.describe('счета и пополнение (ADR-0090)', () => {
+  test('клиенты и партнёры на одной странице; пополнение без основания; у поддержки кнопок нет', async ({
+    browser,
+  }) => {
+    const adminContext = await browser.newContext();
+    const page = await adminContext.newPage();
+    await signIn(page, PEOPLE.admin);
+    await page
+      .getByRole('navigation', { name: 'Разделы' })
+      .getByRole('link', { name: 'Счета и пополнение' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Счета и пополнение' })).toBeVisible();
+
+    // Клиент: сумма без основания, итог с остатком.
+    await page.getByRole('button', { name: 'Пополнить' }).first().click();
+    await page.getByLabel('Сумма, ₽').fill('10');
+    await expect(page.getByLabel('Основание (необязательно)')).toHaveValue('');
+    await page.getByRole('button', { name: /Пополнить \d/u }).click();
+    await expect(page.getByText(/Проведено\. Остаток:/u)).toBeVisible();
+
+    // Партнёры: другая вкладка, «Причитается».
+    await page.getByRole('tab', { name: 'Партнёры' }).click();
+    await expect(page.getByRole('columnheader', { name: 'Причитается' })).toBeVisible();
+    await page.getByRole('button', { name: 'Пополнить' }).first().click();
+    await page.getByLabel('Сумма, ₽').fill('5');
+    await page.getByRole('button', { name: /Пополнить \d/u }).click();
+    await expect(page.getByText(/Проведено\. Причитается:/u)).toBeVisible();
+
+    const supportContext = await browser.newContext();
+    const support = await supportContext.newPage();
+    await signIn(support, PEOPLE.support);
+    await support.goto('/money');
+    await expect(support.getByRole('columnheader', { name: 'Остаток' })).toBeVisible();
+    await expect(support.getByRole('button', { name: 'Пополнить' })).toHaveCount(0);
+
+    await adminContext.close();
+    await supportContext.close();
+  });
+
+  test('«Записи разговоров» — в «Аккаунте» партнёра, а не в «Деньгах»', async ({ page }) => {
+    await signIn(page, PEOPLE.partner);
+    await page.goto('/partner/money');
+    await expect(page.getByRole('heading', { name: 'Записи разговоров' })).toHaveCount(0);
+    await page.goto('/partner/account');
+    await expect(page.getByRole('heading', { name: 'Записи разговоров' })).toBeVisible();
+    await expect(
+      page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: 'Лимиты' }),
+    ).toHaveCount(0);
+  });
+});
+
 test.describe('выплата партнёрам списком', () => {
   test('причитающееся видно списком, выплата записывается одним действием', async ({ page }) => {
     await signIn(page, PEOPLE.admin);

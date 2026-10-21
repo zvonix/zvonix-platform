@@ -11,7 +11,6 @@ import {
   DatabaseBackup,
   Coins,
   FileText,
-  Gauge,
   HandCoins,
   HardDrive,
   Inbox,
@@ -38,6 +37,7 @@ import {
   ShieldCheck,
   SignalHigh,
   Users,
+  PiggyBank,
   Wallet,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -140,6 +140,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
+        { href: '/money', label: 'Счета и пополнение', Icon: PiggyBank },
         { href: '/payments', label: 'Платежи', Icon: Banknote },
         { href: '/payouts', label: 'Выплаты партнёрам', Icon: HandCoins },
         { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
@@ -202,6 +203,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       items: [
         { href: '/reports', label: 'Сводка', Icon: BarChart3 },
         { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
+        { href: '/money', label: 'Счета и пополнение', Icon: PiggyBank },
         { href: '/payments', label: 'Платежи', Icon: Banknote },
         { href: '/payouts', label: 'Выплаты партнёрам', Icon: HandCoins },
         { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
@@ -249,7 +251,6 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/partner/calls', label: 'Вызовы', Icon: PhoneCall, tab: true },
         { href: '/partner/equipment', label: 'Оборудование', Icon: Radio, tab: true },
         { href: '/partner/prices', label: 'Тарифы', Icon: ReceiptText },
-        { href: '/partner/limits', label: 'Лимиты', Icon: Gauge },
         { href: '/partner/distribution', label: 'Распределение', Icon: Shuffle },
       ],
     },

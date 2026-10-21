@@ -42,7 +42,6 @@ export interface Account {
   readonly limit_per_hour: number | null;
   readonly limit_per_day: number | null;
   readonly warmup_enabled: boolean;
-  readonly stop_line: boolean;
   readonly recommended: boolean;
   readonly warmup_day: number | null;
   readonly paused_until: string | null;
@@ -129,8 +128,8 @@ export function AccountTariffName({ account }: { account: Account }) {
 }
 
 /**
- * «Настройки» аккаунта одним окном: название, тариф, «рекомендованная работа» и «СТОП» в сообщениях (ADR-0088). Значения
- * рекомендованной работы партнёру не показываются — их задаёт площадка; свои лимиты партнёр ставит только в тарифе.
+ * «Настройки» аккаунта одним окном: название, тариф и «рекомендованная работа» (ADR-0088, ADR-0090). Включена — лимиты тарифа не
+ * действуют, работают лимиты площадки; их значения партнёру не показываются. Строка «СТОП» добавляется всегда и не настраивается.
  */
 export function AccountSettingsForm({ account }: { account: Account }) {
   const queryClient = useQueryClient();
@@ -138,16 +137,16 @@ export function AccountSettingsForm({ account }: { account: Account }) {
   const [label, setLabel] = useState(account.label);
   const [tariffId, setTariffId] = useState(account.tariff_id ?? '');
   const [recommended, setRecommended] = useState(account.recommended);
-  const [stopLine, setStopLine] = useState(account.stop_line);
   const valid = label.trim().length >= 2;
   const list = tariffs.data?.tariffs ?? [];
   const fallback = list.find((tariff) => tariff.is_default);
+  const chosen = list.find((tariff) => tariff.id === tariffId) ?? fallback;
 
   const save = useMutation({
     mutationFn: async () => {
       await request<unknown>(`/partner/messenger/accounts/${account.id}`, {
         method: 'PATCH',
-        body: { label: label.trim(), stopLine, recommended },
+        body: { label: label.trim(), recommended },
       });
       if (tariffId !== (account.tariff_id ?? '')) {
         await request<unknown>(`/partner/messenger/accounts/${account.id}/tariff`, {
@@ -204,22 +203,19 @@ export function AccountSettingsForm({ account }: { account: Account }) {
           Рекомендованная работа
           <Hint label="Что такое рекомендованная работа">
             <p>
-              Аккаунт отправляет в темпе, который площадка считает безопасным: реже блокировки. Ваши
-              лимиты из тарифа остаются, действует меньший из двух. Значения темпа задаёт площадка.
+              Аккаунт отправляет в темпе, который площадка считает безопасным: реже блокировки.
+              Лимиты вашего тарифа при этом не действуют, работают лимиты площадки. Значения задаёт
+              площадка.
             </p>
           </Hint>
         </label>
-        <label className="flex items-center gap-2">
-          <Switch checked={stopLine} onCheckedChange={setStopLine} />
-          «СТОП» в сообщениях
-          <Hint label="Что такое «СТОП» в сообщениях">
-            <p>
-              К каждому сообщению добавляется строка «Чтобы отписаться, ответьте СТОП». Человек,
-              который ответит так, больше не получит сообщений. Меньше жалоб — аккаунт реже
-              блокируют.
-            </p>
-          </Hint>
-        </label>
+        {chosen !== undefined && (
+          <p className={recommended ? 'text-faint' : 'text-muted-foreground'}>
+            Лимиты тарифа:{' '}
+            {limitsText(chosen.limit_per_minute, chosen.limit_per_hour, chosen.limit_per_day)}
+            {recommended && ' — не действуют, работает рекомендованная работа'}
+          </p>
+        )}
       </div>
     </DialogForm>
   );

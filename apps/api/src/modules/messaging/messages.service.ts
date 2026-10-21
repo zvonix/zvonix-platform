@@ -605,9 +605,8 @@ export class MessagesService {
 
     try {
       const rendered = await this.templates.render(message);
-      // Строка про «СТОП» — решение партнёра по аккаунту; не влезает в предел мессенджера — сообщение уходит без неё.
-      const stopLine =
-        account.stopLine && rendered.length + STOP_LINE.length + 2 <= MESSAGE_MAX_LENGTH;
+      // Строка про «СТОП» идёт во всех сообщениях через аккаунты (ADR-0090); не влезает в предел мессенджера — уходит без неё.
+      const stopLine = rendered.length + STOP_LINE.length + 2 <= MESSAGE_MAX_LENGTH;
       const { messageId } = await this.provider.sendText(
         this.messaging.refOf(account),
         message.recipient,

@@ -183,6 +183,31 @@ describe('пополнение баланса', () => {
     expect(body.entries).toHaveLength(1);
   });
 
+  it('основание можно не писать: в журнале «Ручное пополнение» (ADR-0090); у списания оно обязательно', async () => {
+    const clientId = await createClient();
+    const bare = await api().inject({
+      method: 'POST',
+      url: `/clients/${clientId}/deposit`,
+      headers: auth(),
+      payload: { amount: '10', idempotencyKey: `bare:${clientId}` },
+    });
+    expect(bare.statusCode).toBe(200);
+    const entries = await api().inject({
+      method: 'GET',
+      url: `/clients/${clientId}/entries`,
+      headers: auth(),
+    });
+    expect(JSON.stringify(entries.json())).toContain('Ручное пополнение');
+
+    const debit = await api().inject({
+      method: 'POST',
+      url: `/clients/${clientId}/debit`,
+      headers: auth(),
+      payload: { amount: '1', idempotencyKey: `bare-debit:${clientId}` },
+    });
+    expect(debit.statusCode).toBe(400);
+  });
+
   it('отвергает сумму, которая не сумма', async () => {
     const clientId = await createClient();
     for (const amount of ['', 'сто рублей', '-100', '0', '1.2345678']) {

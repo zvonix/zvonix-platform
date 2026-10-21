@@ -306,7 +306,7 @@ describe('отправка воркером', () => {
     expect(await api().get(MessagesService).dispatchDue(new Date())).toBeGreaterThanOrEqual(1);
 
     expect(await messageOf(client.token, id)).toMatchObject({ status: 'sent' });
-    // По умолчанию у аккаунта включена строка про «СТОП» (ADR-0088): она добавляется в конец.
+    // Строка про «СТОП» добавляется в конец всегда (ADR-0090).
     expect(simulatedSent.find((item) => item.recipient === '79005550011')).toMatchObject({
       instanceId: partner.instance,
       text: 'Ваш заказ принят\n\nЧтобы отписаться, ответьте СТОП',
@@ -314,7 +314,7 @@ describe('отправка воркером', () => {
     expect(await messageOf(client.token, id)).toMatchObject({ stop_line: true });
   });
 
-  it('партнёр выключает «СТОП» у аккаунта: текст уходит как написан, клиент видит, что строки не было; чужой аккаунт не тронуть', async () => {
+  it('строка про «СТОП» не отключается партнёром; PATCH без полей — 400, чужая роль — 403', async () => {
     const partner = await partnerWithAccount('0.45');
     const client = await clientWithMoney('10');
     const accountId = await withDatabase(async (execute) => {
@@ -330,17 +330,8 @@ describe('отправка воркером', () => {
       });
 
     expect((await patch(partner.ownerToken, {})).statusCode).toBe(400);
-    expect((await patch(client.token, { stopLine: false })).statusCode).toBe(403);
-    const off = await patch(partner.ownerToken, { stopLine: false });
-    expect(off.statusCode).toBe(200);
-    expect(off.json<{ account: { stop_line: boolean } }>().account.stop_line).toBe(false);
-
-    const id = (await send(client.token, { to: '79005550081', text: 'Без строки' })).json<{
-      message: MessageView;
-    }>().message.id;
-    await api().get(MessagesService).dispatchDue(new Date());
-    expect(simulatedSent.find((item) => item.recipient === '79005550081')?.text).toBe('Без строки');
-    expect(await messageOf(client.token, id)).toMatchObject({ stop_line: false });
+    expect((await patch(partner.ownerToken, { stopLine: false })).statusCode).toBe(400);
+    expect((await patch(client.token, { recommended: false })).statusCode).toBe(403);
   });
 
   it('пауза аккаунта: второе сообщение ждёт, потом уходит', async () => {
@@ -908,7 +899,7 @@ describe('рекомендованная работа (ADR-0088)', () => {
     await profile({});
   });
 
-  it('лимит профиля сужает тариф: второе сообщение ждёт в очереди; выключенная галочка снимает ограничение; партнёр значений не видит', async () => {
+  it('лимит профиля заменяет тариф: второе сообщение ждёт в очереди; выключенная галочка снимает ограничение; партнёр значений не видит', async () => {
     const partner = await partnerWithAccount('0.45');
     const client = await clientWithMoney('10');
     const accountId = await withDatabase(async (execute) => {

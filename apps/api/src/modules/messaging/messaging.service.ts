@@ -370,7 +370,6 @@ export class MessagingService {
     id: string,
     patch: {
       label?: string | undefined;
-      stopLine?: boolean | undefined;
       recommended?: boolean | undefined;
     },
   ): Promise<MessengerAccountRow> {
@@ -378,7 +377,6 @@ export class MessagingService {
 
     const updated = await this.repository.setOwnerFields(account.id, {
       ...(patch.label === undefined ? {} : { label: patch.label }),
-      ...(patch.stopLine === undefined ? {} : { stopLine: patch.stopLine }),
       ...(patch.recommended === undefined ? {} : { recommended: patch.recommended }),
     });
     if (updated === undefined) throw notFound('Аккаунт не найден');
@@ -390,12 +388,10 @@ export class MessagingService {
       actorRole: actor.role,
       before: {
         label: account.label,
-        stop_line: account.stopLine,
         recommended: account.recommended,
       },
       after: {
         label: updated.label,
-        stop_line: updated.stopLine,
         recommended: updated.recommended,
       },
     });
