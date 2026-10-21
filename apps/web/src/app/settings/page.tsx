@@ -87,11 +87,20 @@ const SECTIONS: readonly {
 }[] = [
   {
     key: 'registration',
-    title: 'Регистрация',
+    title: 'Участники',
     parts: [
-      { title: 'Партнёры', prefixes: ['partners.'] },
-      { title: 'Клиенты', prefixes: ['clients.'] },
+      { title: 'Регистрация партнёров', prefixes: ['partners.'] },
+      { title: 'Регистрация клиентов', prefixes: ['clients.'] },
       { title: 'Кабинеты', prefixes: ['cabinets.'] },
+      { title: 'Обращения в поддержку', prefixes: ['support.'] },
+    ],
+  },
+  {
+    key: 'calls',
+    title: 'Звонки',
+    parts: [
+      { title: 'Узлы', prefixes: ['nodes.'] },
+      { title: 'Записи разговоров', prefixes: ['recordings.'] },
     ],
   },
   {
@@ -104,7 +113,7 @@ const SECTIONS: readonly {
   },
   {
     key: 'messaging',
-    title: 'Сообщения',
+    title: 'Сообщения MAX',
     parts: [
       { title: 'Через аккаунты партнёров', prefixes: ['messaging.', 'messages.'] },
       { title: 'Бот площадки', prefixes: ['bot.'] },
@@ -130,10 +139,7 @@ const SECTIONS: readonly {
     key: 'system',
     title: 'Система',
     parts: [
-      { title: 'Узлы', prefixes: ['nodes.'] },
       { title: 'Хранение', prefixes: ['retention.'] },
-      { title: 'Обращения в поддержку', prefixes: ['support.'] },
-      { title: 'Записи разговоров', prefixes: ['recordings.'] },
       { title: 'Сайт', prefixes: ['site.'] },
     ],
   },
@@ -149,10 +155,10 @@ const SECTION_ALIASES: Record<string, string> = {
   bot: 'messaging',
   payments: 'money',
   pricing: 'money',
-  nodes: 'system',
+  nodes: 'calls',
   retention: 'system',
-  support: 'system',
-  recordings: 'system',
+  support: 'registration',
+  recordings: 'calls',
   site: 'system',
 };
 

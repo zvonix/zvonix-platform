@@ -216,8 +216,8 @@ test.describe('поддержка видит, но не меняет', () => {
     const rail = page.getByRole('navigation', { name: 'Разделы' });
     for (const label of [
       'Учётные записи',
-      'Партнёры и оборудование',
-      'Клиенты и деньги',
+      'Партнёры',
+      'Клиенты',
       'Тарифы и наценка',
       'Разбор вызовов',
     ]) {
@@ -262,6 +262,8 @@ test.describe('ручное пополнение партнёра', () => {
       .getByRole('link', { name: /Иванов Иван Иванович/u })
       .first()
       .click();
+    // В списке тоже есть «Пополнить» (ADR-0090): ждём карточку, а не жмём кнопку списка.
+    await page.waitForURL(/\/partners\/[0-9a-f-]+$/u);
 
     await page.getByRole('button', { name: 'Пополнить' }).click();
     await page.getByLabel('Сумма, ₽').fill('250');
@@ -290,18 +292,16 @@ test.describe('ручное пополнение партнёра', () => {
   });
 });
 
-test.describe('счета и пополнение (ADR-0090)', () => {
-  test('клиенты и партнёры на одной странице; пополнение без основания; у поддержки кнопок нет', async ({
+test.describe('пополнение из списков и меню по предмету (ADR-0090)', () => {
+  test('клиенты и партнёры в «Участниках»; «Пополнить» в строке без основания; у поддержки кнопок нет', async ({
     browser,
   }) => {
     const adminContext = await browser.newContext();
     const page = await adminContext.newPage();
     await signIn(page, PEOPLE.admin);
-    await page
-      .getByRole('navigation', { name: 'Разделы' })
-      .getByRole('link', { name: 'Счета и пополнение' })
-      .click();
-    await expect(page.getByRole('heading', { name: 'Счета и пополнение' })).toBeVisible();
+    const rail = page.getByRole('navigation', { name: 'Разделы' });
+    await rail.getByRole('link', { name: 'Клиенты', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Клиенты', exact: true })).toBeVisible();
 
     // Клиент: сумма без основания, итог с остатком.
     await page.getByRole('button', { name: 'Пополнить' }).first().click();
@@ -310,9 +310,7 @@ test.describe('счета и пополнение (ADR-0090)', () => {
     await page.getByRole('button', { name: /Пополнить \d/u }).click();
     await expect(page.getByText(/Проведено\. Остаток:/u)).toBeVisible();
 
-    // Партнёры: другая вкладка, «Причитается».
-    await page.getByRole('tab', { name: 'Партнёры' }).click();
-    await expect(page.getByRole('columnheader', { name: 'Причитается' })).toBeVisible();
+    await rail.getByRole('link', { name: 'Партнёры', exact: true }).click();
     await page.getByRole('button', { name: 'Пополнить' }).first().click();
     await page.getByLabel('Сумма, ₽').fill('5');
     await page.getByRole('button', { name: /Пополнить \d/u }).click();
@@ -321,7 +319,7 @@ test.describe('счета и пополнение (ADR-0090)', () => {
     const supportContext = await browser.newContext();
     const support = await supportContext.newPage();
     await signIn(support, PEOPLE.support);
-    await support.goto('/money');
+    await support.goto('/clients');
     await expect(support.getByRole('columnheader', { name: 'Остаток' })).toBeVisible();
     await expect(support.getByRole('button', { name: 'Пополнить' })).toHaveCount(0);
 
@@ -452,7 +450,7 @@ test.describe('настройки площадки по разделам', () =>
     await signIn(page, PEOPLE.admin);
     await page.goto('/settings');
     const nav = page.getByRole('navigation', { name: 'Разделы настроек' });
-    await expect(page.getByRole('heading', { name: 'Регистрация', level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Участники', level: 2 })).toBeVisible();
     // Другой раздел на экран не выводится: страница не растёт с каждой новой настройкой.
     await expect(page.getByRole('heading', { name: 'Хранение' })).toHaveCount(0);
 
@@ -1697,14 +1695,14 @@ test.describe('партнёр добавляет своё оборудовани
     await expect(page.getByText('Не включён', { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/Шлюз не включён — линии не могут подключиться/u)).toBeVisible();
     await page.getByRole('button', { name: 'Включить шлюз' }).click();
-    await expect(page.getByText('Работает', { exact: true })).toBeVisible();
+    await expect(page.getByText('Включён', { exact: true })).toBeVisible();
 
     // До ADR-0047 выключение партнёра не отличалось от отключения площадкой,
     // и за одной кнопкой «Включить» приходилось идти к администратору.
     await confirmAction(page, 'Выключить шлюз');
     await expect(page.getByText('Выключен вами')).toBeVisible();
     await page.getByRole('button', { name: 'Включить шлюз' }).click();
-    await expect(page.getByText('Работает', { exact: true })).toBeVisible();
+    await expect(page.getByText('Включён', { exact: true })).toBeVisible();
   });
 
   test('удаление называет последствие до нажатия и уводит шлюз из списка', async ({ page }) => {

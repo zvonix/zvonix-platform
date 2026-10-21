@@ -11,6 +11,7 @@ import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { ReadOnly } from '@/components/read-only';
+import { MoneyOperation } from '@/components/money-operation';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -34,7 +35,7 @@ const COLUMNS = 7;
 
 export default function PartnersPage() {
   return (
-    <ConsoleShell title="Партнёры и оборудование" requireRole={['admin', 'support']}>
+    <ConsoleShell title="Партнёры" requireRole={['admin', 'support']}>
       {() => (
         <Suspense fallback={<p className="text-muted-foreground">Загружаем…</p>}>
           <PartnersTable />
@@ -147,7 +148,7 @@ function PartnersTable() {
             )}
 
             {list.data?.partners.map((partner) => (
-              <PartnerLine key={partner.id} partner={partner} />
+              <PartnerLine key={partner.id} partner={partner} canChange={canChange} />
             ))}
           </TableBody>
         </Table>
@@ -156,10 +157,15 @@ function PartnersTable() {
   );
 }
 
-function PartnerLine({ partner }: { partner: PartnerRow }) {
+function PartnerLine({ partner, canChange }: { partner: PartnerRow; canChange: boolean }) {
   return (
     <TableRow>
-      <TableCell>{partner.name}</TableCell>
+      <TableCell>
+        {/* Имя — ссылка: на телефоне кнопка «Открыть» уходит за край таблицы. */}
+        <Link href={`/partners/${partner.id}`} className="font-medium hover:underline">
+          {partner.name}
+        </Link>
+      </TableCell>
       <TableCell>
         {/*
           Псевдоним заводится вместе с партнёром, но его отсутствие прячут только
@@ -188,12 +194,31 @@ function PartnerLine({ partner }: { partner: PartnerRow }) {
       <TableCell>
         <span className="num text-muted-foreground">{moment(partner.created_at)}</span>
       </TableCell>
-      <TableCell>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/partners/${partner.id}`} aria-label={`Открыть партнёра «${partner.name}»`}>
-            Открыть
-          </Link>
-        </Button>
+      <TableCell className="w-px">
+        <div className="flex items-start gap-2">
+          {canChange && (
+            <MoneyOperation
+              path={`/partners/${partner.id}/deposit`}
+              label="Пополнить"
+              title={`Пополнить счёт партнёра «${partner.name}»`}
+              description="Сумма добавится к тому, что причитается партнёру."
+              reasonPlaceholder="Премия, возмещение, исправление"
+              balanceName="Причитается"
+              doneText="Проведено"
+              variant="outline"
+              invalidate={['partners']}
+              reasonOptional
+            />
+          )}
+          <Button asChild variant="outline" size="sm">
+            <Link
+              href={`/partners/${partner.id}`}
+              aria-label={`Открыть партнёра «${partner.name}»`}
+            >
+              Открыть
+            </Link>
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );

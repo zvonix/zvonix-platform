@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
@@ -116,10 +117,13 @@ function MessagingView() {
           >
             <ManualForm />
           </FormDialog>
-          <p className="text-muted-foreground">
-            Продукт включается и ключ провайдера вписывается в «Настройки площадки» → «Сообщения
-            MAX», наценка — в «Тарифы и наценка».
-          </p>
+          {/* Настройки и наценка — ссылками, а не абзацем с путём по меню (осмотр 2026-10-21). */}
+          <Button asChild variant="outline">
+            <Link href="/settings?section=messaging">Настройки MAX</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/tariffs?tab=max">Наценка</Link>
+          </Button>
         </div>
       )}
 

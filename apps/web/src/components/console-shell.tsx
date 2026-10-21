@@ -37,7 +37,6 @@ import {
   ShieldCheck,
   SignalHigh,
   Users,
-  PiggyBank,
   Wallet,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -102,9 +101,8 @@ function ReleaseVersion() {
 /**
  * Разделы сотрудников по ролям и разделы кабинетов участника — **только существующие**.
  *
- * Пункт, ведущий в ненаписанный раздел, хуже отсутствующего: он обещает, что там
- * что-то есть. Остальные разделы прототипа появятся здесь по мере готовности,
- * их список — в [ROADMAP.md](../../../../docs/ROADMAP.md), этап 5.
+ * Группы — по предмету, а не по истории появления (осмотр 2026-10-21): клиенты и партнёры рядом в «Участниках», у каждого
+ * в списке остаток и «Пополнить»; звонки и сообщения MAX — разные продукты и разные группы; серверы — в «Системе».
  */
 const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
   admin: [
@@ -116,39 +114,43 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       title: 'Участники',
       items: [
         { href: '/applications', label: 'Заявки', Icon: Inbox },
+        { href: '/clients', label: 'Клиенты', Icon: Wallet },
+        { href: '/partners', label: 'Партнёры', Icon: Radio },
         { href: '/users', label: 'Учётные записи', Icon: Users },
         { href: '/support', label: 'Обращения', Icon: LifeBuoy },
       ],
     },
     {
-      title: 'Терминация',
+      title: 'Звонки',
       items: [
-        { href: '/partners', label: 'Партнёры и оборудование', Icon: Radio },
         { href: '/nodes', label: 'Узлы АТС', Icon: Server },
-        { href: '/servers', label: 'Серверы', Icon: HardDrive },
         { href: '/operators', label: 'Операторы связи', Icon: SignalHigh },
         { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
         { href: '/quality', label: 'Качество', Icon: Activity },
-        { href: '/messaging', label: 'Сообщения MAX', Icon: MessageSquare },
-        { href: '/message-report', label: 'Отчёты MAX', Icon: BarChart3 },
-        { href: '/message-stops', label: 'Не писать', Icon: BellOff },
         { href: '/limits', label: 'Запреты и лимиты', Icon: ShieldBan },
+      ],
+    },
+    {
+      title: 'Сообщения MAX',
+      items: [
+        { href: '/messaging', label: 'Аккаунты и бот', Icon: MessageSquare },
+        { href: '/message-report', label: 'Отчёты', Icon: BarChart3 },
+        { href: '/message-stops', label: 'Не писать', Icon: BellOff },
       ],
     },
     {
       title: 'Деньги',
       items: [
         { href: '/reports', label: 'Сводка', Icon: BarChart3 },
-        { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
-        { href: '/money', label: 'Счета и пополнение', Icon: PiggyBank },
         { href: '/payments', label: 'Платежи', Icon: Banknote },
         { href: '/payouts', label: 'Выплаты партнёрам', Icon: HandCoins },
         { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
       ],
     },
     {
-      title: 'Служебное',
+      title: 'Система',
       items: [
+        { href: '/servers', label: 'Серверы', Icon: HardDrive },
         { href: '/audit', label: 'Журнал действий', Icon: ScrollText },
         { href: '/settings', label: 'Настройки площадки', Icon: Settings2 },
         { href: '/security', label: 'Безопасность', Icon: ShieldCheck },
@@ -179,39 +181,43 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       title: 'Участники',
       items: [
         { href: '/applications', label: 'Заявки', Icon: Inbox },
+        { href: '/clients', label: 'Клиенты', Icon: Wallet },
+        { href: '/partners', label: 'Партнёры', Icon: Radio },
         { href: '/users', label: 'Учётные записи', Icon: Users },
         { href: '/support', label: 'Обращения', Icon: LifeBuoy },
       ],
     },
     {
-      title: 'Терминация',
+      title: 'Звонки',
       items: [
-        { href: '/partners', label: 'Партнёры и оборудование', Icon: Radio },
         { href: '/nodes', label: 'Узлы АТС', Icon: Server },
-        { href: '/servers', label: 'Серверы', Icon: HardDrive },
         { href: '/operators', label: 'Операторы связи', Icon: SignalHigh },
         { href: '/calls', label: 'Разбор вызовов', Icon: PhoneCall },
         { href: '/quality', label: 'Качество', Icon: Activity },
-        { href: '/messaging', label: 'Сообщения MAX', Icon: MessageSquare },
-        { href: '/message-report', label: 'Отчёты MAX', Icon: BarChart3 },
-        { href: '/message-stops', label: 'Не писать', Icon: BellOff },
         { href: '/limits', label: 'Запреты и лимиты', Icon: ShieldBan },
+      ],
+    },
+    {
+      title: 'Сообщения MAX',
+      items: [
+        { href: '/messaging', label: 'Аккаунты и бот', Icon: MessageSquare },
+        { href: '/message-report', label: 'Отчёты', Icon: BarChart3 },
+        { href: '/message-stops', label: 'Не писать', Icon: BellOff },
       ],
     },
     {
       title: 'Деньги',
       items: [
         { href: '/reports', label: 'Сводка', Icon: BarChart3 },
-        { href: '/clients', label: 'Клиенты и деньги', Icon: Wallet },
-        { href: '/money', label: 'Счета и пополнение', Icon: PiggyBank },
         { href: '/payments', label: 'Платежи', Icon: Banknote },
         { href: '/payouts', label: 'Выплаты партнёрам', Icon: HandCoins },
         { href: '/tariffs', label: 'Тарифы и наценка', Icon: Coins },
       ],
     },
     {
-      title: 'Служебное',
+      title: 'Система',
       items: [
+        { href: '/servers', label: 'Серверы', Icon: HardDrive },
         { href: '/audit', label: 'Журнал действий', Icon: ScrollText },
         { href: '/security', label: 'Безопасность', Icon: ShieldCheck },
       ],

@@ -9,6 +9,7 @@ import { ConsoleShell } from '@/components/console-shell';
 import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
+import { MoneyOperation } from '@/components/money-operation';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -45,7 +46,7 @@ const asApiError = (error: unknown): ApiError | undefined =>
 
 export default function ClientsPage() {
   return (
-    <ConsoleShell title="Клиенты и деньги" requireRole={['admin', 'support']}>
+    <ConsoleShell title="Клиенты" requireRole={['admin', 'support']}>
       {() => (
         <Suspense fallback={<p className="text-muted-foreground">Загружаем…</p>}>
           <ClientsTable />
@@ -170,7 +171,11 @@ function ClientsTable() {
 
             {list.data?.clients.map((client) => (
               <TableRow key={client.id}>
-                <TableCell>{client.name}</TableCell>
+                <TableCell>
+                  <Link href={`/clients/${client.id}`} className="font-medium hover:underline">
+                    {client.name}
+                  </Link>
+                </TableCell>
                 <TableCell>
                   <span className={`rounded-sm px-1.5 py-0.5 ${clientStatusTone(client.status)}`}>
                     {CLIENT_STATUS_NAME[client.status]}
@@ -191,15 +196,31 @@ function ClientsTable() {
                 <TableCell>
                   <span className="num text-muted-foreground">{moment(client.created_at)}</span>
                 </TableCell>
-                <TableCell>
-                  <Button asChild variant="outline" size="sm">
-                    <Link
-                      href={`/clients/${client.id}`}
-                      aria-label={`Открыть клиента «${client.name}»`}
-                    >
-                      Открыть
-                    </Link>
-                  </Button>
+                <TableCell className="w-px">
+                  <div className="flex items-start gap-2">
+                    {canChange && (
+                      <MoneyOperation
+                        path={`/clients/${client.id}/deposit`}
+                        label="Пополнить"
+                        title={`Пополнить счёт «${client.name}»`}
+                        description="Деньги появятся на остатке сразу и станут доступны для звонков."
+                        reasonPlaceholder="Платёжное поручение № 42 от 07.09.2026"
+                        balanceName="Остаток"
+                        doneText="Проведено"
+                        variant="outline"
+                        invalidate={['clients']}
+                        reasonOptional
+                      />
+                    )}
+                    <Button asChild variant="outline" size="sm">
+                      <Link
+                        href={`/clients/${client.id}`}
+                        aria-label={`Открыть клиента «${client.name}»`}
+                      >
+                        Открыть
+                      </Link>
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
