@@ -1,4 +1,6 @@
+import { Building2, RadioTower } from 'lucide-react';
 import { CallPath, CallToAction, Feature, FeatureGrid, Section } from './blocks';
+import { HeroConsole } from './hero-console';
 import { Reveal } from './reveal';
 import { getSiteInfo, getSitePrices, rubles } from './site-data';
 
@@ -11,52 +13,58 @@ export default async function HomePage() {
   return (
     <>
       <div className="site-hero border-b border-border">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-20 pt-16 md:pt-24">
-          <span className="text-xs font-semibold uppercase tracking-widest text-primary">
-            Площадка терминации
-          </span>
-          <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-balance md:text-6xl">
-            Звонки и сообщения в одном месте
-          </h1>
-          <p className="max-w-2xl text-lg text-muted-foreground md:text-xl">
-            Компаниям и сервисам — звонки и уведомления в мессенджерах вашим клиентам по понятным
-            ценам. Владельцам GSM-оборудования — загрузка SIM и выплаты за каждую минуту.
-          </p>
-          <div className="flex flex-wrap gap-3 pt-2">
-            <a
-              href={register}
-              className="rounded-md bg-primary px-5 py-3 font-medium text-primary-foreground transition-opacity hover:opacity-90"
-            >
-              Зарегистрироваться
-            </a>
-            <a
-              href="/how-it-works"
-              className="rounded-md border border-border px-5 py-3 font-medium hover:bg-muted"
-            >
-              Как это работает
-            </a>
-          </div>
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-20 pt-16 md:pt-24 lg:grid-cols-[1.15fr_1fr]">
+          <div className="flex flex-col gap-6">
+            <span className="text-xs font-semibold uppercase tracking-widest text-primary">
+              Площадка терминации
+            </span>
+            <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-balance md:text-6xl">
+              Звонки и сообщения в одном месте
+            </h1>
+            <p className="max-w-2xl text-lg text-muted-foreground md:text-xl">
+              Компаниям и сервисам — звонки и уведомления в мессенджерах вашим клиентам по понятным
+              ценам. Владельцам GSM-оборудования — загрузка SIM и выплаты за каждую минуту.
+            </p>
+            <div className="flex flex-wrap gap-3 pt-2">
+              <a
+                href={register}
+                className="site-lift rounded-md bg-primary px-5 py-3 font-medium text-primary-foreground hover:opacity-90"
+              >
+                Зарегистрироваться
+              </a>
+              <a
+                href="/how-it-works"
+                className="rounded-md border border-border px-5 py-3 font-medium hover:bg-muted"
+              >
+                Как это работает
+              </a>
+            </div>
 
-          <dl className="mt-6 grid gap-4 sm:grid-cols-2 md:max-w-2xl">
-            <div className="rounded-lg border border-border bg-card/80 p-4">
-              <dt className="text-muted-foreground">Звонок</dt>
-              <dd className="mt-1 text-2xl font-semibold tabular-nums">
-                {prices.callFrom === null ? 'по запросу' : `от ${rubles(prices.callFrom)}`}
-                {prices.callFrom !== null && (
-                  <span className="text-base font-normal text-muted-foreground"> / мин</span>
-                )}
-              </dd>
-            </div>
-            <div className="rounded-lg border border-border bg-card/80 p-4">
-              <dt className="text-muted-foreground">Сообщение</dt>
-              <dd className="mt-1 text-2xl font-semibold tabular-nums">
-                {prices.messageFrom === null ? 'по запросу' : `от ${rubles(prices.messageFrom)}`}
-                {prices.messageFrom !== null && (
-                  <span className="text-base font-normal text-muted-foreground"> / сообщение</span>
-                )}
-              </dd>
-            </div>
-          </dl>
+            <dl className="mt-6 grid gap-4 sm:grid-cols-2 md:max-w-2xl">
+              <div className="rounded-lg border border-border bg-card/80 p-4">
+                <dt className="text-muted-foreground">Звонок</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums">
+                  {prices.callFrom === null ? 'по запросу' : `от ${rubles(prices.callFrom)}`}
+                  {prices.callFrom !== null && (
+                    <span className="text-base font-normal text-muted-foreground"> / мин</span>
+                  )}
+                </dd>
+              </div>
+              <div className="rounded-lg border border-border bg-card/80 p-4">
+                <dt className="text-muted-foreground">Сообщение</dt>
+                <dd className="mt-1 text-2xl font-semibold tabular-nums">
+                  {prices.messageFrom === null ? 'по запросу' : `от ${rubles(prices.messageFrom)}`}
+                  {prices.messageFrom !== null && (
+                    <span className="text-base font-normal text-muted-foreground">
+                      {' '}
+                      / сообщение
+                    </span>
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </div>
+          <HeroConsole />
         </div>
       </div>
 
@@ -68,8 +76,11 @@ export default async function HomePage() {
           <Reveal>
             <a
               href="/clients"
-              className="group flex h-full flex-col gap-3 rounded-xl border border-border bg-card p-6 transition-colors hover:border-primary"
+              className="site-lift group flex h-full flex-col gap-3 rounded-xl border border-primary/40 bg-primary/10 p-6 hover:border-primary"
             >
+              <span className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <Building2 size={22} aria-hidden />
+              </span>
               <h3 className="text-xl font-semibold">Компаниям и сервисам</h3>
               <p className="text-muted-foreground">
                 Звонки и уведомления вашим клиентам через одну площадку: доставка, такси, магазины,
@@ -84,8 +95,11 @@ export default async function HomePage() {
           <Reveal delay={80}>
             <a
               href="/partners"
-              className="group flex h-full flex-col gap-3 rounded-xl border border-border bg-card p-6 transition-colors hover:border-primary"
+              className="site-lift group flex h-full flex-col gap-3 rounded-xl border border-border bg-card p-6 hover:border-primary"
             >
+              <span className="flex size-11 items-center justify-center rounded-lg border border-border bg-muted text-foreground">
+                <RadioTower size={22} aria-hidden />
+              </span>
               <h3 className="text-xl font-semibold">Партнёрам с GSM-оборудованием</h3>
               <p className="text-muted-foreground">
                 Подключите шлюзы и SIM, задайте цену по операторам и получайте свою долю с каждого
@@ -105,6 +119,18 @@ export default async function HomePage() {
       >
         <CallPath />
       </Section>
+
+      <section className="site-band mt-20">
+        <dl className="mx-auto grid max-w-6xl gap-8 px-4 py-14 sm:grid-cols-2 lg:grid-cols-4">
+          <BandFigure
+            value={prices.callFrom === null ? 'по запросу' : `от ${rubles(prices.callFrom)}`}
+            label="за минуту звонка"
+          />
+          <BandFigure value="посекундно" label="или поминутно — видно до звонка" />
+          <BandFigure value="1–99" label="ваш порядок партнёров" />
+          <BandFigure value="SMPP 3.4" label="сообщения как обычные SMS" />
+        </dl>
+      </section>
 
       <Section
         title="Сообщения — как обычные SMS"
@@ -156,5 +182,16 @@ export default async function HomePage() {
 
       <CallToAction cabinetUrl={info.cabinetUrl} />
     </>
+  );
+}
+
+/** Цифра на тёмной полосе: крупно значение, под ним — что оно значит. */
+function BandFigure({ value, label }: { value: string; label: string }) {
+  return (
+    <Reveal className="flex flex-col gap-1">
+      <dt className="sr-only">{label}</dt>
+      <dd className="num text-3xl font-semibold tracking-tight md:text-4xl">{value}</dd>
+      <dd className="site-band-muted">{label}</dd>
+    </Reveal>
   );
 }
