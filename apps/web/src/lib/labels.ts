@@ -669,14 +669,29 @@ export function messageTone(status: string): string {
   return 'bg-warn-soft text-warn';
 }
 
-/** Состояния обращения в поддержку (ADR-0085). */
-export const TICKET_STATUS_NAME: Record<TicketStatus, string> = {
-  open: 'Ждёт ответа',
+/**
+ * Состояния обращения в поддержку (ADR-0085, ADR-0089): одно состояние называется по-разному для сотрудника и для автора —
+ * каждому нужно знать, чей сейчас ход.
+ */
+const TICKET_STATUS_NAME: Record<TicketStatus, string> = {
+  open: 'Новое — ждёт ответа',
   in_progress: 'В работе',
-  waiting_user: 'Ждём вас',
+  waiting_user: 'Отвечено — ждём автора',
   resolved: 'Решено',
   closed: 'Закрыто',
 };
+
+const TICKET_STATUS_NAME_AUTHOR: Record<TicketStatus, string> = {
+  open: 'Ждёт ответа поддержки',
+  in_progress: 'В работе',
+  waiting_user: 'Есть ответ поддержки',
+  resolved: 'Решено',
+  closed: 'Закрыто',
+};
+
+/** Название состояния для того, кто смотрит: автор (`author`) или сотрудник (`staff`). */
+export const ticketStatusName = (status: TicketStatus, mode: 'author' | 'staff'): string =>
+  (mode === 'staff' ? TICKET_STATUS_NAME : TICKET_STATUS_NAME_AUTHOR)[status];
 
 /** Цвет подписи: ждущее ответа и «ждём вас» — внимание, решённое — хорошо, закрытое — спокойно. */
 export const TICKET_STATUS_TONE: Record<TicketStatus, string> = {

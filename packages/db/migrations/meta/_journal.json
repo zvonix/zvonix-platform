@@ -484,6 +484,13 @@
       "when": 1792504254361,
       "tag": "0068_zhurnal_akkauntov_i_proverok",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1792567149218,
+      "tag": "0069_obrashcheniya_otmetka_prochitano",
+      "breakpoints": true
     }
   ]
 }

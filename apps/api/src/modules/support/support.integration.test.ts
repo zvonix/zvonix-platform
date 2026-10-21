@@ -305,6 +305,98 @@ describe('сотрудники', () => {
   });
 });
 
+describe('есть ответ поддержки и автозакрытие (ADR-0089)', () => {
+  const unread = async (token: string) =>
+    (await call(token, 'GET', '/support/tickets/unread')).json<{ total: number }>().total;
+
+  it('ответ поддержки зажигает число у автора; открыл обращение — число гаснет; чужому и сотруднику недоступно', async () => {
+    const client = await clientWithMoney('1');
+    const other = await clientWithMoney('1');
+    const staff = await user('support');
+    const { ticket } = (await newTicket(client.token, 'client')).json<TicketBody>();
+    expect(await unread(client.token)).toBe(0);
+
+    await call(staff.token, 'POST', `/support/staff/tickets/${ticket.id}/messages`, {
+      body: 'Посмотрели, ответ вам',
+    });
+    expect(await unread(client.token)).toBe(1);
+    expect(await unread(other.token)).toBe(0);
+    const list = (await call(client.token, 'GET', '/support/tickets')).json<{
+      tickets: { status: string; unread: boolean }[];
+    }>().tickets;
+    expect(list[0]).toMatchObject({ status: 'waiting_user', unread: true });
+
+    // Заметка сотрудников автору ничего не зажигает.
+    await call(staff.token, 'POST', `/support/staff/tickets/${ticket.id}/messages`, {
+      body: 'внутренняя',
+      internal: true,
+    });
+    expect(await unread(client.token)).toBe(1);
+
+    await call(client.token, 'GET', `/support/tickets/${ticket.id}`);
+    expect(await unread(client.token)).toBe(0);
+
+    // Новый ответ поддержки — снова число.
+    await call(staff.token, 'POST', `/support/staff/tickets/${ticket.id}/messages`, {
+      body: 'Ещё уточнение',
+    });
+    expect(await unread(client.token)).toBe(1);
+
+    expect((await call(staff.token, 'GET', '/support/tickets/unread')).statusCode).toBe(403);
+  });
+
+  it('поддержка ответила, автор молчит — обращение закрывается само через срок из настройки; 0 — не закрывает; ответ автора сбрасывает отсчёт', async () => {
+    const client = await clientWithMoney('1');
+    const staff = await user('support');
+    const { ticket } = (await newTicket(client.token, 'client')).json<TicketBody>();
+    await call(staff.token, 'POST', `/support/staff/tickets/${ticket.id}/messages`, {
+      body: 'Ответ поддержки',
+    });
+    const age = (days: number) =>
+      withDatabase(async (execute) => {
+        await execute(
+          sql`update support_tickets set last_message_at = now() - make_interval(days => ${days}) where id = ${ticket.id}`,
+        );
+      });
+    const status = async () =>
+      (await call(client.token, 'GET', `/support/tickets/${ticket.id}`)).json<TicketBody>().ticket
+        .status;
+    const service = api().get(SupportService);
+
+    // По умолчанию семь суток: шесть ещё рано.
+    await age(6);
+    expect(await service.closeResolved(new Date())).toBe(0);
+    expect(await status()).toBe('waiting_user');
+
+    // Срок 3 суток — шесть уже много.
+    expect((await put(adminToken, { 'support.autoclose_days': 3 })).statusCode).toBe(200);
+    // Ответ автора до срока возвращает обращение в работу, отсчёт начинается заново.
+    await call(client.token, 'POST', `/support/tickets/${ticket.id}/messages`, { body: 'Я тут' });
+    expect(await service.closeResolved(new Date())).toBe(0);
+    expect(await status()).toBe('open');
+
+    // 0 — само не закрывается никогда.
+    expect((await put(adminToken, { 'support.autoclose_days': 0 })).statusCode).toBe(200);
+    await call(staff.token, 'POST', `/support/staff/tickets/${ticket.id}/messages`, {
+      body: 'Ответили ещё раз',
+    });
+    await age(400);
+    expect(await service.closeResolved(new Date())).toBe(0);
+
+    expect((await put(adminToken, { 'support.autoclose_days': 3 })).statusCode).toBe(200);
+    expect(await service.closeResolved(new Date())).toBe(1);
+    expect(await status()).toBe('closed');
+    const audited = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select action from audit_log where action = 'support_ticket.auto_closed' and entity_id = ${ticket.id}`,
+      );
+      return result.rows.length;
+    });
+    expect(audited).toBe(1);
+    expect((await put(adminToken, { 'support.autoclose_days': 7 })).statusCode).toBe(200);
+  });
+});
+
 describe('доступ', () => {
   it('сотрудникам закрыт путь автора, автору — путь сотрудников', async () => {
     const client = await clientWithMoney('1');

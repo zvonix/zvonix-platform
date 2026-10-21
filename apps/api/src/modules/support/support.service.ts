@@ -11,7 +11,6 @@ import {
   notFound,
   parseId,
   rateLimited,
-  TICKET_AUTOCLOSE_DAYS,
   TICKET_MESSAGES_PER_DAY,
   TICKETS_OPEN_MAX,
   TICKETS_PER_DAY,
@@ -128,7 +127,18 @@ export class SupportService {
 
   async getOwn(actor: SupportActor, id: string): Promise<TicketDetail> {
     const ticket = await this.ownTicket(actor, id);
-    return { ticket, messages: await this.repository.messages(ticket.id, false) };
+    // Открыл — значит, ответ поддержки прочитан (ADR-0089).
+    const now = new Date();
+    await this.repository.markRead(ticket.id, now);
+    return {
+      ticket: { ...ticket, authorReadAt: now },
+      messages: await this.repository.messages(ticket.id, false),
+    };
+  }
+
+  /** Сколько обращений автора ждут его прочтения — число у пункта «Поддержка» в меню. */
+  unreadOwn(actor: SupportActor): Promise<number> {
+    return this.repository.countUnreadByAuthor(actor.userId);
   }
 
   async reply(actor: SupportActor, id: string, body: string): Promise<TicketDetail> {
@@ -233,12 +243,26 @@ export class SupportService {
     return this.getStaff(id);
   }
 
-  /** Фоновая задача: решённые обращения, к которым не вернулись за неделю, закрываются сами. */
+  /**
+   * Фоновая задача ([ADR-0089](../../../../../docs/adr/0089-obrashcheniya-statusy-i-kartinki.md)): обращения, на которые поддержка
+   * ответила (или решённые) и к которым автор не вернулся за `support.autoclose_days`, закрываются сами. 0 — не закрывать.
+   */
   async closeResolved(now: Date): Promise<number> {
-    return this.repository.closeResolvedBefore(
-      new Date(now.getTime() - TICKET_AUTOCLOSE_DAYS * DAY_MS),
+    const { autocloseDays } = await this.settings.support();
+    if (autocloseDays === 0) return 0;
+    const closed = await this.repository.closeStaleBefore(
+      new Date(now.getTime() - autocloseDays * DAY_MS),
       now,
     );
+    for (const id of closed) {
+      await this.audit.record({
+        action: 'support_ticket.auto_closed',
+        entityType: 'support_ticket',
+        entityId: id,
+        after: { status: 'closed', after_days: autocloseDays },
+      });
+    }
+    return closed.length;
   }
 
   // --- внутреннее ---

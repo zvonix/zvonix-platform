@@ -37,6 +37,8 @@ export const supportTickets = pgTable(
 
     /** Последняя реплика: по ней очередь сортируется, а автоматическое закрытие отсчитывает срок. */
     lastMessageAt: timestamptz().notNull().defaultNow(),
+    /** Когда автор последний раз открывал обращение: по нему считается «есть ответ поддержки» (ADR-0089). */
+    authorReadAt: timestamptz(),
     resolvedAt: timestamptz(),
     closedAt: timestamptz(),
 

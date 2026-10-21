@@ -7,6 +7,8 @@
  * остаётся в окружении ([ADR-0002](../../../../../docs/adr/0002-konfiguraciya.md)).
  */
 
+import { TICKET_AUTOCLOSE_DAYS } from '@zvonix/shared';
+
 /** Как значение хранится строкой и во что превращается при чтении. */
 type SettingKind = 'string' | 'number' | 'boolean';
 
@@ -115,6 +117,14 @@ export const SETTINGS = {
     kind: 'boolean',
     fallback: 'true',
     hint: 'Письмо сотрудникам, когда клиент или партнёр написал новое обращение или ответил в старом (не чаще раза в 15 минут по обращению). Нужна настроенная почта',
+  },
+
+  'support.autoclose_days': {
+    kind: 'number',
+    fallback: String(TICKET_AUTOCLOSE_DAYS),
+    min: 0,
+    max: 365,
+    hint: 'Через сколько суток обращение закрывается само, если поддержка ответила (или обращение решено), а автор не вернулся. Ответ автора до срока возвращает обращение в работу и сбрасывает отсчёт. 0 — не закрывать само',
   },
 
   'messaging.enabled': {

@@ -132,6 +132,7 @@ const SECTIONS: readonly {
     parts: [
       { title: 'Узлы', prefixes: ['nodes.'] },
       { title: 'Хранение', prefixes: ['retention.'] },
+      { title: 'Обращения в поддержку', prefixes: ['support.'] },
       { title: 'Записи разговоров', prefixes: ['recordings.'] },
       { title: 'Сайт', prefixes: ['site.'] },
     ],
@@ -150,6 +151,7 @@ const SECTION_ALIASES: Record<string, string> = {
   pricing: 'money',
   nodes: 'system',
   retention: 'system',
+  support: 'system',
   recordings: 'system',
   site: 'system',
 };
