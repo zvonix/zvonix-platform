@@ -80,7 +80,11 @@ export function DepositForm({ client, canChange }: { client: ClientRow; canChang
     mutationFn: () =>
       request<Posted>(`/clients/${client.id}/deposit`, {
         method: 'POST',
-        body: { amount: numberFromInput(amount), idempotencyKey: key, description },
+        body: {
+          amount: numberFromInput(amount),
+          idempotencyKey: key,
+          ...(description.trim() === '' ? {} : { description }),
+        },
       }),
     onSuccess: (posted) => {
       setDone(posted);
@@ -96,7 +100,7 @@ export function DepositForm({ client, canChange }: { client: ClientRow; canChang
   const fundsError = asApiError(funds.error);
   const typed = numberFromInput(amount);
   const amountValid = isAmount(typed);
-  const ready = amountValid && description.trim() !== '';
+  const ready = amountValid;
   const shown = amountValid ? money(typed) : '';
 
   return (
@@ -142,7 +146,7 @@ export function DepositForm({ client, canChange }: { client: ClientRow; canChang
                 />
               </DialogField>
 
-              <DialogField label="Основание" wide>
+              <DialogField label="Основание (необязательно)" wide>
                 <Input
                   autoComplete="off"
                   placeholder="Платёжное поручение № 42 от 07.09.2026"

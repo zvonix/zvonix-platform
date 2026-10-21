@@ -126,6 +126,11 @@ pending ⇄ active ⇄ suspended
 { "amount": "1500.50", "idempotencyKey": "deposit:2026-09-01:0001", "description": "Оплата по счёту 17" }
 ```
 
+`description` у пополнения (клиента и партнёра) необязателен: без него в журнале «Ручное пополнение» ([ADR-0090](../adr/0090-dengi-admina-i-limity-akkaunta.md)); у списания и выплаты он обязателен.
+
+```json
+```
+
 `200` → `{ "transaction_id", "already_posted", "balance" }`
 
 Ручное пополнение — такая же проводка, как платёж через эквайринг. Способ поступления

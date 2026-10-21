@@ -29,14 +29,13 @@ export interface RecommendedProfile {
 /** Аккаунт с наложенным профилем: к лимитам добавлена минимальная пауза, которую нужно выдержать. */
 export type WithRecommended<T> = T & { readonly recommendedPaceSeconds?: number };
 
-/** Меньшее из двух пределов; пусто или 0 у профиля — предел тарифа остаётся как есть. */
-const tighter = (own: number | null, recommended: number): number | null =>
-  recommended <= 0 ? own : own === null ? recommended : Math.min(own, recommended);
+/** Предел профиля; 0 — без ограничения. Лимит тарифа при этом не действует (ADR-0090). */
+const profileLimit = (recommended: number): number | null =>
+  recommended <= 0 ? null : recommended;
 
 /**
- * Рекомендованная работа: у аккаунта с включённой галочкой действует меньшее из лимита тарифа и профиля площадки, а пауза между
- * сообщениями — не меньше рекомендованной. Профиль только сужает: поднять лимит выше тарифа он не может. Выключенная галочка
- * оставляет аккаунт как есть.
+ * Рекомендованная работа: у аккаунта с включённой галочкой лимиты тарифа **не действуют** — работают лимиты профиля площадки, а
+ * пауза между сообщениями — не меньше рекомендованной (ADR-0090). Выключенная галочка и профиль из одних нулей оставляют аккаунт как есть.
  */
 export function withRecommended<
   T extends Pick<
@@ -45,11 +44,20 @@ export function withRecommended<
   >,
 >(account: T, profile: RecommendedProfile): WithRecommended<T> {
   if (!account.recommended) return account;
+  // Профиль из одних нулей — режим выключен на площадке: действуют лимиты тарифа, как без галочки.
+  if (
+    profile.paceSeconds <= 0 &&
+    profile.perMinute <= 0 &&
+    profile.perHour <= 0 &&
+    profile.perDay <= 0
+  ) {
+    return account;
+  }
   return {
     ...account,
-    limitPerMinute: tighter(account.limitPerMinute, profile.perMinute),
-    limitPerHour: tighter(account.limitPerHour, profile.perHour),
-    limitPerDay: tighter(account.limitPerDay, profile.perDay),
+    limitPerMinute: profileLimit(profile.perMinute),
+    limitPerHour: profileLimit(profile.perHour),
+    limitPerDay: profileLimit(profile.perDay),
     recommendedPaceSeconds: profile.paceSeconds,
   };
 }

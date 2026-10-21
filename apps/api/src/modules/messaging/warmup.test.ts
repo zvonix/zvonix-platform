@@ -116,7 +116,7 @@ describe('рекомендованная работа (ADR-0088)', () => {
     ...overrides,
   });
 
-  it('действует меньшее из тарифа и профиля; нет лимита в тарифе — берётся профиль', () => {
+  it('лимиты тарифа не действуют: работает профиль площадки', () => {
     expect(withRecommended(own(), profile)).toMatchObject({
       limitPerMinute: 2,
       limitPerHour: 15,
@@ -125,18 +125,21 @@ describe('рекомендованная работа (ADR-0088)', () => {
     });
     expect(
       withRecommended(own({ limitPerMinute: 1, limitPerHour: 100, limitPerDay: 500 }), profile),
-    ).toMatchObject({ limitPerMinute: 1, limitPerHour: 15, limitPerDay: 80 });
+    ).toMatchObject({ limitPerMinute: 2, limitPerHour: 15, limitPerDay: 80 });
   });
 
-  it('профиль не поднимает лимит выше тарифа; нули профиля — без ограничения; галочка снята — аккаунт как есть', () => {
+  it('ноль у одного предела профиля — он без ограничения, лимит тарифа не действует; профиль из одних нулей и снятая галочка — аккаунт как есть', () => {
     expect(
-      withRecommended(own({ limitPerMinute: 1 }), {
-        paceSeconds: 0,
+      withRecommended(own({ limitPerMinute: 1, limitPerDay: 9 }), {
+        paceSeconds: 20,
         perMinute: 0,
         perHour: 0,
         perDay: 0,
       }),
-    ).toMatchObject({ limitPerMinute: 1, limitPerHour: null, limitPerDay: null });
+    ).toMatchObject({ limitPerMinute: null, limitPerHour: null, limitPerDay: null });
+    const zeros = { paceSeconds: 0, perMinute: 0, perHour: 0, perDay: 0 };
+    const tariffOnly = own({ limitPerMinute: 1 });
+    expect(withRecommended(tariffOnly, zeros)).toBe(tariffOnly);
     const off = own({ recommended: false, limitPerMinute: 50 });
     expect(withRecommended(off, profile)).toBe(off);
   });

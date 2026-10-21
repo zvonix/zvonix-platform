@@ -31,6 +31,7 @@ export function PartnerMoney({ partnerId, name }: { partnerId: string; name: str
         doneText="Проведено"
         variant="outline"
         invalidate={['partners']}
+        reasonOptional
       />
       <MoneyOperation
         path={`/partners/${partnerId}/debit`}

@@ -34,6 +34,7 @@ import {
   createClientSchema,
   createPartnerSchema,
   depositSchema,
+  topUpSchema,
   payoutBatchSchema,
   overdraftSchema,
   partnerAliasSchema,
@@ -177,7 +178,7 @@ export class BillingController {
   @HttpCode(200)
   async deposit(
     @Param('id') id: string,
-    @Body(zodBody(depositSchema)) body: z.infer<typeof depositSchema>,
+    @Body(zodBody(topUpSchema)) body: z.infer<typeof topUpSchema>,
     @CurrentUser() actor: Principal,
   ): Promise<{ transaction_id: string; already_posted: boolean; balance: string }> {
     const clientId = parseId(id, 'client');
@@ -207,7 +208,7 @@ export class BillingController {
   @HttpCode(200)
   async depositPartner(
     @Param('id') id: string,
-    @Body(zodBody(depositSchema)) body: z.infer<typeof depositSchema>,
+    @Body(zodBody(topUpSchema)) body: z.infer<typeof topUpSchema>,
     @CurrentUser() actor: Principal,
   ): Promise<{ transaction_id: string; already_posted: boolean; balance: string }> {
     const partnerId = parseId(id, 'partner');

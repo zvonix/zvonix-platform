@@ -154,6 +154,7 @@ afterAll(async () => {
 function sections(): { name: string; reads: string[] }[] {
   return [
     { name: 'Учётные записи', reads: ['/users?limit=50'] },
+    { name: 'Счета и пополнение', reads: ['/clients?limit=100', '/partners?limit=100'] },
     {
       name: 'Клиенты и деньги',
       reads: [

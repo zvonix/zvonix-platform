@@ -62,3 +62,4 @@ playwright-report/
 
 # Записи разговоров при RECORDINGS_STORAGE=local (ADR-0063)
 /data/
+apps/api/data/

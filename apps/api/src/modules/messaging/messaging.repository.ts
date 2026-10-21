@@ -236,7 +236,7 @@ export class MessagingRepository {
 
   async setOwnerFields(
     id: MessengerAccountId,
-    fields: { label?: string; stopLine?: boolean; recommended?: boolean },
+    fields: { label?: string; recommended?: boolean },
   ): Promise<MessengerAccountRow | undefined> {
     const [row] = await this.database.db
       .update(messengerAccounts)
