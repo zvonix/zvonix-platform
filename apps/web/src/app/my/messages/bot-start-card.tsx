@@ -67,7 +67,7 @@ export function BotStartCard({ company }: { company: string }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
           <textarea
-            aria-label="Ответ бота при запуске"
+            aria-label="Текст ответа бота"
             className="min-h-24 rounded-lg border border-border bg-background p-2 font-sans"
             maxLength={BOT_GREETING_MAX}
             placeholder="Стандартный текст. {название} — название вашей службы"
