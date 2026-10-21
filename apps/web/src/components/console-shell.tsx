@@ -17,6 +17,7 @@ import {
   Inbox,
   LayoutDashboard,
   LifeBuoy,
+  UserRound,
   ListOrdered,
   MessageSquare,
   PenLine,
@@ -239,6 +240,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/partner/statement', label: 'Выписка', Icon: FileText },
         { href: '/partner/money', label: 'Деньги', Icon: Wallet, tab: true },
         { href: '/partner/support', label: 'Поддержка', Icon: LifeBuoy },
+        { href: '/partner/account', label: 'Аккаунт', Icon: UserRound },
       ],
     },
     {
@@ -280,6 +282,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/my/money', label: 'Деньги', Icon: Wallet, tab: true },
         { href: '/my/integration', label: 'Интеграция', Icon: KeyRound },
         { href: '/my/support', label: 'Поддержка', Icon: LifeBuoy },
+        { href: '/my/account', label: 'Аккаунт', Icon: UserRound },
       ],
     },
     {
