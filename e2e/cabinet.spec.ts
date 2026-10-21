@@ -2339,3 +2339,46 @@ test.describe('коридор цены сообщения', () => {
     await expect(section).toContainText('Коридора нет');
   });
 });
+
+test.describe('аккаунт клиента и партнёра', () => {
+  for (const [who, path] of [
+    ['client', '/my/account'],
+    ['partner', '/partner/account'],
+  ] as const) {
+    test(`${who}: пункт «Аккаунт» в меню; пароль меняется и возвращается; видно текущий вход`, async ({
+      browser,
+    }) => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await signIn(page, PEOPLE[who]);
+      await page.getByRole('link', { name: 'Аккаунт', exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`${path}$`, 'u'));
+      await expect(page.getByRole('main').getByText(PEOPLE[who])).toBeVisible();
+      await expect(page.getByText('это устройство')).toBeVisible();
+
+      const change = async (from: string, to: string, again = to): Promise<void> => {
+        await page.getByLabel('Текущий пароль').fill(from);
+        await page.getByLabel('Новый пароль', { exact: true }).fill(to);
+        await page.getByLabel('Новый пароль ещё раз').fill(again);
+      };
+
+      // Несовпадение видно до отправки, кнопка закрыта.
+      await change(PASSWORD, 'Совсем-Другой-Пароль-1', 'не-тот-же');
+      await expect(page.getByText('Пароли не совпадают')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Сменить пароль' })).toBeDisabled();
+
+      // Неверный текущий пароль — отказ с объяснением; верный — «Пароль сменён», и пароль возвращается обратно.
+      await change('неверный-текущий', 'Совсем-Другой-Пароль-1');
+      await page.getByRole('button', { name: 'Сменить пароль' }).click();
+      await expect(page.getByRole('alert').first()).toBeVisible();
+
+      await change(PASSWORD, 'Совсем-Другой-Пароль-1');
+      await page.getByRole('button', { name: 'Сменить пароль' }).click();
+      await expect(page.getByText(/Пароль сменён/u)).toBeVisible();
+      await change('Совсем-Другой-Пароль-1', PASSWORD);
+      await page.getByRole('button', { name: 'Сменить пароль' }).click();
+      await expect(page.getByText(/Пароль сменён/u)).toBeVisible();
+      await context.close();
+    });
+  }
+});
