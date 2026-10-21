@@ -44,5 +44,5 @@ export const TICKETS_PER_DAY = 10;
 export const TICKET_MESSAGES_PER_DAY = 60;
 export const TICKETS_OPEN_MAX = 20;
 
-/** Решённое обращение, к которому автор не вернулся за это число суток, закрывается само. */
+/** По умолчанию: обращение, на которое поддержка ответила (или решённое) и к которому автор не вернулся за это число суток, закрывается само (настройка `support.autoclose_days`). */
 export const TICKET_AUTOCLOSE_DAYS = 7;

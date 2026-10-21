@@ -4,7 +4,14 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { Money, notFound, parseId, validationFailed, type MoneyAmount } from '@zvonix/shared';
+import {
+  Money,
+  notFound,
+  parseId,
+  TICKET_AUTOCLOSE_DAYS,
+  validationFailed,
+  type MoneyAmount,
+} from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { decryptSecret, encryptSecret, PLATFORM_SETTING_PURPOSE } from '../../infra/secret-box.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -285,6 +292,19 @@ export class SettingsService {
     return {
       recordingsDays: clampDays(this.number(values, 'retention.recordings_days'), 1, 3650, 30),
       metricsDays: clampDays(this.number(values, 'retention.metrics_days'), 1, 90, 14),
+    };
+  }
+
+  /** Обращения в поддержку ([ADR-0089](../../../../../docs/adr/0089-obrashcheniya-statusy-i-kartinki.md)): срок автозакрытия, суток; 0 — не закрывать. */
+  async support(): Promise<{ readonly autocloseDays: number }> {
+    const values = await this.values();
+    return {
+      autocloseDays: clampDays(
+        this.number(values, 'support.autoclose_days'),
+        0,
+        365,
+        TICKET_AUTOCLOSE_DAYS,
+      ),
     };
   }
 

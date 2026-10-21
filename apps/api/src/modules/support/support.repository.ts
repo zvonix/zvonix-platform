@@ -217,13 +217,47 @@ export class SupportRepository {
       .where(eq(supportTickets.id, id));
   }
 
-  /** Закрывает решённые обращения, к которым не возвращались с `before`. Возвращает, сколько закрыто. */
-  async closeResolvedBefore(before: Date, now: Date): Promise<number> {
+  /**
+   * Закрывает обращения, на которые поддержка ответила или которые решены, а автор не вернулся с `before` (ADR-0089).
+   * Возвращает закрытые: по каждому пишется запись в журнал.
+   */
+  async closeStaleBefore(before: Date, now: Date): Promise<Id<'supportTicket'>[]> {
     const closed = await this.db
       .update(supportTickets)
       .set({ status: 'closed', closedAt: now })
-      .where(and(eq(supportTickets.status, 'resolved'), lt(supportTickets.lastMessageAt, before)))
+      .where(
+        and(
+          inArray(supportTickets.status, ['waiting_user', 'resolved']),
+          lt(supportTickets.lastMessageAt, before),
+        ),
+      )
       .returning({ id: supportTickets.id });
-    return closed.length;
+    return closed.map((row) => row.id);
+  }
+
+  /** Автор открыл обращение: ответ поддержки прочитан. */
+  async markRead(id: Id<'supportTicket'>, now: Date): Promise<void> {
+    await this.db
+      .update(supportTickets)
+      .set({ authorReadAt: now })
+      .where(eq(supportTickets.id, id));
+  }
+
+  /** Сколько обращений автора ждут его прочтения: поддержка ответила, автор ещё не открывал. */
+  async countUnreadByAuthor(authorUserId: Id<'user'>): Promise<number> {
+    const [row] = await this.db
+      .select({ n: count() })
+      .from(supportTickets)
+      .where(
+        and(
+          eq(supportTickets.authorUserId, authorUserId),
+          eq(supportTickets.status, 'waiting_user'),
+          or(
+            isNull(supportTickets.authorReadAt),
+            lt(supportTickets.authorReadAt, supportTickets.lastMessageAt),
+          ),
+        ),
+      );
+    return row?.n ?? 0;
   }
 }

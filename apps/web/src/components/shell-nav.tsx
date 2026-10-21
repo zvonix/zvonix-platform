@@ -104,6 +104,31 @@ function AttentionDot({ href }: { href: string }) {
 }
 
 /**
+ * Сколько обращений ждут прочтения автором — число у пункта «Поддержка» клиента и партнёра: поддержка ответила, а он ещё не открывал
+ * (ADR-0089). Запрос уходит только у этого пункта.
+ */
+function UnreadReplies({ href }: { href: string }) {
+  const own = href === '/my/support' || href === '/partner/support';
+  const unread = useQuery({
+    queryKey: ['support', 'unread'],
+    queryFn: () => request<{ total: number }>('/support/tickets/unread'),
+    enabled: own,
+    refetchInterval: 60_000,
+  });
+  if (!own || !unread.data || unread.data.total === 0) return null;
+  return (
+    <span
+      role="img"
+      aria-label={`Есть ответ поддержки: ${String(unread.data.total)}`}
+      title="Есть ответ поддержки"
+      className="num ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground"
+    >
+      {unread.data.total}
+    </span>
+  );
+}
+
+/**
  * Сколько обращений в поддержку ждёт ответа — число у пункта «Обращения». Запрос уходит только у этого пункта, а он
  * виден лишь администратору и поддержке (ADR-0085).
  */
@@ -292,6 +317,7 @@ export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; foote
                       )}
                       <AttentionDot href={item.href} />
                       <TicketCount href={item.href} />
+                      <UnreadReplies href={item.href} />
                     </Link>
                   );
                 })}
@@ -372,6 +398,7 @@ function AllSections({
                     {item.label}
                     <AttentionDot href={item.href} />
                     <TicketCount href={item.href} />
+                    <UnreadReplies href={item.href} />
                   </Link>
                 );
               })}

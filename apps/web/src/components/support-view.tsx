@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
-import { TICKET_CATEGORY_NAME, TICKET_STATUS_NAME, TICKET_STATUS_TONE } from '@/lib/labels';
+import { TICKET_CATEGORY_NAME, TICKET_STATUS_TONE, ticketStatusName } from '@/lib/labels';
 import { useLiveInterval } from '@/lib/live';
 
 interface Ticket {
@@ -38,6 +38,8 @@ interface Ticket {
   readonly author_email: string;
   readonly assignee_user_id: string | null;
   readonly last_message_at: string;
+  /** Поддержка ответила, автор ещё не открывал (ADR-0089). */
+  readonly unread: boolean;
   readonly created_at: string;
 }
 
@@ -99,7 +101,7 @@ export function SupportView({
           label="Состояние"
           anyLabel={staff ? 'Все' : 'Все мои обращения'}
           value={status}
-          options={TICKET_STATUSES.map((value) => [value, TICKET_STATUS_NAME[value]] as const)}
+          options={TICKET_STATUSES.map((value) => [value, ticketStatusName(value, mode)] as const)}
           onChange={setStatus}
         />
         {staff && (
@@ -160,11 +162,13 @@ export function SupportView({
                 }`}
               >
                 <span className="flex items-start justify-between gap-2">
-                  <span className="font-medium">{ticket.subject}</span>
+                  <span className={ticket.unread && !staff ? 'font-bold' : 'font-medium'}>
+                    {ticket.subject}
+                  </span>
                   <span
                     className={`shrink-0 rounded-md px-2 py-0.5 ${TICKET_STATUS_TONE[ticket.status]}`}
                   >
-                    {TICKET_STATUS_NAME[ticket.status]}
+                    {ticketStatusName(ticket.status, mode)}
                   </span>
                 </span>
                 <span className="text-muted-foreground">
@@ -343,7 +347,7 @@ function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
           </span>
         </div>
         <span className={`rounded-md px-2 py-0.5 ${TICKET_STATUS_TONE[ticket.status]}`}>
-          {TICKET_STATUS_NAME[ticket.status]}
+          {ticketStatusName(ticket.status, mode)}
         </span>
       </header>
 
@@ -351,10 +355,10 @@ function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
         <div className="flex flex-wrap items-end gap-2">
           <Choice
             label="Состояние"
-            anyLabel={TICKET_STATUS_NAME[ticket.status]}
+            anyLabel={ticketStatusName(ticket.status, mode)}
             value=""
             options={TICKET_STATUSES.filter((value) => value !== ticket.status).map(
-              (value) => [value, TICKET_STATUS_NAME[value]] as const,
+              (value) => [value, ticketStatusName(value, mode)] as const,
             )}
             onChange={(value) => {
               if (value !== '')

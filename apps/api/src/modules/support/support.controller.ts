@@ -32,6 +32,8 @@ interface TicketJson {
   readonly author_email: string;
   readonly assignee_user_id: string | null;
   readonly last_message_at: string;
+  /** Поддержка ответила, автор ещё не открывал (ADR-0089). */
+  readonly unread: boolean;
   readonly created_at: string;
 }
 
@@ -52,6 +54,9 @@ const ticketJson = (row: TicketRow): TicketJson => ({
   author_email: row.authorEmail,
   assignee_user_id: row.assigneeUserId,
   last_message_at: row.lastMessageAt.toISOString(),
+  unread:
+    row.status === 'waiting_user' &&
+    (row.authorReadAt === null || row.authorReadAt < row.lastMessageAt),
   created_at: row.createdAt.toISOString(),
 });
 
@@ -101,6 +106,13 @@ export class SupportController {
     @Body(zodBody(createTicketSchema)) body: z.infer<typeof createTicketSchema>,
   ) {
     return detailJson(await this.support.create(actorOf(principal), body));
+  }
+
+  /** Сколько обращений ждут прочтения автором — для числа у пункта «Поддержка». До маршрута с `:id`, иначе путь съест он. */
+  @Cabinets('client', 'partner')
+  @Get('support/tickets/unread')
+  async unread(@CurrentUser() principal: Principal): Promise<{ total: number }> {
+    return { total: await this.support.unreadOwn(actorOf(principal)) };
   }
 
   @Cabinets('client', 'partner')
