@@ -6,11 +6,15 @@ import {
   TICKET_BODY_MAX,
   TICKET_CABINETS,
   TICKET_CATEGORIES,
+  TICKET_IMAGES_PER_MESSAGE,
   TICKET_STATUSES,
   TICKET_SUBJECT_MAX,
 } from '@zvonix/shared';
 import { z } from 'zod';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
+
+/** Идентификаторы загруженных картинок (ADR-0089): не больше пяти на сообщение. */
+const attachments = z.array(z.uuid()).max(TICKET_IMAGES_PER_MESSAGE).optional();
 
 const body = z
   .string()
@@ -27,14 +31,16 @@ export const createTicketSchema = z.object({
     .max(TICKET_SUBJECT_MAX, `не длиннее ${String(TICKET_SUBJECT_MAX)} знаков`),
   category: z.enum(TICKET_CATEGORIES),
   body,
+  attachments,
 });
 
-export const ticketMessageSchema = z.object({ body });
+export const ticketMessageSchema = z.object({ body, attachments });
 
 /** Ответ сотрудника: реплика автору либо заметка для своих. */
 export const staffMessageSchema = z.object({
   body,
   internal: z.boolean().optional().default(false),
+  attachments,
 });
 
 export const ticketStatusSchema = z.object({ status: z.enum(TICKET_STATUSES) });

@@ -491,6 +491,13 @@
       "when": 1792567149218,
       "tag": "0069_obrashcheniya_otmetka_prochitano",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1792573773638,
+      "tag": "0070_obrashcheniya_kartinki",
+      "breakpoints": true
     }
   ]
 }

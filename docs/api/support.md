@@ -17,6 +17,13 @@
 - `GET /support/tickets?status=&limit=&offset=` → `{ tickets, total }` — свои обращения, свежие сверху.
 - `POST /support/tickets` `{ cabinet: "client"|"partner", subject (3–120), category, body (3–5000) }` → `201` с перепиской.
   `404` — нет кабинета указанного вида; `409` — открытых уже 20; `429` — больше 10 новых в сутки.
+- `POST /storage/support/attachments?name=` — загрузить одну картинку: тело запроса — сами байты (`application/octet-stream`), `?name=` — имя для показа. Автор и
+  сотрудник. Только PNG, JPEG, WebP **по содержимому**, до 5 МБ, за сутки не больше 20 МБ на человека (`429`); не картинка и больше 5 МБ — `400`. → `201
+  { id, name, size, type }`. Загруженная ждёт отправки с сообщением, не прикреплённая за сутки стирается (фоновая задача `support.purge-uploads`).
+- В `POST /support/tickets`, `POST /support/tickets/:id/messages` и `POST /support/staff/tickets/:id/messages` — необязательное `attachments: [id…]` (не более 5, свои
+  и ещё не прикреплённые; иначе `409`/`400`). В реплике — `attachments: [{ id, name, size, type }]`.
+- `GET /support/attachments/:id` — сама картинка (`Content-Type` из базы, `nosniff`): автору обращения (кроме заметок сотрудников — для автора `404`) и сотрудникам;
+  загрузивший видит свою ещё не прикреплённую. Файлы лежат в `SUPPORT_DIR`, копия базы их не содержит.
 - `GET /support/tickets/unread` → `{ total }` — сколько обращений автора ждут прочтения (`waiting_user`, открытых автором позже ответа нет); число
   у пункта «Поддержка» в меню. Заметки сотрудников в счёт не входят.
 - `GET /support/tickets/:id` → переписка **без** внутренних заметок; открытие отмечает ответ прочитанным (`author_read_at`).

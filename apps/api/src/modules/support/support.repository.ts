@@ -4,13 +4,27 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, inArray, isNull, lt, or, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { containsIgnoringCase, toDatabaseError, type Database } from '@zvonix/db';
-import { supportTicketMessages, supportTickets } from '@zvonix/db/schema';
+import { supportAttachments, supportTicketMessages, supportTickets } from '@zvonix/db/schema';
 import {
   newId,
   type Id,
   type TicketCabinet,
+  type TicketImageType,
   type TicketCategory,
   type TicketSide,
   type TicketStatus,
@@ -19,6 +33,7 @@ import { DatabaseService } from '../../infra/database.service.js';
 
 export type TicketRow = typeof supportTickets.$inferSelect;
 export type TicketMessageRow = typeof supportTicketMessages.$inferSelect;
+export type AttachmentRow = typeof supportAttachments.$inferSelect;
 
 export interface TicketFilter {
   readonly authorUserId?: Id<'user'>;
@@ -51,6 +66,7 @@ export class SupportRepository {
     subject: string;
     category: TicketCategory;
     body: string;
+    attachmentIds?: readonly Id<'supportAttachment'>[];
   }): Promise<TicketRow> {
     try {
       return await this.db.transaction(async (tx) => {
@@ -66,18 +82,137 @@ export class SupportRepository {
           })
           .returning();
         if (ticket === undefined) throw new Error('Вставка не вернула строку');
+        const messageId = newId<'supportTicketMessage'>();
         await tx.insert(supportTicketMessages).values({
-          id: newId<'supportTicketMessage'>(),
+          id: messageId,
           ticketId: ticket.id,
           authorUserId: draft.authorUserId,
           side: 'user',
           body: draft.body,
         });
+        await this.link(tx, messageId, draft.authorUserId, draft.attachmentIds);
         return ticket;
       });
     } catch (cause) {
       throw toDatabaseError(cause);
     }
+  }
+
+  /** Прикрепляет загруженные этим же человеком и ещё свободные картинки к сообщению (внутри той же транзакции). */
+  private async link(
+    tx: Pick<Database, 'update'>,
+    messageId: Id<'supportTicketMessage'>,
+    uploader: Id<'user'>,
+    ids: readonly Id<'supportAttachment'>[] | undefined,
+  ): Promise<void> {
+    if (ids === undefined || ids.length === 0) return;
+    await tx
+      .update(supportAttachments)
+      .set({ messageId })
+      .where(
+        and(
+          inArray(supportAttachments.id, [...ids]),
+          eq(supportAttachments.uploaderUserId, uploader),
+          isNull(supportAttachments.messageId),
+        ),
+      );
+  }
+
+  async addAttachment(draft: {
+    uploaderUserId: Id<'user'>;
+    storedName: string;
+    originalName: string;
+    contentType: TicketImageType;
+    size: number;
+  }): Promise<AttachmentRow> {
+    const [row] = await this.db
+      .insert(supportAttachments)
+      .values({ id: newId<'supportAttachment'>(), ...draft })
+      .returning();
+    if (row === undefined) throw new Error('Вставка не вернула строку');
+    return row;
+  }
+
+  /** Сколько байт картинок загрузил человек с `since`: суточный предел. */
+  async uploadedBytesSince(uploader: Id<'user'>, since: Date): Promise<number> {
+    const [row] = await this.db
+      .select({ total: sql<number>`coalesce(sum(${supportAttachments.size}), 0)::float8` })
+      .from(supportAttachments)
+      .where(
+        and(
+          eq(supportAttachments.uploaderUserId, uploader),
+          gte(supportAttachments.createdAt, since),
+        ),
+      );
+    return row?.total ?? 0;
+  }
+
+  /** Свободные (ни к чему не прикреплённые) картинки этого загрузившего среди названных. */
+  freeAttachments(
+    uploader: Id<'user'>,
+    ids: readonly Id<'supportAttachment'>[],
+  ): Promise<AttachmentRow[]> {
+    return this.db
+      .select()
+      .from(supportAttachments)
+      .where(
+        and(
+          inArray(supportAttachments.id, [...ids]),
+          eq(supportAttachments.uploaderUserId, uploader),
+          isNull(supportAttachments.messageId),
+        ),
+      );
+  }
+
+  /** Картинка вместе с обращением, к которому она прикреплена, и признаком заметки; `ticket` пуст, пока не прикреплена. */
+  async attachmentWithContext(
+    id: string,
+  ): Promise<
+    { attachment: AttachmentRow; ticket: TicketRow | undefined; internal: boolean } | undefined
+  > {
+    if (!/^[0-9a-f-]{36}$/u.test(id)) return undefined;
+    const [row] = await this.db
+      .select({
+        attachment: supportAttachments,
+        ticket: supportTickets,
+        internal: supportTicketMessages.internal,
+      })
+      .from(supportAttachments)
+      .leftJoin(supportTicketMessages, eq(supportTicketMessages.id, supportAttachments.messageId))
+      .leftJoin(supportTickets, eq(supportTickets.id, supportTicketMessages.ticketId))
+      .where(eq(supportAttachments.id, id as Id<'supportAttachment'>));
+    if (row === undefined) return undefined;
+    return {
+      attachment: row.attachment,
+      ticket: row.ticket ?? undefined,
+      internal: row.internal ?? false,
+    };
+  }
+
+  /** Картинки сообщений одним запросом, сгруппированные по сообщению. */
+  async attachmentsOf(
+    messageIds: readonly Id<'supportTicketMessage'>[],
+  ): Promise<Map<string, AttachmentRow[]>> {
+    const grouped = new Map<string, AttachmentRow[]>();
+    if (messageIds.length === 0) return grouped;
+    const rows = await this.db
+      .select()
+      .from(supportAttachments)
+      .where(inArray(supportAttachments.messageId, [...messageIds]))
+      .orderBy(asc(supportAttachments.createdAt));
+    for (const row of rows) {
+      if (row.messageId === null) continue;
+      grouped.set(row.messageId, [...(grouped.get(row.messageId) ?? []), row]);
+    }
+    return grouped;
+  }
+
+  /** Стирает строки неприкреплённых картинок старше границы и возвращает их (файлы стирает сервис). */
+  deleteUnlinkedBefore(before: Date): Promise<AttachmentRow[]> {
+    return this.db
+      .delete(supportAttachments)
+      .where(and(isNull(supportAttachments.messageId), lt(supportAttachments.createdAt, before)))
+      .returning();
   }
 
   async findById(id: Id<'supportTicket'>): Promise<TicketRow | undefined> {
@@ -163,6 +298,7 @@ export class SupportRepository {
     internal: boolean;
     nextStatus: TicketStatus | undefined;
     now: Date;
+    attachmentIds?: readonly Id<'supportAttachment'>[];
   }): Promise<TicketMessageRow> {
     try {
       return await this.db.transaction(async (tx) => {
@@ -178,6 +314,7 @@ export class SupportRepository {
           })
           .returning();
         if (message === undefined) throw new Error('Вставка не вернула строку');
+        await this.link(tx, message.id, draft.authorUserId, draft.attachmentIds);
         if (!draft.internal) {
           await tx
             .update(supportTickets)

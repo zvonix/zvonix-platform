@@ -27,8 +27,10 @@ import { IdentityService } from '../identity/identity.service.js';
 import { RateLimitService, type LimitRule } from '../limits/rate-limit.service.js';
 import { MailService } from '../mail/mail.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { SupportAttachmentsService } from './support-attachments.service.js';
 import {
   SupportRepository,
+  type AttachmentRow,
   type TicketFilter,
   type TicketMessageRow,
   type TicketRow,
@@ -60,9 +62,14 @@ export interface SupportActor {
   readonly email: string;
 }
 
+/** Реплика с прикреплёнными картинками (ADR-0089). */
+export interface TicketMessageView extends TicketMessageRow {
+  readonly attachments: AttachmentRow[];
+}
+
 export interface TicketDetail {
   readonly ticket: TicketRow;
-  readonly messages: TicketMessageRow[];
+  readonly messages: TicketMessageView[];
 }
 
 const CATEGORY_NAME: Record<TicketCategory, string> = {
@@ -86,6 +93,7 @@ export class SupportService {
     private readonly mail: MailService,
     private readonly settings: SettingsService,
     private readonly audit: AuditService,
+    private readonly attachments: SupportAttachmentsService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('support');
@@ -95,7 +103,13 @@ export class SupportService {
 
   async create(
     actor: SupportActor,
-    input: { cabinet: TicketCabinet; subject: string; category: TicketCategory; body: string },
+    input: {
+      cabinet: TicketCabinet;
+      subject: string;
+      category: TicketCategory;
+      body: string;
+      attachments?: readonly string[] | undefined;
+    },
   ): Promise<TicketDetail> {
     // Кабинет открывает владение карточкой, а не роль: писать «из кабинета партнёра» может только партнёр.
     if (input.cabinet === 'client') await this.billing.requireClientOwnedBy(actor.userId);
@@ -107,6 +121,7 @@ export class SupportService {
       );
     }
     await this.assertWithin(NEW_TICKET_RULE, actor.userId, 'Новых обращений не больше');
+    const attachmentIds = await this.attachments.assertUsable(actor, input.attachments ?? []);
 
     const ticket = await this.repository.createWithMessage({
       authorUserId: actor.userId,
@@ -115,10 +130,21 @@ export class SupportService {
       subject: input.subject,
       category: input.category,
       body: input.body,
+      attachmentIds,
     });
     await this.limits.hit(NEW_TICKET_RULE, actor.userId);
     await this.notifyStaff(ticket, `Новое обращение: ${input.subject}`, input.body);
-    return { ticket, messages: await this.repository.messages(ticket.id, false) };
+    return { ticket, messages: await this.messagesOf(ticket.id, false) };
+  }
+
+  /** Реплики обращения с картинками одним дополнительным запросом. */
+  private async messagesOf(
+    ticketId: Id<'supportTicket'>,
+    includeInternal: boolean,
+  ): Promise<TicketMessageView[]> {
+    const rows = await this.repository.messages(ticketId, includeInternal);
+    const grouped = await this.repository.attachmentsOf(rows.map((row) => row.id));
+    return rows.map((row) => ({ ...row, attachments: grouped.get(row.id) ?? [] }));
   }
 
   listOwn(actor: SupportActor, filter: Pick<TicketFilter, 'status' | 'limit' | 'offset'>) {
@@ -132,7 +158,7 @@ export class SupportService {
     await this.repository.markRead(ticket.id, now);
     return {
       ticket: { ...ticket, authorReadAt: now },
-      messages: await this.repository.messages(ticket.id, false),
+      messages: await this.messagesOf(ticket.id, false),
     };
   }
 
@@ -141,12 +167,18 @@ export class SupportService {
     return this.repository.countUnreadByAuthor(actor.userId);
   }
 
-  async reply(actor: SupportActor, id: string, body: string): Promise<TicketDetail> {
+  async reply(
+    actor: SupportActor,
+    id: string,
+    body: string,
+    attachments: readonly string[] = [],
+  ): Promise<TicketDetail> {
     const ticket = await this.ownTicket(actor, id);
     if (ticket.status === 'closed') {
       throw conflict('Обращение закрыто: создайте новое');
     }
     await this.assertWithin(MESSAGE_RULE, actor.userId, 'Сообщений в сутки не больше');
+    const attachmentIds = await this.attachments.assertUsable(actor, attachments);
     await this.repository.addMessage({
       ticketId: ticket.id,
       authorUserId: actor.userId,
@@ -155,6 +187,7 @@ export class SupportService {
       internal: false,
       nextStatus: 'open',
       now: new Date(),
+      attachmentIds,
     });
     await this.limits.hit(MESSAGE_RULE, actor.userId);
     await this.notifyStaff(ticket, `Ответ в обращении: ${ticket.subject}`, body);
@@ -177,19 +210,20 @@ export class SupportService {
 
   async getStaff(id: string): Promise<TicketDetail> {
     const ticket = await this.anyTicket(id);
-    return { ticket, messages: await this.repository.messages(ticket.id, true) };
+    return { ticket, messages: await this.messagesOf(ticket.id, true) };
   }
 
   /** Ответ автору либо внутренняя заметка. Закрытому обращению отвечать нельзя, заметку оставить можно. */
   async staffReply(
     actor: SupportActor,
     id: string,
-    input: { body: string; internal: boolean },
+    input: { body: string; internal: boolean; attachments?: readonly string[] | undefined },
   ): Promise<TicketDetail> {
     const ticket = await this.anyTicket(id);
     if (!input.internal && ticket.status === 'closed') {
       throw conflict('Обращение закрыто: автор может создать новое');
     }
+    const attachmentIds = await this.attachments.assertUsable(actor, input.attachments ?? []);
     await this.repository.addMessage({
       ticketId: ticket.id,
       authorUserId: actor.userId,
@@ -198,6 +232,7 @@ export class SupportService {
       internal: input.internal,
       nextStatus: input.internal ? undefined : 'waiting_user',
       now: new Date(),
+      attachmentIds,
     });
     if (!input.internal) await this.notifyAuthor(ticket, input.body);
     return this.getStaff(id);
@@ -263,6 +298,11 @@ export class SupportService {
       });
     }
     return closed.length;
+  }
+
+  /** Фоновая задача: загруженные, но так и не прикреплённые картинки старше суток стираются (ADR-0089). */
+  purgeUploads(now: Date): Promise<number> {
+    return this.attachments.purgeUnlinked(now);
   }
 
   // --- внутреннее ---
