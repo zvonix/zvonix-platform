@@ -6,6 +6,8 @@
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  BOT_SHARE_BUTTON,
+  botStartText,
   conflict,
   dependencyUnavailable,
   isDomainError,
@@ -50,9 +52,6 @@ const FEE_BATCH = 200;
 
 /** Тексты бота людям: готовые, с названием службы (настраиваемые — этап 3 ADR-0077). */
 const TEXT = {
-  askContact: (service: string) =>
-    `Служба «${service}» будет присылать вам уведомления в этом чате. Чтобы мы знали, кому писать, нажмите «Поделиться номером».`,
-  shareButton: 'Поделиться номером',
   needLink: 'Бот подключается по ссылке, которую вам прислала служба. Откройте эту ссылку ещё раз.',
   thanks: 'Спасибо! Номер подтверждён. Остановить уведомления — напишите СТОП.',
   notYours: 'Поделитесь своим номером кнопкой под сообщением.',
@@ -879,12 +878,10 @@ export class BotsService {
       firstName: nameOf(update.user),
     });
     const client = await this.billing.clientWithBalance(connection.clientId);
-    // Своё приветствие клиента: `{служба}` заменяется названием; пусто — стандартный текст.
-    const greeting =
-      connection.greeting === null
-        ? TEXT.askContact(client.name)
-        : connection.greeting.replaceAll('{служба}', client.name);
-    await this.provider.send(token, chatId, greeting, { requestContact: TEXT.shareButton });
+    // Своё приветствие клиента (`{название}`, прежнее `{служба}`) или стандартный текст — одной функцией с предпросмотром.
+    await this.provider.send(token, chatId, botStartText(connection.greeting, client.name), {
+      requestContact: BOT_SHARE_BUTTON,
+    });
   }
 
   private async onMessage(bot: BotRow, update: BotUpdate): Promise<void> {

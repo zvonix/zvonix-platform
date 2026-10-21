@@ -355,11 +355,11 @@ test.describe('сообщения MAX (ADR-0071)', () => {
       partner.getByRole('row', { name: /Основной/u }).getByText('по умолчанию'),
     ).toBeVisible();
 
-    // Новый тариф — умолчание: аккаунт сразу получает его цену; свой тариф назначается выбором в строке.
+    // Новый тариф — умолчание: аккаунт сразу получает его цену; свой тариф назначается в «Настройках» аккаунта.
     await partner.goto('/partner/messages');
     const accountRow = partner.getByRole('row', { name: /Основной/u });
     await expect(accountRow.getByText(/0,45/u)).toBeVisible();
-    await expect(accountRow.getByLabel(/Тариф аккаунта/u)).toHaveValue('');
+    await expect(accountRow.getByText(/по умолчанию/u)).toBeVisible();
 
     await admin.goto('/messaging');
     await expect(admin.getByRole('row', { name: /Основной/u })).toBeVisible();
@@ -533,7 +533,8 @@ test.describe('отправка сообщений из кабинета пар�
     const partner = await partnerContext.newPage();
     await signIn(partner, PEOPLE.partner);
     await partner.goto('/partner/send');
-    await expect(partner.getByText(/Клиентского кабинета у вас пока нет/u)).toBeVisible();
+    // Пункта «Сообщения» в меню нет (отправлять без клиентского кабинета нечем), страница ведёт к заявке.
+    await expect(partner.getByRole('link', { name: 'Сообщения', exact: true })).toHaveCount(0);
     await expect(partner.getByRole('link', { name: 'Стать клиентом' }).first()).toBeVisible();
     // Формы, которая отказала бы, нет.
     await expect(partner.getByLabel('Номер получателя')).toHaveCount(0);
@@ -648,15 +649,18 @@ test.describe('бот MAX (ADR-0077)', () => {
     await admin.getByRole('button', { name: 'Сохранить' }).click();
     await expect(admin.getByText('своя')).toBeVisible();
 
-    // Тексты бота: сохраняются и видны при следующем открытии окна.
+    // Ответ бота при запуске правится рядом с шаблоном сообщения и сохраняется; в окне «Настройки» бота его больше нет.
     await page.getByRole('button', { name: 'Настройки', exact: true }).click();
-    await page.getByLabel('Приветствие, когда ваш клиент запускает бота').fill('Привет от Волны');
-    await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
-    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
-    await expect(page.getByLabel('Приветствие, когда ваш клиент запускает бота')).toHaveValue(
-      'Привет от Волны',
-    );
+    await expect(page.getByLabel('Приветствие, когда ваш клиент запускает бота')).toHaveCount(0);
     await page.keyboard.press('Escape');
+    await page.goto('/my/message-text');
+    await page.getByLabel('Текст ответа бота').fill('Привет от {название}');
+    await expect(page.getByText(/Привет от Такси/u)).toBeVisible();
+    await page.getByRole('button', { name: 'Сохранить ответ' }).click();
+    await expect(page.getByText('Сохранено')).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel('Текст ответа бота')).toHaveValue('Привет от {название}');
+    await page.goto('/my/message-connections');
 
     // Блок бота отдельно: «Отключено» бывает и у подключения SMPP того же клиента.
     const botBlock = page.locator('section', {
@@ -1076,8 +1080,6 @@ test.describe('звонки и MAX у партнёра — отдельные р
     // Звонки и MAX — разные страницы, у каждого свой раздел меню: вкладок «Звонки / Сообщения MAX» нет.
     await page.goto('/partner/limits');
     await expect(page.getByRole('tab', { name: 'Сообщения MAX' })).toHaveCount(0);
-    await page.goto('/partner/max-limits');
-    await expect(page.getByRole('columnheader', { name: 'В минуту' })).toBeVisible();
 
     await page.goto('/partner/max-tariffs');
     await expect(page.getByRole('columnheader', { name: 'Цена за сообщение' })).toBeVisible();

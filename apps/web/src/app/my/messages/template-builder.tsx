@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
+import { BotStartCard } from './bot-start-card';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
 import {
@@ -395,6 +396,7 @@ export function TemplateBuilder() {
         )}
         {empty && <span className="text-warn">Заполните пустые блоки или удалите их</span>}
       </div>
+      <BotStartCard company={company} />
     </div>
   );
 }

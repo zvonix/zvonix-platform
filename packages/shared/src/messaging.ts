@@ -160,6 +160,22 @@ export type BotSubscriberState = (typeof BOT_SUBSCRIBER_STATES)[number];
 export const BOT_GREETING_MAX = 300;
 export const BOT_INSERT_MAX = 150;
 
+/** Ответ бота человеку, когда он запустил бота, если клиент не задал свой; `{название}` — название службы клиента. */
+export const BOT_START_DEFAULT =
+  'Служба «{название}» будет присылать вам уведомления в этом чате. Чтобы мы знали, кому писать, нажмите «Поделиться номером».';
+/** Кнопка под ответом при запуске: без номера бот не сможет писать человеку. */
+export const BOT_SHARE_BUTTON = 'Поделиться номером';
+
+/**
+ * Что бот отвечает при запуске. Своего текста нет — стандартный. Подставляется `{название}` и прежний `{служба}` (старые
+ * тексты не ломаются). Одна функция и для бота, и для предпросмотра в кабинете: показанное совпадает с ушедшим.
+ */
+export function botStartText(custom: string | null, company: string): string {
+  return (custom ?? BOT_START_DEFAULT)
+    .replaceAll('{название}', company)
+    .replaceAll('{служба}', company);
+}
+
 /** Сколько адресов можно разрешить учётной записи SMPP: больше — это уже «любые». */
 export const SMPP_ALLOWED_IPS_MAX = 20;
 

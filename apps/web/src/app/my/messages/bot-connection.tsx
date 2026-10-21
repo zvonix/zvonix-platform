@@ -13,7 +13,6 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { ApiError, request } from '@/lib/api';
 import { money } from '@/lib/money';
-import { BOT_GREETING_MAX } from '@zvonix/shared';
 
 interface Terms {
   readonly message_price: string;
@@ -92,7 +91,7 @@ export function BotConnection() {
     (candidate): candidate is ApiError => candidate instanceof ApiError,
   );
 
-  const saveSettings = async (patch: { greeting: string; fallbackAccounts: boolean }) => {
+  const saveSettings = async (patch: { fallbackAccounts: boolean }) => {
     store(
       await request<BotState>('/client/messages/bot/settings', { method: 'PATCH', body: patch }),
     );
@@ -312,71 +311,25 @@ function OwnBotForm({
   );
 }
 
-/** Поле текста с счётчиком знаков: не длиннее предела, который держит и сервер. */
-function TextField({
-  id,
-  label,
-  value,
-  max,
-  placeholder,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  max: number;
-  placeholder: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1 sm:col-span-2">
-      <Label htmlFor={id}>{label}</Label>
-      <textarea
-        id={id}
-        rows={2}
-        maxLength={max}
-        value={value}
-        placeholder={placeholder}
-        onChange={(event) => {
-          onChange(event.target.value);
-        }}
-        className="w-full rounded-md border border-input bg-transparent px-3 py-2"
-      />
-      <span className="num text-muted-foreground">
-        {String(value.length)} из {String(max)}
-      </span>
-    </div>
-  );
-}
-
 /**
- * Окно настроек бота клиента: приветствие и запасной путь через аккаунты. Тексты вокруг сообщений — во вкладке «Текст
- * сообщения». Пустое поле — стандартный текст; `{служба}` в приветствии заменяется названием службы.
+ * Окно настроек бота клиента: запасной путь через аккаунты. Все тексты — и ответ бота при запуске, и вставки в сообщения — на
+ * странице «Текст сообщения».
  */
 function SettingsForm({
   settings,
   onSave,
 }: {
   settings: BotState['settings'];
-  onSave: (patch: { greeting: string; fallbackAccounts: boolean }) => Promise<unknown>;
+  onSave: (patch: { fallbackAccounts: boolean }) => Promise<unknown>;
 }) {
-  const [greeting, setGreeting] = useState(settings.greeting ?? '');
   const [fallback, setFallback] = useState(settings.fallback_accounts);
 
   return (
     <DialogForm
       submitLabel="Сохранить"
       canSubmit
-      onSubmit={() => onSave({ greeting, fallbackAccounts: fallback })}
+      onSubmit={() => onSave({ fallbackAccounts: fallback })}
     >
-      <TextField
-        id="bot-greeting"
-        label="Приветствие, когда ваш клиент запускает бота"
-        value={greeting}
-        max={BOT_GREETING_MAX}
-        placeholder="Стандартное. {служба} — название вашей службы"
-        onChange={setGreeting}
-      />
       <div className="flex items-start gap-3 sm:col-span-2">
         <Switch id="bot-fallback" checked={fallback} onCheckedChange={setFallback} />
         <div>

@@ -22,10 +22,8 @@ import {} from '@/lib/labels';
 import { money } from '@/lib/money';
 import {
   ACCOUNTS_KEY,
-  AccountTariffSelect,
-  RecommendedSwitch,
-  RenameForm,
-  StopLineSwitch,
+  AccountSettingsForm,
+  AccountTariffName,
   useMessengerAccounts,
   type Account,
 } from './terms';
@@ -206,11 +204,7 @@ function AccountRow({
       </TableCell>
 
       <TableCell>
-        <div className="flex flex-col items-start gap-1.5">
-          <AccountTariffSelect account={account} />
-          <RecommendedSwitch account={account} />
-          <StopLineSwitch account={account} />
-        </div>
+        <AccountTariffName account={account} />
       </TableCell>
 
       <TableCell className="num text-right">
@@ -261,12 +255,12 @@ function AccountRow({
             </FormDialog>
           )}
           <FormDialog
-            label="Название"
+            label="Настройки"
             title={`Аккаунт «${account.label}»`}
             variant="outline"
             size="xs"
           >
-            <RenameForm account={account} />
+            <AccountSettingsForm account={account} />
           </FormDialog>
           <ConfirmAction
             label="Удалить"

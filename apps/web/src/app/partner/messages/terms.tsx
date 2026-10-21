@@ -7,7 +7,6 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Hint } from '@/components/hint';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -108,88 +107,60 @@ function limitsText(
 // --- Аккаунт: название и тариф ----------------------------------------------------------------
 
 /** Название аккаунта. Цена и лимиты — в тарифе. */
-/**
- * «СТОП» в сообщениях: при включённой галочке к каждому сообщению через аккаунт добавляется строка «Чтобы отписаться,
- * ответьте СТОП» (ADR-0088). Ответ «СТОП» принимается всегда, независимо от галочки.
- */
-export function StopLineSwitch({ account }: { account: Account }) {
-  const queryClient = useQueryClient();
-  const change = useMutation({
-    mutationFn: (stopLine: boolean) =>
-      request<unknown>(`/partner/messenger/accounts/${account.id}`, {
-        method: 'PATCH',
-        body: { stopLine },
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
-  });
+/** Тариф аккаунта в таблице: только название; менять — в «Настройках» аккаунта. */
+export function AccountTariffName({ account }: { account: Account }) {
+  const tariffs = useMessengerTariffs();
+  const list = tariffs.data?.tariffs ?? [];
+  if (!tariffs.isPending && list.length === 0) {
+    return (
+      <Link href="/partner/max-tariffs" className="text-warn underline underline-offset-2">
+        Создайте тариф
+      </Link>
+    );
+  }
+  const own = list.find((tariff) => tariff.id === account.tariff_id);
+  const fallback = list.find((tariff) => tariff.is_default);
+  if (tariffs.isPending) return <span className="text-faint">загружаем…</span>;
   return (
-    <label className="inline-flex items-center gap-2 text-muted-foreground">
-      «СТОП» в сообщениях
-      <Switch
-        aria-label={`Строка про СТОП в сообщениях аккаунта «${account.label}»`}
-        checked={account.stop_line}
-        disabled={change.isPending}
-        onCheckedChange={(stopLine) => {
-          change.mutate(stopLine);
-        }}
-      />
-      <Hint label="Что такое «СТОП» в сообщениях">
-        <p>
-          К каждому сообщению добавляется строка «Чтобы отписаться, ответьте СТОП». Человек, который
-          ответит так, больше не получит сообщений. Меньше жалоб — аккаунт реже блокируют.
-        </p>
-      </Hint>
-    </label>
+    <span>
+      {own?.name ?? (fallback === undefined ? 'по умолчанию' : `по умолчанию — ${fallback.name}`)}
+    </span>
   );
 }
 
 /**
- * «Рекомендованная работа»: аккаунт отправляет в безопасном для мессенджера темпе, который задала площадка (ADR-0088).
- * Значения партнёру не показываются; поставить свои лимиты можно только ниже — в тарифе.
+ * «Настройки» аккаунта одним окном: название, тариф, «рекомендованная работа» и «СТОП» в сообщениях (ADR-0088). Значения
+ * рекомендованной работы партнёру не показываются — их задаёт площадка; свои лимиты партнёр ставит только в тарифе.
  */
-export function RecommendedSwitch({ account }: { account: Account }) {
+export function AccountSettingsForm({ account }: { account: Account }) {
   const queryClient = useQueryClient();
-  const change = useMutation({
-    mutationFn: (recommended: boolean) =>
-      request<unknown>(`/partner/messenger/accounts/${account.id}`, {
-        method: 'PATCH',
-        body: { recommended },
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
-  });
-  return (
-    <label className="inline-flex items-center gap-2 text-muted-foreground">
-      Рекомендованная работа
-      <Switch
-        aria-label={`Рекомендованная работа аккаунта «${account.label}»`}
-        checked={account.recommended}
-        disabled={change.isPending}
-        onCheckedChange={(recommended) => {
-          change.mutate(recommended);
-        }}
-      />
-      <Hint label="Что такое рекомендованная работа">
-        <p>
-          Аккаунт отправляет в темпе, который площадка считает безопасным: реже блокировки. Ваши
-          лимиты из тарифа остаются, действует меньший из двух. Значения темпа задаёт площадка.
-        </p>
-      </Hint>
-    </label>
-  );
-}
-
-export function RenameForm({ account }: { account: Account }) {
-  const queryClient = useQueryClient();
+  const tariffs = useMessengerTariffs();
   const [label, setLabel] = useState(account.label);
+  const [tariffId, setTariffId] = useState(account.tariff_id ?? '');
+  const [recommended, setRecommended] = useState(account.recommended);
+  const [stopLine, setStopLine] = useState(account.stop_line);
   const valid = label.trim().length >= 2;
+  const list = tariffs.data?.tariffs ?? [];
+  const fallback = list.find((tariff) => tariff.is_default);
 
   const save = useMutation({
-    mutationFn: () =>
-      request<unknown>(`/partner/messenger/accounts/${account.id}`, {
+    mutationFn: async () => {
+      await request<unknown>(`/partner/messenger/accounts/${account.id}`, {
         method: 'PATCH',
-        body: { label: label.trim() },
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+        body: { label: label.trim(), stopLine, recommended },
+      });
+      if (tariffId !== (account.tariff_id ?? '')) {
+        await request<unknown>(`/partner/messenger/accounts/${account.id}/tariff`, {
+          method: 'PUT',
+          body: { tariffId: tariffId === '' ? null : tariffId },
+        });
+      }
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
+        queryClient.invalidateQueries({ queryKey: TARIFFS_KEY }),
+      ]),
   });
 
   return (
@@ -207,68 +178,50 @@ export function RenameForm({ account }: { account: Account }) {
           }}
         />
       </DialogField>
+      {list.length > 0 && (
+        <DialogField label="Тариф" wide>
+          <select
+            value={tariffId}
+            onChange={(event) => {
+              setTariffId(event.target.value);
+            }}
+            className="h-9 rounded-md border border-input bg-transparent px-2"
+          >
+            <option value="">
+              {fallback === undefined ? 'по умолчанию' : `по умолчанию — ${fallback.name}`}
+            </option>
+            {list.map((tariff) => (
+              <option key={tariff.id} value={tariff.id}>
+                {tariff.name}
+              </option>
+            ))}
+          </select>
+        </DialogField>
+      )}
+      <div className="flex flex-col gap-3 sm:col-span-2">
+        <label className="flex items-center gap-2">
+          <Switch checked={recommended} onCheckedChange={setRecommended} />
+          Рекомендованная работа
+          <Hint label="Что такое рекомендованная работа">
+            <p>
+              Аккаунт отправляет в темпе, который площадка считает безопасным: реже блокировки. Ваши
+              лимиты из тарифа остаются, действует меньший из двух. Значения темпа задаёт площадка.
+            </p>
+          </Hint>
+        </label>
+        <label className="flex items-center gap-2">
+          <Switch checked={stopLine} onCheckedChange={setStopLine} />
+          «СТОП» в сообщениях
+          <Hint label="Что такое «СТОП» в сообщениях">
+            <p>
+              К каждому сообщению добавляется строка «Чтобы отписаться, ответьте СТОП». Человек,
+              который ответит так, больше не получит сообщений. Меньше жалоб — аккаунт реже
+              блокируют.
+            </p>
+          </Hint>
+        </label>
+      </div>
     </DialogForm>
-  );
-}
-
-/**
- * Выбор тарифа у аккаунта. Сохраняется сразу при выборе (как у тарифа SIM): одно поле, кнопка «Сохранить»
- * была бы лишним шагом. Пустое значение — «как у умолчания»; какой это тариф, подписано в самом пункте.
- */
-export function AccountTariffSelect({ account }: { account: Account }) {
-  const queryClient = useQueryClient();
-  const tariffs = useMessengerTariffs();
-  const save = useMutation({
-    mutationFn: (tariffId: string | null) =>
-      request<unknown>(`/partner/messenger/accounts/${account.id}/tariff`, {
-        method: 'PUT',
-        body: { tariffId },
-      }),
-    onSuccess: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: ACCOUNTS_KEY }),
-        queryClient.invalidateQueries({ queryKey: TARIFFS_KEY }),
-      ]),
-  });
-
-  const list = tariffs.data?.tariffs ?? [];
-  const fallback = list.find((tariff) => tariff.is_default);
-  const error = save.error instanceof ApiError ? save.error : undefined;
-
-  if (!tariffs.isPending && list.length === 0) {
-    return (
-      <Link href="/partner/max-tariffs" className="text-warn underline underline-offset-2">
-        Создайте тариф
-      </Link>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <select
-        aria-label={`Тариф аккаунта «${account.label}»`}
-        value={account.tariff_id ?? ''}
-        disabled={save.isPending || tariffs.isPending}
-        onChange={(event) => {
-          save.mutate(event.target.value === '' ? null : event.target.value);
-        }}
-        className="h-8 max-w-[14rem] rounded-md border border-input bg-transparent px-2"
-      >
-        {tariffs.isPending ? (
-          <option value={account.tariff_id ?? ''}>загружаем…</option>
-        ) : (
-          <option value="">
-            {fallback === undefined ? 'по умолчанию' : `по умолчанию — ${fallback.name}`}
-          </option>
-        )}
-        {list.map((tariff) => (
-          <option key={tariff.id} value={tariff.id}>
-            {tariff.name}
-          </option>
-        ))}
-      </select>
-      {error !== undefined && <ErrorNote error={error} />}
-    </div>
   );
 }
 
@@ -514,75 +467,6 @@ export function MaxTariffs() {
                     )}
                   </span>
                 </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Страница «Лимиты MAX»: только просмотр — какие лимиты действуют у каждого аккаунта и по какому
- * тарифу. Меняются лимиты в тарифе: одно место правки вместо двух.
- */
-export function MaxLimits() {
-  const accounts = useMessengerAccounts();
-  const tariffs = useMessengerTariffs();
-  if (accounts.error instanceof ApiError) return <ErrorNote error={accounts.error} />;
-  if (accounts.data === undefined) return <p className="text-muted-foreground">Загружаем…</p>;
-  const names = new Map((tariffs.data?.tariffs ?? []).map((tariff) => [tariff.id, tariff]));
-  const fallback = [...names.values()].find((tariff) => tariff.is_default);
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button asChild variant="outline">
-          <Link href="/partner/max-tariffs">Изменить в тарифах</Link>
-        </Button>
-        <Hint label="Как работают лимиты MAX">
-          <p>
-            Лимиты сообщений задаются в тарифе. Лишнее сверх лимита не теряется, а ждёт в очереди.
-          </p>
-        </Hint>
-      </div>
-      <div className="rounded-lg border border-border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Аккаунт</TableHead>
-              <TableHead className="h-8">Тариф</TableHead>
-              <TableHead className="h-8 text-right">В минуту</TableHead>
-              <TableHead className="h-8 text-right">В час</TableHead>
-              <TableHead className="h-8 text-right">В сутки</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {accounts.data.accounts.length === 0 && (
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="whitespace-normal text-muted-foreground">
-                  Аккаунтов MAX пока нет. Добавьте первый в разделе{' '}
-                  <Link href="/partner/messages" className="underline underline-offset-2">
-                    «Аккаунты MAX»
-                  </Link>
-                  .
-                </TableCell>
-              </TableRow>
-            )}
-            {accounts.data.accounts.map((account) => (
-              <TableRow key={account.id}>
-                <TableCell>{account.label}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {account.tariff_id === null
-                    ? fallback === undefined
-                      ? 'нет тарифа'
-                      : `по умолчанию — ${fallback.name}`
-                    : (names.get(account.tariff_id)?.name ?? '—')}
-                </TableCell>
-                <TableCell className="num text-right">{account.limit_per_minute ?? '—'}</TableCell>
-                <TableCell className="num text-right">{account.limit_per_hour ?? '—'}</TableCell>
-                <TableCell className="num text-right">{account.limit_per_day ?? '—'}</TableCell>
               </TableRow>
             ))}
           </TableBody>
