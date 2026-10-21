@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { TerminationKind } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
+import { Hint } from '@/components/hint';
 import {
   Table,
   TableBody,
@@ -35,7 +36,12 @@ interface Tariff {
 export default function MyPricesPage() {
   return (
     <ConsoleShell title="Цены" cabinet="client">
-      {() => <MyPrices />}
+      {() => (
+        <>
+          <MyPrices />
+          <MessagePrices />
+        </>
+      )}
     </ConsoleShell>
   );
 }
@@ -177,4 +183,68 @@ function billing(row: Tariff): string {
 
   if (row.minimum_duration_seconds === 0) return step;
   return `${step}, но не меньше ${String(row.minimum_duration_seconds)} с`;
+}
+
+interface BotPrices {
+  readonly available: boolean;
+  readonly connection: { readonly enabled: boolean; readonly kind: 'platform' | 'own' } | null;
+  readonly terms: { readonly message_price: string; readonly monthly_fee: string };
+}
+
+/**
+ * Цены сообщений MAX: через аккаунты партнёров (одна цена за сообщение) и через бота (цена и плата за месяц, если бот
+ * подключён). Раньше цену можно было увидеть только строкой на странице «Сообщения».
+ */
+function MessagePrices() {
+  const price = useQuery({
+    queryKey: ['client', 'messages', 'price'],
+    queryFn: ({ signal }) =>
+      request<{ enabled: boolean; price: string | null }>('/client/messages/price', { signal }),
+  });
+  const bot = useQuery({
+    queryKey: ['client', 'messages', 'bot'],
+    queryFn: ({ signal }) => request<BotPrices>('/client/messages/bot', { signal }),
+  });
+
+  const viaAccounts = price.data?.enabled === true ? (price.data.price ?? null) : null;
+  const viaBot =
+    bot.data?.available === true && bot.data.connection?.enabled === true ? bot.data.terms : null;
+  if (viaAccounts === null && viaBot === null) return null;
+
+  return (
+    <section aria-label="Сообщения MAX" className="mt-6 flex max-w-2xl flex-col gap-2">
+      <div className="flex items-center gap-1">
+        <h2 className="font-semibold">Сообщения MAX</h2>
+        <Hint label="Как считается цена сообщений">
+          <p>
+            Цена не зависит от длины текста и числа блоков шаблона: одно сообщение — одна цена. Не
+            доставленное из-за отсутствия MAX у получателя возвращается на счёт.
+          </p>
+        </Hint>
+      </div>
+      <div className="rounded-lg border border-border bg-card">
+        <Table>
+          <TableBody>
+            {viaAccounts !== null && (
+              <TableRow>
+                <TableCell>Через аккаунты партнёров</TableCell>
+                <TableCell className="num text-right">{money(viaAccounts)} за сообщение</TableCell>
+              </TableRow>
+            )}
+            {viaBot !== null && (
+              <TableRow>
+                <TableCell>Через бота</TableCell>
+                <TableCell className="num text-right">
+                  {Number(viaBot.message_price) === 0
+                    ? 'бесплатно'
+                    : `${money(viaBot.message_price)} за сообщение`}
+                  {Number(viaBot.monthly_fee) === 0 ? '' : `, ${money(viaBot.monthly_fee)} в месяц`}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
+  );
 }

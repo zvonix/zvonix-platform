@@ -28,10 +28,6 @@ function Send() {
   if (client === null) {
     return (
       <div className="flex max-w-xl flex-col gap-3 rounded-lg border border-border bg-card p-4">
-        <p>
-          Сообщения отправляются со счёта клиентского кабинета, по той же цене, что и остальным.
-          Клиентского кабинета у вас пока нет.
-        </p>
         {cabinets.data.second_cabinet_open ? (
           <div>
             <Link
@@ -41,9 +37,7 @@ function Send() {
               Стать клиентом
             </Link>
           </div>
-        ) : (
-          <p className="text-muted-foreground">Площадка пока не подключает второй кабинет.</p>
-        )}
+        ) : null}
       </div>
     );
   }

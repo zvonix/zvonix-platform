@@ -257,7 +257,6 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/partner/send', label: 'Сообщения', Icon: Send },
         { href: '/partner/messages', label: 'Аккаунты', Icon: MessageSquare },
         { href: '/partner/max-tariffs', label: 'Тарифы', Icon: ReceiptText },
-        { href: '/partner/max-limits', label: 'Лимиты', Icon: Gauge },
         { href: '/partner/max-distribution', label: 'Распределение', Icon: Shuffle },
       ],
     },
@@ -422,7 +421,15 @@ export function ConsoleShell({
   const current = isStaffRole(user.role)
     ? undefined
     : (pageCabinet ?? (owned === undefined ? undefined : homeCabinet(owned)));
-  const cabinetGroups = current === undefined ? [] : CABINET_NAVIGATION[current];
+  // Партнёр без клиентского кабинета отправлять сообщения не может: пункт «Сообщения» ему только мешает.
+  const withoutSend = current === 'partner' && owned !== undefined && owned.client === null;
+  const cabinetGroups =
+    current === undefined
+      ? []
+      : CABINET_NAVIGATION[current].map((group) => ({
+          ...group,
+          items: group.items.filter((item) => !(withoutSend && item.href === '/partner/send')),
+        }));
   const groups = isStaffRole(user.role)
     ? STAFF_NAVIGATION[user.role]
     : [...cabinetGroups, ...secondCabinetGroup(owned)];
