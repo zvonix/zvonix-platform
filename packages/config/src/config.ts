@@ -50,6 +50,7 @@ const PUBLIC_VARIABLES = new Set([
   'SMPP_TLS_KEY_FILE',
   'RECORDINGS_STORAGE',
   'RECORDINGS_DIR',
+  'SUPPORT_DIR',
   'UPDATER_DIR',
   'RECORDING_LINK_TTL_SECONDS',
   'LOG_LEVEL',
@@ -203,6 +204,8 @@ export const configSchema = z.object({
   RECORDINGS_STORAGE: z.enum(['local', 's3']).default('local'),
   /** Каталог записей при `local`. На сервере — вне каталога выпуска, чтобы выкладка не стирала записи. */
   RECORDINGS_DIR: z.string().min(1, 'не может быть пустым').default('./data/recordings'),
+  /** Каталог картинок из обращений в поддержку ([ADR-0089](../../../docs/adr/0089-obrashcheniya-statusy-i-kartinki.md)). На сервере — вне каталога выпуска. */
+  SUPPORT_DIR: z.string().min(1, 'не может быть пустым').default('./data/support'),
   /**
    * Каталог обмена с службой обновления (ADR-0074): API кладёт туда заявки и читает состояние и журнал.
    * Каталог создаёт выкладка; нет каталога — обновление из кабинета «не настроено».

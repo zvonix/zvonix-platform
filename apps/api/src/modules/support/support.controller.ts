@@ -5,7 +5,22 @@
  * с `/support/staff/tickets`.
  */
 
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  Res,
+  StreamableFile,
+} from '@nestjs/common';
+import { createReadStream } from 'node:fs';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { TicketStatus } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Cabinets, Roles } from '../../http/auth.guard.js';
@@ -20,8 +35,14 @@ import {
   ticketStatusSchema,
   ticketsQuerySchema,
 } from './schemas.js';
-import type { TicketMessageRow, TicketRow } from './support.repository.js';
-import { SupportService, type SupportActor, type TicketDetail } from './support.service.js';
+import type { TicketRow } from './support.repository.js';
+import { SupportAttachmentsService } from './support-attachments.service.js';
+import {
+  SupportService,
+  type SupportActor,
+  type TicketDetail,
+  type TicketMessageView,
+} from './support.service.js';
 
 interface TicketJson {
   readonly id: string;
@@ -42,6 +63,7 @@ interface MessageJson {
   readonly side: string;
   readonly body: string;
   readonly internal: boolean;
+  readonly attachments: { id: string; name: string; size: number; type: string }[];
   readonly created_at: string;
 }
 
@@ -60,11 +82,17 @@ const ticketJson = (row: TicketRow): TicketJson => ({
   created_at: row.createdAt.toISOString(),
 });
 
-const messageJson = (row: TicketMessageRow): MessageJson => ({
+const messageJson = (row: TicketMessageView): MessageJson => ({
   id: row.id,
   side: row.side,
   body: row.body,
   internal: row.internal,
+  attachments: row.attachments.map((file) => ({
+    id: file.id,
+    name: file.originalName,
+    size: file.size,
+    type: file.contentType,
+  })),
   created_at: row.createdAt.toISOString(),
 });
 
@@ -81,7 +109,57 @@ const actorOf = (principal: Principal): SupportActor => ({
 
 @Controller()
 export class SupportController {
-  constructor(private readonly support: SupportService) {}
+  constructor(
+    private readonly support: SupportService,
+    private readonly attachments: SupportAttachmentsService,
+  ) {}
+
+  /**
+   * Загрузка одной картинки (ADR-0089): тело запроса — сами байты (`application/octet-stream`), имя для показа — в `?name=`. Путь под
+   * `/storage/`: у nginx кабинета для него снят предел тела и выключена буферизация; предел 5 МБ держит API. Загружать может автор
+   * (клиент, партнёр) и сотрудник; тип проверяется по содержимому.
+   */
+  @Cabinets('client', 'partner')
+  @Roles('admin', 'support')
+  @HttpCode(201)
+  @Post('storage/support/attachments')
+  async uploadImage(
+    @CurrentUser() principal: Principal,
+    @Req() request: FastifyRequest,
+    @Headers('content-length') length: string | undefined,
+    @Query('name') name: string | undefined,
+  ): Promise<{ id: string; name: string; size: number; type: string }> {
+    const declared = length === undefined ? undefined : Number(length);
+    const file = await this.attachments.receive(
+      actorOf(principal),
+      request.raw,
+      declared === undefined || Number.isNaN(declared) ? undefined : declared,
+      name,
+    );
+    return { id: file.id, name: file.originalName, size: file.size, type: file.contentType };
+  }
+
+  /** Картинка из обращения: автору (кроме заметок сотрудников) и сотрудникам; загрузивший видит свою неприкреплённую. */
+  @Cabinets('client', 'partner')
+  @Roles('admin', 'support')
+  @Get('support/attachments/:id')
+  async image(
+    @CurrentUser() principal: Principal,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<StreamableFile> {
+    const file = await this.attachments.fileFor(actorOf(principal), id);
+    // `nosniff` — браузер не должен угадывать другой тип; кэш только у самого человека.
+    void reply
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'private, max-age=3600');
+    return new StreamableFile(createReadStream(file.path), {
+      type: file.contentType,
+      // Показывается в странице, а не скачивается.
+      disposition: 'inline',
+      length: file.size,
+    });
+  }
 
   // --- автор: клиент или партнёр ---
 
@@ -128,7 +206,9 @@ export class SupportController {
     @Param('id') id: string,
     @Body(zodBody(ticketMessageSchema)) body: z.infer<typeof ticketMessageSchema>,
   ) {
-    return detailJson(await this.support.reply(actorOf(principal), id, body.body));
+    return detailJson(
+      await this.support.reply(actorOf(principal), id, body.body, body.attachments),
+    );
   }
 
   @Cabinets('client', 'partner')

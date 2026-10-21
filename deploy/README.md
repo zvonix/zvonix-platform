@@ -96,6 +96,7 @@ curl -fsSL -H @<(printf 'Authorization: Bearer %s\n' "$GITHUB_TOKEN") \
 |---|---|
 | `/opt/zvonix/releases/<метка>-<время>` | выпуски, хранятся пять последних |
 | `/opt/zvonix/current`, `/opt/zvonix/previous` | ссылки на работающий и предыдущий |
+| `/var/lib/zvonix-support` | картинки из обращений в поддержку ([ADR-0089](../docs/adr/0089-obrashcheniya-statusy-i-kartinki.md)): создаёт systemd (`StateDirectory`), выкладка не стирает, **копий нет**; не прикреплённые к сообщению стираются через сутки |
 | `/var/lib/zvonix-recordings` | записи разговоров ([ADR-0063](../docs/adr/0063-hranilishche-zapisey-na-diske.md)): создаёт systemd (`StateDirectory`), выкладка не стирает, **копий нет**; срок хранения — настройка «Срок хранения записей» (30 суток) в кабинете ([ADR-0065](../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)) |
 | `/var/lib/zvonix-updater/` | обмен кабинета со службой обновления: `requests/` (заявки, пишет `zvonix`), `runs/<id>/` (состояние и журнал, пишет root), `releases.json` |
 | `/var/backups/zvonix/<метка>-<время>.dump` | копия базы перед миграциями каждой выкладки, пять последних; `postgres 0700` |
@@ -237,7 +238,7 @@ file:backup.key -in daily-….dump.enc -out daily-….dump`, дальше — «
 7. Если ключ не удалось сохранить: войдите, заново вставьте токены ботов и провайдера, заново подключите второй фактор
    (администратор без него — по разделу «Потерян второй фактор» ниже).
 
-Не входит в копию: записи разговоров (`/var/lib/zvonix-recordings`) и сертификат домена (выпускается заново в «Настройках»).
+Не входит в копию: записи разговоров (`/var/lib/zvonix-recordings`), картинки из обращений (`/var/lib/zvonix-support`) и сертификат домена (выпускается заново в «Настройках»).
 
 ## Сервер SMPP
 

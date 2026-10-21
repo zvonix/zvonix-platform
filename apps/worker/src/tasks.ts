@@ -322,6 +322,11 @@ export class BackgroundTasks {
         run: (now) => this.support.closeResolved(now),
       },
       {
+        name: 'support.purge-uploads',
+        everySeconds: TICKET_AUTOCLOSE_SECONDS,
+        run: (now) => this.support.purgeUploads(now),
+      },
+      {
         name: 'platform.heartbeat',
         everySeconds: HEARTBEAT_SECONDS,
         run: (now) => this.platformHealth.recordWorkerHeartbeat(now),

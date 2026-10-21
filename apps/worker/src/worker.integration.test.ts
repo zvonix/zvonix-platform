@@ -97,6 +97,7 @@ describe('реестр фоновых задач', () => {
       'notifications.low-balance',
       'notifications.alerts',
       'support.close-resolved',
+      'support.purge-uploads',
       'platform.heartbeat',
       'notifications.payment-decisions',
       'notifications.partner-suspension',

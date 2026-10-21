@@ -2382,3 +2382,76 @@ test.describe('аккаунт клиента и партнёра', () => {
     });
   }
 });
+
+test.describe('картинки в обращениях (ADR-0089)', () => {
+  /** Настоящий PNG 1×1: браузер показывает его, а сервер узнаёт по первым байтам. */
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+    'base64',
+  );
+
+  test('клиент прикладывает файл при создании и вставкой Ctrl+V в ответе; сотрудник видит; не картинка отклоняется', async ({
+    browser,
+  }) => {
+    const clientContext = await browser.newContext();
+    const client = await clientContext.newPage();
+    await signIn(client, PEOPLE.client);
+    await client.goto('/my/support');
+    await client.getByRole('button', { name: 'Новое обращение' }).click();
+    const dialog = client.getByRole('dialog');
+    await dialog.getByLabel('Тема').fill('Скриншот ошибки');
+    await dialog.getByLabel('Что случилось или что нужно').fill('Смотрите на картинку ниже');
+
+    // Не картинка не принимается: сообщение об этом, миниатюры нет.
+    await dialog
+      .getByLabel('Файлы картинок')
+      .setInputFiles({ name: 'заметки.txt', mimeType: 'text/plain', buffer: Buffer.from('текст') });
+    await expect(dialog.getByRole('alert')).toContainText('PNG, JPEG и WebP');
+
+    await dialog
+      .getByLabel('Файлы картинок')
+      .setInputFiles({ name: 'ошибка.png', mimeType: 'image/png', buffer: PNG });
+    await expect(dialog.getByAltText('ошибка.png')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Отправить' }).click();
+
+    // Переписка: картинка первой реплики видна миниатюрой и открывается из API.
+    const conversation = client.getByRole('region', { name: 'Переписка' });
+    await expect(conversation.getByAltText('ошибка.png')).toBeVisible();
+    const src = await conversation.getByAltText('ошибка.png').getAttribute('src');
+    expect(src).toMatch(/^\/api\/support\/attachments\/[0-9a-f-]{36}$/u);
+    await expect(
+      conversation
+        .getByAltText('ошибка.png')
+        .evaluate((element: HTMLImageElement) => element.naturalWidth),
+    ).resolves.toBeGreaterThan(0);
+
+    // Вставка из буфера в поле ответа: приходит картинка, миниатюра появляется, отправка уносит её.
+    const reply = conversation.getByRole('textbox', { name: 'Ваш ответ' });
+    await reply.fill('Ещё один снимок');
+    await reply.evaluate((element, base64) => {
+      const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+      const data = new DataTransfer();
+      data.items.add(new File([bytes], 'image.png', { type: 'image/png' }));
+      element.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
+      );
+    }, PNG.toString('base64'));
+    await expect(conversation.getByAltText('image.png')).toBeVisible();
+    await conversation.getByRole('button', { name: 'Отправить' }).click();
+    await expect(conversation.getByAltText('image.png')).toBeVisible();
+    await expect(conversation.getByRole('button', { name: /Убрать/u })).toHaveCount(0);
+
+    // Сотрудник видит те же картинки в переписке.
+    const staffContext = await browser.newContext();
+    const staff = await staffContext.newPage();
+    await signIn(staff, PEOPLE.support);
+    await staff.goto('/support');
+    await staff.getByRole('button', { name: /Скриншот ошибки/u }).click();
+    await expect(
+      staff.getByRole('region', { name: 'Переписка' }).getByAltText('ошибка.png'),
+    ).toBeVisible();
+
+    await staffContext.close();
+    await clientContext.close();
+  });
+});

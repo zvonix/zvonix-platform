@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
+import { MessageImages, TicketImagesBar, useTicketImages } from '@/components/ticket-images';
 import { TICKET_CATEGORY_NAME, TICKET_STATUS_TONE, ticketStatusName } from '@/lib/labels';
 import { useLiveInterval } from '@/lib/live';
 
@@ -48,6 +49,7 @@ interface Message {
   readonly side: 'user' | 'staff';
   readonly body: string;
   readonly internal: boolean;
+  readonly attachments: { id: string; name: string; size: number }[];
   readonly created_at: string;
 }
 
@@ -212,19 +214,27 @@ function NewTicket({
   const [category, setCategory] = useState<string>('bug');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const images = useTicketImages();
 
   return (
     <FormDialog label="Новое обращение" title="Новое обращение в поддержку" size="sm">
       <DialogForm
         submitLabel="Отправить"
-        canSubmit={subject.trim().length >= 3 && body.trim().length >= 3}
+        canSubmit={subject.trim().length >= 3 && body.trim().length >= 3 && !images.busy}
         onSubmit={async () => {
           const created = await request<Detail>('/support/tickets', {
             method: 'POST',
-            body: { cabinet, subject: subject.trim(), category, body: body.trim() },
+            body: {
+              cabinet,
+              subject: subject.trim(),
+              category,
+              body: body.trim(),
+              attachments: images.ids,
+            },
           });
           setSubject('');
           setBody('');
+          images.clear();
           refresh();
           onCreated(created.ticket.id);
         }}
@@ -262,9 +272,17 @@ function NewTicket({
             onChange={(event) => {
               setBody(event.target.value);
             }}
+            onPaste={images.onPaste}
+            onDrop={images.onDrop}
+            onDragOver={(event) => {
+              event.preventDefault();
+            }}
             className={FIELD}
           />
         </DialogField>
+        <div className="sm:col-span-2">
+          <TicketImagesBar images={images} />
+        </div>
       </DialogForm>
     </FormDialog>
   );
@@ -272,6 +290,7 @@ function NewTicket({
 
 function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
   const staff = mode === 'staff';
+  const images = useTicketImages();
   const refresh = useRefresh();
   const live = useLiveInterval();
   const base = staff ? '/support/staff/tickets' : '/support/tickets';
@@ -316,17 +335,20 @@ function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
   const closed = ticket.status === 'closed';
 
   const send = (): void => {
-    if (text.trim().length < 3) return;
+    if (text.trim().length < 3 || images.busy) return;
     act.mutate(
       {
         path: '/messages',
         method: 'POST',
-        body: staff ? { body: text.trim(), internal } : { body: text.trim() },
+        body: staff
+          ? { body: text.trim(), internal, attachments: images.ids }
+          : { body: text.trim(), attachments: images.ids },
       },
       {
         onSuccess: () => {
           setText('');
           setInternal(false);
+          images.clear();
         },
       },
     );
@@ -407,6 +429,7 @@ function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
               <span className="num">{moment(message.created_at)}</span>
             </span>
             <span className="whitespace-pre-wrap break-words">{message.body}</span>
+            <MessageImages files={message.attachments} />
           </li>
         ))}
       </ol>
@@ -436,11 +459,21 @@ function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
               onChange={(event) => {
                 setText(event.target.value);
               }}
+              onPaste={images.onPaste}
+              onDrop={images.onDrop}
+              onDragOver={(event) => {
+                event.preventDefault();
+              }}
               className={FIELD}
             />
           </label>
+          <TicketImagesBar images={images} />
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" disabled={act.isPending || text.trim().length < 3} onClick={send}>
+            <Button
+              type="button"
+              disabled={act.isPending || images.busy || text.trim().length < 3}
+              onClick={send}
+            >
               {staff && internal ? 'Добавить заметку' : 'Отправить'}
             </Button>
             {staff && (
