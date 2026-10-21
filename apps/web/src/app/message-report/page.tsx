@@ -14,6 +14,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
+import { moment } from '@/lib/format';
 import { MESSAGE_FAILURE_NAME } from '@/lib/labels';
 
 interface Counts {
@@ -46,10 +47,45 @@ interface AccountRow extends Counts {
   readonly pause_reason: string | null;
 }
 
+interface JournalAccount {
+  readonly account_id: string;
+  readonly label: string;
+  readonly partner_name: string;
+  readonly status: string;
+  readonly checks: { exists: number; absent: number; unknown: number; limited: number };
+  readonly blocked: number;
+  readonly suspended: number;
+  readonly logged_out: number;
+  readonly health_paused: number;
+}
+
+interface JournalEvent {
+  readonly account_id: string;
+  readonly label: string;
+  readonly kind: 'unavailable' | 'active' | 'health_paused';
+  readonly reason: 'suspended' | 'blocked' | 'logged_out' | null;
+  readonly at: string;
+}
+
 interface Report {
   readonly days: number;
   readonly clients: ClientRow[];
   readonly accounts: AccountRow[];
+  readonly journal: {
+    readonly sent_via_accounts: number;
+    readonly blocked: number;
+    readonly accounts: JournalAccount[];
+    readonly recent: JournalEvent[];
+  };
+}
+
+/** Что произошло с аккаунтом: словами для ленты событий. */
+function eventName(event: JournalEvent): string {
+  if (event.kind === 'active') return 'вернулся в работу';
+  if (event.kind === 'health_paused') return 'пауза: много «нет MAX» после отправки';
+  if (event.reason === 'blocked') return 'заблокирован MAX';
+  if (event.reason === 'suspended') return 'приостановлен у провайдера';
+  return 'вышел из MAX';
 }
 
 const PERIODS = [7, 14, 30] as const;
@@ -128,6 +164,7 @@ function ReportView() {
               row,
             }))}
           />
+          <Journal journal={report.data.journal} />
         </>
       )}
     </div>
@@ -217,4 +254,87 @@ function reasons(row: Counts): string {
     .filter(([, count]) => count > 0)
     .map(([name, count]) => `${name}: ${String(count)}`);
   return shown.length === 0 ? '—' : shown.join('; ');
+}
+
+/** Журнал аккаунтов: сколько блокировок на тысячу сообщений, проверки номеров на MAX и последние события (ADR-0088). */
+function Journal({ journal }: { journal: Report['journal'] }) {
+  const per1000 =
+    journal.sent_via_accounts === 0
+      ? undefined
+      : Math.round((journal.blocked * 10_000) / journal.sent_via_accounts) / 10;
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="font-semibold">Журнал аккаунтов</h2>
+        <Hint label="Что в журнале">
+          <p>
+            Блокировки на тысячу сообщений — по ним поднимают или снижают рекомендованные лимиты в
+            «Настройках площадки». Проверки номеров — запросы «есть ли у номера MAX» к провайдеру;
+            повтор из памяти не считается.
+          </p>
+        </Hint>
+        <span className="num text-muted-foreground">
+          Блокировок на 1000 сообщений: {per1000 === undefined ? '—' : String(per1000)} (блокировок{' '}
+          {String(journal.blocked)}, сообщений {String(journal.sent_via_accounts)})
+        </span>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className="h-8">Аккаунт</TableHead>
+              <TableHead className="h-8 text-right">Нет MAX</TableHead>
+              <TableHead className="h-8 text-right">Есть MAX</TableHead>
+              <TableHead className="h-8 text-right">Предел проверок</TableHead>
+              <TableHead className="h-8 text-right">Не удалось</TableHead>
+              <TableHead className="h-8 text-right">Блокировок</TableHead>
+              <TableHead className="h-8 text-right">Пауз</TableHead>
+              <TableHead className="h-8 text-right">Выходов</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {journal.accounts.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={8} className="text-muted-foreground">
+                  За период записей нет.
+                </TableCell>
+              </TableRow>
+            )}
+            {journal.accounts.map((row) => (
+              <TableRow key={row.account_id}>
+                <TableCell className="whitespace-normal">{`${row.label} · ${row.partner_name}`}</TableCell>
+                <TableCell className="num text-right">{row.checks.absent}</TableCell>
+                <TableCell className="num text-right">{row.checks.exists}</TableCell>
+                <TableCell
+                  className={`num text-right ${row.checks.limited > 0 ? 'text-warn' : ''}`}
+                >
+                  {row.checks.limited}
+                </TableCell>
+                <TableCell className="num text-right">{row.checks.unknown}</TableCell>
+                <TableCell className={`num text-right ${row.blocked > 0 ? 'text-crit' : ''}`}>
+                  {row.blocked}
+                </TableCell>
+                <TableCell className="num text-right">{row.health_paused}</TableCell>
+                <TableCell className="num text-right">{row.logged_out + row.suspended}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      {journal.recent.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {journal.recent.map((event) => (
+            <li
+              key={`${event.account_id}-${event.at}-${event.kind}`}
+              className="flex flex-wrap gap-x-3"
+            >
+              <span className="num text-muted-foreground">{moment(event.at)}</span>
+              <span>{event.label}</span>
+              <span className="text-muted-foreground">{eventName(event)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
 }

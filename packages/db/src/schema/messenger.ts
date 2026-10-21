@@ -23,6 +23,8 @@ import {
   MESSAGE_FAILURE_REASONS,
   MESSAGE_STATUSES,
   MESSAGE_STOP_SOURCES,
+  MESSENGER_ACCOUNT_EVENT_KINDS,
+  NUMBER_CHECK_RESULTS,
   MESSENGER_ACCOUNT_REASONS,
   DISTRIBUTION_MODES,
   DISTRIBUTION_PRODUCTS,
@@ -47,6 +49,8 @@ import {
   type MessageChannel,
   type MessageFailureReason,
   type MessageStopSource,
+  type MessengerAccountEventKind,
+  type NumberCheckResult,
   type MessageRoute,
   type MessageStatus,
   type MessengerAccountReason,
@@ -521,6 +525,57 @@ export const messageTemplates = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex('message_templates_client_key').on(t.clientId)],
+);
+
+/**
+ * История состояния аккаунта ([ADR-0088](../../../../docs/adr/0088-otchety-i-zashchita-akkauntov-max.md)): когда стал недоступен и по
+ * какой причине, когда вернулся, когда поставлен на паузу здоровья. Из неё считается «блокировок на тысячу сообщений».
+ */
+export const messengerAccountEvents = pgTable(
+  'messenger_account_events',
+  {
+    id: primaryId<'messengerAccountEvent'>(),
+    accountId: idRef<'messengerAccount'>()
+      .notNull()
+      .references(() => messengerAccounts.id, { onDelete: 'cascade' }),
+    kind: text().$type<MessengerAccountEventKind>().notNull(),
+    /** Причина недоступности (`suspended`, `blocked`, `logged_out`); у остальных видов пусто. */
+    reason: text().$type<MessengerAccountReason>(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('messenger_account_events_account_idx').on(t.accountId, t.createdAt),
+    index('messenger_account_events_created_idx').on(t.createdAt),
+    check(
+      'messenger_account_events_kind_check',
+      sql`${oneOf(t.kind, MESSENGER_ACCOUNT_EVENT_KINDS)}`,
+    ),
+    check(
+      'messenger_account_events_reason_check',
+      sql`${t.reason} is null or ${oneOf(t.reason, MESSENGER_ACCOUNT_REASONS)}`,
+    ),
+  ],
+);
+
+/**
+ * Журнал настоящих запросов «есть ли у номера MAX» к провайдеру (попадания в память Redis не пишутся). Номер **не хранится**:
+ * это персональные данные, а отчёту нужны только число и итог по аккаунту.
+ */
+export const numberChecks = pgTable(
+  'number_checks',
+  {
+    id: primaryId<'numberCheck'>(),
+    accountId: idRef<'messengerAccount'>()
+      .notNull()
+      .references(() => messengerAccounts.id, { onDelete: 'cascade' }),
+    result: text().$type<NumberCheckResult>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('number_checks_account_idx').on(t.accountId, t.createdAt),
+    index('number_checks_created_idx').on(t.createdAt),
+    check('number_checks_result_check', sql`${oneOf(t.result, NUMBER_CHECK_RESULTS)}`),
+  ],
 );
 
 /**
