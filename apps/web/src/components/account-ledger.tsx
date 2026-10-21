@@ -45,6 +45,16 @@ interface Entry {
  * Чей это счёт, передаётся явно: API его в ответе не называет, а подпись операции
  * от стороны зависит — одна и та же `charge` у клиента списание, у партнёра начисление.
  */
+/** Ссылка на владельца ленты — шум: лента и так его (осмотр 2026-10-21: партнёр видел «partner <uuid>»). */
+const SELF_REFERENCES: ReadonlySet<string> = new Set(['client', 'partner']);
+
+/** Чем порождена проводка — словами, а не именем таблицы. */
+const REFERENCE_NAME: Readonly<Record<string, string>> = {
+  call: 'вызов',
+  message: 'сообщение',
+  bot_fee: 'плата за бота',
+};
+
 export function AccountLedger({ source, account }: { source: string; account: LedgerAccount }) {
   const [offset, setOffset] = useState(0);
 
@@ -113,15 +123,18 @@ export function AccountLedger({ source, account }: { source: string; account: Le
                   {entry.description}
                   {/*
                     Ссылка на породившее событие: по вызову разбирают спор о списании.
-                    Ссылка на самого клиента здесь не показывается — эта лента и так его,
+                    Ссылка на самого клиента или партнёра здесь не показывается — эта лента и так его,
                     и повторять его идентификатор в каждой строке значит прятать за шумом
                     те ссылки, ради которых столбец и заведён.
                   */}
-                  {entry.reference_id !== null && entry.reference_type !== 'client' && (
-                    <span className="num block text-faint">
-                      {entry.reference_type} {entry.reference_id}
-                    </span>
-                  )}
+                  {entry.reference_id !== null &&
+                    entry.reference_type !== null &&
+                    !SELF_REFERENCES.has(entry.reference_type) && (
+                      <span className="num block text-faint">
+                        {REFERENCE_NAME[entry.reference_type] ?? entry.reference_type}{' '}
+                        {entry.reference_id}
+                      </span>
+                    )}
                 </TableCell>
                 <TableCell className="num text-right">
                   <span className={isNegative(entry.amount) ? 'text-crit' : 'text-ok'}>

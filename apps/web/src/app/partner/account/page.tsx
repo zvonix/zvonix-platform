@@ -23,6 +23,7 @@ function PartnerAccount() {
         <RecordingsAccess
           partnerId={account.data.partner.id}
           listens={account.data.partner.listens_to_recordings}
+          alias={account.data.partner.display_name}
         />
       )}
     </div>

@@ -2,11 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CALL_STATUSES, type CallStatus } from '@zvonix/shared';
+import Link from 'next/link';
 import { Suspense } from 'react';
 import { ListenButton, useListenable } from '@/components/call-recording';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ExportButton } from '@/components/export-button';
+import { Hint } from '@/components/hint';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
@@ -113,13 +115,15 @@ function PartnerCalls() {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="max-w-prose text-muted-foreground">
-        Вызовы, прошедшие через ваше оборудование, — по ним сверяется счёт вашего оператора. Задайте
-        тот же период, что в счёте: если разговора за этот период здесь нет, а оператор его
-        посчитал, — он шёл не через площадку.
-      </p>
-
       <div className="flex flex-wrap items-end gap-2">
+        {/* Пояснение — за «?», а не абзацем над таблицей (осмотр 2026-10-21). */}
+        <Hint label="Как сверить со счётом оператора">
+          <p>
+            Вызовы, прошедшие через ваше оборудование, — по ним сверяется счёт вашего оператора.
+            Задайте тот же период, что в счёте: если разговора за этот период здесь нет, а оператор
+            его посчитал, — он шёл не через площадку.
+          </p>
+        </Hint>
         <label className="flex flex-col gap-1">
           <span className="text-muted-foreground">Итог</span>
           <select
@@ -227,9 +231,21 @@ function PartnerCalls() {
             {list.data?.calls.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
-                  {filtered
-                    ? 'За этот период и с этим итогом вызовов через ваше оборудование не было.'
-                    : 'Вызовов через ваше оборудование пока не было. Если оно подключено и включено, посмотрите «Моё оборудование» и «Мои тарифы»: без регистрации на узле и без цены в тарифе карты вызов не уйдёт вовсе.'}
+                  {filtered ? (
+                    'За этот период и с этим итогом вызовов через ваше оборудование не было.'
+                  ) : (
+                    <>
+                      Вызовов пока не было. Проверьте{' '}
+                      <Link href="/partner/equipment" className="underline underline-offset-2">
+                        оборудование
+                      </Link>{' '}
+                      (шлюз на связи) и{' '}
+                      <Link href="/partner/prices" className="underline underline-offset-2">
+                        тарифы
+                      </Link>{' '}
+                      (есть цена для карт).
+                    </>
+                  )}
                 </TableCell>
               </TableRow>
             )}

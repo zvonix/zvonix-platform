@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { Hint } from '@/components/hint';
 import { OneTimeSecret } from '@/components/one-time-secret';
 import { Input } from '@/components/ui/input';
 import {
@@ -76,13 +77,6 @@ function Integration() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="max-w-[720px] text-muted-foreground">
-        Ключ открывает вашей диспетчерской доступ к <span className="num">/v1</span>: состояние
-        вызовов и баланс. Предъявляется схемой Basic — имя пользователя это{' '}
-        <span className="num">zvx_client_…</span>, пароль — секрет. По ключу на систему: сорвавшийся
-        ключ отзывается отдельно от остальных.
-      </p>
-
       {issued !== undefined && (
         <OneTimeSecret
           title={`Ключ «${issued.label}»`}
@@ -111,7 +105,7 @@ function Integration() {
         </OneTimeSecret>
       )}
 
-      <div>
+      <div className="flex items-center gap-2">
         <FormDialog
           label="Создать ключ"
           title="Новый ключ"
@@ -124,6 +118,14 @@ function Integration() {
             }}
           />
         </FormDialog>
+        <Hint label="Что такое ключ">
+          <p>
+            Ключ открывает вашей диспетчерской доступ к <span className="num">/v1</span>: состояние
+            вызовов и баланс. Предъявляется схемой Basic — имя пользователя это{' '}
+            <span className="num">zvx_client_…</span>, пароль — секрет. По ключу на систему:
+            сорвавшийся ключ отзывается отдельно от остальных.
+          </p>
+        </Hint>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">

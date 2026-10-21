@@ -330,9 +330,10 @@ test.describe('пополнение из списков и меню по пре�
   test('«Записи разговоров» — в «Аккаунте» партнёра, а не в «Деньгах»', async ({ page }) => {
     await signIn(page, PEOPLE.partner);
     await page.goto('/partner/money');
-    await expect(page.getByRole('heading', { name: 'Записи разговоров' })).toHaveCount(0);
+    await expect(page.getByText('Я слушаю записи разговоров')).toHaveCount(0);
     await page.goto('/partner/account');
-    await expect(page.getByRole('heading', { name: 'Записи разговоров' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Что видят клиенты' })).toBeVisible();
+    await expect(page.getByText('Я слушаю записи разговоров')).toBeVisible();
     await expect(
       page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: 'Лимиты' }),
     ).toHaveCount(0);
@@ -1386,9 +1387,11 @@ test.describe('чужой раздел', () => {
 
     // Заголовок, а не любой текст: то же имя стоит в углу меню, как только загрузится сессия.
     await expect(page.getByRole('heading', { name: 'Иванов Иван Иванович' })).toBeVisible();
-    await expect(page.getByText('Партнёр 17')).toBeVisible();
     // Заработка ещё нет, и это нормальное состояние нового партнёра.
     await expect(page.getByText('Заработано, к выплате')).toBeVisible();
+    // Псевдоним — в «Аккаунте», рядом с остальным, что видят клиенты (осмотр 2026-10-21).
+    await page.goto('/partner/account');
+    await expect(page.getByText('Партнёр 17')).toBeVisible();
   });
 });
 
