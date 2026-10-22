@@ -11,7 +11,7 @@ import type { Logger } from '@zvonix/logger';
 import type { FastifyInstance } from 'fastify';
 
 /** Дольше этого запрос считается медленным: кабинет ждёт 20 с, и задолго до них человек видит «зависание». */
-export const SLOW_REQUEST_MS = 2_000;
+const SLOW_REQUEST_MS = 2_000;
 
 export function registerSlowRequestLog(
   fastify: FastifyInstance,
