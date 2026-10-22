@@ -23,6 +23,8 @@ import {
   MESSAGE_FAILURE_REASONS,
   MESSAGE_STATUSES,
   MESSAGE_STOP_SOURCES,
+  STOP_LINE_REQUIREMENTS,
+  ACCOUNT_MIN_AGE_DAYS_MAX,
   MESSENGER_ACCOUNT_EVENT_KINDS,
   NUMBER_CHECK_RESULTS,
   MESSENGER_ACCOUNT_REASONS,
@@ -49,6 +51,7 @@ import {
   type MessageChannel,
   type MessageFailureReason,
   type MessageStopSource,
+  type StopLineRequirement,
   type MessengerAccountEventKind,
   type NumberCheckResult,
   type MessageRoute,
@@ -602,6 +605,61 @@ export const messageStops = pgTable(
       .where(sql`${t.clientId} is not null`),
     index('message_stops_client_idx').on(t.clientId),
     check('message_stops_source_check', sql`${oneOf(t.source, MESSAGE_STOP_SOURCES)}`),
+  ],
+);
+
+/**
+ * Требования клиента к аккаунтам MAX ([ADR-0092](../../../../docs/adr/0092-trebovaniya-klienta-k-akkauntam.md)): одна запись на
+ * клиента; нет записи — подходит любой аккаунт. Действуют на каждый выбор аккаунта для сообщений этого клиента.
+ */
+export const clientMessageRequirements = pgTable(
+  'client_message_requirements',
+  {
+    id: primaryId<'clientMessageRequirements'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    stopLine: text().$type<StopLineRequirement>().notNull().default('any'),
+    recommendedOnly: boolean().notNull().default(false),
+    /** Цена сообщения для клиента (с наценкой) не дороже; пусто — без предела. */
+    maxPrice: money(),
+    /** Аккаунт заведён не меньше стольких суток назад; пусто — без предела. */
+    minAgeDays: integer(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('client_message_requirements_client_key').on(t.clientId),
+    check(
+      'client_message_requirements_stop_check',
+      sql`${oneOf(t.stopLine, STOP_LINE_REQUIREMENTS)}`,
+    ),
+    check(
+      'client_message_requirements_age_check',
+      sql`${t.minAgeDays} is null or ${t.minAgeDays} between 1 and ${sql.raw(String(ACCOUNT_MIN_AGE_DAYS_MAX))}`,
+    ),
+    check(
+      'client_message_requirements_price_check',
+      sql`${t.maxPrice} is null or ${t.maxPrice} > 0`,
+    ),
+  ],
+);
+
+/** Аккаунты, которые клиент отключил для себя вручную (ADR-0092): для его сообщений не берутся. */
+export const clientAccountExclusions = pgTable(
+  'client_account_exclusions',
+  {
+    id: primaryId<'clientAccountExclusion'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    accountId: idRef<'messengerAccount'>()
+      .notNull()
+      .references(() => messengerAccounts.id, { onDelete: 'cascade' }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('client_account_exclusions_key').on(t.clientId, t.accountId),
+    index('client_account_exclusions_account_idx').on(t.accountId),
   ],
 );
 

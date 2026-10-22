@@ -15,6 +15,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  lte,
   max,
   min,
   ne,
@@ -44,6 +45,7 @@ import {
   type SmppReceiptMap,
   WARMUP_IDLE_DAYS,
 } from '@zvonix/shared';
+import type { ClientRules } from './requirements.service.js';
 import { DatabaseService } from '../../infra/database.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
 
@@ -235,7 +237,11 @@ export class MessagesRepository {
     /** Только эти партнёры — одна цифра списка клиента (ADR-0081). */
     onlyPartners?: readonly Id<'partner'>[];
     offset?: number;
+    /** Требования клиента и его ручные отключения (ADR-0092). */
+    rules?: ClientRules;
   }): Promise<MessengerAccountRow[]> {
+    const rules = filter.rules;
+    if (rules?.impossible === true) return [];
     const conditions = [
       eq(messengerAccounts.status, 'active'),
       isNotNull(messengerAccounts.price),
@@ -251,6 +257,17 @@ export class MessagesRepository {
       filter.onlyPartners === undefined
         ? undefined
         : inArray(messengerAccounts.partnerId, [...filter.onlyPartners]),
+      rules?.stopLine === undefined ? undefined : eq(messengerAccounts.stopLine, rules.stopLine),
+      rules?.recommendedOnly === true ? eq(messengerAccounts.recommended, true) : undefined,
+      rules?.maxPartnerPrice === undefined
+        ? undefined
+        : lte(messengerAccounts.price, rules.maxPartnerPrice),
+      rules?.createdBefore === undefined
+        ? undefined
+        : lte(messengerAccounts.createdAt, rules.createdBefore),
+      rules === undefined || rules.exceptAccounts.length === 0
+        ? undefined
+        : notInArray(messengerAccounts.id, [...rules.exceptAccounts]),
     ];
     // Самая дешёвая цена среди подходящих: только её группа — цена клиента не прыгает на дорогой аккаунт.
     const [cheapest] = await this.database.db

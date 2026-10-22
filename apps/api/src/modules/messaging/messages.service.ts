@@ -19,7 +19,6 @@ import {
   rateLimited,
   STOP_LINE,
   validationFailed,
-  type CommissionRule,
   type Id,
   type MessageChannel,
   type MessageFailureReason,
@@ -38,6 +37,7 @@ import { MessagingService } from './messaging.service.js';
 import { StopsService } from './stops.service.js';
 import { TemplatesService } from './templates.service.js';
 import { AccountPicker } from './account-picker.js';
+import { commissionOf } from './commission.js';
 import { accountReadyAt, withRecommended } from './warmup.js';
 import {
   MessagesRepository,
@@ -80,17 +80,6 @@ export interface Quote {
   readonly partnerAmount: MoneyAmount;
   readonly commissionAmount: MoneyAmount;
   readonly clientAmount: MoneyAmount;
-}
-
-/**
- * Наценка на сообщение: фикс плюс доля от цены партнёра, вместе (ADR-0073). Долю округляем **вверх** до
- * микроединицы (ADR-0010: округляем один раз и в пользу площадки). Правил нет — наценка нулевая.
- */
-function commissionOf(partnerAmount: MoneyAmount, rule: CommissionRule | undefined): MoneyAmount {
-  if (rule === undefined) return Money.ZERO;
-  const raw = Money.toMicros(partnerAmount) * rule.percentBasisPoints;
-  const share = Money.fromMicros((raw + 9_999n) / 10_000n);
-  return Money.add(rule.fixedFee, share);
 }
 
 @Injectable()
@@ -260,6 +249,16 @@ export class MessagesService {
         ? await this.picker.pick(new Date(), { sticky: { clientId, recipient } })
         : undefined;
     if (viaBot === undefined && account === undefined) {
+      // Без требований клиента аккаунт нашёлся бы — мешают требования, а не площадка (ADR-0092).
+      const withoutRules = await this.picker.pick(new Date(), {
+        sticky: { clientId, recipient },
+        ignoreRules: true,
+      });
+      if (withoutRules !== undefined) {
+        throw conflict(
+          'Под ваши требования к аккаунтам сейчас никто не подходит — смягчите их в разделе «Аккаунты MAX»',
+        );
+      }
       throw dependencyUnavailable('Сейчас нет доступных аккаунтов для отправки — повторите позже');
     }
 
@@ -574,6 +573,7 @@ export class MessagesService {
         message.partnerId === null || account.price === null
           ? undefined
           : await this.picker.pick(now, {
+              forClient: message.clientId,
               scope: {
                 partnerId: message.partnerId,
                 price: account.price,
@@ -605,8 +605,9 @@ export class MessagesService {
 
     try {
       const rendered = await this.templates.render(message);
-      // Строка про «СТОП» идёт во всех сообщениях через аккаунты (ADR-0090); не влезает в предел мессенджера — уходит без неё.
-      const stopLine = rendered.length + STOP_LINE.length + 2 <= MESSAGE_MAX_LENGTH;
+      // Строка про «СТОП» — решение партнёра по аккаунту (ADR-0092); не влезает в предел мессенджера — сообщение уходит без неё.
+      const stopLine =
+        account.stopLine && rendered.length + STOP_LINE.length + 2 <= MESSAGE_MAX_LENGTH;
       const { messageId } = await this.provider.sendText(
         this.messaging.refOf(account),
         message.recipient,

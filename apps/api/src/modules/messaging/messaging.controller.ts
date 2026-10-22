@@ -42,6 +42,8 @@ interface AccountView {
   readonly limit_per_day: number | null;
   /** Автопрогрев и равномерная отправка включены. */
   readonly warmup_enabled: boolean;
+  /** К сообщениям через аккаунт добавляется строка про «СТОП» (решает партнёр, ADR-0092). */
+  readonly stop_line: boolean;
   /** Включена «рекомендованная работа»: профиль площадки сужает лимиты (его значений партнёр не видит). */
   readonly recommended: boolean;
   /** Номер суток прогрева с нуля; пусто — прогрева нет. */
@@ -67,6 +69,7 @@ const toView = (row: MessengerAccountRow, now: Date = new Date()): AccountView =
   limit_per_hour: row.limitPerHour,
   limit_per_day: row.limitPerDay,
   warmup_enabled: row.warmupEnabled,
+  stop_line: row.stopLine,
   recommended: row.recommended,
   warmup_day: effectiveLimits(row, now).warmupDay,
   daily_limit_now: effectiveLimits(row, now).daily,
@@ -169,6 +172,7 @@ export class MessagingController {
   ): Promise<{ account: AccountView }> {
     const row = await this.messaging.updateOwn({ userId: actor.userId, role: actor.role }, id, {
       label: body.label,
+      stopLine: body.stopLine,
       recommended: body.recommended,
     });
     return { account: toView(row) };
