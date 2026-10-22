@@ -37,7 +37,8 @@ export class TemplatesService {
 
   /**
    * Итоговый текст для отправки. Шаблона нет — исходный, без единого лишнего запроса: так идёт почти весь трафик.
-   * «Первое» — до этого этому номеру от этого клиента ничего не ушло.
+   * «Первое» — до этого этому номеру от этого клиента ничего не ушло **этим же путём**: первое через бота — первое после подписки,
+   * сколько бы ни ушло через аккаунты партнёров (владелец, 2026-10-22; иначе «только первое + только бот» не срабатывало никогда).
    */
   async render(message: {
     id: Parameters<MessagesRepository['hasEarlierSent']>[2];
@@ -53,7 +54,7 @@ export class TemplatesService {
     const [first, known, company] = await Promise.all([
       blocks.some((block) => block.when === 'first' && block.kind !== 'body')
         ? this.messages
-            .hasEarlierSent(message.clientId, message.recipient, message.id)
+            .hasEarlierSent(message.clientId, message.recipient, message.id, message.route)
             .then((sent) => !sent)
         : Promise.resolve(false),
       blocks.some((block) => block.kind === 'greeting' || block.kind === 'bot_link')

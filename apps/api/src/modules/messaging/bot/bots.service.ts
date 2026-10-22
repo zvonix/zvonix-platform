@@ -831,6 +831,10 @@ export class BotsService {
     } catch (cause) {
       if (cause instanceof BotRecipientRejectedError) {
         await this.repository.stopSubscriber(subscriber.id);
+        // Платформа не пустила сообщение — человек заблокировал бота (ADR-0091).
+        if (subscriber.phone !== null && (await this.settings.bot()).blockStopsAccounts) {
+          await this.stops.stop(subscriber.phone, 'bot', subscriber.clientId);
+        }
       }
       throw cause;
     }
@@ -850,9 +854,34 @@ export class BotsService {
         await this.onStarted(bot, update);
       } else if (update.update_type === 'message_created') {
         await this.onMessage(bot, update);
+      } else if (update.update_type === 'bot_stopped' || update.update_type === 'dialog_removed') {
+        await this.onStopped(bot, update);
       }
     } catch (cause) {
       this.logger.error('Событие бота не обработано', cause, { bot_id: botId });
+    }
+  }
+
+  /**
+   * Человек остановил бота или удалил диалог (`bot_stopped`, `dialog_removed`, https://dev.max.ru/docs-api/objects/Update): бот ему
+   * больше не пишет. Запрет для аккаунтов партнёров — только при настройке `bot.block_stops_accounts` (ADR-0091): по умолчанию
+   * блокировка бота — не отказ от сообщений вообще.
+   */
+  private async onStopped(bot: BotRow, update: BotUpdate): Promise<void> {
+    const userId = idOf(update.user?.user_id);
+    if (userId === undefined) {
+      this.logger.warn('Остановка бота без пользователя в событии', {
+        bot_id: bot.id,
+        update_type: update.update_type,
+      });
+      return;
+    }
+    await this.repository.stopUser(bot.id, userId);
+    if (!(await this.settings.bot()).blockStopsAccounts) return;
+    for (const subscriber of await this.repository.subscribersOf(bot.id, userId)) {
+      if (subscriber.phone !== null) {
+        await this.stops.stop(subscriber.phone, 'bot', subscriber.clientId);
+      }
     }
   }
 

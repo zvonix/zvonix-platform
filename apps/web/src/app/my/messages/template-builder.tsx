@@ -153,9 +153,9 @@ export function TemplateBuilder() {
   const error = save.error instanceof ApiError ? save.error : undefined;
 
   return (
-    <div className="flex max-w-4xl flex-col gap-4">
+    <div className="flex max-w-6xl flex-col gap-4">
       <div className="flex items-center gap-1">
-        <h2 className="font-semibold">Текст сообщения</h2>
+        <h2 className="font-semibold">Из чего собирается сообщение</h2>
         <Hint label="Как собирается сообщение">
           <p>
             Блоки склеиваются сверху вниз. «Текст сообщения» — то, что вы отправляете из формы, SMPP
@@ -170,201 +170,169 @@ export function TemplateBuilder() {
         </Hint>
       </div>
 
-      <ol className="flex flex-col gap-2">
-        {rows.map((row, index) => (
-          <li
-            key={row.key}
-            className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 sm:flex-row sm:items-start"
-          >
-            <span className="w-36 shrink-0 pt-1.5 font-medium">{KIND_NAME[row.kind]}</span>
-            <div className="min-w-0 flex-1">
-              {hasText(row.kind) ? (
-                <div className="flex flex-col gap-1">
-                  <textarea
-                    aria-label={KIND_NAME[row.kind]}
-                    aria-invalid={isEmpty(row)}
-                    rows={row.kind === 'greeting' ? 1 : 2}
-                    value={row.text ?? ''}
-                    maxLength={TEMPLATE_TEXT_MAX}
-                    placeholder={
-                      row.kind === 'greeting' ? TEMPLATE_GREETING_DEFAULT : 'Например: Такси Волна'
-                    }
-                    onChange={(event) => {
-                      patch(row.key, { text: event.target.value });
-                    }}
-                    className="w-full resize-y rounded-md border border-input bg-transparent px-3 py-1.5 aria-[invalid=true]:border-crit"
-                  />
-                  <span className="num text-right text-muted-foreground">
-                    {String((row.text ?? '').length)} из {String(TEMPLATE_TEXT_MAX)}
-                  </span>
-                </div>
-              ) : (
-                <span className="inline-block pt-1.5 text-muted-foreground">
-                  {row.kind === 'body'
-                    ? SAMPLE_BODY
-                    : row.kind === 'bot_link'
-                      ? `${link ?? 'ссылки не будет'} (${botName})`
-                      : 'пустая строка между частями'}
-                </span>
-              )}
-            </div>
-            {row.kind !== 'body' && (
-              <select
-                aria-label={`Когда: ${KIND_NAME[row.kind]}`}
-                value={row.when}
-                onChange={(event) => {
-                  patch(row.key, { when: event.target.value as TemplateWhen });
-                }}
-                className="h-9 rounded-md border border-input bg-transparent px-2"
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="flex min-w-0 flex-col gap-3">
+          <ol className="flex flex-col gap-2">
+            {rows.map((row, index) => (
+              <li
+                key={row.key}
+                className={`flex flex-col gap-2 rounded-lg border bg-card p-3 ${
+                  row.kind === 'body' ? 'border-primary/50' : 'border-border'
+                }`}
               >
-                <option value="always">Всегда</option>
-                <option value="first">Только первое</option>
-              </select>
-            )}
-            {row.kind !== 'body' && (
-              <select
-                aria-label={`Где: ${KIND_NAME[row.kind]}`}
-                value={row.via ?? 'all'}
-                onChange={(event) => {
-                  patch(row.key, { via: event.target.value as TemplateVia });
-                }}
-                className="h-9 rounded-md border border-input bg-transparent px-2"
-              >
-                <option value="all">Везде</option>
-                <option value="bot">Только бот</option>
-                <option value="account">Только аккаунты</option>
-              </select>
-            )}
-            <div className="flex shrink-0 gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label="Выше"
-                disabled={index === 0}
-                onClick={() => {
-                  move(index, -1);
-                }}
-              >
-                <ArrowUp size={16} aria-hidden />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label="Ниже"
-                disabled={index === rows.length - 1}
-                onClick={() => {
-                  move(index, 1);
-                }}
-              >
-                <ArrowDown size={16} aria-hidden />
-              </Button>
-              {row.kind !== 'body' && row.kind !== 'bot_link' && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label={`Копия: ${KIND_NAME[row.kind]}`}
-                  disabled={full}
-                  onClick={() => {
-                    duplicate(index);
-                  }}
-                >
-                  <Copy size={16} aria-hidden />
-                </Button>
-              )}
-              {row.kind !== 'body' && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label={`Удалить: ${KIND_NAME[row.kind]}`}
-                  onClick={() => {
-                    change(rows.filter((other) => other.key !== row.key));
-                  }}
-                >
-                  <Trash2 size={16} aria-hidden />
-                </Button>
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
-
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ['Приветствие', { kind: 'greeting', text: TEMPLATE_GREETING_DEFAULT, when: 'always' }],
-            ['Свой текст', { kind: 'text', text: '', when: 'always' }],
-            ['Пустая строка', { kind: 'break', when: 'always' }],
-            ['Ссылка на бота', { kind: 'bot_link', when: 'always', via: 'account' }],
-          ] as const
-        ).map(([label, block]) => (
-          <Button
-            key={label}
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={full}
-            onClick={() => {
-              add(block);
-            }}
-          >
-            <Plus size={14} aria-hidden /> {label}
-          </Button>
-        ))}
-        <span className="num self-center text-muted-foreground">
-          {String(rows.length)} из {String(TEMPLATE_BLOCKS_MAX)} блоков
-        </span>
-      </div>
-
-      <section aria-label="Как это выглядит" className="flex flex-col gap-2">
-        <h3 className="font-semibold">Как это выглядит</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {(
-            [
-              ['bot', 'Через бота'],
-              ['account', 'Через аккаунты партнёров'],
-            ] as const
-          ).map(([route, title]) => (
-            <div key={route} className="flex flex-col gap-2">
-              <span className="flex items-center gap-1 font-medium">
-                {title}
-                {route === 'account' && (
-                  <Hint label="Про строку «СТОП»">
-                    <p>
-                      К сообщению через аккаунт в конец всегда добавляется строка «{STOP_LINE}».
-                      Человек, который так ответит, больше не получит от вас сообщений.
-                    </p>
-                  </Hint>
-                )}
-              </span>
-              {([true, false] as const).map((first) => {
-                const text = preview(route, first);
-                return (
-                  <div key={String(first)} className="flex flex-col gap-1">
-                    <span className="flex justify-between text-muted-foreground">
-                      <span>{first ? 'Первое сообщение человеку' : 'Следующие сообщения'}</span>
-                      <span className="num">
-                        {String(text.length)} из {String(MESSAGE_MAX_LENGTH)}
-                      </span>
-                    </span>
-                    <pre className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 font-sans">
-                      {text}
-                      {route === 'account' && (
-                        <span className="mt-2 block border-t border-dashed border-border pt-2 text-muted-foreground">
-                          {STOP_LINE}
-                        </span>
-                      )}
-                    </pre>
+                {/* Заголовок блока: что это, когда и где, действия — одной строкой; текст — на всю ширину ниже. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="mr-auto font-medium">{KIND_NAME[row.kind]}</span>
+                  {row.kind !== 'body' && (
+                    <select
+                      aria-label={`Когда: ${KIND_NAME[row.kind]}`}
+                      value={row.when}
+                      onChange={(event) => {
+                        patch(row.key, { when: event.target.value as TemplateWhen });
+                      }}
+                      className={SELECT}
+                    >
+                      <option value="always">Всегда</option>
+                      <option value="first">Только первое</option>
+                    </select>
+                  )}
+                  {row.kind !== 'body' && (
+                    <select
+                      aria-label={`Где: ${KIND_NAME[row.kind]}`}
+                      value={row.via ?? 'all'}
+                      onChange={(event) => {
+                        patch(row.key, { via: event.target.value as TemplateVia });
+                      }}
+                      className={SELECT}
+                    >
+                      <option value="all">Везде</option>
+                      <option value="bot">Только бот</option>
+                      <option value="account">Только аккаунты</option>
+                    </select>
+                  )}
+                  <div className="flex gap-0.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Выше"
+                      disabled={index === 0}
+                      onClick={() => {
+                        move(index, -1);
+                      }}
+                    >
+                      <ArrowUp size={16} aria-hidden />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Ниже"
+                      disabled={index === rows.length - 1}
+                      onClick={() => {
+                        move(index, 1);
+                      }}
+                    >
+                      <ArrowDown size={16} aria-hidden />
+                    </Button>
+                    {row.kind !== 'body' && row.kind !== 'bot_link' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Копия: ${KIND_NAME[row.kind]}`}
+                        disabled={full}
+                        onClick={() => {
+                          duplicate(index);
+                        }}
+                      >
+                        <Copy size={16} aria-hidden />
+                      </Button>
+                    )}
+                    {row.kind !== 'body' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Удалить: ${KIND_NAME[row.kind]}`}
+                        onClick={() => {
+                          change(rows.filter((other) => other.key !== row.key));
+                        }}
+                      >
+                        <Trash2 size={16} aria-hidden />
+                      </Button>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          ))}
+                </div>
+                {hasText(row.kind) ? (
+                  <div className="flex flex-col gap-1">
+                    <textarea
+                      aria-label={KIND_NAME[row.kind]}
+                      aria-invalid={isEmpty(row)}
+                      rows={row.kind === 'greeting' ? 1 : 3}
+                      value={row.text ?? ''}
+                      maxLength={TEMPLATE_TEXT_MAX}
+                      placeholder={
+                        row.kind === 'greeting'
+                          ? TEMPLATE_GREETING_DEFAULT
+                          : 'Например: Такси Волна'
+                      }
+                      onChange={(event) => {
+                        patch(row.key, { text: event.target.value });
+                      }}
+                      // Поле растёт по тексту: без полосы прокрутки в узком окне (осмотр 2026-10-22).
+                      className="w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 [field-sizing:content] aria-[invalid=true]:border-crit"
+                    />
+                    <span className="num text-right text-xs text-muted-foreground">
+                      {String((row.text ?? '').length)} из {String(TEMPLATE_TEXT_MAX)}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="break-all text-muted-foreground">
+                    {row.kind === 'body'
+                      ? `${SAMPLE_BODY} — сюда встаёт ваш текст`
+                      : row.kind === 'bot_link'
+                        ? `${link ?? 'ссылки не будет'} (${botName})`
+                        : 'пустая строка между частями'}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(
+              [
+                [
+                  'Приветствие',
+                  { kind: 'greeting', text: TEMPLATE_GREETING_DEFAULT, when: 'always' },
+                ],
+                ['Свой текст', { kind: 'text', text: '', when: 'always' }],
+                ['Пустая строка', { kind: 'break', when: 'always' }],
+                ['Ссылка на бота', { kind: 'bot_link', when: 'always', via: 'account' }],
+              ] as const
+            ).map(([label, block]) => (
+              <Button
+                key={label}
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={full}
+                onClick={() => {
+                  add(block);
+                }}
+              >
+                <Plus size={14} aria-hidden /> {label}
+              </Button>
+            ))}
+            <span className="num text-muted-foreground">
+              {String(rows.length)} из {String(TEMPLATE_BLOCKS_MAX)} блоков
+            </span>
+          </div>
         </div>
-      </section>
+
+        <ChatPreview preview={preview} />
+      </div>
 
       {error !== undefined && <ErrorNote error={error} />}
       <div className="flex flex-wrap items-center gap-3">
@@ -397,5 +365,86 @@ export function TemplateBuilder() {
       </div>
       <BotStartCard company={company} />
     </div>
+  );
+}
+
+const SELECT = 'h-8 rounded-md border border-input bg-transparent px-2 text-sm';
+
+/**
+ * Как сообщение увидит человек: окно чата, пузырь от вашей компании. Переключатель «первое / следующие» общий для обоих путей,
+ * чтобы сравнивать бота и аккаунты рядом. Строка про «СТОП» через аккаунты показана серым под чертой.
+ */
+function ChatPreview({
+  preview,
+}: {
+  preview: (route: 'bot' | 'account', first: boolean) => string;
+}) {
+  const [first, setFirst] = useState(true);
+  return (
+    <section aria-label="Как это выглядит" className="flex flex-col gap-3 lg:sticky lg:top-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-semibold">Как это выглядит</h3>
+        <div
+          role="group"
+          aria-label="Какое сообщение"
+          className="flex rounded-md border border-border p-0.5"
+        >
+          {([true, false] as const).map((value) => (
+            <button
+              key={String(value)}
+              type="button"
+              aria-pressed={first === value}
+              onClick={() => {
+                setFirst(value);
+              }}
+              className={`rounded px-2.5 py-1 text-sm ${
+                first === value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
+              }`}
+            >
+              {value ? 'Первое' : 'Следующие'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {(
+        [
+          ['bot', 'Через бота'],
+          ['account', 'Через аккаунты партнёров'],
+        ] as const
+      ).map(([route, title]) => {
+        const text = preview(route, first);
+        return (
+          <div
+            key={route}
+            className="flex flex-col gap-1.5 rounded-xl border border-border bg-muted/40 p-3"
+          >
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="flex items-center gap-1 font-medium">
+                {title}
+                {route === 'account' && (
+                  <Hint label="Про строку «СТОП»">
+                    <p>
+                      К сообщению через аккаунт в конец добавляется строка «{STOP_LINE}». Человек,
+                      который так ответит, больше не получит от вас сообщений.
+                    </p>
+                  </Hint>
+                )}
+              </span>
+              <span className="num text-muted-foreground">
+                {String(text.length)} из {String(MESSAGE_MAX_LENGTH)}
+              </span>
+            </div>
+            <div className="max-w-[92%] whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm bg-card px-3.5 py-2.5 shadow-sm">
+              {text}
+              {route === 'account' && (
+                <span className="mt-2 block border-t border-dashed border-border pt-2 text-muted-foreground">
+                  {STOP_LINE}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </section>
   );
 }

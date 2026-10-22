@@ -174,6 +174,7 @@ export class MessagesRepository {
     clientId: Id<'client'>,
     recipient: string,
     exceptId: MessageId,
+    route: MessageRoute,
   ): Promise<boolean> {
     const [row] = await this.database.db
       .select({ id: messages.id })
@@ -182,6 +183,7 @@ export class MessagesRepository {
         and(
           eq(messages.clientId, clientId),
           eq(messages.recipient, recipient),
+          eq(messages.route, route),
           ne(messages.id, exceptId),
           inArray(messages.status, ['sent', 'delivered', 'read']),
         ),
