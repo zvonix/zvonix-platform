@@ -67,15 +67,15 @@ export function CallRequirementsForm({ current }: { current: CallRequirements })
   return (
     <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4">
       <div className="flex items-center gap-1">
-        <h2 className="font-semibold">Какие партнёры мне подходят</h2>
+        <h2 className="font-semibold">Какие маршруты мне подходят</h2>
         <Hint label="Как работают требования">
           <p>
-            Площадка берёт для ваших звонков только подходящих партнёров — при каждом вызове всех
-            ваших линий. Новые партнёры, подходящие под требования, подключаются сами. Отдельного
-            партнёра можно отключить в таблице ниже: «не использовать».
+            Площадка берёт для ваших звонков только подходящие маршруты — при каждом вызове всех
+            ваших линий. Новые маршруты, подходящие под требования, подключаются сами. Отдельный
+            маршрут можно отключить в таблице ниже: «не использовать».
           </p>
           <p className="mt-2">
-            Цена сравнивается по направлению вызова: партнёр, дешёвый на одного оператора и дорогой
+            Цена сравнивается по направлению вызова: маршрут, дешёвый на одного оператора и дорогой
             на другого, берётся только туда, где он не дороже вашего предела.
           </p>
         </Hint>
@@ -114,7 +114,7 @@ export function CallRequirementsForm({ current }: { current: CallRequirements })
               touch();
             }}
           />
-          Только партнёры, которые не слушают записи
+          Только где не слушают записи разговоров
         </label>
         <label className="flex flex-col gap-1">
           <span className="flex items-center gap-1 text-muted-foreground">

@@ -57,6 +57,8 @@ const LABELS: Record<string, string> = {
   'bot.monthly_fee': 'Плата клиента за бота в месяц, ₽',
   'bot.own_message_price': 'Цена сообщения со своего бота клиента, ₽',
   'bot.own_monthly_fee': 'Плата клиента за своего бота в месяц, ₽',
+  'bot.share_button': 'Надпись кнопки «поделиться номером» в боте',
+  'bot.block_stops_accounts': 'Остановил бота — не писать и через аккаунты партнёров',
   'bot.api_url': 'Адрес API ботов MAX',
   'support.autoclose_days': 'Закрывать обращение само через, суток',
   'messages.pace_seconds': 'Пауза между сообщениями аккаунта, секунд',

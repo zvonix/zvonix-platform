@@ -1,5 +1,6 @@
 'use client';
 
+import type { AccountRest } from '@/components/messenger-status';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -47,6 +48,8 @@ export interface Account {
   readonly warmup_day: number | null;
   readonly paused_until: string | null;
   readonly daily_limit_now: number | null;
+  /** Почему сейчас на паузе и до какого времени; пусто — работает. */
+  readonly rest?: AccountRest;
 }
 
 export interface AccountsResponse {
@@ -143,7 +146,6 @@ export function AccountSettingsForm({ account }: { account: Account }) {
   const valid = label.trim().length >= 2;
   const list = tariffs.data?.tariffs ?? [];
   const fallback = list.find((tariff) => tariff.is_default);
-  const chosen = list.find((tariff) => tariff.id === tariffId) ?? fallback;
 
   const save = useMutation({
     mutationFn: async () => {
@@ -212,13 +214,6 @@ export function AccountSettingsForm({ account }: { account: Account }) {
             </p>
           </Hint>
         </label>
-        {chosen !== undefined && (
-          <p className={recommended ? 'text-faint' : 'text-muted-foreground'}>
-            Лимиты тарифа:{' '}
-            {limitsText(chosen.limit_per_minute, chosen.limit_per_hour, chosen.limit_per_day)}
-            {recommended && ' — не действуют, работает рекомендованная работа'}
-          </p>
-        )}
         <label className="flex items-center gap-2">
           <Switch checked={stopLine} onCheckedChange={setStopLine} />
           «СТОП» в сообщениях

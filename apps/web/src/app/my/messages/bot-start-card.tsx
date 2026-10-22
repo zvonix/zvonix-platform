@@ -6,17 +6,16 @@ import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
-import {
-  BOT_GREETING_MAX,
-  BOT_SHARE_BUTTON,
-  BOT_START_DEFAULT,
-  botStartText,
-} from '@zvonix/shared';
+import { BOT_GREETING_MAX, BOT_START_DEFAULT, botStartParts } from '@zvonix/shared';
 
 interface BotState {
   readonly available: boolean;
   readonly connection: { readonly enabled: boolean } | null;
-  readonly settings: { readonly greeting: string | null; readonly fallback_accounts: boolean };
+  readonly settings: {
+    readonly greeting: string | null;
+    readonly fallback_accounts: boolean;
+    readonly share_button: string;
+  };
 }
 
 const KEY = ['client', 'messages', 'bot'] as const;
@@ -56,7 +55,8 @@ export function BotStartCard({ company }: { company: string }) {
   const text = draft ?? (stored === '' ? BOT_START_DEFAULT : stored);
   const standard = text.trim() === BOT_START_DEFAULT;
   const error = save.error instanceof ApiError ? save.error : undefined;
-  const shown = botStartText(text.trim() === '' ? null : text.trim(), company);
+  const button = bot.data.settings.share_button;
+  const shown = botStartParts(text.trim() === '' ? null : text.trim(), company, button);
 
   return (
     <section aria-label="Ответ бота при запуске" className="flex flex-col gap-2">
@@ -65,8 +65,13 @@ export function BotStartCard({ company }: { company: string }) {
         <Hint label="Про ответ бота при запуске">
           <p>
             Это единственное сообщение, которое бот отправляет сам, когда человек открыл вашу ссылку
-            и нажал «Запустить». К нему всегда добавляется кнопка «{BOT_SHARE_BUTTON}»: без номера
-            бот не сможет писать человеку. {'{название}'} заменяется названием вашей службы.
+            и нажал «Запустить». К нему всегда добавляется кнопка «{button}»: без номера бот не
+            сможет писать человеку. {'{название}'} заменяется названием вашей службы.
+          </p>
+          <p className="mt-2">
+            После вашего текста площадка всегда добавляет строку с призывом нажать кнопку — если в
+            тексте нет её названия. Человеку, который пишет боту, не поделившись номером, бот
+            напомнит об этом и покажет кнопку снова.
           </p>
         </Hint>
       </div>
@@ -94,9 +99,15 @@ export function BotStartCard({ company }: { company: string }) {
         <div className="flex flex-col gap-1.5 rounded-xl border border-border bg-muted/40 p-3">
           <span className="text-sm font-medium">Как это выглядит</span>
           <div className="flex max-w-[92%] flex-col gap-2 rounded-2xl rounded-tl-sm bg-card px-3.5 py-2.5 shadow-sm">
-            <p className="whitespace-pre-wrap">{shown}</p>
+            <p className="whitespace-pre-wrap">{shown.text}</p>
+            {shown.call !== null && (
+              <p className="flex flex-col gap-0.5">
+                <span>{shown.call}</span>
+                <span className="text-xs text-muted-foreground">добавляется всегда</span>
+              </p>
+            )}
             <span className="inline-flex w-full justify-center rounded-lg border border-border bg-background px-3 py-1.5 font-medium text-primary">
-              {BOT_SHARE_BUTTON}
+              {button}
             </span>
           </div>
         </div>

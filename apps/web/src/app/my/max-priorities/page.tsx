@@ -1,13 +1,6 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { ConsoleShell } from '@/components/console-shell';
-import { Priorities } from '../priorities/priorities-view';
-
-/** Очерёдность партнёров для сообщений MAX. Для звонков — страница «Приоритеты». */
-export default function MyMaxPrioritiesPage() {
-  return (
-    <ConsoleShell title="Очерёдность партнёров" cabinet="client">
-      {() => <Priorities product="messages" />}
-    </ConsoleShell>
-  );
+/** Прежний адрес очерёдности MAX: теперь это вкладка страницы «Маршруты» MAX — старые закладки не ломаются. */
+export default function MyMaxPrioritiesPage(): never {
+  redirect('/my/max-accounts?tab=order');
 }

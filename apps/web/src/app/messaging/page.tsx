@@ -2,11 +2,16 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
+import { WARMUP_DAYS } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
-import { MessengerAccountStatus } from '@/components/messenger-status';
+import {
+  AccountRestNote,
+  MessengerAccountStatus,
+  type AccountRest,
+} from '@/components/messenger-status';
 import { BotPlatform } from './bot-platform';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
@@ -50,6 +55,10 @@ interface Account {
   readonly warmup_enabled: boolean;
   readonly warmup_day: number | null;
   readonly paused_until: string | null;
+  /** Включена «рекомендованная работа»: лимиты тарифа заменены профилем площадки (ADR-0090). */
+  readonly recommended: boolean;
+  /** Почему сейчас на паузе и до какого времени; пусто — работает. */
+  readonly rest?: AccountRest;
   readonly pause_reason: string | null;
   readonly daily_limit_now: number | null;
   readonly state_reason: string | null;
@@ -135,10 +144,16 @@ function MessagingView() {
               <TableHead className="h-8">Партнёр</TableHead>
               <TableHead className="h-8">Аккаунт</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8 text-right">Цена партнёра</TableHead>
-              <TableHead className="h-8 text-right">
+              <TableHead className="h-8 text-right">Цена</TableHead>
+              <TableHead className="h-8 text-right" title="Предел в минуту / в час">
+                Мин / час
+              </TableHead>
+              <TableHead className="h-8 text-right" title="Сколько ещё можно отправить сегодня">
+                Сегодня
+              </TableHead>
+              <TableHead className="h-8">
                 <span className="inline-flex items-center gap-1">
-                  Лимиты
+                  Прогрев
                   <Hint label="Что такое автопрогрев">
                     <p>
                       MAX блокирует новые номера, которые сразу шлют много. Автопрогрев начинает с
@@ -150,21 +165,20 @@ function MessagingView() {
                   </Hint>
                 </span>
               </TableHead>
-              <TableHead className="h-8">Сверено</TableHead>
               <TableHead className="h-8" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {list.isPending && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   Загружаем…
                 </TableCell>
               </TableRow>
             )}
             {list.data?.accounts.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7} className="whitespace-normal text-muted-foreground">
+                <TableCell colSpan={8} className="whitespace-normal text-muted-foreground">
                   Аккаунтов нет. Партнёры заводят их в своём кабинете, когда продукт включён.
                 </TableCell>
               </TableRow>
@@ -182,9 +196,15 @@ function MessagingView() {
                     reason={account.state_reason}
                     staff
                   />
+                  {/* Время сверки — мелкой строкой под состоянием, а не отдельным столбцом: таблица влезает в 1280. */}
+                  {account.state_checked_at !== null && (
+                    <span className="num block text-xs text-faint">
+                      сверено {moment(account.state_checked_at)}
+                    </span>
+                  )}
+                  <AccountRestNote rest={account.rest} />
                   {account.paused_until !== null && (
-                    <span className="mt-1 block text-warn">
-                      Пауза до {moment(account.paused_until)}: много «нет MAX» после отправки
+                    <span className="mt-1 block">
                       {canChange && (
                         <Button
                           variant="outline"
@@ -209,27 +229,28 @@ function MessagingView() {
                   )}
                 </TableCell>
                 <TableCell className="num text-right">
-                  <span className="block">
-                    {account.limit_per_minute === null
-                      ? '—'
-                      : `${String(account.limit_per_minute)}/мин`}
-                  </span>
-                  {account.limit_per_hour !== null && (
-                    <span className="block text-faint">{`${String(account.limit_per_hour)}/час`}</span>
-                  )}
-                  <span className="block text-faint">
-                    {account.daily_limit_now === null
-                      ? '—'
-                      : `${String(account.daily_limit_now)}/сут`}
-                  </span>
-                  {account.warmup_day !== null && (
-                    <span className="block text-faint">
-                      прогрев, {String(account.warmup_day + 1)}-е сутки
+                  {account.recommended ? (
+                    <span
+                      className="font-sans text-muted-foreground"
+                      title="Рекомендованная работа: темп и лимиты — профиль площадки, лимиты тарифа не применяются"
+                    >
+                      рекомендованные
                     </span>
+                  ) : (
+                    <>
+                      {account.limit_per_minute === null ? '—' : String(account.limit_per_minute)}
+                      {' / '}
+                      {account.limit_per_hour === null ? '—' : String(account.limit_per_hour)}
+                    </>
                   )}
-                  {canChange && (
-                    <label className="mt-1 inline-flex items-center justify-end gap-2 text-muted-foreground">
-                      Автопрогрев
+                </TableCell>
+                <TableCell className="num text-right">
+                  {account.daily_limit_now === null ? '—' : String(account.daily_limit_now)}
+                </TableCell>
+                <TableCell>
+                  {/* Прогрев одной строкой: где он, на какой день и выключатель (владелец: «прогрев где-то непонятно где»). */}
+                  <span className="inline-flex items-center gap-2">
+                    {canChange && (
                       <Switch
                         aria-label={`Автопрогрев аккаунта «${account.label}»`}
                         checked={account.warmup_enabled}
@@ -238,11 +259,17 @@ function MessagingView() {
                           warmup.mutate({ id: account.id, enabled });
                         }}
                       />
-                    </label>
-                  )}
-                </TableCell>
-                <TableCell className="num text-muted-foreground">
-                  {account.state_checked_at === null ? '—' : moment(account.state_checked_at)}
+                    )}
+                    {!account.warmup_enabled ? (
+                      <span className="text-muted-foreground">выключен</span>
+                    ) : account.warmup_day === null ? (
+                      <span className="text-muted-foreground">пройден</span>
+                    ) : (
+                      <span className="num">
+                        {String(account.warmup_day + 1)}-е сутки из {String(WARMUP_DAYS)}
+                      </span>
+                    )}
+                  </span>
                 </TableCell>
                 <TableCell className="text-right">
                   {canChange && (

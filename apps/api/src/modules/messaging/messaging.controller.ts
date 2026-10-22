@@ -14,7 +14,13 @@ import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
-import { effectiveLimits } from './warmup.js';
+import {
+  effectiveLimits,
+  withRecommended,
+  type RecommendedProfile,
+  type RestReason,
+} from './warmup.js';
+import { AccountPicker } from './account-picker.js';
 import { MessagingService } from './messaging.service.js';
 import { TestSendService } from './test-send.service.js';
 import {
@@ -55,9 +61,31 @@ interface AccountView {
   readonly pause_reason: string | null;
   readonly state_checked_at: string | null;
   readonly created_at: string;
+  /**
+   * Аккаунт сейчас не берёт сообщения и до какого времени: `health` — пауза здоровья, `quiet` — тихие часы партнёра,
+   * `minute`/`hour`/`day` — исчерпан лимит (окна скользящие). Пусто — работает. Только в списках партнёра и сотрудников.
+   */
+  readonly rest?: { readonly reason: RestReason; readonly until: string } | null;
 }
 
-const toView = (row: MessengerAccountRow, now: Date = new Date()): AccountView => ({
+/** Вид аккаунта со сведениями о паузе — для списков. */
+const withRest = (
+  view: AccountView,
+  rests: ReadonlyMap<string, { reason: RestReason; until: Date }>,
+): AccountView => {
+  const rest = rests.get(view.id);
+  return {
+    ...view,
+    rest: rest === undefined ? null : { reason: rest.reason, until: rest.until.toISOString() },
+  };
+};
+
+/**
+ * Вид аккаунта. `limit_per_*` — лимиты тарифа (их партнёр и назначает); `daily_limit_now` и `warmup_day` — что действует
+ * сейчас: с «рекомендованной работой» (профиль площадки заменяет лимиты тарифа, ADR-0090) и прогревом. Раньше сутки считались
+ * без профиля и показывали чужое число (владелец, 2026-10-22).
+ */
+const toView = (row: MessengerAccountRow, now: Date, profile: RecommendedProfile): AccountView => ({
   id: row.id,
   label: row.label,
   status: row.status,
@@ -71,8 +99,8 @@ const toView = (row: MessengerAccountRow, now: Date = new Date()): AccountView =
   warmup_enabled: row.warmupEnabled,
   stop_line: row.stopLine,
   recommended: row.recommended,
-  warmup_day: effectiveLimits(row, now).warmupDay,
-  daily_limit_now: effectiveLimits(row, now).daily,
+  warmup_day: effectiveLimits(withRecommended(row, profile), now).warmupDay,
+  daily_limit_now: effectiveLimits(withRecommended(row, profile), now).daily,
   paused_until:
     row.pausedUntil !== null && row.pausedUntil > now ? row.pausedUntil.toISOString() : null,
   pause_reason: row.pausedUntil !== null && row.pausedUntil > now ? row.pauseReason : null,
@@ -86,7 +114,13 @@ export class MessagingController {
     private readonly messaging: MessagingService,
     private readonly settings: SettingsService,
     private readonly testSend: TestSendService,
+    private readonly picker: AccountPicker,
   ) {}
+
+  /** Профиль «рекомендованной работы» площадки — для действующих лимитов в виде аккаунта. */
+  private async profile(): Promise<RecommendedProfile> {
+    return (await this.settings.messaging()).recommended;
+  }
 
   /** Аккаунты партнёра и признак «продукт включён»: выключенный раздел показывает это, а не пустоту. */
   @Cabinets('partner')
@@ -98,7 +132,12 @@ export class MessagingController {
       this.messaging.listOwn(actor.userId),
       this.settings.messaging(),
     ]);
-    return { enabled: config.enabled, accounts: rows.map((row) => toView(row)) };
+    const now = new Date();
+    const [rests, profile] = await Promise.all([this.picker.restOf(rows, now), this.profile()]);
+    return {
+      enabled: config.enabled,
+      accounts: rows.map((row) => withRest(toView(row, now, profile), rests)),
+    };
   }
 
   /** Партнёр заводит аккаунт; дальше — QR-код. `201` с аккаунтом в состоянии «ждёт входа». */
@@ -112,7 +151,7 @@ export class MessagingController {
       { userId: actor.userId, role: actor.role },
       body.label,
     );
-    return { account: toView(row) };
+    return { account: toView(row, new Date(), await this.profile()) };
   }
 
   /**
@@ -175,7 +214,7 @@ export class MessagingController {
       stopLine: body.stopLine,
       recommended: body.recommended,
     });
-    return { account: toView(row) };
+    return { account: toView(row, new Date(), await this.profile()) };
   }
 
   @Cabinets('partner')
@@ -192,9 +231,17 @@ export class MessagingController {
     accounts: (AccountView & { partner_id: string; partner_name: string })[];
   }> {
     const rows = await this.messaging.listAll();
+    const now = new Date();
+    const [rests, profile] = await Promise.all([
+      this.picker.restOf(
+        rows.map(({ account }) => account),
+        now,
+      ),
+      this.profile(),
+    ]);
     return {
       accounts: rows.map(({ account, partnerName }) => ({
-        ...toView(account),
+        ...withRest(toView(account, now, profile), rests),
         partner_id: account.partnerId,
         partner_name: partnerName,
       })),
@@ -254,7 +301,7 @@ export class MessagingController {
         apiUrl: body.apiUrl,
       },
     );
-    return { account: toView(row) };
+    return { account: toView(row, new Date(), await this.profile()) };
   }
 
   /** Снять паузу здоровья раньше срока (ADR-0079). */
@@ -266,7 +313,7 @@ export class MessagingController {
     @Param('id') id: string,
   ): Promise<{ account: AccountView }> {
     const row = await this.messaging.resume({ userId: actor.userId, role: actor.role }, id);
-    return { account: toView(row) };
+    return { account: toView(row, new Date(), await this.profile()) };
   }
 
   /** Автопрогрев аккаунта: включить или выключить (ADR-0078). */
@@ -282,7 +329,7 @@ export class MessagingController {
       id,
       body.enabled,
     );
-    return { account: toView(row) };
+    return { account: toView(row, new Date(), await this.profile()) };
   }
 
   @Roles('admin')

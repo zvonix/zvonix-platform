@@ -17,7 +17,6 @@ import {
   LayoutDashboard,
   LifeBuoy,
   UserRound,
-  ListOrdered,
   MessageSquare,
   PenLine,
   Plug,
@@ -37,6 +36,7 @@ import {
   ShieldCheck,
   SignalHigh,
   Users,
+  Waypoints,
   Wallet,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -298,7 +298,8 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/my/calls', label: 'Вызовы', Icon: PhoneCall, tab: true },
         { href: '/my/channels', label: 'Линии', Icon: Route },
         { href: '/my/prices', label: 'Цены', Icon: ReceiptText },
-        { href: '/my/priorities', label: 'Приоритеты', Icon: ListOrdered },
+        // «Маршруты», а не «Приоритеты» и не «Партнёры»: клиент не обязан знать, кто за маршрутом (владелец, 2026-10-22).
+        { href: '/my/priorities', label: 'Маршруты', Icon: Waypoints },
       ],
     },
     {
@@ -307,8 +308,8 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/my/messages', label: 'Сообщения', Icon: MessageSquare, tab: true },
         { href: '/my/message-text', label: 'Текст сообщения', Icon: PenLine },
         { href: '/my/message-connections', label: 'Подключения', Icon: Plug },
-        { href: '/my/max-accounts', label: 'Аккаунты', Icon: Users },
-        { href: '/my/max-priorities', label: 'Приоритеты', Icon: ListOrdered },
+        // Требования, аккаунты и очерёдность — одна страница с вкладками, а не два пункта меню.
+        { href: '/my/max-accounts', label: 'Маршруты', Icon: Waypoints },
       ],
     },
   ],

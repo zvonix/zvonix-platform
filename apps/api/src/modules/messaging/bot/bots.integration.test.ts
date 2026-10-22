@@ -273,9 +273,24 @@ describe('события бота', () => {
     ]);
     expect(simulatedBotSent.at(-1)).toMatchObject({
       chatId: '555',
-      requestContact: 'Поделиться номером',
+      requestContact: '📲 Получать уведомления',
     });
     expect(simulatedBotSent.at(-1)?.text).toContain('Такси');
+    // Призыв нажать кнопку площадка добавляет к ответу всегда.
+    expect(simulatedBotSent.at(-1)?.text).toContain('Нажмите кнопку ниже 👇');
+
+    // Номером не поделился и пишет боту — напоминание и кнопка снова, а не общая справка.
+    await event(botId, {
+      update_type: 'message_created',
+      message: { sender: { user_id: 77 }, recipient: { chat_id: 555 }, body: { text: 'привет' } },
+    });
+    expect(simulatedBotSent.at(-1)).toMatchObject({
+      chatId: '555',
+      requestContact: '📲 Получать уведомления',
+    });
+    expect(simulatedBotSent.at(-1)?.text).toBe(
+      'Нажмите кнопку ниже 👇, чтобы получать уведомления.',
+    );
 
     await event(botId, {
       update_type: 'bot_started',

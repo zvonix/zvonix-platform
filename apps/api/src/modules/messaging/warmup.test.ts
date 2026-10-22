@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountLoad } from './messages.repository.js';
-import { accountReadyAt, effectiveLimits, isIdle, withRecommended } from './warmup.js';
+import { accountReadyAt, effectiveLimits, isIdle, restOf, withRecommended } from './warmup.js';
 
 const NOW = new Date('2026-10-14T10:00:00Z');
 const load = (overrides: Partial<AccountLoad>): AccountLoad => ({
@@ -154,5 +154,52 @@ describe('рекомендованная работа (ADR-0088)', () => {
     expect(
       accountReadyAt(limited, load({}), NOW, { paceSeconds: 60, withBacklog: false })?.getTime(),
     ).toBe(last.getTime() + 60_000);
+  });
+});
+
+describe('почему аккаунт на паузе — для таблиц партнёра и сотрудников', () => {
+  const none = { reservePercent: 0, quietEnd: undefined };
+
+  it('работает — паузы нет; очередь и пауза между сообщениями паузой не считаются', () => {
+    expect(
+      restOf(account({ limitPerHour: 10 }), load({ hour: 9, backlog: 5 }), NOW, none),
+    ).toBeUndefined();
+    expect(
+      restOf(account({ lastUsedAt: new Date(NOW.getTime() - 1000) }), load({}), NOW, none),
+    ).toBeUndefined();
+  });
+
+  it('пауза здоровья и тихие часы — со временем снятия; здоровье важнее', () => {
+    const until = new Date(NOW.getTime() + 3_600_000);
+    const quietEnd = new Date(NOW.getTime() + 600_000);
+    expect(
+      restOf(account({ pausedUntil: until }), load({}), NOW, { reservePercent: 0, quietEnd }),
+    ).toEqual({
+      reason: 'health',
+      until,
+    });
+    expect(restOf(account(), load({}), NOW, { reservePercent: 0, quietEnd })).toEqual({
+      reason: 'quiet',
+      until: quietEnd,
+    });
+  });
+
+  it('исчерпан лимит — причина и окно; запас партнёра уменьшает доступное', () => {
+    expect(restOf(account({ limitPerMinute: 3 }), load({ minute: 3 }), NOW, none)).toEqual({
+      reason: 'minute',
+      window: { windowMs: 60_000, allowed: 3 },
+    });
+    expect(
+      restOf(account({ limitPerHour: 10 }), load({ hour: 8 }), NOW, {
+        reservePercent: 20,
+        quietEnd: undefined,
+      }),
+    ).toEqual({
+      reason: 'hour',
+      window: { windowMs: 3_600_000, allowed: 8 },
+    });
+    expect(restOf(account({ limitPerDay: 50 }), load({ day: 50 }), NOW, none)).toMatchObject({
+      reason: 'day',
+    });
   });
 });

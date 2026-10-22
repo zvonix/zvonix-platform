@@ -5,7 +5,9 @@ import { useEffect, useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
-import { MessengerAccountStatus } from '@/components/messenger-status';
+import { AccountRestNote, MessengerAccountStatus } from '@/components/messenger-status';
+import { Hint } from '@/components/hint';
+import { WARMUP_DAYS } from '@zvonix/shared';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -90,10 +92,13 @@ function Accounts() {
             >
               <NewAccountForm onCreate={(label) => create.mutateAsync(label)} />
             </FormDialog>
-            <p className="text-muted-foreground">
-              Цена и лимиты — в тарифе: создайте тарифы на странице «Тарифы MAX» и назначьте
-              аккаунтам здесь. Без своего тарифа аккаунт идёт за тарифом по умолчанию.
-            </p>
+            <Hint label="Где цена и лимиты">
+              <p>
+                Цена и лимиты — в тарифе: создайте тарифы на странице «Тарифы MAX» и назначьте
+                аккаунтам здесь, в «Настройках». Без своего тарифа аккаунт идёт за тарифом по
+                умолчанию.
+              </p>
+            </Hint>
           </div>
 
           <div className="rounded-lg border border-border bg-card">
@@ -103,15 +108,21 @@ function Accounts() {
                   <TableHead className="h-8">Аккаунт</TableHead>
                   <TableHead className="h-8">Состояние</TableHead>
                   <TableHead className="h-8">Тариф</TableHead>
-                  <TableHead className="h-8 text-right">Цена за сообщение</TableHead>
-                  <TableHead className="h-8 text-right">Лимиты</TableHead>
+                  <TableHead className="h-8 text-right">Цена</TableHead>
+                  <TableHead className="h-8 text-right" title="Предел в минуту / в час">
+                    Мин / час
+                  </TableHead>
+                  <TableHead className="h-8 text-right" title="Сколько можно за сутки сейчас">
+                    Сутки
+                  </TableHead>
+                  <TableHead className="h-8">Прогрев</TableHead>
                   <TableHead className="h-8" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {list.data?.accounts.length === 0 && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={6} className="whitespace-normal text-muted-foreground">
+                    <TableCell colSpan={8} className="whitespace-normal text-muted-foreground">
                       Аккаунтов пока нет. Добавьте первый и войдите в него по QR-коду.
                     </TableCell>
                   </TableRow>
@@ -196,6 +207,7 @@ function AccountRow({
 
       <TableCell className="whitespace-normal">
         <MessengerAccountStatus status={account.status} reason={account.state_reason} />
+        <AccountRestNote rest={account.rest} />
         {account.price === null && account.status === 'active' && (
           <span className="block pt-0.5 text-warn">
             Создайте тариф — без него сообщения не идут
@@ -215,28 +227,37 @@ function AccountRow({
         )}
       </TableCell>
 
-      <TableCell className={`num text-right ${account.recommended ? 'text-faint' : ''}`}>
-        <span className="block">
-          {account.limit_per_minute === null ? '—' : `${String(account.limit_per_minute)} в минуту`}
-        </span>
-        {account.limit_per_hour !== null && (
-          <span className="block text-faint">{`${String(account.limit_per_hour)} в час`}</span>
-        )}
-        <span className="block text-faint">
-          {account.limit_per_day === null ? '—' : `${String(account.limit_per_day)} в сутки`}
-        </span>
-        {account.recommended && (
-          <span className="block whitespace-normal font-sans text-muted-foreground">
-            не действуют: рекомендованная работа
+      {/* Рекомендованная работа заменяет лимиты тарифа лимитами площадки (ADR-0090): тогда здесь не числа тарифа, а это слово —
+          «не действуют» читалось как «рекомендованная работа не действует» (владелец, 2026-10-22). */}
+      <TableCell className="num text-right">
+        {account.recommended ? (
+          <span
+            className="font-sans text-muted-foreground"
+            title="Включена рекомендованная работа: темп и лимиты задаёт площадка, лимиты тарифа не применяются"
+          >
+            рекомендованные
           </span>
+        ) : (
+          <>
+            {account.limit_per_minute === null ? '—' : String(account.limit_per_minute)}
+            {' / '}
+            {account.limit_per_hour === null ? '—' : String(account.limit_per_hour)}
+          </>
         )}
-        {account.paused_until !== null && (
-          <span className="block text-warn">Пауза: много «нет MAX» после отправки</span>
-        )}
-        {account.warmup_day !== null && (
-          <span className="block text-faint">
-            Прогрев, {String(account.warmup_day + 1)}-е сутки: сегодня до{' '}
-            {String(account.daily_limit_now)}
+      </TableCell>
+
+      <TableCell className="num text-right">
+        {account.daily_limit_now === null ? '—' : String(account.daily_limit_now)}
+      </TableCell>
+
+      <TableCell>
+        {!account.warmup_enabled ? (
+          <span className="text-muted-foreground">выключен</span>
+        ) : account.warmup_day === null ? (
+          <span className="text-muted-foreground">пройден</span>
+        ) : (
+          <span className="num">
+            {String(account.warmup_day + 1)}-е сутки из {String(WARMUP_DAYS)}
           </span>
         )}
       </TableCell>

@@ -699,10 +699,18 @@ test.describe('бот MAX (ADR-0077)', () => {
     await admin.getByRole('button', { name: 'Сохранить' }).click();
     await expect(admin.getByText('своя')).toBeVisible();
 
-    // Ответ бота при запуске правится рядом с шаблоном сообщения и сохраняется; в окне «Настройки» бота его больше нет.
-    await page.getByRole('button', { name: 'Настройки', exact: true }).click();
-    await expect(page.getByLabel('Приветствие, когда ваш клиент запускает бота')).toHaveCount(0);
-    await page.keyboard.press('Escape');
+    // Запасной путь — переключателем прямо в карточке бота, без окна «Настройки»; сохраняется сразу.
+    const fallback = page.getByRole('switch', {
+      name: /Тем, кто не подписан на бота, писать через аккаунты партнёров/u,
+    });
+    await expect(fallback).toBeChecked();
+    await fallback.click();
+    await expect(fallback).not.toBeChecked();
+    await page.reload();
+    await expect(fallback).not.toBeChecked();
+    await expect(page.getByRole('button', { name: 'Настройки', exact: true })).toHaveCount(0);
+
+    // Ответ бота при запуске правится рядом с шаблоном сообщения и сохраняется.
     await page.goto('/my/message-text');
     await page.getByLabel('Текст ответа бота').fill('Привет от {название}');
     await expect(page.getByText(/Привет от Такси/u)).toBeVisible();
@@ -779,6 +787,14 @@ test.describe('требования к аккаунтам MAX (ADR-0092)', () =>
       'true',
     );
     await expect(page.getByLabel('Цена не дороже, ₽')).toHaveValue('0,9');
+    // Очерёдность — вкладка того же раздела; прежний адрес ведёт туда же.
+    await page.getByRole('tab', { name: 'Очерёдность' }).click();
+    await expect(page.getByRole('columnheader', { name: 'Очерёдность' })).toBeVisible();
+    await page.goto('/my/max-priorities');
+    await expect(page.getByRole('tab', { name: 'Очерёдность' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 });
 
@@ -1416,14 +1432,28 @@ test.describe('чужой раздел', () => {
 });
 
 test.describe('кабинет клиента', () => {
-  test('приоритеты партнёров: раздел есть в меню и открывается списком (ADR-0081)', async ({
+  test('маршруты звонков: требования и очерёдность в одном разделе (ADR-0081, ADR-0095)', async ({
     page,
   }) => {
     await signIn(page, PEOPLE.client);
     await page.locator('a[href="/my/priorities"]').click();
 
+    await expect(page.getByRole('heading', { name: 'Какие маршруты мне подходят' })).toBeVisible();
+    await page.getByRole('button', { name: 'Только SIM' }).click();
+    await page.getByRole('button', { name: 'Сохранить требования' }).click();
+    await expect(page.getByRole('status')).toHaveText('Сохранено');
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Только SIM' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.getByRole('columnheader', { name: 'Подходит' })).toBeVisible();
+    // Вернуть «Любой»: требование клиента стенда не должно сужать вызовы соседних тестов.
+    await page.getByRole('button', { name: 'Любой' }).click();
+    await page.getByRole('button', { name: 'Сохранить требования' }).click();
+    await expect(page.getByRole('status')).toHaveText('Сохранено');
     await expect(page.getByRole('columnheader', { name: 'Очерёдность' })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'Найти партнёра' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Найти маршрут' })).toBeVisible();
     // Без партнёров с ценой список пуст и говорит об этом, а не молчит.
     await expect(page.getByRole('button', { name: 'Сохранить список' })).toBeDisabled();
   });

@@ -17,7 +17,7 @@ import { chooseByMode, isFree, type Candidate } from './distribution.js';
 import { MessagesRepository, type AccountLoad } from './messages.repository.js';
 import { MessagingRepository, type MessengerAccountRow } from './messaging.repository.js';
 import { RequirementsService, type ClientRules } from './requirements.service.js';
-import { withRecommended } from './warmup.js';
+import { restOf, withRecommended, type RestReason } from './warmup.js';
 
 /** Сколько аккаунтов смотрится за один заход: хватает, чтобы найти свободный, и не читает все. */
 const CANDIDATES = 12;
@@ -56,6 +56,51 @@ export class AccountPicker {
   /** Настройка партнёра для сообщений; нет записи — «поровну» без параметров. */
   async settingsOf(partnerId: Id<'partner'>): Promise<DistributionSettings> {
     return this.distribution.get(partnerId, PRODUCT);
+  }
+
+  /**
+   * Почему аккаунты сейчас на паузе и до какого времени — для таблиц партнёра и сотрудников. Лимиты — с «рекомендованной
+   * работой» и запасом партнёра, как при выборе; время по лимиту — из скользящего окна (запрос только для упёршихся).
+   */
+  async restOf(
+    accounts: readonly MessengerAccountRow[],
+    now: Date,
+  ): Promise<Map<string, { reason: RestReason; until: Date }>> {
+    const result = new Map<string, { reason: RestReason; until: Date }>();
+    const active = accounts.filter((account) => account.status === 'active');
+    if (active.length === 0) return result;
+    const [profile, loads, settings] = await Promise.all([
+      this.settings.messaging().then((config) => config.recommended),
+      this.messages.loadOf(
+        active.map((account) => account.id),
+        now,
+      ),
+      this.distribution.forPartners(
+        [...new Set(active.map((account) => account.partnerId))],
+        PRODUCT,
+      ),
+    ]);
+    for (const account of active) {
+      const own = settings.get(account.partnerId) ?? DEFAULT_DISTRIBUTION;
+      const rest = restOf(
+        withRecommended(account, profile),
+        loads.get(account.id) ?? EMPTY_LOAD,
+        now,
+        {
+          reservePercent: own.reservePercent,
+          quietEnd: quietEndsAt(own, now),
+        },
+      );
+      if (rest === undefined) continue;
+      const until =
+        rest.until ??
+        (rest.window === undefined
+          ? undefined
+          : await this.messages.windowFreesAt(account.id, rest.window, now));
+      if (until !== undefined && until > now)
+        result.set(account.id, { reason: rest.reason, until });
+    }
+    return result;
   }
 
   /** Когда у аккаунта кончатся тихие часы партнёра; `undefined` — сейчас не тихие часы. */
