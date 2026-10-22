@@ -126,6 +126,18 @@ export interface MessageFilter {
   readonly offset: number;
 }
 
+/** Бот или аккаунты по клиенту (ADR-0094). */
+export interface RouteStatsRow {
+  readonly clientId: string;
+  readonly name: string;
+  /** Разные номера, которым ушло хоть одно сообщение. */
+  readonly recipients: number;
+  /** Из них сейчас подписаны на бота клиента. */
+  readonly inBot: number;
+  readonly viaBot: number;
+  readonly viaAccounts: number;
+}
+
 @Injectable()
 export class MessagesRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -905,6 +917,38 @@ export class MessagesRepository {
       clients: byClient.rows as unknown as ClientReportRow[],
       accounts: byAccount.rows as unknown as AccountReportRow[],
     };
+  }
+
+  /**
+   * Бот или аккаунты (ADR-0094): сколько получателей писали клиенту с `since`, сколько из них сейчас подписаны на его бота
+   * (поделились номером и не остановили), сколько ушедших сообщений прошло ботом и сколько через аккаунты партнёров.
+   * Без клиента — по каждому клиенту, у которого были сообщения.
+   */
+  async routeStats(since: Date, clientId?: Id<'client'>): Promise<RouteStatsRow[]> {
+    const result = await this.database.db.execute(sql`
+      with sent as (
+        select m.client_id, m.recipient, m.route
+          from messages m
+         where m.created_at >= ${since}
+           and m.status in ('sent', 'delivered', 'read')
+           ${clientId === undefined ? sql`` : sql`and m.client_id = ${clientId}`}
+      ),
+      people as (
+        select distinct client_id, recipient from sent
+      )
+      select c.id as "clientId", c.name as name,
+             (select count(*)::int from people p where p.client_id = c.id) as recipients,
+             (select count(*)::int from people p
+               where p.client_id = c.id
+                 and exists (select 1 from bot_subscribers b
+                              where b.client_id = p.client_id and b.phone = p.recipient and b.state = 'started')
+             ) as "inBot",
+             (select count(*)::int from sent s where s.client_id = c.id and s.route = 'bot') as "viaBot",
+             (select count(*)::int from sent s where s.client_id = c.id and s.route = 'account') as "viaAccounts"
+        from clients c
+       where c.id in (select client_id from people)
+       order by recipients desc, c.name`);
+    return result.rows as unknown as RouteStatsRow[];
   }
 
   /** Принято и окончательно не отправлено с `since`: по этому судят, что отправка в целом сломалась. */

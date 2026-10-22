@@ -33,6 +33,14 @@ interface Message {
 }
 
 const LIST_KEY = ['client', 'messages'] as const;
+const ROUTES_KEY = ['client', 'messages', 'route-stats'] as const;
+
+interface RouteStats {
+  readonly recipients: number;
+  readonly in_bot: number;
+  readonly via_bot: number;
+  readonly via_accounts: number;
+}
 const PRICE_KEY = ['client', 'messages', 'price'] as const;
 
 /**
@@ -41,6 +49,11 @@ const PRICE_KEY = ['client', 'messages', 'price'] as const;
  * кабинета по цене, как у всех.
  */
 export function SendMessages() {
+  const routes = useQuery({
+    queryKey: ROUTES_KEY,
+    queryFn: ({ signal }) => request<RouteStats>('/client/messages/route-stats?days=7', { signal }),
+    refetchInterval: 60_000,
+  });
   const [opened, setOpened] = useState<string | undefined>(undefined);
   const queryClient = useQueryClient();
   const [to, setTo] = useState('');
@@ -157,6 +170,16 @@ export function SendMessages() {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
+      {enabled && routes.data !== undefined && routes.data.recipients > 0 && (
+        // Бот или аккаунты за неделю (ADR-0094): видно, сколько людей уже перешли в бота.
+        <p className="text-muted-foreground">
+          За 7 суток: людей {String(routes.data.recipients)}, из них в боте{' '}
+          {String(routes.data.in_bot)} (
+          {String(Math.round((routes.data.in_bot * 100) / routes.data.recipients))} %); сообщений
+          через бота {String(routes.data.via_bot)}, через аккаунты партнёров{' '}
+          {String(routes.data.via_accounts)}.
+        </p>
+      )}
       {enabled && (
         <div className="rounded-lg border border-border bg-card">
           <Table>

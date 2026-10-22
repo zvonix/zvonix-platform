@@ -106,7 +106,9 @@ function Accounts() {
 
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="font-semibold">Аккаунты партнёров</h2>
-        <span className={fitting === 0 ? 'text-warn' : 'text-muted-foreground'}>
+        <span
+          className={fitting === 0 && accounts.length > 0 ? 'text-warn' : 'text-muted-foreground'}
+        >
           подходят {String(fitting)} из {String(accounts.length)}
         </span>
         {fitting === 0 && accounts.length > 0 && (
@@ -185,7 +187,7 @@ function RequirementsForm({ current }: { current: Requirements }) {
   const [stop, setStop] = useState<StopRequirement>(current.stop_line);
   const [recommended, setRecommended] = useState(current.recommended_only);
   const [price, setPrice] = useState(
-    current.max_price === null ? '' : numberFromInput(current.max_price),
+    current.max_price === null ? '' : current.max_price.replace('.', ','),
   );
   const [age, setAge] = useState(current.min_age_days === null ? '' : String(current.min_age_days));
   const [saved, setSaved] = useState(false);
@@ -193,7 +195,7 @@ function RequirementsForm({ current }: { current: Requirements }) {
   useEffect(() => {
     setStop(current.stop_line);
     setRecommended(current.recommended_only);
-    setPrice(current.max_price === null ? '' : numberFromInput(current.max_price));
+    setPrice(current.max_price === null ? '' : current.max_price.replace('.', ','));
     setAge(current.min_age_days === null ? '' : String(current.min_age_days));
   }, [current]);
 

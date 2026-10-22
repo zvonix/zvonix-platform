@@ -119,6 +119,17 @@ export class ClientMessagesController {
     return { enabled, price: quote === undefined ? null : Money.format(quote.clientAmount) };
   }
 
+  /** Бот или аккаунты у клиента: сколько людей перешли в бота и сколько сообщений каким путём (ADR-0094). */
+  @Cabinets('client')
+  @Get('client/messages/route-stats')
+  async routeStats(
+    @CurrentUser() actor: Principal,
+    @Query(zodQuery(messagesReportQuerySchema)) query: z.infer<typeof messagesReportQuerySchema>,
+  ) {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return { days: query.days, ...(await this.messages.routeStatsOf(client.id, query.days)) };
+  }
+
   /** Партнёры с ценой сообщения для клиента — из чего строится список приоритетов (ADR-0081). */
   @Cabinets('client')
   @Get('client/messages/offers')
@@ -247,6 +258,15 @@ export class StaffMessagesController {
     return {
       days: query.days,
       clients: report.clients.map(({ clientId, ...rest }) => ({ client_id: clientId, ...rest })),
+      // Бот или аккаунты по клиентам (ADR-0094).
+      routes: report.routes.map((row) => ({
+        client_id: row.clientId,
+        name: row.name,
+        recipients: row.recipients,
+        in_bot: row.inBot,
+        via_bot: row.viaBot,
+        via_accounts: row.viaAccounts,
+      })),
       accounts: report.accounts.map(({ accountId, partnerName, ...rest }) => ({
         account_id: accountId,
         partner_name: partnerName,

@@ -708,6 +708,49 @@ describe('настройки бота клиента и шаблон сообщ�
     expect(simulatedBotSent.at(-1)?.text).toBe('Машина у подъезда');
   });
 
+  it('статистика «бот или аккаунты»: люди в боте и сообщения по путям — у клиента и в отчёте админа (ADR-0094)', async () => {
+    await connectPlatform();
+    await fx.partnerWithAccount('0.45');
+    const { client, phone } = await subscribed(558, 84, '79001234570');
+    const setState = (state: string) =>
+      withDatabase(async (execute) => {
+        await execute(sql`update bot_subscribers set state = ${state} where max_user_id = '84'`);
+      });
+    await setState('stopped');
+    await sendTo(client.token, phone, { text: 'Через аккаунт' });
+    await sendTo(client.token, '79005550099', { text: 'Через аккаунт другому' });
+    await dispatch();
+    // Второе через тот же аккаунт ждёт паузу между отправками — время вперёд.
+    await api()
+      .get(MessagesService)
+      .dispatchDue(new Date(Date.now() + 10 * 60_000));
+    await setState('started');
+    await sendTo(client.token, phone, { text: 'Через бота' });
+    await dispatch();
+
+    const own = await api().inject({
+      method: 'GET',
+      url: '/client/messages/route-stats?days=7',
+      headers: bearer(client.token),
+    });
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toMatchObject({
+      days: 7,
+      recipients: 2,
+      in_bot: 1,
+      via_bot: 1,
+      via_accounts: 2,
+    });
+
+    const report = await api().inject({
+      method: 'GET',
+      url: '/messages/report?days=7',
+      headers: bearer(adminToken),
+    });
+    const routes = report.json<{ routes: { client_id: string; in_bot: number }[] }>().routes;
+    expect(routes.find((row) => row.client_id === client.clientId)?.in_bot).toBe(1);
+  });
+
   it('«где»: блок «только аккаунты» в сообщение бота не попадает, «только бот» — попадает; неверное значение отвергается', async () => {
     await connectPlatform();
     const { client, phone } = await subscribed(557, 79, '79001234569', 'Пётр');

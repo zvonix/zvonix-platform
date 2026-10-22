@@ -400,11 +400,26 @@ export class MessagesService {
   /** Отчёт для сотрудников за `days` суток: по клиентам, по аккаунтам и журнал аккаунтов (ADR-0088). */
   async report(days: number, now: Date = new Date()) {
     const since = new Date(now.getTime() - days * 86_400_000);
-    const [counts, journal] = await Promise.all([
+    const [counts, journal, routes] = await Promise.all([
       this.repository.report(since, new Date(now.getTime() - 86_400_000)),
       this.repository.journal(since, 30),
+      this.repository.routeStats(since),
     ]);
-    return { ...counts, journal };
+    return { ...counts, journal, routes };
+  }
+
+  /** Бот или аккаунты у одного клиента за `days` суток (ADR-0094). */
+  async routeStatsOf(clientId: Id<'client'>, days: number, now: Date = new Date()) {
+    const [row] = await this.repository.routeStats(
+      new Date(now.getTime() - days * 86_400_000),
+      clientId,
+    );
+    return {
+      recipients: row?.recipients ?? 0,
+      in_bot: row?.inBot ?? 0,
+      via_bot: row?.viaBot ?? 0,
+      via_accounts: row?.viaAccounts ?? 0,
+    };
   }
 
   list(filter: MessageFilter): Promise<{ rows: MessageRow[]; total: number }> {
