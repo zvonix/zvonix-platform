@@ -7,7 +7,7 @@
 
 import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/common';
 import type { z } from 'zod';
-import { parseId, type SmppReceiptMap } from '@zvonix/shared';
+import { parseId, type Id, type SmppReceiptMap } from '@zvonix/shared';
 import { Cabinets, Roles } from '../../../http/auth.guard.js';
 import { CurrentUser } from '../../../http/request-context.js';
 import { zodBody } from '../../../http/zod.pipe.js';
@@ -16,8 +16,9 @@ import { BillingService } from '../../billing/billing.service.js';
 import type { Principal } from '../../identity/identity.service.js';
 import { MessagingService } from '../messaging.service.js';
 import { updateSmppSchema, staffSmppSchema } from '../schemas.js';
+import { SmppServer } from './server.js';
 import type { SmppAccountRow } from './smpp.repository.js';
-import { receiptsOf, SmppService } from './smpp.service.js';
+import { receiptsOf, SmppService, type SmppEventView } from './smpp.service.js';
 
 interface SmppView {
   readonly system_id: string;
@@ -34,6 +35,20 @@ interface ConnectionView {
   readonly tls_port: number | null;
 }
 
+/** Кто сейчас на связи под подключением клиента: адрес, режим, с какого времени. Пусто — никто. */
+interface OnlineView {
+  readonly ip: string;
+  readonly mode: string;
+  readonly since: string;
+}
+
+const onlineOf = (server: SmppServer, clientId: Id<'client'>): OnlineView[] =>
+  server.sessionsOf(clientId).map((session) => ({
+    ip: session.ip,
+    mode: session.mode,
+    since: session.since.toISOString(),
+  }));
+
 const toView = (row: SmppAccountRow): SmppView => ({
   system_id: row.systemId,
   enabled: row.enabled,
@@ -49,6 +64,7 @@ export class ClientSmppController {
     private readonly smpp: SmppService,
     private readonly messaging: MessagingService,
     private readonly billing: BillingService,
+    private readonly server: SmppServer,
     @Inject(APP_CONFIG) private readonly config: Config,
   ) {}
 
@@ -63,15 +79,20 @@ export class ClientSmppController {
 
   @Cabinets('client')
   @Get('client/messages/smpp')
-  async get(
-    @CurrentUser() actor: Principal,
-  ): Promise<{ enabled: boolean; connection: ConnectionView; smpp: SmppView | null }> {
+  async get(@CurrentUser() actor: Principal): Promise<{
+    enabled: boolean;
+    connection: ConnectionView;
+    smpp: (SmppView & { online: OnlineView[] }) | null;
+  }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     const account = await this.smpp.find(client.id);
     return {
       enabled: await this.messaging.isEnabled(),
       connection: this.connection(),
-      smpp: account === undefined ? null : toView(account),
+      smpp:
+        account === undefined
+          ? null
+          : { ...toView(account), online: onlineOf(this.server, client.id) },
     };
   }
 
@@ -95,6 +116,14 @@ export class ClientSmppController {
     return { smpp: toView(account), password };
   }
 
+  /** Журнал подключения: входы и отказы в приёме, новые сверху (ADR-0096). */
+  @Cabinets('client')
+  @Get('client/messages/smpp/events')
+  async events(@CurrentUser() actor: Principal): Promise<{ events: SmppEventView[] }> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return { events: await this.smpp.eventsOf(client.id) };
+  }
+
   @Cabinets('client')
   @Patch('client/messages/smpp')
   async update(
@@ -113,12 +142,17 @@ export class StaffSmppController {
   constructor(
     private readonly smpp: SmppService,
     private readonly billing: BillingService,
+    private readonly server: SmppServer,
   ) {}
 
   @Roles('admin', 'support')
   @Get('smpp/accounts')
   async list(): Promise<{
-    accounts: (SmppView & { client_id: string; client_name: string | null })[];
+    accounts: (SmppView & {
+      client_id: string;
+      client_name: string | null;
+      online: OnlineView[];
+    })[];
   }> {
     const { rows } = await this.billing.listClients({ limit: 200, offset: 0 });
     const names = new Map<string, string>(rows.map((client) => [client.id, client.name]));
@@ -128,8 +162,16 @@ export class StaffSmppController {
         ...toView(row),
         client_id: row.clientId,
         client_name: names.get(row.clientId) ?? null,
+        online: onlineOf(this.server, row.clientId),
       })),
     };
+  }
+
+  /** Журнал подключения клиента — сотрудникам: подключается ли программа и почему отклонена (ADR-0096). */
+  @Roles('admin', 'support')
+  @Get('smpp/accounts/:clientId/events')
+  async events(@Param('clientId') clientId: string): Promise<{ events: SmppEventView[] }> {
+    return { events: await this.smpp.eventsOf(parseId(clientId, 'client')) };
   }
 
   /** Отключение или возврат подключения клиента: пароль и адреса не трогаются. */

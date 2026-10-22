@@ -13,14 +13,19 @@ import {
   conflict,
   notFound,
   SMPP_ALLOWED_IPS_MAX,
+  SMPP_EVENTS_KEEP_DAYS,
   validationFailed,
   type Id,
+  type SmppBindMode,
+  type SmppBindResult,
+  type SmppEventKind,
   type SmppReceiptMap,
 } from '@zvonix/shared';
 import { AuditService } from '../../audit/audit.service.js';
 import { BillingService } from '../../billing/billing.service.js';
 import type { Principal } from '../../identity/identity.service.js';
 import { MessagingService } from '../messaging.service.js';
+import { SmppEventsRepository } from './smpp-events.repository.js';
 import { SmppRepository, type SmppAccountRow } from './smpp.repository.js';
 
 /** Без неоднозначных знаков (0/O, 1/l/I): пароль переписывают руками и диктуют по телефону. */
@@ -28,12 +33,35 @@ const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz2345
 const PASSWORD_LENGTH = 16;
 const SYSTEM_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
-/** Почему вход отклонён: SMPP-сервер превращает это в код ответа, клиенту подробности не нужны. */
-type BindRefusal = 'unknown_system_id' | 'wrong_password' | 'refused';
+/**
+ * Почему вход отклонён. SMPP-сервер превращает это в общий код ответа (имена не перебрать по ответам), а подробность пишет
+ * в журнал подключения (ADR-0096) — кроме неизвестного имени: его не к чему привязать.
+ */
+type BindRefusal =
+  'unknown_system_id' | Exclude<SmppBindResult, 'ok' | 'too_many_sessions' | 'ip_blocked'>;
 
 export type BindResult =
   | { readonly ok: true; readonly clientId: Id<'client'>; readonly accountId: SmppAccountRow['id'] }
-  | { readonly ok: false; readonly refusal: BindRefusal };
+  | {
+      readonly ok: false;
+      readonly refusal: BindRefusal;
+      /** Подключение, к которому относится отказ; нет — имя неизвестно. */
+      readonly accountId?: SmppAccountRow['id'];
+    };
+
+/** Событие журнала так, как его видит клиент и сотрудник. */
+export interface SmppEventView {
+  readonly kind: SmppEventKind;
+  readonly result: string;
+  readonly ip: string;
+  readonly mode: SmppBindMode | null;
+  readonly count: number;
+  readonly first_at: string;
+  readonly last_at: string;
+}
+
+/** Сколько событий журнала показывается. */
+const EVENTS_SHOWN = 100;
 
 const pick = (alphabet: string, length: number): string =>
   Array.from({ length }, () => alphabet[randomInt(alphabet.length)]).join('');
@@ -59,6 +87,7 @@ export const normalizeIp = (ip: string): string =>
 export class SmppService {
   constructor(
     private readonly repository: SmppRepository,
+    private readonly events: SmppEventsRepository,
     private readonly messaging: MessagingService,
     private readonly billing: BillingService,
     private readonly audit: AuditService,
@@ -194,20 +223,56 @@ export class SmppService {
     const expected = Buffer.from(account?.passwordHash ?? '0'.repeat(64), 'hex');
     const matches = timingSafeEqual(expected, hashOf(systemId, password));
     if (account === undefined) return { ok: false, refusal: 'unknown_system_id' };
-    if (!matches) return { ok: false, refusal: 'wrong_password' };
+    const refuse = (refusal: BindRefusal): BindResult => ({
+      ok: false,
+      refusal,
+      accountId: account.id,
+    });
+    if (!matches) return refuse('wrong_password');
 
-    if (!account.enabled) return { ok: false, refusal: 'refused' };
+    if (!account.enabled) return refuse('disabled');
     if (
       account.allowedIps.length > 0 &&
       !account.allowedIps.some((allowed) => allowed === normalizeIp(ip))
     ) {
-      return { ok: false, refusal: 'refused' };
+      return refuse('ip_not_allowed');
     }
-    if (!(await this.messaging.isEnabled())) return { ok: false, refusal: 'refused' };
+    if (!(await this.messaging.isEnabled())) return refuse('product_off');
     const client = await this.billing.clientWithBalance(account.clientId);
-    if (client.status !== 'active') return { ok: false, refusal: 'refused' };
+    if (client.status !== 'active') return refuse('client_inactive');
 
     await this.repository.touchBind(account.id, new Date());
     return { ok: true, clientId: account.clientId, accountId: account.id };
+  }
+
+  /** Запись в журнал подключения (ADR-0096). Сбой записи не мешает работе SMPP — журнал вспомогательный. */
+  async record(event: {
+    accountId: SmppAccountRow['id'];
+    kind: SmppEventKind;
+    result: string;
+    ip: string;
+    mode: SmppBindMode | null;
+  }): Promise<void> {
+    await this.events.record({ ...event, ip: normalizeIp(event.ip) }, new Date());
+  }
+
+  /** Журнал подключения клиента; подключения нет — `404`. */
+  async eventsOf(clientId: Id<'client'>): Promise<SmppEventView[]> {
+    const account = await this.repository.findByClient(clientId);
+    if (account === undefined) throw notFound('Подключения SMPP нет');
+    return (await this.events.list(account.id, EVENTS_SHOWN)).map((row) => ({
+      kind: row.kind,
+      result: row.result,
+      ip: row.ip,
+      mode: row.mode,
+      count: row.count,
+      first_at: row.createdAt.toISOString(),
+      last_at: row.lastAt.toISOString(),
+    }));
+  }
+
+  /** Стирает журнал старше срока — фоновая задача (догоняющая, по сроку — ADR-0020). */
+  purgeEvents(now: Date): Promise<number> {
+    return this.events.purge(new Date(now.getTime() - SMPP_EVENTS_KEEP_DAYS * 86_400_000));
   }
 }

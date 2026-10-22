@@ -11,13 +11,15 @@ import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
 import type { Principal } from '../identity/identity.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { MessagingService } from './messaging.service.js';
 import {
   RequirementsService,
   type AccountOfferView,
+  type DeliveryView,
   type RequirementsView,
 } from './requirements.service.js';
-import { exclusionSchema, requirementsSchema } from './schemas.js';
+import { deliverySchema, exclusionSchema, requirementsSchema } from './schemas.js';
 
 @Controller()
 export class RequirementsController {
@@ -25,6 +27,7 @@ export class RequirementsController {
     private readonly requirements: RequirementsService,
     private readonly billing: BillingService,
     private readonly messaging: MessagingService,
+    private readonly settings: SettingsService,
   ) {}
 
   @Cabinets('client')
@@ -55,6 +58,36 @@ export class RequirementsController {
       body,
     );
     return { requirements };
+  }
+
+  /** «Если отправить сразу нельзя» и «сколько ждать» (ADR-0097). */
+  @Cabinets('client')
+  @Get('client/messages/delivery')
+  async delivery(
+    @CurrentUser() actor: Principal,
+  ): Promise<{ delivery: DeliveryView; platform_max_wait_minutes: number }> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    const [delivery, { maxWaitMinutes }] = await Promise.all([
+      this.requirements.delivery(client.id),
+      this.settings.messaging(),
+    ]);
+    // Значение площадки — чтобы кабинет показал, сколько ждёт «по умолчанию».
+    return { delivery, platform_max_wait_minutes: maxWaitMinutes };
+  }
+
+  @Cabinets('client')
+  @Put('client/messages/delivery')
+  async setDelivery(
+    @CurrentUser() actor: Principal,
+    @Body(zodBody(deliverySchema)) body: z.infer<typeof deliverySchema>,
+  ): Promise<{ delivery: DeliveryView }> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    const delivery = await this.requirements.setDelivery(
+      { userId: actor.userId, role: actor.role },
+      client.id,
+      body,
+    );
+    return { delivery };
   }
 
   @Cabinets('client')

@@ -42,6 +42,13 @@
 - Отказы: не хватает денег или клиент не работает — `ESME_RSUBMITFAIL` (0x45); нет доступных аккаунтов,
   слишком часто (более 50 сообщений в секунду с сессии, более 100 в очереди) — `ESME_RTHROTTLED` (0x58),
   клиент повторяет сам; сбой площадки — `ESME_RSYSERR` (0x08).
+- **Все аккаунты заняты** ([ADR-0097](../adr/0097-zanyato-i-srok-soobshcheniya.md)): по умолчанию у SMPP — **отказ сразу**,
+  `ESME_RTHROTTLED` (0x58), денег не списано — программа может отправить через другого агрегатора. Клиент может выбрать «ждать»
+  (`PUT /client/messages/delivery`, раздел «Подключения»): сообщение встаёт в очередь до срока, не ушло — отчёт `EXPIRED`.
+  Ближайший аккаунт освободится позже срока — отказ сразу и в режиме «ждать».
+- **Срок сообщения** — `validity_period` (SMPP 3.4, 7.1.1): абсолютный `YYMMDDhhmmsstnn±` (nn — четверти часа от UTC: Москва —
+  `012+`) или относительный `YYMMDDhhmmss000R`. Действует меньшее из срока сообщения и «сколько ждать» клиента (не задано —
+  настройка площадки). Неразборчивый или уже прошедший срок — `ESME_RINVEXPIRY` (0x62).
 - Повтор после обрыва создаёт **второе** сообщение: у протокола нет ключа повтора. Нужна защита от
   повторов — HTTP с `externalId`.
 - Операции вне подмножества (`query_sm`, `cancel_sm`, `replace_sm`, `data_sm`, …) — `generic_nack`
@@ -83,7 +90,8 @@ id:<message_id> sub:001 dlvrd:001 submit date:ГГММДДччмм done date:Г�
 Только свой контур (`/client/*`).
 
 - `GET /client/messages/smpp` → `{ "enabled": true, "connection": { "host", "port", "tls_port" }, "smpp": { "system_id", "enabled", "allowed_ips", "receipts": { "sent", "delivered", "read" }, "last_bind_at", "created_at" } | null }`.
-  `port` и `tls_port` — `null`, если слушатель не включён.
+  `port` и `tls_port` — `null`, если слушатель не включён. В `smpp` — `online: [{ "ip", "mode", "since" }]`: кто сейчас на связи
+  под подключением (пусто — никто); у сотрудников в `GET /smpp/accounts` — то же поле.
 - `POST /client/messages/smpp` → `201`, `{ "smpp": { … }, "password": "…" }`. Пароль — единственный раз.
   `409` — подключение уже создано или продукт выключен.
 - `POST /client/messages/smpp/password` → `{ "smpp": { … }, "password": "…" }`: новый пароль, прежний
@@ -95,10 +103,20 @@ id:<message_id> sub:001 dlvrd:001 submit date:ГГММДДччмм done date:Г�
 Создание, смена пароля и изменение пишутся в журнал (`smpp_account.created`, `smpp_account.password_reset`,
 `smpp_account.updated`); пароль в журнал не попадает.
 
+- `GET /client/messages/smpp/events` → `{ "events": [{ "kind": "bind"|"submit", "result", "ip", "mode", "count", "first_at",
+  "last_at" }] }` — **журнал подключения** ([ADR-0096](../adr/0096-zhurnal-podklyucheniy-smpp.md)), последние 100, новые сверху.
+  `bind`: `ok`, `wrong_password`, `ip_not_allowed`, `disabled`, `product_off`, `client_inactive`, `too_many_sessions`,
+  `ip_blocked` (5 неверных паролей за минуту — адрес до конца минуты не пускается; пишется один раз, когда пауза началась); `submit`
+  (сообщение не принято): `invalid_destination`, `invalid_length`, `wrong_mode` (вход только для отчётов), `rejected` (деньги,
+  требования, «не писать»), `throttled` («повторите»), `system_error`. Одинаковые события за минуту — одна строка, `count` —
+  сколько раз. Неизвестное имя для входа и попытки с адреса, заблокированного за перебор, не пишутся. Номер и текст
+  сообщения не пишутся. Хранится 30 суток (задача воркера `smpp.purge-events`). Подключения нет — `404`.
+
 ## Сотрудникам
 
 - `GET /smpp/accounts` (роли `admin`, `support`) → `{ "accounts": [{ "client_id", "client_name", "system_id", "enabled",
   "allowed_ips", "last_bind_at", "created_at" }] }`. Пароль не отдаётся никому, кроме клиента при создании.
+- `GET /smpp/accounts/:clientId/events` (роли `admin`, `support`) — журнал подключения клиента, как у клиента выше.
 - `PATCH /smpp/accounts/:clientId` (только `admin`) ← `{ "enabled": false }` — отключить подключение клиента (например,
   при подозрении на утечку пароля) или вернуть; пишется в журнал (`smpp_account.updated`). Открытые сессии доживают до
   разрыва, новые входы отклоняются (`ESME_RBINDFAIL`).

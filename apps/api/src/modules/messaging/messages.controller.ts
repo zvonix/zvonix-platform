@@ -28,6 +28,17 @@ import {
   sendMessageSchema,
 } from './schemas.js';
 
+/** `validMinutes` запроса — срок сообщения от момента приёма (ADR-0097). */
+const withValidity = ({
+  validMinutes,
+  ...rest
+}: z.infer<typeof sendMessageSchema>): Parameters<MessagesService['send']>[1] => ({
+  ...rest,
+  ...(validMinutes === undefined
+    ? {}
+    : { validUntil: new Date(Date.now() + validMinutes * 60_000) }),
+});
+
 const withoutText = ({
   text: _text,
   full_text: _fullText,
@@ -173,7 +184,7 @@ export class ClientMessagesController {
     @Body(zodBody(sendMessageSchema)) body: z.infer<typeof sendMessageSchema>,
   ): Promise<{ message: ClientMessageView }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    const row = await this.messages.send(client.id, body);
+    const row = await this.messages.send(client.id, withValidity(body));
     return { message: toClientView(row) };
   }
 }
@@ -189,7 +200,7 @@ export class ClientApiMessagesController {
     @CurrentMachine() machine: MachinePrincipal,
     @Body(zodBody(sendMessageSchema)) body: z.infer<typeof sendMessageSchema>,
   ): Promise<{ message: ClientMessageView }> {
-    const row = await this.messages.send(clientOf(machine), body);
+    const row = await this.messages.send(clientOf(machine), withValidity(body));
     return { message: toClientView(row) };
   }
 

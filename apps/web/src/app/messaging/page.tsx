@@ -13,6 +13,7 @@ import {
   type AccountRest,
 } from '@/components/messenger-status';
 import { BotPlatform } from './bot-platform';
+import { SmppEvents } from '@/components/smpp-events';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import { Hint } from '@/components/hint';
@@ -470,6 +471,8 @@ interface SmppConnection {
   readonly enabled: boolean;
   readonly allowed_ips: readonly string[];
   readonly last_bind_at: string | null;
+  /** Сейчас на связи (ADR-0096). */
+  readonly online: readonly { ip: string }[];
 }
 
 /**
@@ -509,7 +512,7 @@ function SmppConnections() {
               <TableHead className="h-8">Адреса</TableHead>
               <TableHead className="h-8">Был на связи</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
-              {canChange && <TableHead className="h-8" />}
+              <TableHead className="h-8" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -525,38 +528,56 @@ function SmppConnections() {
                     : `ограничены: ${String(account.allowed_ips.length)}`}
                 </TableCell>
                 <TableCell>
-                  <span className="num text-muted-foreground">{moment(account.last_bind_at)}</span>
+                  {account.online.length > 0 ? (
+                    <span className="text-ok" title={account.online.map((s) => s.ip).join(', ')}>
+                      сейчас на связи
+                    </span>
+                  ) : (
+                    <span className="num text-muted-foreground">
+                      {moment(account.last_bind_at)}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className={account.enabled ? 'text-ok' : 'text-warn'}>
                   {account.enabled ? 'Включено' : 'Отключено'}
                 </TableCell>
-                {canChange && (
-                  <TableCell className="text-right">
-                    {account.enabled ? (
-                      <ConfirmAction
-                        label="Отключить"
-                        title={`Отключить SMPP клиента «${account.client_name ?? account.system_id}»`}
-                        consequence="Новые подключения клиента будут отклоняться, пока вы не включите его снова. Открытые сессии доживут до разрыва."
-                        confirmLabel="Отключить"
-                        size="xs"
-                        onConfirm={() =>
-                          toggle.mutateAsync({ clientId: account.client_id, enabled: false })
-                        }
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={toggle.isPending}
-                        onClick={() => {
-                          toggle.mutate({ clientId: account.client_id, enabled: true });
-                        }}
-                        className="min-h-7 rounded-md border border-border px-2 hover:bg-muted"
-                      >
-                        Включить
-                      </button>
-                    )}
-                  </TableCell>
-                )}
+                <TableCell className="text-right">
+                  <span className="inline-flex items-center gap-2">
+                    {/* Журнал подключения — и поддержке: «подключается ли программа клиента» (ADR-0096). */}
+                    <FormDialog
+                      label="Журнал"
+                      title={`Журнал SMPP: ${account.client_name ?? account.system_id}`}
+                      variant="outline"
+                      size="xs"
+                    >
+                      <SmppEvents url={`/smpp/accounts/${account.client_id}/events`} />
+                    </FormDialog>
+                    {canChange &&
+                      (account.enabled ? (
+                        <ConfirmAction
+                          label="Отключить"
+                          title={`Отключить SMPP клиента «${account.client_name ?? account.system_id}»`}
+                          consequence="Новые подключения клиента будут отклоняться, пока вы не включите его снова. Открытые сессии доживут до разрыва."
+                          confirmLabel="Отключить"
+                          size="xs"
+                          onConfirm={() =>
+                            toggle.mutateAsync({ clientId: account.client_id, enabled: false })
+                          }
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={toggle.isPending}
+                          onClick={() => {
+                            toggle.mutate({ clientId: account.client_id, enabled: true });
+                          }}
+                          className="min-h-7 rounded-md border border-border px-2 hover:bg-muted"
+                        >
+                          Включить
+                        </button>
+                      ))}
+                  </span>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

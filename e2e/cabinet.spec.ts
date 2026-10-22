@@ -634,8 +634,29 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
     await expect(page.getByText('Был на связи')).toBeVisible();
 
     await page.getByLabel(/Разрешённые адреса/u).fill('203.0.113.5');
-    await page.getByRole('button', { name: 'Сохранить' }).click();
+    // «Сохранить» на странице два (адреса и «Если отправить сразу нельзя») — берётся кнопка формы адресов.
+    await page
+      .locator('form', { has: page.getByLabel(/Разрешённые адреса/u) })
+      .getByRole('button', { name: 'Сохранить' })
+      .click();
     await expect(page.getByLabel(/Разрешённые адреса/u)).toHaveValue('203.0.113.5');
+    // Пустой журнал говорит, что программа не обращалась (ADR-0096).
+    await expect(page.getByText('Подключений не было')).toBeVisible();
+
+    // «Если отправить сразу нельзя» (ADR-0097): выбор сохраняется.
+    const delivery = page.locator('section', {
+      has: page.getByRole('heading', { name: 'Если отправить сразу нельзя' }),
+    });
+    await delivery.getByRole('button', { name: 'Ждать' }).click();
+    await delivery.getByLabel('Сколько ждать, минут').fill('5');
+    await delivery.getByRole('button', { name: 'Сохранить' }).click();
+    await expect(delivery.getByRole('status')).toHaveText('Сохранено');
+    await page.reload();
+    await expect(delivery.getByRole('button', { name: 'Ждать' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(delivery.getByLabel('Сколько ждать, минут')).toHaveValue('5');
 
     await page.getByRole('button', { name: 'Новый пароль' }).click();
     await page.getByRole('button', { name: 'Выпустить' }).click();

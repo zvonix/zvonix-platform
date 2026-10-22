@@ -8,7 +8,13 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
-import { isDomainError, MESSAGE_MAX_LENGTH, normalizeMsisdn, type Id } from '@zvonix/shared';
+import {
+  isDomainError,
+  MESSAGE_MAX_LENGTH,
+  normalizeMsisdn,
+  type Id,
+  type SmppSubmitRefusal,
+} from '@zvonix/shared';
 import type { Logger } from '../../../infra/tokens.js';
 import {
   bindResponseBody,
@@ -21,6 +27,7 @@ import {
   PduFramer,
   RESPONSE_BIT,
   SmppProtocolError,
+  smppTimeToDate,
   Status,
   type Pdu,
   type SubmitRequest,
@@ -35,9 +42,14 @@ export interface SessionHost {
     session: SmppSession,
     mode: BindMode,
     credentials: { systemId: string; password: string },
-  ): Promise<{ status: number; clientId?: Id<'client'> }>;
-  /** Принимает сообщение клиента; возвращает его идентификатор. Бросает доменную ошибку при отказе. */
-  submit(clientId: Id<'client'>, to: string, text: string): Promise<string>;
+  ): Promise<{ status: number; clientId?: Id<'client'>; accountId?: Id<'smppAccount'> }>;
+  /**
+   * Принимает сообщение клиента; возвращает его идентификатор. Бросает доменную ошибку при отказе. `validUntil` — срок
+   * сообщения из `validity_period` (ADR-0097).
+   */
+  submit(clientId: Id<'client'>, to: string, text: string, validUntil?: Date): Promise<string>;
+  /** Сообщение не принято — в журнал подключения (ADR-0096). */
+  refused(session: SmppSession, reason: SmppSubmitRefusal): void;
   closed(session: SmppSession): void;
 }
 
@@ -69,6 +81,10 @@ interface PartGroup {
 export class SmppSession {
   mode: BindMode | undefined;
   clientId: Id<'client'> | undefined;
+  /** Подключение клиента, под которым вошли: к нему пишется журнал отказов. */
+  accountId: Id<'smppAccount'> | undefined;
+  /** Когда вошли — для «Сейчас на связи» в кабинете. */
+  boundAt: Date | undefined;
 
   private readonly framer = new PduFramer();
   private readonly groups = new Map<string, PartGroup>();
@@ -292,17 +308,19 @@ export class SmppSession {
     }
     this.mode = mode;
     this.clientId = result.clientId;
+    this.accountId = result.accountId;
+    this.boundAt = new Date();
     clearTimeout(this.bindTimer);
     this.respond(pdu, Status.ok, bindResponseBody('zvonix'));
   }
 
   private enqueueSubmit(pdu: Pdu): void {
     if (this.mode === undefined || !this.canSubmit || this.clientId === undefined) {
-      this.respond(pdu, Status.incorrectBindStatus);
+      this.refuse(pdu, Status.incorrectBindStatus, 'wrong_mode');
       return;
     }
     if (this.queued >= MAX_QUEUED_SUBMITS || !this.withinRate()) {
-      this.respond(pdu, Status.throttled);
+      this.refuse(pdu, Status.throttled, 'throttled');
       return;
     }
     const clientId = this.clientId;
@@ -313,7 +331,7 @@ export class SmppSession {
         await this.processSubmit(pdu, clientId);
       } catch (cause) {
         this.logger.error('SMPP: сбой приёма сообщения', cause, { ip: this.ip });
-        this.respond(pdu, Status.systemError);
+        this.refuse(pdu, Status.systemError, 'system_error');
       } finally {
         this.queued -= 1;
       }
@@ -355,20 +373,48 @@ export class SmppSession {
     }
 
     if (normalizeMsisdn(request.destination) === undefined) {
-      this.respond(pdu, Status.invalidDestination);
+      this.refuse(pdu, Status.invalidDestination, 'invalid_destination');
       return;
     }
     if (text.trim() === '' || text.length > MESSAGE_MAX_LENGTH) {
-      this.respond(pdu, Status.invalidMessageLength);
+      this.refuse(pdu, Status.invalidMessageLength, 'invalid_length');
+      return;
+    }
+    // Срок сообщения (ADR-0097): относительный отсчитывается от приёма; неразборчивый или прошедший — отказ сразу.
+    let validUntil: Date | undefined;
+    try {
+      const now = new Date();
+      validUntil = smppTimeToDate(request.validity, now);
+      if (validUntil !== undefined && validUntil <= now) {
+        this.refuse(pdu, Status.invalidExpiry, 'invalid_validity');
+        return;
+      }
+    } catch {
+      this.refuse(pdu, Status.invalidExpiry, 'invalid_validity');
       return;
     }
 
     try {
-      const id = await this.host.submit(clientId, request.destination, text);
+      const id = await this.host.submit(clientId, request.destination, text, validUntil);
       this.respond(pdu, Status.ok, cString(id));
     } catch (cause) {
-      this.respond(pdu, this.statusOf(cause));
+      const status = this.statusOf(cause);
+      this.refuse(
+        pdu,
+        status,
+        status === Status.throttled
+          ? 'throttled'
+          : status === Status.submitFailed
+            ? 'rejected'
+            : 'system_error',
+      );
     }
+  }
+
+  /** Ответ об отказе на `submit_sm` — и запись в журнал подключения (ADR-0096). */
+  private refuse(pdu: Pdu, status: number, reason: SmppSubmitRefusal): void {
+    this.respond(pdu, status);
+    this.host.refused(this, reason);
   }
 
   /** Склеивает часть с остальными; `undefined` — ещё не все, строка — готовый текст. */

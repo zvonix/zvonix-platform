@@ -224,8 +224,15 @@ MAX либо нет связи; `retired` — списан (в списках е
 - `GET /client/messages/price` → `{ "enabled": true, "price": "0.54" }` — сколько сообщение стоит сейчас;
   `price: null` — принять некуда.
 - `GET /client/messages?status=&limit=&offset=` → `{ "messages": [ … ], "total": 3 }`.
-- `POST /client/messages` `{ "to": "+7 900 123-45-67", "text": "…", "externalId": "…" }` → `201`
-  `{ "message": { … } }` в состоянии `queued`.
+- `POST /client/messages` `{ "to": "+7 900 123-45-67", "text": "…", "externalId": "…", "validMinutes": 5 }` → `201`
+  `{ "message": { … } }` в состоянии `queued`. `validMinutes` (1–1440, необязательно) — срок сообщения: не ушло за это время —
+  `wait_expired`, деньги возвращаются; действует меньшее из него и «сколько ждать» клиента ([ADR-0097](../adr/0097-zanyato-i-srok-soobshcheniya.md)).
+  Все аккаунты заняты и клиент выбрал «отказать сразу» (или ждать бессмысленно — освободятся позже срока) — `503`,
+  `error.details.reason = "all_busy"`, денег не списано.
+- `GET|PUT /client/messages/delivery` — `{ "busyMode": "reject"|"wait"|null, "maxWaitMinutes": 1–1440|null }`: что делать, если
+  свободного аккаунта нет, и сколько ждать. `null` — по умолчанию: по SMPP отказать сразу, через API и кабинет — ждать;
+  ждать — `messages.max_wait_minutes` площадки (`GET` отдаёт его в `platform_max_wait_minutes`). Журнал —
+  `client_message_delivery.set`.
 
 ### API клиента по ключу (`/v1`, [ADR-0044](../adr/0044-klientskiy-api.md))
 

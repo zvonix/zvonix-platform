@@ -35,6 +35,8 @@ export const Status = {
   invalidSystemId: 0x0f,
   submitFailed: 0x45,
   throttled: 0x58,
+  /** `ESME_RINVEXPIRY`: срок сообщения не разобран или уже прошёл (ADR-0097). */
+  invalidExpiry: 0x62,
 } as const;
 
 /** Опциональные параметры (TLV), которые мы читаем или пишем. */
@@ -197,6 +199,44 @@ export interface SubmitRequest {
   /** Текст целиком, либо часть длинного текста — тогда `part` заполнено. */
   readonly text: string;
   readonly part?: ConcatPart;
+  /**
+   * `validity_period` как есть (SMPP 3.4, 7.1.1): пусто — срок не задан. Переводится во время функцией {@link smppTimeToDate}
+   * в момент приёма — относительный срок отсчитывается от него.
+   */
+  readonly validity: string;
+}
+
+/**
+ * Время SMPP 3.4 (7.1.1) в момент: абсолютное `YYMMDDhhmmsstnn±` (nn — четверти часа от UTC) или относительное `YYMMDDhhmmss000R`
+ * от `now` (месяц — 30 суток, год — 365). Пусто — `undefined`; неразборчивое — ошибка протокола (`ESME_RINVEXPIRY`).
+ */
+export function smppTimeToDate(value: string, now: Date): Date | undefined {
+  if (value === '') return undefined;
+  const match = /^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d)(\d{2})([+\-R])$/u.exec(value);
+  if (match === null) throw new SmppProtocolError(Status.invalidExpiry, 'Неверный срок сообщения');
+  const [yy, mo, dd, hh, mi, ss, tenth, nn, kind] = match
+    .slice(1)
+    .map((part, index) => (index === 8 ? part : Number(part))) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    string,
+  ];
+  if (kind === 'R') {
+    const seconds = ((yy * 365 + mo * 30 + dd) * 24 + hh) * 3600 + mi * 60 + ss;
+    return new Date(now.getTime() + seconds * 1000);
+  }
+  if (mo < 1 || mo > 12 || dd < 1 || dd > 31 || hh > 23 || mi > 59 || ss > 59 || nn > 48) {
+    throw new SmppProtocolError(Status.invalidExpiry, 'Неверный срок сообщения');
+  }
+  const offsetMinutes = (kind === '+' ? 1 : -1) * nn * 15;
+  const local = Date.UTC(2000 + yy, mo - 1, dd, hh, mi, ss, tenth * 100);
+  return new Date(local - offsetMinutes * 60_000);
 }
 
 /** Часть длинного текста: набор по `reference` собирается, когда пришли все `total` частей. */
@@ -220,7 +260,7 @@ export function decodeSubmit(body: Buffer): SubmitRequest {
   reader.byte(); // protocol_id
   reader.byte(); // priority_flag
   reader.cString(16); // schedule_delivery_time
-  reader.cString(16); // validity_period
+  const validity = reader.cString(16);
   const registeredDelivery = reader.byte();
   reader.byte(); // replace_if_present_flag
   const dataCoding = reader.byte();
@@ -259,6 +299,7 @@ export function decodeSubmit(body: Buffer): SubmitRequest {
     dataCoding,
     registeredDelivery,
     text: decodeText(payload, dataCoding),
+    validity,
     ...(part === undefined ? {} : { part }),
   };
 }
@@ -371,6 +412,8 @@ function tlv(tag: number, value: Buffer): Buffer {
 }
 
 export interface SubmitDraft {
+  /** `validity_period` как есть (ADR-0097); пусто — без срока. */
+  readonly validity?: string;
   readonly destination: string;
   readonly text: string;
   readonly dataCoding?: number;
@@ -410,7 +453,7 @@ export function encodeSubmitBody(draft: SubmitDraft): Buffer {
     cString(draft.destination),
     Buffer.from([esmClass, 0x00, 0x00]),
     cString(''),
-    cString(''),
+    cString(draft.validity ?? ''),
     Buffer.from([0x01, 0x00, dataCoding, 0x00, text.length]),
     text,
   ]);

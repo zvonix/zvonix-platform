@@ -159,6 +159,8 @@ export class MessagesRepository {
       clientAmount: MoneyAmount;
       partnerAmount: MoneyAmount;
       commissionAmount: MoneyAmount;
+      /** Не ушло к этому моменту — отказ с возвратом (ADR-0097). */
+      expiresAt?: Date;
     },
     executor: Executor = this.database.db,
   ): Promise<MessageRow> {
@@ -642,11 +644,23 @@ export class MessagesRepository {
   }
 
   /** Ждут отправки дольше срока. */
-  listWaitingBefore(before: Date, limit: number): Promise<MessageRow[]> {
+  /**
+   * Ждущие сверх срока: свой срок у сообщения (ADR-0097) прошёл, а у строк без срока — принятые раньше `before` (прежнее правило
+   * площадки). Догоняюще, по сроку, а не «с прошлого запуска».
+   */
+  listWaitingBefore(before: Date, limit: number, now: Date = new Date()): Promise<MessageRow[]> {
     return this.database.db
       .select()
       .from(messages)
-      .where(and(inArray(messages.status, ['queued', 'sending']), lt(messages.createdAt, before)))
+      .where(
+        and(
+          inArray(messages.status, ['queued', 'sending']),
+          or(
+            and(isNotNull(messages.expiresAt), lt(messages.expiresAt, now)),
+            and(isNull(messages.expiresAt), lt(messages.createdAt, before)),
+          ),
+        ),
+      )
       .orderBy(asc(messages.createdAt))
       .limit(limit);
   }

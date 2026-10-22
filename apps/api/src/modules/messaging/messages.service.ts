@@ -37,6 +37,7 @@ import { MessagingService } from './messaging.service.js';
 import { StopsService } from './stops.service.js';
 import { TemplatesService } from './templates.service.js';
 import { AccountPicker } from './account-picker.js';
+import { defaultBusyMode, RequirementsService } from './requirements.service.js';
 import { commissionOf } from './commission.js';
 import { accountReadyAt, withRecommended } from './warmup.js';
 import {
@@ -98,6 +99,7 @@ export class MessagesService {
     private readonly templates: TemplatesService,
     private readonly stops: StopsService,
     private readonly picker: AccountPicker,
+    private readonly requirements: RequirementsService,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -186,7 +188,13 @@ export class MessagesService {
    */
   async send(
     clientId: Id<'client'>,
-    input: { to: string; text: string; externalId?: string | undefined },
+    input: {
+      to: string;
+      text: string;
+      externalId?: string | undefined;
+      /** Срок сообщения от программы (SMPP `validity_period`, API `validMinutes`, ADR-0097). */
+      validUntil?: Date | undefined;
+    },
     channel: MessageChannel = 'api',
   ): Promise<MessageRow> {
     await this.messaging.assertEnabled();
@@ -209,6 +217,19 @@ export class MessagesService {
       const earlier = await this.repository.findByExternal(clientId, externalId);
       if (earlier !== undefined) return this.sameOrRefuse(earlier, recipient, input.text);
     }
+
+    // Срок отправки (ADR-0097): меньшее из срока сообщения и «сколько ждать» клиента (не задано — настройка площадки).
+    const now = new Date();
+    const [delivery, { maxWaitMinutes: platformWait }] = await Promise.all([
+      this.requirements.delivery(clientId),
+      this.settings.messaging(),
+    ]);
+    const waitUntil = new Date(
+      now.getTime() + (delivery.max_wait_minutes ?? platformWait) * 60_000,
+    );
+    const expiresAt =
+      input.validUntil !== undefined && input.validUntil < waitUntil ? input.validUntil : waitUntil;
+    if (expiresAt <= now) throw validationFailed('Срок сообщения уже прошёл');
 
     // Повтор одного и того же текста одному номеру за короткое время — главная причина блокировки аккаунтов и
     // частая ошибка клиента (повторный запрос). Повтор по тому же внешнему номеру обработан выше как один и тот же
@@ -244,10 +265,22 @@ export class MessagesService {
     // Предел на номер — только для аккаунтов партнёров: бот пишет подписчику, который сам его позвал, и жалоб на
     // аккаунт от этого не бывает.
     if (viaBot === undefined) await this.assertRecipientLimit(clientId, recipient);
-    const account =
+    const picked =
       viaBot === undefined
-        ? await this.picker.pick(new Date(), { sticky: { clientId, recipient } })
+        ? await this.picker.pickWithState(now, { sticky: { clientId, recipient } })
         : undefined;
+    const account = picked?.account;
+    // Свободного нет — «первый по давности», сообщение встало бы в очередь (ADR-0097). Клиент выбрал «отказать сразу» (у SMPP —
+    // по умолчанию) или аккаунт освободится только после срока — отказ сейчас: программа уйдёт к другому агрегатору, а не
+    // получит «не доставлено» через полчаса. Денег не списано — проводки ещё нет.
+    if (account !== undefined && picked?.free === false) {
+      const mode = delivery.busy_mode ?? defaultBusyMode(channel);
+      if (mode === 'reject' || (await this.picker.freeAt(account, now)) >= expiresAt) {
+        throw dependencyUnavailable('Все аккаунты сейчас заняты — повторите позже', {
+          details: { reason: 'all_busy' },
+        });
+      }
+    }
     if (viaBot === undefined && account === undefined) {
       // Без требований клиента аккаунт нашёлся бы — мешают требования, а не площадка (ADR-0092).
       const withoutRules = await this.picker.pick(new Date(), {
@@ -274,6 +307,7 @@ export class MessagesService {
           text: input.text,
           route: 'bot' as const,
           botId: viaBot.botId,
+          expiresAt,
           clientAmount: viaBot.price,
           partnerAmount: Money.ZERO,
           commissionAmount: viaBot.price,
@@ -312,6 +346,7 @@ export class MessagesService {
                 text: input.text,
                 accountId: account.id,
                 partnerId: account.partnerId,
+                expiresAt,
                 clientAmount: quote.clientAmount,
                 partnerAmount: quote.partnerAmount,
                 commissionAmount: quote.commissionAmount,
@@ -725,6 +760,7 @@ ${STOP_LINE}`
     const stale = await this.repository.listWaitingBefore(
       new Date(now.getTime() - maxWaitMinutes * 60_000),
       EXPIRY_BATCH,
+      now,
     );
     for (const message of stale) await this.fail(message, 'wait_expired', now);
     return stale.length;

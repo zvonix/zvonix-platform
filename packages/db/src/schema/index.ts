@@ -63,4 +63,5 @@ export {
   messengerTariffs,
   messages,
   smppAccounts,
+  smppEvents,
 } from './messenger.js';

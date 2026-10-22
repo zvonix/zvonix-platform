@@ -55,6 +55,7 @@ export { LimitService, COUNTER_RETENTION_DAYS } from './modules/limits/limit.ser
 
 export { MessagingModule } from './modules/messaging/messaging.module.js';
 export { BotsService } from './modules/messaging/bot/bots.service.js';
+export { SmppService } from './modules/messaging/smpp/smpp.service.js';
 export { MessagesService } from './modules/messaging/messages.service.js';
 export { MessagingService } from './modules/messaging/messaging.service.js';
 export { NodesModule } from './modules/nodes/nodes.module.js';

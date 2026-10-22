@@ -254,6 +254,13 @@ describe('выбор аккаунта по режиму партнёра', () =>
       quietToMinute: (nowMinute + 120) % 1440,
     });
     const client = await fx.clientWithMoney('10');
+    // Ждать сутки: тихие часы кончатся до срока, иначе приём откажет сразу — ждать бессмысленно (ADR-0097).
+    await api().inject({
+      method: 'PUT',
+      url: '/client/messages/delivery',
+      headers: bearer(client.token),
+      payload: { busyMode: 'wait', maxWaitMinutes: 1440 },
+    });
     const id = messageId(await send(client.token, '79005550401'));
 
     await api().get(MessagesService).dispatchDue(new Date());

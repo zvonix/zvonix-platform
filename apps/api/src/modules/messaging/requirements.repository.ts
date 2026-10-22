@@ -10,7 +10,13 @@ import {
   clientMessageRequirements,
   messengerAccounts,
 } from '@zvonix/db/schema';
-import { newId, type Id, type MoneyAmount, type StopLineRequirement } from '@zvonix/shared';
+import {
+  newId,
+  type Id,
+  type MessageBusyMode,
+  type MoneyAmount,
+  type StopLineRequirement,
+} from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type RequirementsRow = typeof clientMessageRequirements.$inferSelect;
@@ -55,6 +61,18 @@ export class RequirementsRepository {
       .returning();
     if (row === undefined) throw new Error('Требования клиента не записаны');
     return row;
+  }
+
+  /** «Если отправить сразу нельзя» и «сколько ждать» (ADR-0097) — только эти поля, требования к аккаунтам не трогаются. */
+  async saveDelivery(
+    clientId: Id<'client'>,
+    delivery: { busyMode: MessageBusyMode | null; maxWaitMinutes: number | null },
+  ): Promise<void> {
+    const values = { ...delivery, updatedAt: new Date() };
+    await this.database.db
+      .insert(clientMessageRequirements)
+      .values({ id: newId<'clientMessageRequirements'>(), clientId, ...values })
+      .onConflictDoUpdate({ target: clientMessageRequirements.clientId, set: values });
   }
 
   async exclusions(clientId: Id<'client'>): Promise<Id<'messengerAccount'>[]> {

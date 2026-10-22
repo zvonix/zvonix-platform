@@ -38,6 +38,7 @@ import {
   ReservationService,
   RETENTION_SWEEP_LIMIT,
   SESSION_SWEEP_LIMIT,
+  SmppService,
   STALE_SWEEP_LIMIT,
 } from '@zvonix/api';
 import { NODE_HEARTBEAT_INTERVAL_MS } from '@zvonix/shared';
@@ -237,6 +238,7 @@ export class BackgroundTasks {
     private readonly messaging: MessagingService,
     private readonly messageService: MessagesService,
     private readonly bots: BotsService,
+    private readonly smpp: SmppService,
   ) {}
 
   list(): readonly BackgroundTask[] {
@@ -360,6 +362,12 @@ export class BackgroundTasks {
         name: 'messages.purge-texts',
         everySeconds: MAIL_CLEANUP_SECONDS,
         run: (now) => this.messageService.purgeTexts(now),
+      },
+      {
+        // Журнал подключений SMPP — 30 суток (ADR-0096).
+        name: 'smpp.purge-events',
+        everySeconds: MAIL_CLEANUP_SECONDS,
+        run: (now) => this.smpp.purgeEvents(now),
       },
       {
         name: 'messages.check-health',
