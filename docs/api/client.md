@@ -94,7 +94,7 @@
 ## `POST /client/channels` — клиент заводит себе линию
 
 Тело `{ "name"? }` (без названия — «Линия N»). `201` →
-`{ "channel": {…}, "account": { "username", "password", "realm" } }`. Линия сразу
+`{ "channel": {…}, "account": { "username", "password", "realm", "server" } }`. Линия сразу
 `active`. **Пароль — единственный показ:** в базе хеш. Клиент не в состоянии `active` или
 линий уже пять — `409`. Решение — [ADR-0058](../adr/0058-klient-sam-poluchaet-liniyu.md).
 

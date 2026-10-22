@@ -51,6 +51,8 @@ interface SipAccountView {
   readonly username: string;
   readonly password: string;
   readonly realm: string;
+  /** Куда подключаться — адрес узла, а не домен (`TelephonyService.sipServer`). */
+  readonly server: string;
 }
 
 /** Вход линии GOIP (ADR-0054): тот же один показ пароля, с портом, к которому он выдан. */
@@ -150,6 +152,12 @@ interface CandidateView {
 export class TelephonyController {
   constructor(private readonly telephony: TelephonyService) {}
 
+  /** Входы линий с адресом узла — один запрос адреса на весь ответ. */
+  private async portViews(accounts: readonly IssuedPortAccount[]): Promise<PortAccountView[]> {
+    const server = await this.telephony.sipServer();
+    return accounts.map((account) => toPortAccountView(account, server));
+  }
+
   // --- Шлюзы -----------------------------------------------------------------
 
   @Roles('admin')
@@ -172,8 +180,8 @@ export class TelephonyController {
     );
     return {
       gateway: toGatewayView(created.gateway),
-      account: toAccountView(created.account),
-      port_accounts: created.portAccounts.map(toPortAccountView),
+      account: toAccountView(created.account, await this.telephony.sipServer()),
+      port_accounts: await this.portViews(created.portAccounts),
     };
   }
 
@@ -226,7 +234,7 @@ export class TelephonyController {
       actor.userId,
       actor.role,
     );
-    return { account: toAccountView(account) };
+    return { account: toAccountView(account, await this.telephony.sipServer()) };
   }
 
   /**
@@ -248,7 +256,7 @@ export class TelephonyController {
     );
     return {
       gateway: toGatewayView(result.gateway),
-      port_accounts: result.portAccounts.map(toPortAccountView),
+      port_accounts: await this.portViews(result.portAccounts),
     };
   }
 
@@ -264,7 +272,7 @@ export class TelephonyController {
       actor.userId,
       actor.role,
     );
-    return { port_accounts: accounts.map(toPortAccountView) };
+    return { port_accounts: await this.portViews(accounts) };
   }
 
   /** Новый вход одной линии: имя и пароль меняются, прежние перестают работать. */
@@ -279,7 +287,7 @@ export class TelephonyController {
       actor.userId,
       actor.role,
     );
-    return { port_account: toPortAccountView(account) };
+    return { port_account: toPortAccountView(account, await this.telephony.sipServer()) };
   }
 
   // --- Каналы ----------------------------------------------------------------
@@ -300,7 +308,10 @@ export class TelephonyController {
       actor.userId,
       actor.role,
     );
-    return { channel: toChannelView(created.channel), account: toAccountView(created.account) };
+    return {
+      channel: toChannelView(created.channel),
+      account: toAccountView(created.account, await this.telephony.sipServer()),
+    };
   }
 
   @Roles('admin', 'support')
@@ -361,7 +372,7 @@ export class TelephonyController {
       actor.userId,
       actor.role,
     );
-    return { account: toAccountView(account) };
+    return { account: toAccountView(account, await this.telephony.sipServer()) };
   }
 
   @Roles('admin')
@@ -712,16 +723,16 @@ function toPortView(row: GatewayPortRow): PortView {
   };
 }
 
-function toAccountView(account: IssuedSipAccount): SipAccountView {
-  return { username: account.username, password: account.password, realm: account.realm };
+function toAccountView(account: IssuedSipAccount, server: string): SipAccountView {
+  return { username: account.username, password: account.password, realm: account.realm, server };
 }
 
 /** Общий вид входа линии для обоих контуров: администратора и самого партнёра. */
-export function toPortAccountView(account: IssuedPortAccount): PortAccountView {
+export function toPortAccountView(account: IssuedPortAccount, server: string): PortAccountView {
   return {
     port_id: account.portId,
     port_number: account.portNumber,
-    ...toAccountView(account),
+    ...toAccountView(account, server),
   };
 }
 

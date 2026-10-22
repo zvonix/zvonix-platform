@@ -94,8 +94,13 @@ const SECTIONS: readonly {
       { title: 'Регистрация партнёров', prefixes: ['partners.'] },
       { title: 'Регистрация клиентов', prefixes: ['clients.'] },
       { title: 'Кабинеты', prefixes: ['cabinets.'] },
-      { title: 'Обращения в поддержку', prefixes: ['support.'] },
     ],
+  },
+  // Своим разделом: к участникам и их регистрации обращения не относятся (владелец, 2026-10-22).
+  {
+    key: 'support',
+    title: 'Поддержка',
+    parts: [{ title: 'Обращения', prefixes: ['support.'] }],
   },
   {
     key: 'calls',
@@ -159,7 +164,6 @@ const SECTION_ALIASES: Record<string, string> = {
   pricing: 'money',
   nodes: 'calls',
   retention: 'system',
-  support: 'registration',
   recordings: 'calls',
   site: 'system',
 };

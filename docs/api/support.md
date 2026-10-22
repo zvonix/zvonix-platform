@@ -47,3 +47,6 @@
 Обращение, на которое поддержка ответила (`waiting_user`) или решённое (`resolved`), без новых реплик закрывается само через `support.autoclose_days`
 суток (по умолчанию 7, `0` — не закрывать; фоновая задача `support.close-resolved`, журнал `support_ticket.auto_closed`). Ответ автора до срока
 возвращает обращение в `open` и сбрасывает отсчёт.
+Списки (`GET /support/tickets`, `GET /support/staff/tickets`) принимают `scope=active|done` — «Открытые» (`open`, `in_progress`,
+`waiting_user`) и «Закрытые» (`resolved`, `closed`); `status` точнее и важнее `scope`. В ответе `counts: { active, done }` — по тем же
+отборам без вкладки и состояния, для счётчиков вкладок. В кабинете сотрудника «Ответить и закрыть» — ответ и сразу `closed`.

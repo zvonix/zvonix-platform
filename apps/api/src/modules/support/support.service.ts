@@ -147,7 +147,10 @@ export class SupportService {
     return rows.map((row) => ({ ...row, attachments: grouped.get(row.id) ?? [] }));
   }
 
-  listOwn(actor: SupportActor, filter: Pick<TicketFilter, 'status' | 'limit' | 'offset'>) {
+  listOwn(
+    actor: SupportActor,
+    filter: Pick<TicketFilter, 'status' | 'scope' | 'limit' | 'offset'>,
+  ) {
     return this.repository.list({ ...filter, authorUserId: actor.userId });
   }
 

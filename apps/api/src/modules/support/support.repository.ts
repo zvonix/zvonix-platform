@@ -27,6 +27,8 @@ import {
   type TicketImageType,
   type TicketCategory,
   type TicketSide,
+  TICKET_SCOPE_STATUSES,
+  type TicketScope,
   type TicketStatus,
 } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
@@ -38,6 +40,7 @@ export type AttachmentRow = typeof supportAttachments.$inferSelect;
 export interface TicketFilter {
   readonly authorUserId?: Id<'user'>;
   readonly status?: TicketStatus;
+  readonly scope?: TicketScope;
   readonly cabinet?: TicketCabinet;
   readonly category?: TicketCategory;
   /** Только обращения без исполнителя либо взятые этим сотрудником. */
@@ -48,7 +51,7 @@ export interface TicketFilter {
 }
 
 /** Состояния, в которых обращение ещё открыто. */
-const OPEN_STATUSES: readonly TicketStatus[] = ['open', 'in_progress', 'waiting_user'];
+const OPEN_STATUSES = TICKET_SCOPE_STATUSES.active;
 
 @Injectable()
 export class SupportRepository {
@@ -220,9 +223,13 @@ export class SupportRepository {
     return row;
   }
 
-  async list(filter: TicketFilter): Promise<{ rows: TicketRow[]; total: number }> {
+  async list(
+    filter: TicketFilter,
+  ): Promise<{ rows: TicketRow[]; total: number; counts: Record<TicketScope, number> }> {
     const where = this.conditions(filter);
-    const [rows, [total]] = await Promise.all([
+    // Счётчики вкладок — по тем же отборам, но без вкладки и состояния: «Закрытые (3)» видно и с открытой вкладки.
+    const { scope: _scope, status: _status, ...rest } = filter;
+    const [rows, [total], byStatus] = await Promise.all([
       this.db
         .select()
         .from(supportTickets)
@@ -231,8 +238,18 @@ export class SupportRepository {
         .limit(filter.limit)
         .offset(filter.offset),
       this.db.select({ n: count() }).from(supportTickets).where(where),
+      this.db
+        .select({ status: supportTickets.status, n: count() })
+        .from(supportTickets)
+        .where(this.conditions(rest))
+        .groupBy(supportTickets.status),
     ]);
-    return { rows, total: total?.n ?? 0 };
+    const counts: Record<TicketScope, number> = { active: 0, done: 0 };
+    for (const row of byStatus) {
+      if (TICKET_SCOPE_STATUSES.active.includes(row.status)) counts.active += row.n;
+      else counts.done += row.n;
+    }
+    return { rows, total: total?.n ?? 0, counts };
   }
 
   private conditions(filter: TicketFilter): SQL | undefined {
@@ -241,6 +258,9 @@ export class SupportRepository {
       parts.push(eq(supportTickets.authorUserId, filter.authorUserId));
     }
     if (filter.status !== undefined) parts.push(eq(supportTickets.status, filter.status));
+    if (filter.scope !== undefined) {
+      parts.push(inArray(supportTickets.status, [...TICKET_SCOPE_STATUSES[filter.scope]]));
+    }
     if (filter.cabinet !== undefined) parts.push(eq(supportTickets.cabinet, filter.cabinet));
     if (filter.category !== undefined) parts.push(eq(supportTickets.category, filter.category));
     if (filter.unassigned === true) parts.push(isNull(supportTickets.assigneeUserId));

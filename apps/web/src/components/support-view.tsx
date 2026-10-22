@@ -13,6 +13,7 @@ import {
   TICKET_BODY_MAX,
   TICKET_CATEGORIES,
   TICKET_STATUSES,
+  type TicketScope,
   TICKET_SUBJECT_MAX,
   type TicketCabinet,
   type TicketStatus,
@@ -76,19 +77,24 @@ export function SupportView({
   const staff = mode === 'staff';
   const base = staff ? '/support/staff/tickets' : '/support/tickets';
 
+  const [scope, setScope] = useState<TicketScope | ''>('active');
   const [status, setStatus] = useState<string>('');
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
 
   const list = useQuery({
-    queryKey: ['support', mode, status, category, search],
+    queryKey: ['support', mode, scope, status, category, search],
     refetchInterval: live,
     queryFn: () => {
       const query = new URLSearchParams({ limit: '200' });
+      // Выбрано состояние — оно точнее вкладки.
       if (status !== '') query.set('status', status);
+      else if (scope !== '') query.set('scope', scope);
       if (staff && category !== '') query.set('category', category);
       if (staff && search.trim() !== '') query.set('q', search.trim());
-      return request<{ tickets: Ticket[]; total: number }>(`${base}?${query.toString()}`);
+      return request<{ tickets: Ticket[]; total: number; counts: Record<TicketScope, number> }>(
+        `${base}?${query.toString()}`,
+      );
     },
   });
 
@@ -99,15 +105,51 @@ export function SupportView({
   return (
     <div className="flex max-w-[1200px] flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
-        <Choice
-          label="Состояние"
-          anyLabel={staff ? 'Все' : 'Все мои обращения'}
-          value={status}
-          options={TICKET_STATUSES.map((value) => [value, ticketStatusName(value, mode)] as const)}
-          onChange={setStatus}
-        />
+        <div
+          role="tablist"
+          aria-label="Какие обращения"
+          className="flex rounded-md border border-border"
+        >
+          {(
+            [
+              ['active', 'Открытые'],
+              ['done', 'Закрытые'],
+              ['', 'Все'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={status === '' && scope === value}
+              onClick={() => {
+                setScope(value);
+                setStatus('');
+              }}
+              className={`h-9 px-3 first:rounded-l-md last:rounded-r-md ${
+                status === '' && scope === value
+                  ? 'bg-muted font-medium'
+                  : 'text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              {label}
+              {value !== '' && list.data !== undefined && (
+                <span className="num ml-1 text-faint">{String(list.data.counts[value])}</span>
+              )}
+            </button>
+          ))}
+        </div>
         {staff && (
           <>
+            <Choice
+              label="Состояние"
+              anyLabel="Любое"
+              value={status}
+              options={TICKET_STATUSES.map(
+                (value) => [value, ticketStatusName(value, mode)] as const,
+              )}
+              onChange={setStatus}
+            />
             <Choice
               label="О чём"
               anyLabel="Любое"
@@ -334,7 +376,8 @@ function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
   const { ticket, messages } = detail.data;
   const closed = ticket.status === 'closed';
 
-  const send = (): void => {
+  /** `close` — «Ответить и закрыть»: ответ ушёл, обращение закрыто сразу, без ожидания срока (владелец, 2026-10-22). */
+  const send = (close = false): void => {
     if (text.trim().length < 3 || images.busy) return;
     act.mutate(
       {
@@ -349,6 +392,7 @@ function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
           setText('');
           setInternal(false);
           images.clear();
+          if (close) act.mutate({ path: '/status', method: 'PATCH', body: { status: 'closed' } });
         },
       },
     );
@@ -472,10 +516,24 @@ function Conversation({ id, mode }: { id: string; mode: 'author' | 'staff' }) {
             <Button
               type="button"
               disabled={act.isPending || images.busy || text.trim().length < 3}
-              onClick={send}
+              onClick={() => {
+                send();
+              }}
             >
               {staff && internal ? 'Добавить заметку' : 'Отправить'}
             </Button>
+            {staff && !internal && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={act.isPending || images.busy || text.trim().length < 3}
+                onClick={() => {
+                  send(true);
+                }}
+              >
+                Ответить и закрыть
+              </Button>
+            )}
             {staff && (
               <label className="flex items-center gap-2">
                 <input

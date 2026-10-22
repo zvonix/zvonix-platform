@@ -322,6 +322,19 @@ export class NodesService {
     return retired;
   }
 
+  /**
+   * Публичные адреса SIP узлов — куда направлять GOIP и линии клиентов: сначала работающие, списанные не в счёт. Пусто —
+   * ни у одного узла адрес не задан.
+   */
+  async sipAddresses(): Promise<string[]> {
+    const rows = await this.repository.list();
+    const live = (row: NodeRow): boolean => row.status === 'online' || row.status === 'degraded';
+    return rows
+      .filter((row) => row.status !== 'decommissioned' && row.sipAddress !== null)
+      .sort((a, b) => Number(live(b)) - Number(live(a)))
+      .flatMap((row) => (row.sipAddress === null ? [] : [row.sipAddress]));
+  }
+
   async list(): Promise<NodeRow[]> {
     await this.retireSilent();
     return this.repository.list();

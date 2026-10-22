@@ -7,6 +7,7 @@ import {
   TICKET_CABINETS,
   TICKET_CATEGORIES,
   TICKET_IMAGES_PER_MESSAGE,
+  TICKET_SCOPES,
   TICKET_STATUSES,
   TICKET_SUBJECT_MAX,
 } from '@zvonix/shared';
@@ -54,6 +55,7 @@ const optional = <T extends z.ZodType>(schema: T) =>
 
 export const ticketsQuerySchema = z.object({
   status: optional(z.enum(TICKET_STATUSES)),
+  scope: optional(z.enum(TICKET_SCOPES)),
   cabinet: optional(z.enum(TICKET_CABINETS)),
   category: optional(z.enum(TICKET_CATEGORIES)),
   unassigned: optional(z.enum(['1'])),

@@ -32,6 +32,17 @@ export const TICKET_STATUSES = [
 ] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
+/**
+ * Вкладки списка обращений: «Открытые» — ждут кого-то, «Закрытые» — решённые и закрытые. Закрытые раньше терялись в общем
+ * списке, и найти их можно было только отбором по состоянию (владелец, 2026-10-22).
+ */
+export const TICKET_SCOPES = ['active', 'done'] as const;
+export type TicketScope = (typeof TICKET_SCOPES)[number];
+export const TICKET_SCOPE_STATUSES: Record<TicketScope, readonly TicketStatus[]> = {
+  active: ['open', 'in_progress', 'waiting_user'],
+  done: ['resolved', 'closed'],
+};
+
 /** Чья реплика: автора обращения или сотрудника площадки. */
 export const TICKET_SIDES = ['user', 'staff'] as const;
 export type TicketSide = (typeof TICKET_SIDES)[number];
