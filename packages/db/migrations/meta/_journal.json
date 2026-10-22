@@ -512,6 +512,13 @@
       "when": 1792654687463,
       "tag": "0072_polnyy_tekst",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1792661997626,
+      "tag": "0073_trebovaniya_k_partnyoram_zvonkov",
+      "breakpoints": true
     }
   ]
 }

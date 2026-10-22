@@ -2,13 +2,21 @@ import { Module } from '@nestjs/common';
 import { BillingModule } from '../billing/billing.module.js';
 import { CatalogModule } from '../catalog/catalog.module.js';
 import { LimitsModule } from '../limits/limits.module.js';
+import { PrioritiesModule } from '../priorities/priorities.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { TelephonyModule } from '../telephony/telephony.module.js';
 import { RoutingController } from './routing.controller.js';
 import { RoutingService } from './routing.service.js';
 
 @Module({
-  imports: [TelephonyModule, CatalogModule, BillingModule, LimitsModule, SettingsModule],
+  imports: [
+    TelephonyModule,
+    CatalogModule,
+    BillingModule,
+    LimitsModule,
+    PrioritiesModule,
+    SettingsModule,
+  ],
   controllers: [RoutingController],
   providers: [RoutingService],
   exports: [RoutingService],

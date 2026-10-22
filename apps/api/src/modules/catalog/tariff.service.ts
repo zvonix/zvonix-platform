@@ -915,6 +915,12 @@ export class TariffService {
     return cheapest;
   }
 
+  /** Наценка на вызов для клиента сейчас; `undefined` — правил нет. Для предела цены клиента (ADR-0095). */
+  async callCommission(clientId: Id<'client'>, at: Date): Promise<CommissionRule | undefined> {
+    const row = await this.repository.findCommissionRule(clientId, at, 'call');
+    return row === undefined ? undefined : toCommissionRule(row);
+  }
+
   async messageCommission(clientId: Id<'client'>, at: Date): Promise<CommissionRule | undefined> {
     const row = await this.repository.findCommissionRule(clientId, at, 'message');
     return row === undefined ? undefined : toCommissionRule(row);

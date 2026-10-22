@@ -11,7 +11,12 @@ import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
 import type { Principal } from '../identity/identity.service.js';
-import { clientPrioritiesSchema, productSchema } from './priorities.schemas.js';
+import { CallRequirementsService, type CallRequirementsView } from './call-requirements.service.js';
+import {
+  callRequirementsSchema,
+  clientPrioritiesSchema,
+  productSchema,
+} from './priorities.schemas.js';
 import {
   PrioritiesService,
   type ClientPriorityView,
@@ -30,7 +35,33 @@ export class PrioritiesController {
   constructor(
     private readonly priorities: PrioritiesService,
     private readonly billing: BillingService,
+    private readonly requirements: CallRequirementsService,
   ) {}
+
+  /** Требования клиента к партнёрам для звонков (ADR-0095). */
+  @Cabinets('client')
+  @Get('client/call-requirements')
+  async callRequirements(
+    @CurrentUser() actor: Principal,
+  ): Promise<{ requirements: CallRequirementsView }> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return { requirements: await this.requirements.get(client.id) };
+  }
+
+  @Cabinets('client')
+  @Put('client/call-requirements')
+  async setCallRequirements(
+    @CurrentUser() actor: Principal,
+    @Body(zodBody(callRequirementsSchema)) body: z.infer<typeof callRequirementsSchema>,
+  ): Promise<{ requirements: CallRequirementsView }> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    const requirements = await this.requirements.set(
+      { userId: actor.userId, role: actor.role },
+      client.id,
+      body,
+    );
+    return { requirements };
+  }
 
   /** Список клиента: `product` — `calls` (SIM и транк) или `messages` (MAX). Нет строки — партнёр после всех. */
   @Cabinets('client')

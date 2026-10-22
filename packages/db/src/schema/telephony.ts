@@ -43,7 +43,7 @@ import {
   type TerminationKind,
   type TestCallStatus,
 } from '@zvonix/shared';
-import { createdAt, idRef, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
+import { createdAt, idRef, money, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 import { clients, partners } from './billing.js';
 import { operators } from './catalog.js';
 import { nodes } from './nodes.js';
@@ -478,6 +478,35 @@ export const clientPartnerPriorities = pgTable(
       sql`${t.priority} is null or ${t.priority} between 1 and ${sql.raw(String(CLIENT_PRIORITY_MAX))}`,
     ),
     uniqueIndex('client_partner_priorities_key').on(t.clientId, t.partnerId, t.offer),
+  ],
+);
+
+/**
+ * Требования клиента к партнёрам для звонков ([ADR-0095](../../../docs/adr/0095-trebovaniya-klienta-k-partnyoram-zvonkov.md)):
+ * одна запись на клиента, действует на каждый вызов всех его линий. Сужает кандидатов, порядок не меняет.
+ */
+export const clientCallRequirements = pgTable(
+  'client_call_requirements',
+  {
+    id: primaryId<'clientCallRequirements'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    /** Только этот способ терминации; пусто — любой. */
+    terminationKind: text().$type<TerminationKind>(),
+    /** Только партнёры, которые не слушают записи своих вызовов (ADR-0036). */
+    noRecordingListeners: boolean().notNull().default(false),
+    /** Стоимость эталонного вызова в 60 секунд для клиента (с наценкой) не дороже; пусто — без предела. */
+    maxPrice: money(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('client_call_requirements_client_key').on(t.clientId),
+    check(
+      'client_call_requirements_kind_check',
+      sql`${t.terminationKind} is null or ${oneOf(t.terminationKind, TERMINATION_KINDS)}`,
+    ),
+    check('client_call_requirements_price_check', sql`${t.maxPrice} is null or ${t.maxPrice} > 0`),
   ],
 );
 

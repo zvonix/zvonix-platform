@@ -253,6 +253,7 @@ Basic поверх TLS: имя — идентификатор ключа, пар
 | `no_sim_available` — нет свободной SIM нужного оператора | `respond 503 Service Unavailable` | 503 |
 | `recording_required` — подходят только шлюзы без записи | `respond 503 Service Unavailable` | 503 |
 | `no_coverage` — регион номера не покрыт ни одним партнёром | `respond 503 Service Unavailable` | 503 |
+| `requirements_unmet` — никто не подошёл под требования клиента к партнёрам (ADR-0095) | `respond 503 Service Unavailable` | 503 |
 | `no_tariff` — нет действующего тарифа партнёра или правила наценки | `respond 503 Service Unavailable` | 503 |
 | `internal_error` — неисправность control plane | `respond 503 Service Unavailable` | 503 |
 

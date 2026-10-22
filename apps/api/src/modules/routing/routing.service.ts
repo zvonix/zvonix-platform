@@ -11,6 +11,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   DEFAULT_DISTRIBUTION,
   DomainError,
+  REFERENCE_CALL_SECONDS,
+  chargeForCall,
   dialledDigits,
   type CallDestination,
   normalizeMsisdn,
@@ -19,6 +21,7 @@ import {
   type Id,
   type MoneyAmount,
   type Msisdn,
+  type TariffRule,
 } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { ReservationService } from '../billing/reservation.service.js';
@@ -26,6 +29,8 @@ import { BlockedNumberService } from '../catalog/blocked-numbers.service.js';
 import type { LimitRuleRow } from '../limits/limit.repository.js';
 import { DistributionService } from '../limits/distribution.service.js';
 import { LimitBreach, LimitService, type LimitUsage } from '../limits/limit.service.js';
+import type { CallRequirementsInput } from '../priorities/call-requirements.repository.js';
+import { CallRequirementsService } from '../priorities/call-requirements.service.js';
 import { arrangeByDistribution } from './call-distribution.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
@@ -88,6 +93,7 @@ export class RoutingService {
     private readonly tariffs: TariffService,
     private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
+    private readonly callRequirements: CallRequirementsService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -186,10 +192,11 @@ export class RoutingService {
     // 4. Лимиты клиента и канала: исчерпаны — отказ сразу, без отбора SIM и расчёта
     //    тарифа (ADR-0026).
     const at = new Date();
-    const subjectLimits = await this.limits.usage(
-      { clientId: routable.clientId, channelId: channel.id },
-      at,
-    );
+    const [subjectLimits, requirements] = await Promise.all([
+      this.limits.usage({ clientId: routable.clientId, channelId: channel.id }, at),
+      // Требования клиента к партнёрам (ADR-0095): сужают кандидатов, порядок не меняют.
+      this.callRequirements.forRouting(routable.clientId),
+    ]);
     const breached = subjectLimits.find((usage) => usage.exceeded);
     if (breached !== undefined) {
       this.logger.info('Вызов отклонён лимитом', {
@@ -202,29 +209,37 @@ export class RoutingService {
     }
 
     // 5. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
-    //    регион — партнёров, которые в него не звонят (ADR-0022).
-    const [simCandidates, trunkCandidates] = await Promise.all([
-      this.telephony.findSimCandidates({
-        channelId: channel.id,
-        excludeRecordingIncapable: channel.recordingRequired,
-        region,
-        // Только шлюзы **этого** узла: диалплан набирает их как зарегистрированных
-        // пользователей, и регистрация живёт там, куда шлюз пришёл.
-        nodeId: request.nodeId,
-      }),
-      // Транк — такой же кандидат, как SIM, без правила «сначала SIM»: разницу в цене
-      // клиент видит и учитывает сам (ADR-0039, ADR-0040). Отбор по узлу обязателен:
-      // регистрация у провайдера принадлежит конкретному узлу.
-      this.telephony.findTrunkCandidates(request.nodeId, { channelId: channel.id, region }),
-    ]);
-    const candidates: TerminationCandidate[] = [...simCandidates, ...trunkCandidates];
+    //    регион — партнёров, которые в него не звонят (ADR-0022), требования клиента — способ
+    //    и партнёров, которые слушают записи (ADR-0095).
+    const candidates = await this.findCandidates(channel, region, request.nodeId, requirements);
     // 5а. Цена: кандидат — только тот, у кого в тарифе есть цена на этот номер
     //    ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)). Куда SIM звонит,
     //    решает её тариф, поэтому отсев по цене идёт до лимитов и до разбора причин:
     //    карта, которая на этого оператора не звонит, кандидатом не была никогда.
     //    Заодно выстраивается порядок перебора: цена решает при равном приоритете (ADR-0040).
-    const priced = await this.orderByPrice(candidates, operatorId, region, at);
+    //    Предел цены клиента — по цене этого направления (ADR-0095).
+    const priced = await this.withinPriceCap(
+      await this.orderByPrice(candidates, operatorId, region, at),
+      requirements,
+      routable.clientId,
+      at,
+    );
     if (priced.length === 0) {
+      // Без требований кандидат нашёлся бы — отказ из-за настройки клиента, а не нашей стороны.
+      // Повтор отбора только на пути отказа: успешный вызов лишних запросов не делает.
+      if (requirements !== undefined) {
+        const unrestricted = await this.findCandidates(channel, region, request.nodeId, undefined);
+        if ((await this.orderByPrice(unrestricted, operatorId, region, at)).length > 0) {
+          return this.reject(
+            request,
+            destination,
+            channel.id,
+            operatorId,
+            region,
+            'requirements_unmet',
+          );
+        }
+      }
       const reason = await this.explainEmptyCandidates(
         operatorId,
         channel,
@@ -403,6 +418,63 @@ export class RoutingService {
   }
 
   /**
+   * SIM и транки, годные для вызова этой линии на этом узле, — с требованиями клиента или без них.
+   *
+   * Транк — такой же кандидат, как SIM, без правила «сначала SIM»: разницу в цене клиент видит и учитывает сам
+   * (ADR-0039, ADR-0040). Отбор по узлу обязателен у обоих: диалплан набирает шлюз как зарегистрированного
+   * пользователя, а регистрация у провайдера принадлежит конкретному узлу.
+   */
+  private async findCandidates(
+    channel: ChannelRow,
+    region: string | null,
+    nodeId: Id<'node'>,
+    requirements: CallRequirementsInput | undefined,
+  ): Promise<TerminationCandidate[]> {
+    const kind = requirements?.terminationKind ?? null;
+    const excludeRecordingListeners = requirements?.noRecordingListeners ?? false;
+    const [simCandidates, trunkCandidates] = await Promise.all([
+      kind === 'sip'
+        ? []
+        : this.telephony.findSimCandidates({
+            channelId: channel.id,
+            excludeRecordingIncapable: channel.recordingRequired,
+            region,
+            nodeId,
+            excludeRecordingListeners,
+          }),
+      kind === 'sim'
+        ? []
+        : this.telephony.findTrunkCandidates(nodeId, {
+            channelId: channel.id,
+            region,
+            excludeRecordingListeners,
+          }),
+    ]);
+    return [...simCandidates, ...trunkCandidates];
+  }
+
+  /**
+   * Предел цены клиента ([ADR-0095](../../../../../docs/adr/0095-trebovaniya-klienta-k-partnyoram-zvonkov.md)): стоимость
+   * эталонного вызова в 60 секунд **для клиента** — по цене этого направления и той же наценкой, что тарификация.
+   * Без предела наценка не читается вовсе. Нет правила наценки — предел не применяется: вызов всё равно получит
+   * свой отказ на резерве, и называть его «требованиями» было бы неправдой.
+   */
+  private async withinPriceCap(
+    priced: PricedCandidate[],
+    requirements: CallRequirementsInput | undefined,
+    clientId: Id<'client'>,
+    at: Date,
+  ): Promise<PricedCandidate[]> {
+    const cap = requirements?.maxPrice ?? null;
+    if (cap === null || priced.length === 0) return priced;
+    const commission = await this.tariffs.callCommission(clientId, at);
+    if (commission === undefined) return priced;
+    return priced.filter(
+      (entry) => chargeForCall(REFERENCE_CALL_SECONDS, entry.rule, commission).clientAmount <= cap,
+    );
+  }
+
+  /**
    * Почему кандидатов не оказалось.
    *
    * «Нет SIM вовсе», «есть, но все без записи» и «есть, но регион не покрыт» — три
@@ -455,7 +527,15 @@ export class RoutingService {
       const rate = rates[index];
       return rate === undefined
         ? []
-        : [{ candidate, price: rate.pricePerMinute, rateId: rate.id, tariffId: rate.tariffId }];
+        : [
+            {
+              candidate,
+              price: rate.pricePerMinute,
+              rateId: rate.id,
+              tariffId: rate.tariffId,
+              rule: rate,
+            },
+          ];
     });
 
     // Устойчивая сортировка: при полном равенстве остаётся порядок, заданный запросом,
@@ -785,6 +865,8 @@ interface PricedCandidate {
   readonly rateId: Id<'partnerRate'>;
   /** Тариф строки цены: по нему к карте применяются лимиты тарифа (ADR-0080). */
   readonly tariffId: Id<'partnerTariff'> | null;
+  /** Правила строки цены — для предела цены клиента (ADR-0095). */
+  readonly rule: TariffRule;
 }
 
 /** Доля остатка самого строгого лимита каждой карты (0–1). Лимит партнёра на всех карт не различает — не считается. */

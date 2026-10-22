@@ -39,7 +39,7 @@
 
 | Внутренняя причина | Что видит клиент |
 |---|---|
-| `destination_blocked`, `destination_invalid`, `operator_unconfirmed`, `operator_not_allowed`, `insufficient_funds`, `limit_exceeded` | как есть — это про него |
+| `destination_blocked`, `destination_invalid`, `operator_unconfirmed`, `operator_not_allowed`, `insufficient_funds`, `limit_exceeded`, `requirements_unmet` | как есть — это про него |
 | `no_sim_available`, `no_coverage`, `no_tariff`, `recording_required`, `node_lost`, `internal_error`, `channel_unknown` | `platform` |
 
 Причины первой строки клиент может исправить сам: пополнить счёт, поправить список
@@ -144,7 +144,7 @@
   "seconds": 60,
   "offers": [
     { "alias_id": "…", "display_name": "Партнёр 17", "termination_kind": "sim",
-      "min_price": "1.8", "max_price": "2.4", "directions": 12 }
+      "min_price": "1.8", "max_price": "2.4", "directions": 12, "listens_to_recordings": false }
   ]
 }
 ```
@@ -221,6 +221,14 @@
   по псевдониму вместе со способом терминации
   ([ADR-0040](../adr/0040-poryadok-terminacii-predlozhenie-i-cena.md),
   [routing.md](routing.md));
+- `GET|PUT /client/call-requirements` — **требования клиента к партнёрам для звонков**
+  ([ADR-0095](../adr/0095-trebovaniya-klienta-k-partnyoram-zvonkov.md)). Ответ:
+  `{ "requirements": { "termination_kind": "sim"|"sip"|null, "no_recording_listeners": bool, "max_price": "2.5"|null } }`.
+  Тело `PUT`: `{ "terminationKind": "sim"|"sip"|null, "noRecordingListeners": bool, "maxPrice": "2.5"|null }` — `maxPrice` —
+  стоимость вызова в 60 секунд для клиента (с наценкой), больше нуля. Действуют на каждый вызов всех линий клиента: способ и
+  «не слушает записи» — в отборе кандидатов, предел — по цене направления вызова. Никто не подошёл, а без требований
+  подошёл бы, — отказ `requirements_unmet`. Журнал — `client_call_requirements.set`. В `GET /client/prices` у предложения —
+  `listens_to_recordings`: слушает ли партнёр записи своих вызовов.
 - `GET|PUT /client/partner-priorities?product=calls|messages` — **один список приоритетов на клиента**
   ([ADR-0081](../adr/0081-prioritety-partnyorov-u-klienta.md)). Тело `PUT`:
   `{ "priorities": [ { "aliasId", "offer": "sim|sip|message", "priority": 1–99 | null } ] }` — заменяет список целиком;

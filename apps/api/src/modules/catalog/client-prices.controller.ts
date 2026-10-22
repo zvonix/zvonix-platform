@@ -37,6 +37,8 @@ interface OfferPriceView {
   readonly max_price: string;
   /** По скольким направлениям у предложения есть цена. */
   readonly directions: number;
+  /** Партнёр слушает записи своих вызовов (ADR-0036) — клиент решает, работать ли с таким (ADR-0095). */
+  readonly listens_to_recordings: boolean;
 }
 
 /**
@@ -118,6 +120,7 @@ export class ClientPricesController {
             min_price: Money.format(offer.minPrice),
             max_price: Money.format(offer.maxPrice),
             directions: offer.directions,
+            listens_to_recordings: alias.listensToRecordings,
           },
         ];
       }),
