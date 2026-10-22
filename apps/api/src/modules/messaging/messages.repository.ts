@@ -476,11 +476,12 @@ export class MessagesRepository {
     id: MessageId,
     providerMessageId: string,
     at: Date,
+    sentText: string,
     stopLine = false,
   ): Promise<void> {
     await this.database.db
       .update(messages)
-      .set({ status: 'sent', providerMessageId, sentAt: at, stopLine })
+      .set({ status: 'sent', providerMessageId, sentAt: at, stopLine, sentText })
       .where(and(eq(messages.id, id), eq(messages.status, 'sending')));
   }
 
@@ -922,8 +923,13 @@ export class MessagesRepository {
   async purgeTexts(before: Date): Promise<number> {
     const erased = await this.database.db
       .update(messages)
-      .set({ text: '' })
-      .where(and(lt(messages.createdAt, before), ne(messages.text, '')))
+      .set({ text: '', sentText: null })
+      .where(
+        and(
+          lt(messages.createdAt, before),
+          or(ne(messages.text, ''), isNotNull(messages.sentText)),
+        ),
+      )
       .returning({ id: messages.id });
     return erased.length;
   }

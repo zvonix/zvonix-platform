@@ -30,8 +30,9 @@ import {
 
 const withoutText = ({
   text: _text,
+  full_text: _fullText,
   ...rest
-}: ClientMessageView): Omit<ClientMessageView, 'text'> => rest;
+}: ClientMessageView): Omit<ClientMessageView, 'text' | 'full_text'> => rest;
 
 /** Сообщение так, как его видит клиент. */
 interface ClientMessageView {
@@ -44,6 +45,8 @@ interface ClientMessageView {
   readonly failure_reason: string | null;
   /** В конец сообщения добавлена строка про «СТОП». */
   readonly stop_line: boolean;
+  /** Как сообщение получил человек (ADR-0093); `null` — не ушло или стёрто по сроку. */
+  readonly full_text: string | null;
   /** Списано, ₽. Не отправлено — `null`: деньги возвращены. */
   readonly cost: string | null;
   readonly created_at: string;
@@ -62,6 +65,7 @@ const toClientView = (row: MessageRow): ClientMessageView => ({
   status: row.status,
   failure_reason: row.failureReason,
   stop_line: row.stopLine,
+  full_text: row.sentText,
   cost: row.status === 'failed' ? null : Money.format(row.clientAmount),
   created_at: row.createdAt.toISOString(),
   sent_at: iso(row.sentAt),
@@ -70,7 +74,7 @@ const toClientView = (row: MessageRow): ClientMessageView => ({
 });
 
 /** То же для сотрудника плюс деньги по трём счетам и чей это аккаунт. */
-interface StaffMessageView extends Omit<ClientMessageView, 'text'> {
+interface StaffMessageView extends Omit<ClientMessageView, 'text' | 'full_text'> {
   readonly client_id: string;
   /** `bot` — сообщение ушло ботом; у него нет ни партнёра, ни аккаунта. */
   readonly route: 'account' | 'bot';

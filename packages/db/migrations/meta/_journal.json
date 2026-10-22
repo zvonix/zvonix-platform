@@ -505,6 +505,13 @@
       "when": 1792653907324,
       "tag": "0071_trebovaniya_k_akkauntam",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1792654687463,
+      "tag": "0072_polnyy_tekst",
+      "breakpoints": true
     }
   ]
 }

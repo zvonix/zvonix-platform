@@ -44,6 +44,7 @@ interface MessageView {
   failure_reason: string | null;
   cost: string | null;
   stop_line: boolean;
+  full_text: string | null;
 }
 
 const owed = async (partnerId: string): Promise<string> =>
@@ -312,6 +313,16 @@ describe('отправка воркером', () => {
       text: 'Ваш заказ принят\n\nЧтобы отписаться, ответьте СТОП',
     });
     expect(await messageOf(client.token, id)).toMatchObject({ stop_line: true });
+    // Полный текст — как получил человек (ADR-0093); сотруднику ни текст, ни полный текст не отдаются.
+    expect((await messageOf(client.token, id))?.full_text).toBe(
+      'Ваш заказ принят\n\nЧтобы отписаться, ответьте СТОП',
+    );
+    const staff = (
+      await api().inject({ method: 'GET', url: '/messages?limit=50', headers: bearer(adminToken) })
+    ).json<{ messages: Record<string, unknown>[] }>().messages;
+    expect(staff.length).toBeGreaterThan(0);
+    expect(staff[0]).not.toHaveProperty('text');
+    expect(staff[0]).not.toHaveProperty('full_text');
   });
 
   it('партнёр выключает «СТОП» у аккаунта: текст уходит как написан, клиент видит, что строки не было; чужой аккаунт не тронуть', async () => {

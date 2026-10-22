@@ -1,9 +1,9 @@
 import { createLogger } from '@zvonix/logger';
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { registerSlowRequestLog } from './slow-request.hook.js';
 
-const apps: ReturnType<typeof Fastify>[] = [];
+const apps: FastifyInstance[] = [];
 
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));

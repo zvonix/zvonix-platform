@@ -498,13 +498,14 @@ export class MessagesService {
       return false;
     }
     try {
+      const rendered = await this.templates.render(message);
       const { messageId } = await this.bots.sendTo(
         message.botId,
         message.clientId,
         message.recipient,
-        await this.templates.render(message),
+        rendered,
       );
-      await this.repository.markSent(message.id, messageId, now);
+      await this.repository.markSent(message.id, messageId, now, rendered);
       await this.repository.markDelivered(message.id, now);
       return true;
     } catch (cause) {
@@ -608,16 +609,17 @@ export class MessagesService {
       // Строка про «СТОП» — решение партнёра по аккаунту (ADR-0092); не влезает в предел мессенджера — сообщение уходит без неё.
       const stopLine =
         account.stopLine && rendered.length + STOP_LINE.length + 2 <= MESSAGE_MAX_LENGTH;
+      const full = stopLine
+        ? `${rendered}
+
+${STOP_LINE}`
+        : rendered;
       const { messageId } = await this.provider.sendText(
         this.messaging.refOf(account),
         message.recipient,
-        stopLine
-          ? `${rendered}
-
-${STOP_LINE}`
-          : rendered,
+        full,
       );
-      await this.repository.markSent(message.id, messageId, now, stopLine);
+      await this.repository.markSent(message.id, messageId, now, full, stopLine);
       await this.repository.touchAccount(account.id, now);
       return true;
     } catch (cause) {
