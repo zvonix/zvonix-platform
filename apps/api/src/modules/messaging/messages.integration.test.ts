@@ -405,6 +405,43 @@ describe('отправка воркером', () => {
     await service.dispatchDue(new Date(now.getTime() + 2 * MINUTE));
     expect((await messageOf(client.token, b))?.status).toBe('sent');
   });
+
+  it('исчерпан лимит в час — у аккаунта «пауза до»: самое раннее сообщение окна плюс час', async () => {
+    const { ownerToken, accountId } = await partnerWithAccount('0.45', { limitPerHour: 1 });
+    const client = await clientWithMoney('10');
+    const sent = (await send(client.token, { to: '79005550041', text: 'А' })).json<{
+      message: MessageView;
+    }>().message.id;
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect((await messageOf(client.token, sent))?.status).toBe('sent');
+
+    const sentAt = await withDatabase(async (execute) => {
+      const result = await execute(sql`select sent_at from messages where id = ${sent}`);
+      return new Date((result.rows[0] as { sent_at: string }).sent_at);
+    });
+    const listed = await api().inject({
+      method: 'GET',
+      url: '/partner/messenger/accounts',
+      headers: bearer(ownerToken),
+    });
+    const account = listed
+      .json<{ accounts: { id: string; rest: { reason: string; until: string } | null }[] }>()
+      .accounts.find((row) => row.id === accountId);
+    expect(account?.rest?.reason).toBe('hour');
+    expect(new Date(account?.rest?.until ?? 0).getTime()).toBe(sentAt.getTime() + 3_600_000);
+
+    // Сотрудник видит то же.
+    const staff = await api().inject({
+      method: 'GET',
+      url: '/messenger/accounts',
+      headers: bearer(adminToken),
+    });
+    expect(
+      staff
+        .json<{ accounts: { id: string; rest: { reason: string } | null }[] }>()
+        .accounts.find((row) => row.id === accountId)?.rest?.reason,
+    ).toBe('hour');
+  });
 });
 
 describe('автопрогрев и равномерная отправка (ADR-0078)', () => {

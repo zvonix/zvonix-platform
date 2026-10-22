@@ -336,6 +336,30 @@ export class MessagesRepository {
     );
   }
 
+  /**
+   * Когда в скользящем окне аккаунта освободится место: из последних `allowed` отправок самая ранняя выходит из окна. Пусто —
+   * в окне меньше `allowed` отправок (место уже есть).
+   */
+  async windowFreesAt(
+    accountId: Id<'messengerAccount'>,
+    window: { windowMs: number; allowed: number },
+    now: Date,
+  ): Promise<Date | undefined> {
+    const [row] = await this.database.db
+      .select({ sentAt: messages.sentAt })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.accountId, accountId),
+          gte(messages.sentAt, new Date(now.getTime() - window.windowMs)),
+        ),
+      )
+      .orderBy(desc(messages.sentAt))
+      .offset(window.allowed - 1)
+      .limit(1);
+    return row?.sentAt == null ? undefined : new Date(row.sentAt.getTime() + window.windowMs);
+  }
+
   /** Отправки аккаунтов за минуту, час и сутки и очередь за ними — для лимитов. Одним запросом на всех кандидатов. */
   async loadOf(
     accountIds: readonly Id<'messengerAccount'>[],

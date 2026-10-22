@@ -7,7 +7,7 @@
  * остаётся в окружении ([ADR-0002](../../../../../docs/adr/0002-konfiguraciya.md)).
  */
 
-import { TICKET_AUTOCLOSE_DAYS } from '@zvonix/shared';
+import { BOT_SHARE_BUTTON_MAX, TICKET_AUTOCLOSE_DAYS } from '@zvonix/shared';
 
 /** Как значение хранится строкой и во что превращается при чтении. */
 type SettingKind = 'string' | 'number' | 'boolean';
@@ -17,7 +17,7 @@ export interface SettingDefinition {
   /** Секрет шифруется в базе и наружу не отдаётся никогда — ни в API, ни в журнале. */
   readonly secret?: true;
   readonly fallback: string;
-  /** Пределы числа: за ними значение не принимается. Только у числовых настроек. */
+  /** Пределы числа: за ними значение не принимается. У строки `max` — предел длины в знаках. */
   readonly min?: number;
   readonly max?: number;
   /** Для чего это: попадает в ответ администратору, чтобы поле не требовало догадок. */
@@ -180,6 +180,12 @@ export const SETTINGS = {
     kind: 'boolean',
     fallback: 'false',
     hint: 'Человек остановил или заблокировал бота — его номер попадает в «Не писать» и для аккаунтов партнёров (для той компании, чьим подписчиком он был). Выключено: бот ему не пишет, а аккаунты партнёров — как прежде',
+  },
+  'bot.share_button': {
+    kind: 'string',
+    fallback: '',
+    max: BOT_SHARE_BUTTON_MAX,
+    hint: 'Надпись на кнопке под ответом бота при запуске — она отправляет боту номер человека. Пусто — «📲 Получать уведомления». Короче 30 знаков: длинная не влезет в кнопку на телефоне',
   },
   'bot.api_url': {
     kind: 'string',

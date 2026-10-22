@@ -157,3 +157,54 @@ export function accountReadyAt(
   }
   return undefined;
 }
+
+/** Почему аккаунт сейчас не берёт сообщения: пауза здоровья, тихие часы партнёра, лимит в минуту, час или сутки. */
+export type RestReason = 'health' | 'quiet' | 'minute' | 'hour' | 'day';
+
+/** Длина скользящего окна лимита и сколько сообщений в нём можно (с запасом партнёра). */
+export interface RestWindow {
+  readonly windowMs: number;
+  readonly allowed: number;
+}
+
+/**
+ * Почему аккаунт на паузе — для таблиц партнёра и сотрудников. Тот же порядок проверок, что у {@link accountReadyAt}, но **без
+ * очереди и паузы между сообщениями**: показывается, что лимит исчерпан отправленными, а не секундная пауза. Для лимитов
+ * возвращается окно: время снятия — когда самое раннее из последних `allowed` сообщений выйдет из окна (окна скользящие).
+ */
+export function restOf(
+  account: Pick<
+    MessengerAccountRow,
+    | 'warmupEnabled'
+    | 'warmupStartedAt'
+    | 'limitPerDay'
+    | 'limitPerHour'
+    | 'limitPerMinute'
+    | 'lastUsedAt'
+    | 'pausedUntil'
+  >,
+  load: AccountLoad,
+  now: Date,
+  options: { reservePercent: number; quietEnd: Date | undefined },
+): { reason: RestReason; until?: Date; window?: RestWindow } | undefined {
+  if (account.pausedUntil !== null && account.pausedUntil > now) {
+    return { reason: 'health', until: account.pausedUntil };
+  }
+  if (options.quietEnd !== undefined) return { reason: 'quiet', until: options.quietEnd };
+  const keep = (limit: number): number =>
+    Math.max(1, Math.floor((limit * (100 - options.reservePercent)) / 100));
+  if (account.limitPerMinute !== null && load.minute >= keep(account.limitPerMinute)) {
+    return {
+      reason: 'minute',
+      window: { windowMs: 60_000, allowed: keep(account.limitPerMinute) },
+    };
+  }
+  const limits = effectiveLimits(account, now);
+  if (limits.hourly !== null && load.hour >= keep(limits.hourly)) {
+    return { reason: 'hour', window: { windowMs: 3_600_000, allowed: keep(limits.hourly) } };
+  }
+  if (limits.daily !== null && load.day >= keep(limits.daily)) {
+    return { reason: 'day', window: { windowMs: 86_400_000, allowed: keep(limits.daily) } };
+  }
+  return undefined;
+}

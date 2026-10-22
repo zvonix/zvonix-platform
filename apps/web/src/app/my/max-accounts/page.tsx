@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
+import { SectionTabs } from '@/components/section-tabs';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import {
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
 import { money, moneyFromInput, numberFromInput } from '@/lib/money';
+import { Priorities } from '../priorities/priorities-view';
 
 type StopRequirement = 'any' | 'required' | 'forbidden';
 
@@ -56,8 +58,15 @@ const STOP_OPTIONS: readonly (readonly [StopRequirement, string])[] = [
 
 export default function MyMaxAccountsPage() {
   return (
-    <ConsoleShell title="Аккаунты MAX" cabinet="client">
-      {() => <Accounts />}
+    <ConsoleShell title="Маршруты MAX" cabinet="client">
+      {() => (
+        <SectionTabs
+          tabs={[
+            { id: 'fit', label: 'Кто подходит', content: <Accounts /> },
+            { id: 'order', label: 'Очерёдность', content: <Priorities product="messages" /> },
+          ]}
+        />
+      )}
     </ConsoleShell>
   );
 }
@@ -105,7 +114,7 @@ function Accounts() {
       <RequirementsForm current={requirements} />
 
       <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="font-semibold">Аккаунты партнёров</h2>
+        <h2 className="font-semibold">Аккаунты</h2>
         <span
           className={fitting === 0 && accounts.length > 0 ? 'text-warn' : 'text-muted-foreground'}
         >
@@ -121,7 +130,7 @@ function Accounts() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="h-8">Партнёр</TableHead>
+              <TableHead className="h-8">Маршрут</TableHead>
               <TableHead className="h-8">Аккаунт</TableHead>
               <TableHead className="h-8 text-right">Цена</TableHead>
               <TableHead className="h-8">«СТОП»</TableHead>
@@ -135,7 +144,7 @@ function Accounts() {
             {sorted.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={8} className="text-muted-foreground">
-                  Рабочих аккаунтов у партнёров пока нет.
+                  Рабочих аккаунтов пока нет.
                 </TableCell>
               </TableRow>
             )}

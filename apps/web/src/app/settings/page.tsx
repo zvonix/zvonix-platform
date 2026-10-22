@@ -55,6 +55,8 @@ const SUBGROUPS: Record<string, string> = {
   'messages.health_pause_hours': 'Здоровье аккаунта',
   'bot.enabled': 'Включение',
   'bot.api_url': 'Включение',
+  'bot.share_button': 'Подписчики',
+  'bot.block_stops_accounts': 'Подписчики',
   'bot.message_price': 'Цены для клиента',
   'bot.monthly_fee': 'Цены для клиента',
   'bot.own_message_price': 'Цены для клиента',

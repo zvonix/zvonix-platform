@@ -5,6 +5,7 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  BOT_SHARE_BUTTON,
   Money,
   notFound,
   parseId,
@@ -79,6 +80,9 @@ export interface CaptchaSettings {
 }
 
 type Values = Map<SettingKey, string | number | boolean>;
+
+/** Счёт знаков строковой настройки — по видимым символам. */
+const GRAPHEMES = new Intl.Segmenter('ru', { granularity: 'grapheme' });
 
 @Injectable()
 export class SettingsService {
@@ -243,11 +247,14 @@ export class SettingsService {
     readonly ownMonthlyFee: MoneyAmount;
     /** Остановка или блокировка бота — запрет и для аккаунтов партнёров ([ADR-0091](../../../../../docs/adr/0091-blokirovka-bota.md)). */
     readonly blockStopsAccounts: boolean;
+    /** Надпись кнопки «поделиться номером» под ответом при запуске; не задана — стандартная. */
+    readonly shareButton: string;
   }> {
     const values = await this.values();
     return {
       enabled: this.flag(values, 'bot.enabled'),
       blockStopsAccounts: this.flag(values, 'bot.block_stops_accounts'),
+      shareButton: this.text(values, 'bot.share_button').trim() || BOT_SHARE_BUTTON,
       apiUrl: this.text(values, 'bot.api_url').replace(/\/+$/u, ''),
       messagePrice: Money.fromMajorUnits(this.number(values, 'bot.message_price').toFixed(6)),
       monthlyFee: Money.fromMajorUnits(this.number(values, 'bot.monthly_fee').toFixed(6)),
@@ -392,6 +399,16 @@ export class SettingsService {
 
       const definition: SettingDefinition = SETTINGS[key];
       const number = Number(serialized);
+      if (
+        definition.kind === 'string' &&
+        definition.max !== undefined &&
+        // Знак — то, что человек видит одним символом: эмодзи на кнопке — один, а не два-три.
+        Array.from(GRAPHEMES.segment(serialized)).length > definition.max
+      ) {
+        throw validationFailed(
+          `Значение настройки «${key}» — не длиннее ${String(definition.max)} знаков`,
+        );
+      }
       if (
         definition.kind === 'number' &&
         ((definition.min !== undefined && number < definition.min) ||

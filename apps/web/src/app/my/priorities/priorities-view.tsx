@@ -210,8 +210,8 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
       )}
       <div className="flex flex-wrap items-center gap-2">
         <Input
-          aria-label="Найти партнёра"
-          placeholder="Найти партнёра"
+          aria-label="Найти маршрут"
+          placeholder="Найти маршрут"
           className="w-[220px]"
           value={query}
           onChange={(event) => {
@@ -220,12 +220,12 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
         />
         <Hint label="Как работают приоритеты">
           <p>
-            Очерёдность 1 — первыми, дальше 2, 3… Если у нескольких партнёров одна очерёдность, они
-            используются по очереди (сначала дешевле). Когда у партнёров с очерёдностью 1 всё занято
-            или исчерпаны лимиты, берутся партнёры с очерёдностью 2 и так далее.
+            Очерёдность 1 — первыми, дальше 2, 3… Если у нескольких маршрутов одна очерёдность, они
+            используются по очереди (сначала дешевле). Когда у маршрутов с очерёдностью 1 всё занято
+            или исчерпаны лимиты, берутся маршруты с очерёдностью 2 и так далее.
           </p>
           <p className="mt-2">
-            Пусто — партнёр идёт после всех названных. «Не использовать» — не берётся совсем. Для
+            Пусто — маршрут идёт после всех названных. «Не использовать» — не берётся совсем. Для
             отдельной линии можно задать свой порядок в «Линии»: он главнее этого списка.
           </p>
         </Hint>
@@ -292,7 +292,7 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                   }}
                 />
               </TableHead>
-              <TableHead className="h-8">Партнёр</TableHead>
+              <TableHead className="h-8">Маршрут</TableHead>
               {product === 'calls' && <TableHead className="h-8">Через что</TableHead>}
               <TableHead className="h-8 text-right">
                 {product === 'calls' ? 'Цена за вызов' : 'Цена за сообщение'}
@@ -309,7 +309,7 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                   colSpan={calls ? 7 : 5}
                   className="whitespace-normal text-muted-foreground"
                 >
-                  {all.length === 0 ? 'Партнёров пока нет.' : 'Никого не нашли: измените запрос.'}
+                  {all.length === 0 ? 'Маршрутов пока нет.' : 'Никого не нашли: измените запрос.'}
                 </TableCell>
               </TableRow>
             )}
@@ -455,7 +455,7 @@ function FitCell({
       {reasons.length > 0 ? (
         <span className="text-warn">нет: {reasons.join(', ')}</span>
       ) : partial ? (
-        <span title="На части направлений цена выше вашего предела — туда звонки через этого партнёра не пойдут">
+        <span title="На части направлений цена выше вашего предела — туда звонки этим маршрутом не пойдут">
           <span className="text-ok">да</span>
           <span className="text-muted-foreground">, кроме дорогих направлений</span>
         </span>

@@ -548,12 +548,14 @@ describe('настройки бота клиента и шаблон сообщ�
     expect(saved.json<{ settings: Record<string, unknown> }>().settings).toEqual({
       greeting: 'Здравствуйте! Вас приветствует {служба}',
       fallback_accounts: false,
+      share_button: '📲 Получать уведомления',
     });
 
     const cleared = await settingsPatch(client.token, { greeting: '' });
     expect(cleared.json<{ settings: Record<string, unknown> }>().settings).toMatchObject({
       greeting: null,
       fallback_accounts: false,
+      share_button: '📲 Получать уведомления',
     });
   });
 
@@ -830,8 +832,11 @@ describe('настройки бота клиента и шаблон сообщ�
       user: { user_id: 91 },
       payload: link.split('start=')[1],
     });
-    expect(simulatedBotSent.at(-1)?.text).toMatch(/^Добро пожаловать в Такси .+!$/u);
-    expect(simulatedBotSent.at(-1)?.requestContact).toBe('Поделиться номером');
+    // Свой текст клиента, а после него через пустую строку — призыв площадки нажать кнопку.
+    expect(simulatedBotSent.at(-1)?.text).toMatch(
+      /^Добро пожаловать в Такси .+!\n\nНажмите кнопку ниже 👇, чтобы получать уведомления\.$/u,
+    );
+    expect(simulatedBotSent.at(-1)?.requestContact).toBe('📲 Получать уведомления');
 
     await settingsPatch(client.token, { greeting: null });
     await event(botId, {
@@ -841,6 +846,21 @@ describe('настройки бота клиента и шаблон сообщ�
       payload: link.split('start=')[1],
     });
     expect(simulatedBotSent.at(-1)?.text).toContain('будет присылать вам уведомления');
+
+    // Надпись кнопки — настройка площадки: длиннее 30 знаков не принимается, своя уходит в MAX.
+    expect((await fx.put(adminToken, { 'bot.share_button': 'х'.repeat(31) })).statusCode).toBe(400);
+    expect((await fx.put(adminToken, { 'bot.share_button': '✅ Подписаться' })).statusCode).toBe(
+      200,
+    );
+    await event(botId, {
+      update_type: 'bot_started',
+      chat_id: 503,
+      user: { user_id: 93 },
+      payload: link.split('start=')[1],
+    });
+    expect(simulatedBotSent.at(-1)?.requestContact).toBe('✅ Подписаться');
+    expect(simulatedBotSent.at(-1)?.text).toContain('Нажмите кнопку ниже 👇');
+    expect((await fx.put(adminToken, { 'bot.share_button': '' })).statusCode).toBe(200);
   });
 
   it('запасной путь выключен: номер без подписчика не принимается и деньги не списываются; включён или бот не работает — идёт через аккаунты', async () => {

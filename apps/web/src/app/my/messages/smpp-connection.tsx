@@ -81,7 +81,7 @@ export function SmppConnection() {
   const typed = ips ?? smpp?.allowed_ips.join(', ') ?? '';
 
   return (
-    <section className="flex max-w-2xl flex-col gap-3 rounded-lg border border-border bg-card p-4">
+    <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
       <h2 className="font-semibold">Подключение по SMPP</h2>
 
       {issued !== undefined && (

@@ -9,7 +9,6 @@ import { Hint } from '@/components/hint';
 import { QrCode } from '@/components/qr-code';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { ApiError, request } from '@/lib/api';
 import { money } from '@/lib/money';
@@ -77,6 +76,15 @@ export function BotConnection() {
     mutationFn: () => request<BotState>('/client/messages/bot', { method: 'POST' }),
     onSuccess: store,
   });
+  // Настройка прямо в карточке, без окна: одна галочка не стоит отдельного диалога (владелец, 2026-10-22).
+  const fallback = useMutation({
+    mutationFn: (fallbackAccounts: boolean) =>
+      request<BotState>('/client/messages/bot/settings', {
+        method: 'PATCH',
+        body: { fallbackAccounts },
+      }),
+    onSuccess: store,
+  });
   const toggle = useMutation({
     mutationFn: (enabled: boolean) =>
       request<BotState>('/client/messages/bot', { method: 'PATCH', body: { enabled } }),
@@ -87,22 +95,16 @@ export function BotConnection() {
   if (data === undefined || !data.available) return null;
 
   const { connection, subscribers, own } = data;
-  const error = [connect.error, toggle.error, state.error].find(
+  const error = [connect.error, toggle.error, fallback.error, state.error].find(
     (candidate): candidate is ApiError => candidate instanceof ApiError,
   );
-
-  const saveSettings = async (patch: { fallbackAccounts: boolean }) => {
-    store(
-      await request<BotState>('/client/messages/bot/settings', { method: 'PATCH', body: patch }),
-    );
-  };
 
   const saveToken = async (token: string) => {
     store(await request<BotState>('/client/messages/bot/own', { method: 'PUT', body: { token } }));
   };
 
   return (
-    <section className="flex max-w-2xl flex-col gap-3 rounded-lg border border-border bg-card p-4">
+    <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4">
       <div className="flex items-center gap-1">
         <h2 className="font-semibold">Бот MAX</h2>
         <Hint label="Как работает бот">
@@ -119,26 +121,45 @@ export function BotConnection() {
 
       {connection !== null && (
         <>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <dt className="text-muted-foreground">Работает через</dt>
-            <dd translate="no">
-              {connection.kind === 'own' && own.bot !== null
-                ? `ваш бот @${own.bot.username}`
-                : 'бот площадки'}
-            </dd>
-            <dt className="text-muted-foreground">Ссылка для ваших клиентов</dt>
-            <dd className="num select-all break-all" translate="no">
-              {connection.link}
-            </dd>
-            <dt className="text-muted-foreground">Условия</dt>
-            <dd className="num">{termsLine(data.terms)}</dd>
-            <dt className="text-muted-foreground">Подписчиков</dt>
-            <dd className="num">
-              {subscribers.total}, с номером — {subscribers.with_phone}
-            </dd>
-          </dl>
+          <div className="flex flex-wrap items-start gap-4">
+            <dl className="grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+              <dt className="text-muted-foreground">Работает через</dt>
+              <dd translate="no">
+                {connection.kind === 'own' && own.bot !== null
+                  ? `ваш бот @${own.bot.username}`
+                  : 'бот площадки'}
+              </dd>
+              <dt className="text-muted-foreground">Ссылка для ваших клиентов</dt>
+              <dd className="num select-all break-all" translate="no">
+                {connection.link}
+              </dd>
+              <dt className="text-muted-foreground">Условия</dt>
+              <dd className="num">{termsLine(data.terms)}</dd>
+              <dt className="text-muted-foreground">Подписчиков</dt>
+              <dd className="num">
+                {subscribers.total}, с номером — {subscribers.with_phone}
+              </dd>
+            </dl>
 
-          <QrCode value={connection.link} label="QR-код ссылки для ваших клиентов" />
+            <QrCode value={connection.link} label="QR-код ссылки для ваших клиентов" />
+          </div>
+
+          <label className="flex items-center gap-3">
+            <Switch
+              checked={data.settings.fallback_accounts}
+              disabled={fallback.isPending}
+              onCheckedChange={(next) => {
+                fallback.mutate(next);
+              }}
+            />
+            Тем, кто не подписан на бота, писать через аккаунты партнёров
+            <Hint label="Что будет, если выключить">
+              <p>
+                Выключено — сообщение на номер без подписки на бота не принимается и деньги не
+                списываются. Включено — такое сообщение уходит через аккаунты партнёров.
+              </p>
+            </Hint>
+          </label>
 
           {connection.enabled && !connection.fee_paid && (
             <p className="text-warn">
@@ -165,9 +186,6 @@ export function BotConnection() {
             >
               {copied ? 'Скопировано' : 'Копировать ссылку'}
             </Button>
-            <FormDialog label="Настройки" title="Настройки бота" variant="outline" size="sm">
-              <SettingsForm settings={data.settings} onSave={saveSettings} />
-            </FormDialog>
             {connection.enabled ? (
               <Button
                 variant="outline"
@@ -307,40 +325,6 @@ function OwnBotForm({
         />
       </DialogField>
       <p className="text-muted-foreground sm:col-span-2">{termsLine(terms)}</p>
-    </DialogForm>
-  );
-}
-
-/**
- * Окно настроек бота клиента: запасной путь через аккаунты. Все тексты — и ответ бота при запуске, и вставки в сообщения — на
- * странице «Текст сообщения».
- */
-function SettingsForm({
-  settings,
-  onSave,
-}: {
-  settings: BotState['settings'];
-  onSave: (patch: { fallbackAccounts: boolean }) => Promise<unknown>;
-}) {
-  const [fallback, setFallback] = useState(settings.fallback_accounts);
-
-  return (
-    <DialogForm
-      submitLabel="Сохранить"
-      canSubmit
-      onSubmit={() => onSave({ fallbackAccounts: fallback })}
-    >
-      <div className="flex items-start gap-3 sm:col-span-2">
-        <Switch id="bot-fallback" checked={fallback} onCheckedChange={setFallback} />
-        <div>
-          <Label htmlFor="bot-fallback" className="font-normal">
-            Тем, кто не подписан на бота, писать через аккаунты партнёров
-          </Label>
-          <p className="text-muted-foreground">
-            Выключено — сообщение на номер без подписки не принимается и деньги не списываются.
-          </p>
-        </div>
-      </div>
     </DialogForm>
   );
 }

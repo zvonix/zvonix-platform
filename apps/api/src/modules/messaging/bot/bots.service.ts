@@ -6,7 +6,7 @@
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
-  BOT_SHARE_BUTTON,
+  BOT_SHARE_CALL,
   botStartText,
   conflict,
   dependencyUnavailable,
@@ -132,6 +132,8 @@ interface BotTerms {
 interface BotSettingsView {
   readonly greeting: string | null;
   readonly fallback_accounts: boolean;
+  /** Надпись кнопки под ответом при запуске — настройка площадки; для примера в кабинете. */
+  readonly share_button: string;
 }
 
 export interface BotClientView {
@@ -433,6 +435,7 @@ export class BotsService {
       settings: {
         greeting: connection?.greeting ?? null,
         fallback_accounts: connection?.fallbackAccounts ?? true,
+        share_button: settings.shareButton,
       },
       platform_terms: format(platformTerms),
       own: {
@@ -906,11 +909,17 @@ export class BotsService {
       chatId,
       firstName: nameOf(update.user),
     });
-    const client = await this.billing.clientWithBalance(connection.clientId);
+    const [client, { shareButton }] = await Promise.all([
+      this.billing.clientWithBalance(connection.clientId),
+      this.settings.bot(),
+    ]);
     // Своё приветствие клиента (`{название}`, прежнее `{служба}`) или стандартный текст — одной функцией с предпросмотром.
-    await this.provider.send(token, chatId, botStartText(connection.greeting, client.name), {
-      requestContact: BOT_SHARE_BUTTON,
-    });
+    await this.provider.send(
+      token,
+      chatId,
+      botStartText(connection.greeting, client.name, shareButton),
+      { requestContact: shareButton },
+    );
   }
 
   private async onMessage(bot: BotRow, update: BotUpdate): Promise<void> {
@@ -946,6 +955,17 @@ export class BotsService {
         }
       }
       await this.provider.send(token, chatId, TEXT.stopped);
+      return;
+    }
+    // Запустил бота, но номером так и не поделился: кнопка была только под первым сообщением и потерялась — напоминаем
+    // и показываем её снова (владелец, 2026-10-22). Иначе — обычная справка.
+    const subscribers = await this.repository.subscribersOf(bot.id, userId);
+    if (
+      subscribers.some((subscriber) => subscriber.state === 'started' && subscriber.phone === null)
+    ) {
+      await this.provider.send(token, chatId, BOT_SHARE_CALL, {
+        requestContact: (await this.settings.bot()).shareButton,
+      });
       return;
     }
     await this.provider.send(token, chatId, TEXT.help);

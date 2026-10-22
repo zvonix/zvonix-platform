@@ -44,3 +44,41 @@ export function MessengerAccountStatus({
     </span>
   );
 }
+
+/** Почему аккаунт на паузе (поле `rest` списка аккаунтов): причина словами — для партнёра и сотрудников. */
+const REST_NAME = {
+  health: 'много «нет MAX» после отправки',
+  quiet: 'тихие часы',
+  minute: 'лимит в минуту',
+  hour: 'лимит в час',
+  day: 'лимит в сутки',
+} as const;
+
+export type AccountRest =
+  { readonly reason: keyof typeof REST_NAME; readonly until: string } | null | undefined;
+
+/**
+ * «Пауза до 16:42 — лимит в час», ниже «через 12 мин»: аккаунт работает, но сейчас сообщений не берёт (владелец, 2026-10-22).
+ * Окна лимитов скользящие — время посчитано сервером по самому раннему сообщению в окне.
+ */
+export function AccountRestNote({ rest }: { rest: AccountRest }) {
+  if (rest === null || rest === undefined) return null;
+  const until = new Date(rest.until);
+  const minutes = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
+  const sameDay = until.toDateString() === new Date().toDateString();
+  const time = until.toLocaleString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(sameDay ? {} : { day: 'numeric', month: 'short' }),
+  });
+  const left =
+    minutes < 60
+      ? `через ${String(minutes)} мин`
+      : `через ${String(Math.floor(minutes / 60))} ч ${String(minutes % 60)} мин`;
+  return (
+    <span className="mt-1 block text-warn">
+      Пауза до <span className="num">{time}</span> — {REST_NAME[rest.reason]}
+      <span className="block text-xs text-muted-foreground">{left}</span>
+    </span>
+  );
+}
