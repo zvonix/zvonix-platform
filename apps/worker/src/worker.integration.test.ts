@@ -105,6 +105,7 @@ describe('реестр фоновых задач', () => {
       'bots.charge-fees',
       'messages.expire-waiting',
       'messages.purge-texts',
+      'smpp.purge-events',
       'messages.check-health',
       'messaging.refresh-accounts',
       'servers.sample',

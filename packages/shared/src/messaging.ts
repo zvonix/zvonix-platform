@@ -144,6 +144,50 @@ export const SMPP_RECEIPT_ACTIONS = ['none', 'accepted', 'delivered'] as const;
 export type SmppReceiptAction = (typeof SMPP_RECEIPT_ACTIONS)[number];
 export type SmppReceiptMap = Record<SmppReceiptEvent, SmppReceiptAction>;
 
+/**
+ * Журнал подключения SMPP ([ADR-0096](../../../docs/adr/0096-zhurnal-podklyucheniy-smpp.md)): вход и отказ в приёме сообщения.
+ * Неизвестное имя для входа в журнал не попадает — его не к чему привязать.
+ */
+export const SMPP_EVENT_KINDS = ['bind', 'submit'] as const;
+export type SmppEventKind = (typeof SMPP_EVENT_KINDS)[number];
+/** Итог входа: принят или почему отклонён. Программе уходит общий код, подробность — только в журнал. */
+export const SMPP_BIND_RESULTS = [
+  'ok',
+  'wrong_password',
+  'ip_not_allowed',
+  'disabled',
+  'product_off',
+  'client_inactive',
+  'too_many_sessions',
+  /** Адрес на минуту не пускается за подбор пароля — пишется один раз, когда пауза началась. */
+  'ip_blocked',
+] as const;
+export type SmppBindResult = (typeof SMPP_BIND_RESULTS)[number];
+/** Почему сообщение не принято. Номер и текст в журнал не пишутся — это персональные данные. */
+export const SMPP_SUBMIT_REFUSALS = [
+  'invalid_destination',
+  'invalid_length',
+  'invalid_validity',
+  'wrong_mode',
+  'rejected',
+  'throttled',
+  'system_error',
+] as const;
+export type SmppSubmitRefusal = (typeof SMPP_SUBMIT_REFUSALS)[number];
+export const SMPP_BIND_MODES = ['transmitter', 'receiver', 'transceiver'] as const;
+export type SmppBindMode = (typeof SMPP_BIND_MODES)[number];
+/** Сколько суток хранится журнал подключения. */
+export const SMPP_EVENTS_KEEP_DAYS = 30;
+
+/**
+ * Что делать с сообщением, если свободного аккаунта сейчас нет ([ADR-0097](../../../docs/adr/0097-zanyato-i-srok-soobshcheniya.md)):
+ * `reject` — отказать сразу (программа уйдёт к другому агрегатору), `wait` — ждать в очереди до срока. Не задано — по каналу.
+ */
+export const MESSAGE_BUSY_MODES = ['reject', 'wait'] as const;
+export type MessageBusyMode = (typeof MESSAGE_BUSY_MODES)[number];
+/** Предел «сколько ждать» и срока у сообщения, минут: сутки. */
+export const MESSAGE_WAIT_MINUTES_MAX = 1440;
+
 /** Прежнее поведение: ушло — молчим, доставлено и прочитано — `DELIVRD`. */
 export const SMPP_RECEIPT_DEFAULTS: SmppReceiptMap = {
   sent: 'none',

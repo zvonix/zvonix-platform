@@ -14,6 +14,8 @@ import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
 import {
   SMPP_RECEIPT_EVENTS,
   type Id,
+  type SmppEventKind,
+  type SmppSubmitRefusal,
   type SmppReceiptAction,
   type SmppReceiptEvent,
   type SmppReceiptMap,
@@ -22,6 +24,7 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../../infra
 import { MessagesRepository, type MessageRow } from '../messages.repository.js';
 import { MessagesService } from '../messages.service.js';
 import { Status, encodeReceiptBody, type Receipt } from './codec.js';
+import type { SmppAccountRow } from './smpp.repository.js';
 import { SmppService, normalizeIp } from './smpp.service.js';
 import { SmppSession, type BindMode, type SessionHost } from './session.js';
 
@@ -66,6 +69,8 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
   private readonly sessions = new Set<SmppSession>();
   private readonly listeners: net.Server[] = [];
   private readonly failures = new Map<string, FailureRecord>();
+  /** Очередь записей журнала подключения (ADR-0096): одна за другой, чтобы повторы схлопывались. */
+  private journalChain: Promise<void> = Promise.resolve();
   /** Отчёты, отправленные клиенту и ещё не подтверждённые: чтобы опрос не слал один и тот же дважды. */
   private readonly inFlight = new Set<string>();
   private pump: NodeJS.Timeout | undefined;
@@ -187,13 +192,16 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
     return record.count >= BIND_FAILURES_LIMIT;
   }
 
-  private noteFailure(ip: string): void {
+  /** Отмечает неудачный вход; `true` — этим входом адрес только что попал под паузу. */
+  private noteFailure(ip: string): boolean {
     const now = Date.now();
     const record = this.failures.get(ip);
+    let count = 1;
     if (record === undefined || now - record.since > BIND_FAILURE_WINDOW_MS) {
       this.failures.set(ip, { count: 1, since: now });
     } else {
       record.count += 1;
+      count = record.count;
     }
     // Адресов-одноразовок может быть сколько угодно: старые записи не копятся.
     if (this.failures.size > 10_000) {
@@ -201,13 +209,27 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
         if (now - entry.since > BIND_FAILURE_WINDOW_MS) this.failures.delete(address);
       }
     }
+    return count === BIND_FAILURES_LIMIT;
+  }
+
+  /**
+   * Кто из клиента сейчас на связи — для «Сейчас на связи» в кабинете: программа такси сама о подключении ничего не говорит
+   * (владелец, 2026-10-22). Сессии живут в памяти этого процесса — слушатель SMPP только в нём.
+   */
+  sessionsOf(clientId: Id<'client'>): { ip: string; mode: BindMode; since: Date }[] {
+    return [...this.sessions].flatMap((session) =>
+      session.clientId === clientId && session.mode !== undefined && session.boundAt !== undefined
+        ? [{ ip: session.ip, mode: session.mode, since: session.boundAt }]
+        : [],
+    );
   }
 
   async bind(
     session: SmppSession,
-    _mode: BindMode,
+    mode: BindMode,
     credentials: { systemId: string; password: string },
-  ): Promise<{ status: number; clientId?: Id<'client'> }> {
+  ): Promise<{ status: number; clientId?: Id<'client'>; accountId?: SmppAccountRow['id'] }> {
+    // Перебор с заблокированного адреса в журнал клиента не пишется: иначе он заливал бы журнал (ADR-0096).
     if (this.isBlocked(session.ip)) return { status: Status.bindFailed };
 
     const result = await this.smpp.authenticate(
@@ -216,19 +238,64 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
       session.ip,
     );
     if (!result.ok) {
+      if (result.accountId !== undefined) {
+        this.journal(result.accountId, 'bind', result.refusal, session.ip, mode);
+      }
+      if (result.refusal !== 'unknown_system_id' && result.refusal !== 'wrong_password') {
+        return { status: Status.bindFailed };
+      }
       // Неизвестное имя и неверный пароль не различаются в ответе: иначе имена можно перебирать.
-      if (result.refusal === 'refused') return { status: Status.bindFailed };
-      this.noteFailure(session.ip);
+      // Адрес только что попал под паузу за подбор — один раз в журнал (ADR-0096): дальше его попытки не пишутся.
+      if (this.noteFailure(session.ip) && result.accountId !== undefined) {
+        this.journal(result.accountId, 'bind', 'ip_blocked', session.ip, mode);
+      }
       this.logger.warn('SMPP: неверные данные для входа', { ip: session.ip });
       return { status: Status.invalidPassword };
     }
     const same = [...this.sessions].filter((other) => other.clientId === result.clientId).length;
-    if (same >= MAX_SESSIONS_PER_ACCOUNT) return { status: Status.bindFailed };
-    return { status: Status.ok, clientId: result.clientId };
+    if (same >= MAX_SESSIONS_PER_ACCOUNT) {
+      this.journal(result.accountId, 'bind', 'too_many_sessions', session.ip, mode);
+      return { status: Status.bindFailed };
+    }
+    this.journal(result.accountId, 'bind', 'ok', session.ip, mode);
+    return { status: Status.ok, clientId: result.clientId, accountId: result.accountId };
   }
 
-  async submit(clientId: Id<'client'>, to: string, text: string): Promise<string> {
-    const row = await this.messages.send(clientId, { to, text }, 'smpp');
+  /** Отказ в приёме сообщения — в журнал подключения (ADR-0096). */
+  refused(session: SmppSession, reason: SmppSubmitRefusal): void {
+    if (session.accountId === undefined) return;
+    this.journal(session.accountId, 'submit', reason, session.ip, session.mode ?? null);
+  }
+
+  /**
+   * Журнал не задерживает ответ программе и не роняет сессию: запись идёт в фоне, сбой — строка в логе. Записи идут **по
+   * очереди**: две одинаковые подряд иначе обе не нашли бы предыдущую и не схлопнулись бы в счётчик.
+   */
+  private journal(
+    accountId: SmppAccountRow['id'],
+    kind: SmppEventKind,
+    result: string,
+    ip: string,
+    mode: BindMode | null,
+  ): void {
+    this.journalChain = this.journalChain
+      .then(() => this.smpp.record({ accountId, kind, result, ip, mode }))
+      .catch((cause: unknown) => {
+        this.logger.error('SMPP: событие журнала не записано', cause, { ip });
+      });
+  }
+
+  async submit(
+    clientId: Id<'client'>,
+    to: string,
+    text: string,
+    validUntil?: Date,
+  ): Promise<string> {
+    const row = await this.messages.send(
+      clientId,
+      { to, text, ...(validUntil === undefined ? {} : { validUntil }) },
+      'smpp',
+    );
     return row.id;
   }
 

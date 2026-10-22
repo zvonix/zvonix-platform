@@ -41,8 +41,14 @@ import {
   BOT_SUBSCRIBER_STATES,
   MESSAGE_ROUTES,
   MESSENGER_PROVIDERS,
+  MESSAGE_BUSY_MODES,
+  MESSAGE_WAIT_MINUTES_MAX,
+  SMPP_BIND_MODES,
+  SMPP_BIND_RESULTS,
+  SMPP_EVENT_KINDS,
   SMPP_RECEIPT_ACTIONS,
   SMPP_RECEIPT_DEFAULTS,
+  SMPP_SUBMIT_REFUSALS,
   type BotKind,
   type BotStatus,
   type BotSubscriberState,
@@ -60,6 +66,9 @@ import {
   type MessengerAccountStatus,
   type MessengerPauseReason,
   type MessengerProviderId,
+  type MessageBusyMode,
+  type SmppBindMode,
+  type SmppEventKind,
   type SmppReceiptAction,
   type TemplateBlock,
 } from '@zvonix/shared';
@@ -297,6 +306,11 @@ export const messages = pgTable(
     nextAttemptAt: timestamptz().notNull().defaultNow(),
 
     createdAt: createdAt(),
+    /**
+     * Не ушло к этому моменту — отказ `wait_expired` с возвратом денег (ADR-0097): меньшее из срока сообщения и «сколько ждать»
+     * клиента. Пусто у строк до ADR-0097 — по прежнему правилу от времени приёма.
+     */
+    expiresAt: timestamptz(),
     sentAt: timestamptz(),
     deliveredAt: timestamptz(),
     readAt: timestamptz(),
@@ -388,6 +402,43 @@ export const smppAccounts = pgTable(
     check('smpp_accounts_receipt_on_read_check', oneOf(t.receiptOnRead, SMPP_RECEIPT_ACTIONS)),
     uniqueIndex('smpp_accounts_client_key').on(t.clientId),
     uniqueIndex('smpp_accounts_system_id_key').on(t.systemId),
+  ],
+);
+
+/**
+ * Журнал подключения SMPP ([ADR-0096](../../../../docs/adr/0096-zhurnal-podklyucheniy-smpp.md)): входы (принят или почему нет) и
+ * отказы в приёме сообщения. Одинаковые события в пределах минуты схлопываются в одну строку со счётчиком. Хранится 30 суток.
+ */
+export const smppEvents = pgTable(
+  'smpp_events',
+  {
+    id: primaryId<'smppEvent'>(),
+    accountId: idRef<'smppAccount'>()
+      .notNull()
+      .references(() => smppAccounts.id, { onDelete: 'cascade' }),
+    kind: text().$type<SmppEventKind>().notNull(),
+    /** Итог входа (`SMPP_BIND_RESULTS`) или причина отказа в приёме (`SMPP_SUBMIT_REFUSALS`). */
+    result: text().notNull(),
+    /** Адрес, с которого подключились. */
+    ip: text().notNull(),
+    /** Режим входа; у отказа в приёме — режим сессии. */
+    mode: text().$type<SmppBindMode>(),
+    /** Сколько одинаковых событий схлопнуто в строку. */
+    count: integer().notNull().default(1),
+    createdAt: createdAt(),
+    /** Время последнего из схлопнутых. */
+    lastAt: timestamptz().notNull().defaultNow(),
+  },
+  (t) => [
+    index('smpp_events_account_idx').on(t.accountId, t.lastAt),
+    index('smpp_events_last_idx').on(t.lastAt),
+    check('smpp_events_kind_check', oneOf(t.kind, SMPP_EVENT_KINDS)),
+    check(
+      'smpp_events_result_check',
+      sql`(${t.kind} = 'bind' and ${oneOf(t.result, SMPP_BIND_RESULTS)}) or (${t.kind} = 'submit' and ${oneOf(t.result, SMPP_SUBMIT_REFUSALS)})`,
+    ),
+    check('smpp_events_mode_check', sql`${t.mode} is null or ${oneOf(t.mode, SMPP_BIND_MODES)}`),
+    check('smpp_events_count_check', sql`${t.count} >= 1`),
   ],
 );
 
@@ -630,10 +681,22 @@ export const clientMessageRequirements = pgTable(
     maxPrice: money(),
     /** Аккаунт заведён не меньше стольких суток назад; пусто — без предела. */
     minAgeDays: integer(),
+    /** Свободного аккаунта нет — отказать сразу или ждать (ADR-0097); пусто — по каналу (SMPP — отказ, API — ждать). */
+    busyMode: text().$type<MessageBusyMode>(),
+    /** Сколько ждать отправки, минут; пусто — настройка площадки `messages.max_wait_minutes`. */
+    maxWaitMinutes: integer(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex('client_message_requirements_client_key').on(t.clientId),
+    check(
+      'client_message_requirements_busy_check',
+      sql`${t.busyMode} is null or ${oneOf(t.busyMode, MESSAGE_BUSY_MODES)}`,
+    ),
+    check(
+      'client_message_requirements_wait_check',
+      sql`${t.maxWaitMinutes} is null or ${t.maxWaitMinutes} between 1 and ${sql.raw(String(MESSAGE_WAIT_MINUTES_MAX))}`,
+    ),
     check(
       'client_message_requirements_stop_check',
       sql`${oneOf(t.stopLine, STOP_LINE_REQUIREMENTS)}`,

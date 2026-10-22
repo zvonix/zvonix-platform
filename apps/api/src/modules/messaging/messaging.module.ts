@@ -46,6 +46,7 @@ import { MESSAGE_PROVIDER, type MessageProvider } from './provider.js';
 import { SimulatedMessageProvider } from './simulated.provider.js';
 import { SmppServer } from './smpp/server.js';
 import { ClientSmppController, StaffSmppController } from './smpp/smpp.controller.js';
+import { SmppEventsRepository } from './smpp/smpp-events.repository.js';
 import { SmppRepository } from './smpp/smpp.repository.js';
 import { SmppService } from './smpp/smpp.service.js';
 import { StaffStopsController } from './stops.controller.js';
@@ -99,6 +100,7 @@ import { StopsService } from './stops.service.js';
     StopsRepository,
     StopsService,
     SmppRepository,
+    SmppEventsRepository,
     SmppService,
     SmppServer,
     BotsRepository,
@@ -125,6 +127,6 @@ import { StopsService } from './stops.service.js';
           : new GreenApiMessageProvider(settings, logger, redis),
     },
   ],
-  exports: [MessagingService, MessagesService, BotsService, SmppServer],
+  exports: [MessagingService, MessagesService, BotsService, SmppServer, SmppService],
 })
 export class MessagingModule {}

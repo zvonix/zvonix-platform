@@ -128,6 +128,17 @@ export class AccountPicker {
       ignoreRules?: boolean;
     } = {},
   ): Promise<MessengerAccountRow | undefined> {
+    return (await this.pickWithState(now, options)).account;
+  }
+
+  /**
+   * То же, что {@link pick}, и свободен ли найденный аккаунт сейчас: `free: false` — «первый по давности», сообщение встанет в
+   * очередь. Приём по нему решает, отказать ли сразу (ADR-0097).
+   */
+  async pickWithState(
+    now: Date,
+    options: Parameters<AccountPicker['pick']>[1] = {},
+  ): Promise<{ account?: MessengerAccountRow; free: boolean }> {
     const { scope, sticky } = options;
     const paceSeconds = scope?.paceSeconds ?? options.paceSeconds ?? 0;
     // Перевыбор среди соседей одного партнёра списка клиента не касается: партнёр уже выбран.
@@ -148,10 +159,17 @@ export class AccountPicker {
         tier,
         index === 0,
       );
-      if (found.account !== undefined) return found.account;
+      if (found.account !== undefined) return { account: found.account, free: true };
       fallback ??= found.fallback;
     }
-    return scope === undefined ? fallback : undefined;
+    return scope === undefined && fallback !== undefined
+      ? { account: fallback, free: false }
+      : { free: false };
+  }
+
+  /** Когда аккаунт освободится по своим лимитам, тихим часам и паузе здоровья (сейчас — `now`). Для «ждать бессмысленно» (ADR-0097). */
+  async freeAt(account: MessengerAccountRow, now: Date): Promise<Date> {
+    return (await this.restOf([account], now)).get(account.id)?.until ?? now;
   }
 
   /** Один заход по цифре списка клиента: свободный аккаунт или первый по давности. */

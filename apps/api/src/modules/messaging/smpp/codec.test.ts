@@ -10,8 +10,9 @@ import {
   encodeResponse,
   encodeSubmitBody,
   PduFramer,
-  receiptDate,
+  smppTimeToDate,
   SmppProtocolError,
+  receiptDate,
   Command,
   Status,
 } from './codec.js';
@@ -152,5 +153,26 @@ describe('ответ', () => {
     expect(pdu?.commandId).toBe(0x80000004);
     expect(pdu?.sequence).toBe(5);
     expect(decodeMessageId(pdu?.body ?? Buffer.alloc(0))).toBe('id-1');
+  });
+});
+
+describe('срок сообщения SMPP (validity_period, ADR-0097)', () => {
+  const now = new Date('2026-10-22T12:00:00Z');
+
+  it('пусто — без срока; относительный — от момента приёма', () => {
+    expect(smppTimeToDate('', now)).toBeUndefined();
+    expect(smppTimeToDate('000000000300000R', now)).toEqual(new Date('2026-10-22T12:03:00Z'));
+    expect(smppTimeToDate('000001020000000R', now)).toEqual(new Date('2026-10-23T14:00:00Z'));
+  });
+
+  it('абсолютный — со смещением в четвертях часа: «+12» — Москва (UTC+3), «+28» — Красноярск (UTC+7)', () => {
+    expect(smppTimeToDate('261022160000012+', now)).toEqual(new Date('2026-10-22T13:00:00Z'));
+    expect(smppTimeToDate('261022160000028+', now)).toEqual(new Date('2026-10-22T09:00:00Z'));
+    expect(smppTimeToDate('261022050000000-', now)).toEqual(new Date('2026-10-22T05:00:00Z'));
+  });
+
+  it('неразборчивое — ошибка протокола «неверный срок»', () => {
+    expect(() => smppTimeToDate('tomorrow', now)).toThrow(SmppProtocolError);
+    expect(() => smppTimeToDate('261322160000028+', now)).toThrow(SmppProtocolError);
   });
 });

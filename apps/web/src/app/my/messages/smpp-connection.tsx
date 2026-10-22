@@ -1,11 +1,12 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { SMPP_ALLOWED_IPS_MAX, type SmppReceiptMap } from '@zvonix/shared';
+import { SMPP_ALLOWED_IPS_MAX, type SmppBindMode, type SmppReceiptMap } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { OneTimeSecret } from '@/components/one-time-secret';
+import { MODE_NAME, SmppEvents } from '@/components/smpp-events';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,6 +20,8 @@ interface SmppAccount {
   readonly allowed_ips: readonly string[];
   readonly receipts: SmppReceiptMap;
   readonly last_bind_at: string | null;
+  /** Кто сейчас на связи под этим подключением (ADR-0096). */
+  readonly online?: readonly { ip: string; mode: SmppBindMode; since: string }[];
 }
 
 interface Connection {
@@ -49,6 +52,8 @@ export function SmppConnection() {
   const state = useQuery({
     queryKey: KEY,
     queryFn: ({ signal }) => request<State>('/client/messages/smpp', { signal }),
+    // «Сейчас на связи» должно быть свежим: программа подключается и отваливается сама.
+    refetchInterval: 15_000,
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: KEY });
@@ -136,6 +141,19 @@ export function SmppConnection() {
             )}
             <dt className="text-muted-foreground">Имя</dt>
             <dd className="num select-all">{smpp.system_id}</dd>
+            <dt className="text-muted-foreground">Сейчас на связи</dt>
+            <dd>
+              {smpp.online === undefined || smpp.online.length === 0 ? (
+                <span className="text-muted-foreground">нет</span>
+              ) : (
+                smpp.online.map((session) => (
+                  <span key={`${session.ip}-${session.since}`} className="block text-ok">
+                    да, <span className="num">{session.ip}</span> с{' '}
+                    <span className="num">{moment(session.since)}</span> · {MODE_NAME[session.mode]}
+                  </span>
+                ))
+              )}
+            </dd>
             <dt className="text-muted-foreground">Был на связи</dt>
             <dd className="num">{smpp.last_bind_at === null ? '—' : moment(smpp.last_bind_at)}</dd>
           </dl>
@@ -223,6 +241,11 @@ export function SmppConnection() {
                 </Button>
               </>
             )}
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-border pt-3">
+            <h3 className="font-medium">Журнал подключений</h3>
+            <SmppEvents url="/client/messages/smpp/events" />
           </div>
         </>
       )}

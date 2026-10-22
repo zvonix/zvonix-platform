@@ -101,10 +101,19 @@ class Esme {
     return this.request(command, bindBody(systemId, password));
   }
 
-  submit(destination: string, text: string, extra: { dataCoding?: number } = {}): Promise<Pdu> {
+  submit(
+    destination: string,
+    text: string,
+    extra: { dataCoding?: number; validity?: string } = {},
+  ): Promise<Pdu> {
     return this.request(
       Command.submitSm,
-      encodeSubmitBody({ destination, text, dataCoding: extra.dataCoding ?? 8 }),
+      encodeSubmitBody({
+        destination,
+        text,
+        dataCoding: extra.dataCoding ?? 8,
+        ...(extra.validity === undefined ? {} : { validity: extra.validity }),
+      }),
     );
   }
 
@@ -542,7 +551,14 @@ describe('приём сообщения', () => {
 
   it('частота выше предела получает «слишком часто», а не падение', async () => {
     await fx.partnerWithAccount('0.01');
-    const { credentials } = await smppClient('100');
+    const { client, credentials } = await smppClient('100');
+    // Проверяется предел частоты сессии, а не «все заняты»: сообщения ждут в очереди (ADR-0097).
+    await api().inject({
+      method: 'PUT',
+      url: '/client/messages/delivery',
+      headers: bearer(client.token),
+      payload: { busyMode: 'wait', maxWaitMinutes: 60 },
+    });
     const esme = await connect();
     await esme.bind(Command.bindTransmitter, credentials.systemId, credentials.password);
 
@@ -554,6 +570,186 @@ describe('приём сообщения', () => {
     const statuses = results.map((pdu) => pdu.status);
     expect(statuses.filter((status) => status === Status.ok).length).toBeGreaterThanOrEqual(50);
     expect(statuses).toContain(Status.throttled);
+  });
+});
+
+describe('«все заняты» и срок сообщения (ADR-0097)', () => {
+  it('SMPP по умолчанию отказывает сразу, если свободного аккаунта нет; в режиме «ждать» — очередь', async () => {
+    await fx.partnerWithAccount('0.01', { limitPerMinute: 1 });
+    const { client, credentials } = await smppClient('10');
+    const esme = await connect();
+    await esme.bind(Command.bindTransmitter, credentials.systemId, credentials.password);
+    expect((await esme.submit('79001234501', 'первое')).status).toBe(Status.ok);
+    await api().get(MessagesService).dispatchDue(new Date());
+    // Аккаунт исчерпал минуту — второе сразу получает «повторите», денег не списано.
+    expect((await esme.submit('79001234502', 'второе')).status).toBe(Status.throttled);
+    expect(await messagesOf(client.clientId)).toHaveLength(1);
+
+    await api().inject({
+      method: 'PUT',
+      url: '/client/messages/delivery',
+      headers: bearer(client.token),
+      payload: { busyMode: 'wait', maxWaitMinutes: 10 },
+    });
+    expect((await esme.submit('79001234503', 'третье')).status).toBe(Status.ok);
+    expect(await messagesOf(client.clientId)).toHaveLength(2);
+  });
+
+  it('validity_period: относительный срок записывается в сообщение; прошедший и неразборчивый — отказ', async () => {
+    await fx.partnerWithAccount('0.01');
+    const { client, credentials } = await smppClient('10');
+    const esme = await connect();
+    await esme.bind(Command.bindTransmitter, credentials.systemId, credentials.password);
+
+    const before = Date.now();
+    expect(
+      (await esme.submit('79001234511', 'срок три минуты', { validity: '000000000300000R' }))
+        .status,
+    ).toBe(Status.ok);
+    const expiresAt = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select expires_at from messages where client_id = ${client.clientId}`,
+      );
+      return new Date((result.rows[0] as { expires_at: string }).expires_at).getTime();
+    });
+    expect(expiresAt - before).toBeGreaterThanOrEqual(180_000 - 1000);
+    expect(expiresAt - before).toBeLessThanOrEqual(180_000 + 5000);
+
+    expect(
+      (await esme.submit('79001234512', 'прошло', { validity: '200101000000000+' })).status,
+    ).toBe(Status.invalidExpiry);
+    expect((await esme.submit('79001234513', 'мусор', { validity: 'tomorrow' })).status).toBe(
+      Status.invalidExpiry,
+    );
+  });
+});
+
+describe('журнал подключения (ADR-0096)', () => {
+  interface EventView {
+    kind: string;
+    result: string;
+    ip: string;
+    mode: string | null;
+    count: number;
+  }
+  /** Журнал пишется в фоне, чтобы не задерживать ответ программе: ждём, пока событие появится. */
+  const eventsOf = async (token: string, expected: number): Promise<EventView[]> => {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await api().inject({
+        method: 'GET',
+        url: '/client/messages/smpp/events',
+        headers: bearer(token),
+      });
+      expect(response.statusCode).toBe(200);
+      const events = response.json<{ events: EventView[] }>().events;
+      if (events.reduce((sum, event) => sum + event.count, 0) >= expected) return events;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('События журнала не появились');
+  };
+
+  it('вход, неверный пароль, отказ в приёме — с причиной; повтор схлопывается в счётчик; номер не пишется', async () => {
+    const { client, credentials } = await smppClient('10');
+    const bad = await connect();
+    await bad.bind(Command.bindTransmitter, credentials.systemId, 'неверный');
+    await bad.untilClosed();
+
+    const good = await connect();
+    expect(
+      (await good.bind(Command.bindTransceiver, credentials.systemId, credentials.password)).status,
+    ).toBe(Status.ok);
+    await good.submit('98765', 'текст');
+    await good.submit('98766', 'текст');
+
+    const events = await eventsOf(client.token, 4);
+    expect(events.map((event) => [event.kind, event.result, event.count])).toEqual(
+      expect.arrayContaining([
+        ['bind', 'wrong_password', 1],
+        ['bind', 'ok', 1],
+        ['submit', 'invalid_destination', 2],
+      ]),
+    );
+    expect(events.find((event) => event.result === 'ok')?.mode).toBe('transceiver');
+    expect(events.every((event) => event.ip.length > 0)).toBe(true);
+    expect(JSON.stringify(events)).not.toContain('9876');
+  });
+
+  it('адрес вне списка — причина в журнале; неизвестное имя в журнал не попадает; сотрудник видит журнал клиента', async () => {
+    const { client, credentials } = await smppClient();
+    await api().inject({
+      method: 'PATCH',
+      url: '/client/messages/smpp',
+      headers: bearer(client.token),
+      payload: { allowedIps: ['203.0.113.5'] },
+    });
+    const esme = await connect();
+    expect(
+      (await esme.bind(Command.bindTransmitter, credentials.systemId, credentials.password)).status,
+    ).toBe(Status.bindFailed);
+    const events = await eventsOf(client.token, 1);
+    expect(events.map((event) => event.result)).toEqual(['ip_not_allowed']);
+
+    const stranger = await connect();
+    await stranger.bind(Command.bindTransmitter, 'zxnosuchid2', 'x');
+
+    const staff = await api().inject({
+      method: 'GET',
+      url: `/smpp/accounts/${client.clientId}/events`,
+      headers: bearer(adminToken),
+    });
+    expect(staff.statusCode).toBe(200);
+    expect(staff.json<{ events: EventView[] }>().events.map((event) => event.result)).toEqual([
+      'ip_not_allowed',
+    ]);
+  });
+
+  it('пять неверных паролей подряд — в журнале один раз «адрес заблокирован», дальше попытки не пишутся', async () => {
+    const { client, credentials } = await smppClient();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const bad = await connect();
+      await bad.bind(Command.bindTransmitter, credentials.systemId, 'неверный');
+      await bad.untilClosed();
+    }
+    const events = await eventsOf(client.token, 6);
+    expect(events.find((event) => event.result === 'wrong_password')?.count).toBe(5);
+    expect(events.filter((event) => event.result === 'ip_blocked')).toHaveLength(1);
+  });
+
+  it('«сейчас на связи»: вошедшая сессия видна клиенту с адресом и режимом, после выхода — нет', async () => {
+    const { client, credentials } = await smppClient();
+    const online = async () =>
+      (
+        await api().inject({
+          method: 'GET',
+          url: '/client/messages/smpp',
+          headers: bearer(client.token),
+        })
+      ).json<{ smpp: { online: { ip: string; mode: string }[] } }>().smpp.online;
+    expect(await online()).toEqual([]);
+    const esme = await connect();
+    await esme.bind(Command.bindReceiver, credentials.systemId, credentials.password);
+    expect(await online()).toEqual([expect.objectContaining({ mode: 'receiver' })]);
+    esme.destroy();
+    for (let attempt = 0; attempt < 50 && (await online()).length > 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(await online()).toEqual([]);
+  });
+
+  it('старше 30 суток стирается фоновой задачей', async () => {
+    const { client, credentials } = await smppClient();
+    const esme = await connect();
+    await esme.bind(Command.bindTransmitter, credentials.systemId, credentials.password);
+    await eventsOf(client.token, 1);
+    const { SmppService } = await import('./smpp.service.js');
+    const later = new Date(Date.now() + 31 * 86_400_000);
+    expect(await api().get(SmppService).purgeEvents(later)).toBeGreaterThanOrEqual(1);
+    const left = await api().inject({
+      method: 'GET',
+      url: '/client/messages/smpp/events',
+      headers: bearer(client.token),
+    });
+    expect(left.json<{ events: unknown[] }>().events).toEqual([]);
   });
 });
 

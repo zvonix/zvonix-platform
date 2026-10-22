@@ -8,6 +8,8 @@ import {
   Money,
   notFound,
   type Id,
+  type MessageBusyMode,
+  type MessageChannel,
   type MoneyAmount,
   type StopLineRequirement,
   type UserRole,
@@ -37,6 +39,16 @@ export interface ClientRules {
   /** Никакой аккаунт не подойдёт (цена для клиента ниже наценки) — выбор сразу пустой. */
   readonly impossible?: boolean;
 }
+
+/** Как поступать с сообщением, если свободного аккаунта нет (ADR-0097). */
+export interface DeliveryView {
+  readonly busy_mode: MessageBusyMode | null;
+  readonly max_wait_minutes: number | null;
+}
+
+/** Режим «все заняты» по умолчанию: программа по SMPP уходит к другому агрегатору, API и кабинет — ждут, как раньше. */
+export const defaultBusyMode = (channel: MessageChannel): MessageBusyMode =>
+  channel === 'smpp' ? 'reject' : 'wait';
 
 export interface RequirementsView {
   readonly stop_line: StopLineRequirement;
@@ -133,6 +145,32 @@ export class RequirementsService {
       before: { account_id: accountId, excluded: !excluded },
       after: { account_id: accountId, excluded },
     });
+  }
+
+  /** «Если отправить сразу нельзя» и «сколько ждать» клиента (ADR-0097); не задано — `null`. */
+  async delivery(clientId: Id<'client'>): Promise<DeliveryView> {
+    const row = await this.repository.find(clientId);
+    return { busy_mode: row?.busyMode ?? null, max_wait_minutes: row?.maxWaitMinutes ?? null };
+  }
+
+  async setDelivery(
+    actor: { userId: Id<'user'>; role: UserRole },
+    clientId: Id<'client'>,
+    input: { busyMode: MessageBusyMode | null; maxWaitMinutes: number | null },
+  ): Promise<DeliveryView> {
+    const before = await this.delivery(clientId);
+    await this.repository.saveDelivery(clientId, input);
+    const after = { busy_mode: input.busyMode, max_wait_minutes: input.maxWaitMinutes };
+    await this.audit.record({
+      action: 'client_message_delivery.set',
+      entityType: 'client',
+      entityId: clientId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before,
+      after,
+    });
+    return after;
   }
 
   /** Правила для выбора аккаунта; требований и отключений нет — `undefined`, выбор как раньше. */

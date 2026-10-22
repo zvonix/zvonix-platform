@@ -1,4 +1,6 @@
 import {
+  MESSAGE_BUSY_MODES,
+  MESSAGE_WAIT_MINUTES_MAX,
   ACCOUNT_MIN_AGE_DAYS_MAX,
   STOP_LINE_REQUIREMENTS,
   MESSAGE_MAX_LENGTH,
@@ -157,6 +159,24 @@ export const sendMessageSchema = z.object({
     .min(1, 'не может быть пустым')
     .max(100, 'слишком длинный')
     .optional(),
+  /** Срок сообщения, минут (ADR-0097): не ушло за это время — отказ с возвратом денег. Меньшее из этого и «сколько ждать». */
+  validMinutes: z
+    .number()
+    .int('должно быть целым числом')
+    .min(1, 'не меньше 1')
+    .max(MESSAGE_WAIT_MINUTES_MAX, `не больше ${String(MESSAGE_WAIT_MINUTES_MAX)}`)
+    .optional(),
+});
+
+/** «Если отправить сразу нельзя» и «сколько ждать» клиента (ADR-0097); `null` — по умолчанию. */
+export const deliverySchema = z.object({
+  busyMode: z.enum(MESSAGE_BUSY_MODES).nullable(),
+  maxWaitMinutes: z
+    .number()
+    .int('должно быть целым числом')
+    .min(1, 'не меньше 1')
+    .max(MESSAGE_WAIT_MINUTES_MAX, `не больше ${String(MESSAGE_WAIT_MINUTES_MAX)}`)
+    .nullable(),
 });
 
 export const messagesQuerySchema = z.object({
