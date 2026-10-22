@@ -171,10 +171,11 @@ export class SupportController {
   ) {
     const found = await this.support.listOwn(actorOf(principal), {
       ...(query.status === undefined ? {} : { status: query.status }),
+      ...(query.scope === undefined ? {} : { scope: query.scope }),
       limit: query.limit,
       offset: query.offset,
     });
-    return { tickets: found.rows.map(ticketJson), total: found.total };
+    return { tickets: found.rows.map(ticketJson), total: found.total, counts: found.counts };
   }
 
   @Cabinets('client', 'partner')
@@ -225,6 +226,7 @@ export class SupportController {
   async listStaff(@Query(zodQuery(ticketsQuerySchema)) query: z.infer<typeof ticketsQuerySchema>) {
     const found = await this.support.listStaff({
       ...(query.status === undefined ? {} : { status: query.status }),
+      ...(query.scope === undefined ? {} : { scope: query.scope }),
       ...(query.cabinet === undefined ? {} : { cabinet: query.cabinet }),
       ...(query.category === undefined ? {} : { category: query.category }),
       ...(query.unassigned === undefined ? {} : { unassigned: true }),
@@ -232,7 +234,7 @@ export class SupportController {
       limit: query.limit,
       offset: query.offset,
     });
-    return { tickets: found.rows.map(ticketJson), total: found.total };
+    return { tickets: found.rows.map(ticketJson), total: found.total, counts: found.counts };
   }
 
   @Roles('admin', 'support')

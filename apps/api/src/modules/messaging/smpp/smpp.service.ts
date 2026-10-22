@@ -30,7 +30,12 @@ import { SmppRepository, type SmppAccountRow } from './smpp.repository.js';
 
 /** Без неоднозначных знаков (0/O, 1/l/I): пароль переписывают руками и диктуют по телефону. */
 const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-const PASSWORD_LENGTH = 16;
+/**
+ * Восемь — предел SMPP 3.4 (5.2.4: `password` — C-Octet String до 9 октетов с завершающим нулём). Шестнадцать знаков
+ * программа такси владельца отказалась даже отправлять (2026-10-22, «length must be less than 9»). Перебор держат пауза
+ * адреса после 5 неверных паролей и список разрешённых адресов, а не длина.
+ */
+const PASSWORD_LENGTH = 8;
 const SYSTEM_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 /**

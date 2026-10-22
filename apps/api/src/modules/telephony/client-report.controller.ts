@@ -32,10 +32,12 @@ interface OwnSipAccount {
   readonly username: string;
   readonly password: string;
   readonly realm: string;
+  /** Куда подключаться — адрес узла, а не домен (`TelephonyService.sipServer`). */
+  readonly server: string;
 }
 
-function toOwnAccount(account: OwnSipAccount): OwnSipAccount {
-  return { username: account.username, password: account.password, realm: account.realm };
+function toOwnAccount(account: Omit<OwnSipAccount, 'server'>, server: string): OwnSipAccount {
+  return { username: account.username, password: account.password, realm: account.realm, server };
 }
 
 @Controller()
@@ -73,7 +75,7 @@ export class ClientReportController {
     const created = await this.telephony.createOwnChannel(actor, body.name);
     return {
       channel: toClientChannelView(created.channel),
-      account: toOwnAccount(created.account),
+      account: toOwnAccount(created.account, await this.telephony.sipServer()),
     };
   }
 
@@ -85,7 +87,7 @@ export class ClientReportController {
     @Param('id') id: string,
   ): Promise<{ account: OwnSipAccount }> {
     const account = await this.telephony.resetOwnChannelCredentials(parseId(id, 'channel'), actor);
-    return { account: toOwnAccount(account) };
+    return { account: toOwnAccount(account, await this.telephony.sipServer()) };
   }
 
   /**

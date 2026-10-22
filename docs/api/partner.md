@@ -379,9 +379,9 @@
 
 `201` →
 ```json
-{ "gateway": …, "account": { "username": "gw-…", "password": "…", "realm": "…" },
+{ "gateway": …, "account": { "username": "gw-…", "password": "…", "realm": "…", "server": "…" },
   "port_accounts": [ { "port_id": "…", "port_number": 1, "username": "pt-…",
-                       "password": "…", "realm": "…" } ] }
+                       "password": "…", "realm": "…", "server": "…" } ] }
 ```
 
 `port_accounts` — входы всех портов при `port`, пусто при `gateway`. Вход шлюза

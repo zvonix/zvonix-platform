@@ -48,7 +48,7 @@ import {
   tariffChoiceSchema,
 } from './schemas.js';
 import { firstAndAll, toPortAccountView, type PortAccountView } from './telephony.controller.js';
-import { TelephonyService } from './telephony.service.js';
+import { TelephonyService, type IssuedPortAccount } from './telephony.service.js';
 import type {
   GatewayPortRow,
   GatewayRow,
@@ -167,6 +167,12 @@ export class PartnerEquipmentController {
     private readonly catalog: CatalogService,
   ) {}
 
+  /** Входы линий с адресом узла — один запрос адреса на весь ответ. */
+  private async portViews(accounts: readonly IssuedPortAccount[]): Promise<PortAccountView[]> {
+    const server = await this.telephony.sipServer();
+    return accounts.map((account) => toPortAccountView(account, server));
+  }
+
   /**
    * Всё железо партнёра одним ответом.
    *
@@ -225,7 +231,7 @@ export class PartnerEquipmentController {
       );
 
     return {
-      connection: { server: this.telephony.realm, port: NODE_SIP_PORT },
+      connection: { server: await this.telephony.sipServer(), port: NODE_SIP_PORT },
       gateways: gatewayViews,
       trunks: trunks
         .filter(({ gateway }) => gateway.status !== 'retired')
@@ -268,8 +274,9 @@ export class PartnerEquipmentController {
         username: created.account.username,
         password: created.account.password,
         realm: created.account.realm,
+        server: await this.telephony.sipServer(),
       },
-      port_accounts: created.portAccounts.map(toPortAccountView),
+      port_accounts: await this.portViews(created.portAccounts),
     };
   }
 
@@ -297,7 +304,7 @@ export class PartnerEquipmentController {
     );
     return {
       gateway: toGatewayView(result.gateway, []),
-      port_accounts: result.portAccounts.map(toPortAccountView),
+      port_accounts: await this.portViews(result.portAccounts),
     };
   }
 
@@ -360,7 +367,7 @@ export class PartnerEquipmentController {
       actor.userId,
       actor.role,
     );
-    return { port_accounts: accounts.map(toPortAccountView) };
+    return { port_accounts: await this.portViews(accounts) };
   }
 
   /** Новый вход одной линии своего шлюза: прежние имя и пароль перестают работать. */
@@ -375,7 +382,7 @@ export class PartnerEquipmentController {
     await this.telephony.requireOwnPort(portId, partner.id);
 
     const account = await this.telephony.resetPortAccount(portId, actor.userId, actor.role);
-    return { port_account: toPortAccountView(account) };
+    return { port_account: toPortAccountView(account, await this.telephony.sipServer()) };
   }
 
   /**
@@ -422,7 +429,12 @@ export class PartnerEquipmentController {
       actor.role,
     );
     return {
-      account: { username: account.username, password: account.password, realm: account.realm },
+      account: {
+        username: account.username,
+        password: account.password,
+        realm: account.realm,
+        server: await this.telephony.sipServer(),
+      },
     };
   }
 
@@ -521,6 +533,7 @@ interface SipAccountView {
   readonly username: string;
   readonly password: string;
   readonly realm: string;
+  readonly server: string;
 }
 
 /** Порт в ответе на действие: без SIM — её состояние партнёр перечитывает целиком. */

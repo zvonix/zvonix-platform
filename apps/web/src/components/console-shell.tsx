@@ -308,6 +308,8 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
         { href: '/my/messages', label: 'Сообщения', Icon: MessageSquare, tab: true },
         { href: '/my/message-text', label: 'Текст сообщения', Icon: PenLine },
         { href: '/my/message-connections', label: 'Подключения', Icon: Plug },
+        // Цены сообщений — здесь, а не в «Цены» раздела «Звонки»: там только звонки (владелец, 2026-10-22).
+        { href: '/my/message-prices', label: 'Цены', Icon: ReceiptText },
         // Требования, аккаунты и очерёдность — одна страница с вкладками, а не два пункта меню.
         { href: '/my/max-accounts', label: 'Маршруты', Icon: Waypoints },
       ],

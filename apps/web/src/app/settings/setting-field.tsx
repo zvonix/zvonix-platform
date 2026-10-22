@@ -60,7 +60,7 @@ const LABELS: Record<string, string> = {
   'bot.share_button': 'Надпись кнопки «поделиться номером» в боте',
   'bot.block_stops_accounts': 'Остановил бота — не писать и через аккаунты партнёров',
   'bot.api_url': 'Адрес API ботов MAX',
-  'support.autoclose_days': 'Закрывать обращение само через, суток',
+  'support.autoclose_days': 'Закрыть, если после ответа поддержки клиент молчит, суток',
   'messages.pace_seconds': 'Пауза между сообщениями аккаунта, секунд',
   'messages.recommended_pace_seconds': 'Пауза между сообщениями, секунд',
   'messages.recommended_per_minute': 'Сообщений в минуту, не больше',

@@ -34,6 +34,7 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { AuditService } from '../audit/audit.service.js';
 import { BillingRepository } from '../billing/billing.repository.js';
 import { CatalogRepository } from '../catalog/catalog.repository.js';
+import { NodesService } from '../nodes/nodes.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
@@ -126,6 +127,7 @@ export class TelephonyService {
     private readonly resolver: OperatorResolverService,
     private readonly catalog: CatalogRepository,
     private readonly tariffs: TariffService,
+    private readonly nodes: NodesService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -134,6 +136,17 @@ export class TelephonyService {
 
   get realm(): string {
     return this.config.SIP_REALM;
+  }
+
+  /**
+   * Куда подключать GOIP и линию: публичный адрес узла, а не SIP-домен. Домен узел навязывает сам (`challenge-realm`,
+   * `force-register-domain`), и он может вовсе не существовать в DNS — на площадке владельца это была заглушка
+   * `sip.zvonix.local` в поле «Сервер» (2026-10-22). Адреса узла нет — имя кабинета: при установке «всё на одной машине»
+   * узел там же.
+   */
+  async sipServer(): Promise<string> {
+    const [address] = await this.nodes.sipAddresses();
+    return address ?? new URL(this.config.PUBLIC_BASE_URL).hostname;
   }
 
   // --- Шлюзы -----------------------------------------------------------------

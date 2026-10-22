@@ -8,6 +8,8 @@ export interface SipAccount {
   readonly username: string;
   readonly password: string;
   readonly realm: string;
+  /** Адрес узла — куда подключаться. Домен (`realm`) узел подставляет сам. */
+  readonly server: string;
 }
 
 /**
@@ -56,7 +58,7 @@ export function SipCredentials({
         <dt className="text-muted-foreground">Пароль</dt>
         <dd className="num select-all">{account.password}</dd>
         <dt className="text-muted-foreground">Сервер</dt>
-        <dd className="num select-all">{account.realm}</dd>
+        <dd className="num select-all">{account.server}</dd>
       </dl>
       {children}
     </OneTimeSecret>
@@ -95,7 +97,7 @@ export function LineCredentials({
   title: string;
   onClose: () => void;
 }) {
-  const realm = lines[0]?.realm ?? '';
+  const server = lines[0]?.server ?? '';
   return (
     <OneTimeSecret title={title} onClose={onClose}>
       <p>
@@ -106,7 +108,7 @@ export function LineCredentials({
         <span className="text-muted-foreground">
           SIP Proxy, SIP Registrar Server у всех линий:{' '}
         </span>
-        <span className="num select-all">{realm}</span>
+        <span className="num select-all">{server}</span>
       </p>
       <div className="overflow-x-auto">
         {/* Без переносов: разорванный логин или пароль переписывают с ошибкой. */}

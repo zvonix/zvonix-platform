@@ -240,7 +240,7 @@ describe('подключение клиента в кабинете', () => {
     });
     expect(created.statusCode).toBe(201);
     const first = created.json<{ smpp: { system_id: string }; password: string }>();
-    expect(first.password).toHaveLength(16);
+    expect(first.password).toHaveLength(8);
     expect(first.smpp.system_id).toMatch(/^zx[a-z0-9]{8}$/u);
 
     const read = await get();

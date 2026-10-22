@@ -115,8 +115,8 @@ FreeSWITCH принимает его в каталоге вместо парол
 {
   "gateway": { "id", "partner_id", "name", "type", "status", "registration_mode", "sip_username",
                "node_id", "registered_at", "model", "port_count" },
-  "account": { "username": "gw-a1b2c3d4e5f6", "password": "…", "realm": "sip.zvonix.ru" },
-  "port_accounts": [ { "port_id", "port_number", "username": "pt-…", "password", "realm" } ]
+  "account": { "username": "gw-a1b2c3d4e5f6", "password": "…", "realm": "sip.zvonix.ru", "server": "203.0.113.10" },
+  "port_accounts": [ { "port_id", "port_number", "username": "pt-…", "password", "realm", "server" } ]
 }
 ```
 
@@ -170,7 +170,11 @@ FreeSWITCH принимает его в каталоге вместо парол
 
 ## `POST /gateways/:id/credentials` — роль `admin`
 
-`201` → `{ "account": { "username", "password", "realm" } }`
+`201` → `{ "account": { "username", "password", "realm", "server" } }`
+
+`server` — куда подключать оборудование: публичный адрес узла (`sip_address`; сначала работающие узлы), без него — имя
+кабинета из `PUBLIC_BASE_URL`. `realm` — SIP-домен для хеша пароля: узел подставляет его сам (`challenge-realm`), вводить его
+как адрес сервера не нужно — на площадке с заглушкой `sip.zvonix.local` так и выходило «не подключается» (2026-10-22).
 
 Новый пароль: **имя прежнее** ([ADR-0054](../adr/0054-vhod-po-liniyam-goip.md), ревизия
 2026-09-25). Прежний пароль перестаёт действовать сразу — каталог отдаёт хеш нового;
@@ -208,7 +212,7 @@ FreeSWITCH принимает его в каталоге вместо парол
 { "clientId": "…", "name": "Основная линия", "recordingRequired": true, "callerId": "79001234567" }
 ```
 
-`201` → `{ "channel": { … }, "account": { "username": "ch-…", "password", "realm" } }`
+`201` → `{ "channel": { … }, "account": { "username": "ch-…", "password", "realm", "server" } }`
 
 **Канал — линия клиента, а не порт шлюза.** Смешивать эти понятия нельзя,
 см. [GLOSSARY.md](../GLOSSARY.md).
@@ -249,7 +253,7 @@ FreeSWITCH принимает его в каталоге вместо парол
 
 ## `POST /channels/:id/credentials` — роль `admin`
 
-`201` → `{ "account": { "username", "password", "realm" } }`
+`201` → `{ "account": { "username", "password", "realm", "server" } }`
 
 Перевыпуск, симметричный шлюзовому: меняются **и имя, и пароль**, старое имя перестаёт
 находиться в каталоге сразу. Нужен по той же причине, что и у шлюза, только цена ошибки
