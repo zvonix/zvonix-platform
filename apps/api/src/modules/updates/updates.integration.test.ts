@@ -468,7 +468,8 @@ describe('токен GitHub (ADR-0084)', () => {
 
     await status({ expires_at: new Date(Date.now() + 60 * DAY).toISOString() });
     expect(await view()).toMatchObject({ available: true, state: 'ok' });
-    await status({ expires_at: new Date(Date.now() + 5 * DAY).toISOString() });
+    // Запас в час: ровно «5 суток» на границе давал 4 или 5 в зависимости от сдвига часов машины (CI, 2026-10-22).
+    await status({ expires_at: new Date(Date.now() + 5 * DAY - 3_600_000).toISOString() });
     expect(await view()).toMatchObject({ state: 'soon', days_left: 4 });
     await status({ valid: false, problem: 'GitHub не принял токен' });
     expect(await view()).toMatchObject({ state: 'invalid' });
