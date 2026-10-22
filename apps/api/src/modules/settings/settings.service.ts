@@ -241,10 +241,13 @@ export class SettingsService {
     readonly monthlyFee: MoneyAmount;
     readonly ownMessagePrice: MoneyAmount;
     readonly ownMonthlyFee: MoneyAmount;
+    /** Остановка или блокировка бота — запрет и для аккаунтов партнёров ([ADR-0091](../../../../../docs/adr/0091-blokirovka-bota.md)). */
+    readonly blockStopsAccounts: boolean;
   }> {
     const values = await this.values();
     return {
       enabled: this.flag(values, 'bot.enabled'),
+      blockStopsAccounts: this.flag(values, 'bot.block_stops_accounts'),
       apiUrl: this.text(values, 'bot.api_url').replace(/\/+$/u, ''),
       messagePrice: Money.fromMajorUnits(this.number(values, 'bot.message_price').toFixed(6)),
       monthlyFee: Money.fromMajorUnits(this.number(values, 'bot.monthly_fee').toFixed(6)),

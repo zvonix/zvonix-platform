@@ -16,6 +16,7 @@ import { DEFAULT_DISTRIBUTION, quietEndsAt, type DistributionSettings } from '@z
 import { chooseByMode, isFree, type Candidate } from './distribution.js';
 import { MessagesRepository, type AccountLoad } from './messages.repository.js';
 import { MessagingRepository, type MessengerAccountRow } from './messaging.repository.js';
+import { RequirementsService, type ClientRules } from './requirements.service.js';
 import { withRecommended } from './warmup.js';
 
 /** Сколько аккаунтов смотрится за один заход: хватает, чтобы найти свободный, и не читает все. */
@@ -46,6 +47,7 @@ export class AccountPicker {
     private readonly distribution: DistributionService,
     private readonly priorities: PrioritiesService,
     private readonly settings: SettingsService,
+    private readonly requirements: RequirementsService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('account-picker');
@@ -67,6 +69,8 @@ export class AccountPicker {
    * `sticky` — клиент и получатель: если партнёр включил «один получатель — один аккаунт» и прежний аккаунт свободен,
    * берётся он. `clientId` — приоритеты партнёров клиента (ADR-0081): сначала партнёры с цифрой 1, нет свободного
    * аккаунта — следующая цифра, затем партнёры, которых в списке нет; «не использовать» исключает партнёра.
+   * Требования клиента и его ручные отключения (ADR-0092) действуют всегда, когда клиент известен: при приёме — из
+   * `clientId`/`sticky`, при перевыборе соседа — из `forClient`. `ignoreRules` — только чтобы понять, мешают ли требования.
    */
   async pick(
     now: Date,
@@ -74,7 +78,9 @@ export class AccountPicker {
       scope?: PickScope;
       sticky?: { clientId: Id<'client'>; recipient: string };
       clientId?: Id<'client'>;
+      forClient?: Id<'client'>;
       paceSeconds?: number;
+      ignoreRules?: boolean;
     } = {},
   ): Promise<MessengerAccountRow | undefined> {
     const { scope, sticky } = options;
@@ -83,10 +89,20 @@ export class AccountPicker {
     const clientId = scope === undefined ? (options.clientId ?? sticky?.clientId) : undefined;
     const tiers =
       clientId === undefined ? [{}] : tiersOf(await this.priorities.forMessages(clientId));
+    const rulesClient = options.forClient ?? options.clientId ?? sticky?.clientId;
+    const rules =
+      rulesClient === undefined || options.ignoreRules === true
+        ? undefined
+        : await this.requirements.rulesFor(rulesClient, now);
 
     let fallback: MessengerAccountRow | undefined;
     for (const [index, tier] of tiers.entries()) {
-      const found = await this.pickIn(now, { scope, sticky, paceSeconds }, tier, index === 0);
+      const found = await this.pickIn(
+        now,
+        { scope, sticky, paceSeconds, rules },
+        tier,
+        index === 0,
+      );
       if (found.account !== undefined) return found.account;
       fallback ??= found.fallback;
     }
@@ -100,11 +116,12 @@ export class AccountPicker {
       scope: PickScope | undefined;
       sticky: { clientId: Id<'client'>; recipient: string } | undefined;
       paceSeconds: number;
+      rules: ClientRules | undefined;
     },
     tier: Tier,
     first: boolean,
   ): Promise<{ account?: MessengerAccountRow; fallback?: MessengerAccountRow }> {
-    const { scope, sticky, paceSeconds } = options;
+    const { scope, sticky, paceSeconds, rules } = options;
     const profile = (await this.settings.messaging()).recommended;
     const verified = new Set<string>();
     const excluded: Id<'partner'>[] = [...(tier.exceptPartners ?? [])];
@@ -118,6 +135,7 @@ export class AccountPicker {
         offset,
         exceptPartners: excluded,
         ...(tier.onlyPartners === undefined ? {} : { onlyPartners: tier.onlyPartners }),
+        ...(rules === undefined ? {} : { rules }),
         ...(scope === undefined
           ? {}
           : { partnerId: scope.partnerId, price: scope.price, exceptId: scope.exceptId }),

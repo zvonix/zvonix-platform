@@ -51,6 +51,8 @@ export {
   botConnections,
   botSubscribers,
   messageStops,
+  clientMessageRequirements,
+  clientAccountExclusions,
   messengerAccountEvents,
   numberChecks,
   messageTemplates,

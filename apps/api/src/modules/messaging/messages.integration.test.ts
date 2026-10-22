@@ -44,6 +44,7 @@ interface MessageView {
   failure_reason: string | null;
   cost: string | null;
   stop_line: boolean;
+  full_text: string | null;
 }
 
 const owed = async (partnerId: string): Promise<string> =>
@@ -306,15 +307,25 @@ describe('отправка воркером', () => {
     expect(await api().get(MessagesService).dispatchDue(new Date())).toBeGreaterThanOrEqual(1);
 
     expect(await messageOf(client.token, id)).toMatchObject({ status: 'sent' });
-    // Строка про «СТОП» добавляется в конец всегда (ADR-0090).
+    // По умолчанию у аккаунта включена строка про «СТОП» (ADR-0092): она добавляется в конец.
     expect(simulatedSent.find((item) => item.recipient === '79005550011')).toMatchObject({
       instanceId: partner.instance,
       text: 'Ваш заказ принят\n\nЧтобы отписаться, ответьте СТОП',
     });
     expect(await messageOf(client.token, id)).toMatchObject({ stop_line: true });
+    // Полный текст — как получил человек (ADR-0093); сотруднику ни текст, ни полный текст не отдаются.
+    expect((await messageOf(client.token, id))?.full_text).toBe(
+      'Ваш заказ принят\n\nЧтобы отписаться, ответьте СТОП',
+    );
+    const staff = (
+      await api().inject({ method: 'GET', url: '/messages?limit=50', headers: bearer(adminToken) })
+    ).json<{ messages: Record<string, unknown>[] }>().messages;
+    expect(staff.length).toBeGreaterThan(0);
+    expect(staff[0]).not.toHaveProperty('text');
+    expect(staff[0]).not.toHaveProperty('full_text');
   });
 
-  it('строка про «СТОП» не отключается партнёром; PATCH без полей — 400, чужая роль — 403', async () => {
+  it('партнёр выключает «СТОП» у аккаунта: текст уходит как написан, клиент видит, что строки не было; чужой аккаунт не тронуть', async () => {
     const partner = await partnerWithAccount('0.45');
     const client = await clientWithMoney('10');
     const accountId = await withDatabase(async (execute) => {
@@ -330,8 +341,17 @@ describe('отправка воркером', () => {
       });
 
     expect((await patch(partner.ownerToken, {})).statusCode).toBe(400);
-    expect((await patch(partner.ownerToken, { stopLine: false })).statusCode).toBe(400);
-    expect((await patch(client.token, { recommended: false })).statusCode).toBe(403);
+    expect((await patch(client.token, { stopLine: false })).statusCode).toBe(403);
+    const off = await patch(partner.ownerToken, { stopLine: false });
+    expect(off.statusCode).toBe(200);
+    expect(off.json<{ account: { stop_line: boolean } }>().account.stop_line).toBe(false);
+
+    const id = (await send(client.token, { to: '79005550081', text: 'Без строки' })).json<{
+      message: MessageView;
+    }>().message.id;
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect(simulatedSent.find((item) => item.recipient === '79005550081')?.text).toBe('Без строки');
+    expect(await messageOf(client.token, id)).toMatchObject({ stop_line: false });
   });
 
   it('пауза аккаунта: второе сообщение ждёт, потом уходит', async () => {

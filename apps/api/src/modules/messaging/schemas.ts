@@ -1,4 +1,6 @@
 import {
+  ACCOUNT_MIN_AGE_DAYS_MAX,
+  STOP_LINE_REQUIREMENTS,
   MESSAGE_MAX_LENGTH,
   MESSAGE_STATUSES,
   SMPP_RECEIPT_ACTIONS,
@@ -36,15 +38,20 @@ export const testMessageSchema = z.object({
 });
 
 /** Что партнёр меняет у аккаунта: только название. Цена и лимиты — в тарифе ([ADR-0075](../../../../../docs/adr/0075-tarify-max-nabor-uslovij.md)). */
-/** Партнёр меняет своё: название и «рекомендованную работу» (ADR-0088, ADR-0090). */
+/** Партнёр меняет своё: название, «СТОП» в сообщениях и «рекомендованную работу» (ADR-0088, ADR-0090, ADR-0092). */
 export const updateAccountSchema = z
   .object({
     label: label.optional(),
+    stopLine: z.boolean().optional(),
     recommended: z.boolean().optional(),
   })
-  .refine((body) => body.label !== undefined || body.recommended !== undefined, {
-    message: 'Нечего менять',
-  });
+  .refine(
+    (body) =>
+      body.label !== undefined || body.stopLine !== undefined || body.recommended !== undefined,
+    {
+      message: 'Нечего менять',
+    },
+  );
 
 /** Автопрогрев аккаунта: включить или выключить. */
 export const warmupSchema = z.object({ enabled: z.boolean() });
@@ -221,3 +228,20 @@ export const templateSchema = z.object({
       message: 'В сообщении должен быть ровно один блок «Текст сообщения»',
     }),
 });
+
+/** Требования клиента к аккаунтам MAX ([ADR-0092](../../../../../docs/adr/0092-trebovaniya-klienta-k-akkauntam.md)). */
+export const requirementsSchema = z.object({
+  stopLine: z.enum(STOP_LINE_REQUIREMENTS),
+  recommendedOnly: z.boolean(),
+  /** Цена сообщения для клиента не дороже; `null` — без предела. */
+  maxPrice: amount.refine((value) => value > 0n, 'должна быть больше нуля').nullable(),
+  minAgeDays: z
+    .number()
+    .int('должно быть целым числом')
+    .min(1, 'не меньше 1')
+    .max(ACCOUNT_MIN_AGE_DAYS_MAX, `не больше ${String(ACCOUNT_MIN_AGE_DAYS_MAX)}`)
+    .nullable(),
+});
+
+/** Клиент отключает аккаунт для себя или возвращает его. */
+export const exclusionSchema = z.object({ excluded: z.boolean() });

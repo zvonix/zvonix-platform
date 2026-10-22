@@ -61,7 +61,7 @@ MAX либо нет связи; `retired` — списан (в списках е
 
 ### `PATCH /partner/messenger/accounts/:id`
 
-`{ "label"?, "recommended"? }` — переименование и «рекомендованная работа» (хотя бы одно поле, иначе `400`; ADR-0088, ADR-0090). `recommended: true` — лимиты тарифа **не действуют**, работает профиль площадки (значения партнёру не отдаются, в виде аккаунта по-прежнему лимиты тарифа). К каждому сообщению через аккаунт в конец всегда добавляется строка «Чтобы отписаться, ответьте СТОП» (не настраивается; не влезает в предел 4000 знаков — сообщение уходит без неё). В виде сообщения клиента — `stop_line`: строка была добавлена. Ответ «СТОП» принимается независимо от галочки. Журнал: `messenger_account.terms_changed`. **Цена и лимиты у аккаунта не правятся:** они
+`{ "label"?, "stopLine"?, "recommended"? }` — переименование, «СТОП» в сообщениях и «рекомендованная работа» (хотя бы одно поле, иначе `400`; ADR-0088, ADR-0090, ADR-0092). `recommended: true` — лимиты тарифа **не действуют**, работает профиль площадки (значения партнёру не отдаются, в виде аккаунта по-прежнему лимиты тарифа). Вид аккаунта содержит `stop_line`: при `true` к каждому сообщению через аккаунт в конец добавляется строка «Чтобы отписаться, ответьте СТОП» (по умолчанию `true`; решает партнёр; не влезает в предел 4000 знаков — сообщение уходит без неё). В виде сообщения клиента — `stop_line`: строка была добавлена. Ответ «СТОП» принимается независимо от галочки. Журнал: `messenger_account.terms_changed`. **Цена и лимиты у аккаунта не правятся:** они
 действуют из тарифа ([ADR-0075](../adr/0075-tarify-max-nabor-uslovij.md)). Вид аккаунта: `state_reason` — почему `unavailable`: `suspended` (работа приостановлена службой доставки: не оплачено,
 не активировано, временный запрет), `blocked` (MAX ограничил аккаунт), `logged_out` (вышел из MAX); у рабочего и ждущего
 входа — `null`; кабинет показывает его значком «?» рядом с состоянием. `tariff_id` — назначенный
@@ -440,3 +440,27 @@ MAX либо нет связи; `retired` — списан (в списках е
 от этого клиента за час или за сутки уже отправлено не меньше предела из настроек (`messages.recipient_limit_per_hour` — 5,
 `messages.recipient_limit_per_day` — 20; 0 — без предела). Деньги не списываются, сообщение не создаётся. Для получателей,
 которых обслуживает бот клиента (ADR-0077), предел не действует.
+
+## Требования клиента к аккаунтам ([ADR-0092](../adr/0092-trebovaniya-klienta-k-akkauntam.md))
+
+- `GET /client/messages/accounts` → `{ enabled, requirements, accounts }`. `requirements` — `{ stop_line: any|required|forbidden,
+  recommended_only, max_price, min_age_days }`. `accounts` — рабочие аккаунты подтверждённых партнёров: `{ id, partner` (псевдоним)`,
+  number` («аккаунт N» у партнёра)`, price` (для клиента, с наценкой)`, stop_line, recommended, age_days, excluded, reasons }`;
+  `reasons` пуст — подходит. Названия аккаунта, номера телефона и партнёра нет.
+- `PUT /client/messages/requirements` `{ stopLine, recommendedOnly, maxPrice | null, minAgeDays | null }` → `{ requirements }`.
+  `maxPrice` больше нуля, `minAgeDays` 1–365. Журнал: `client_message_requirements.set`.
+- `PUT /client/messages/accounts/:id/exclusion` `{ excluded }` — отключить аккаунт для себя или вернуть; нет аккаунта — `404`.
+  Журнал: `client_account_exclusion.set`.
+- Требования и отключения действуют на каждый выбор аккаунта. Без них аккаунт нашёлся бы — `POST /client/messages` отвечает `409`
+  «Под ваши требования к аккаунтам сейчас никто не подходит».
+
+## Полный текст ([ADR-0093](../adr/0093-polnyy-tekst-soobshcheniya.md))
+
+- В виде сообщения клиента — `full_text`: текст, как его получил человек (шаблон, приветствие, ссылка, «СТОП»); `null` — не ушло
+  или стёрто по сроку. Сотруднику (`GET /messages`) ни `text`, ни `full_text` не отдаются.
+
+## Бот или аккаунты ([ADR-0094](../adr/0094-statistika-bot-ili-akkaunty.md))
+
+- `GET /client/messages/route-stats?days=7` → `{ days, recipients, in_bot, via_bot, via_accounts }`.
+- В `GET /messages/report` — `routes: [{ client_id, name, recipients, in_bot, via_bot, via_accounts }]`.
+

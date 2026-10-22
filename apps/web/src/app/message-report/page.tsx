@@ -67,8 +67,19 @@ interface JournalEvent {
   readonly at: string;
 }
 
+/** Бот или аккаунты по клиенту (ADR-0094). */
+interface RouteRow {
+  readonly client_id: string;
+  readonly name: string;
+  readonly recipients: number;
+  readonly in_bot: number;
+  readonly via_bot: number;
+  readonly via_accounts: number;
+}
+
 interface Report {
   readonly days: number;
+  readonly routes: RouteRow[];
   readonly clients: ClientRow[];
   readonly accounts: AccountRow[];
   readonly journal: {
@@ -165,6 +176,7 @@ function ReportView() {
             }))}
           />
           <Journal journal={report.data.journal} />
+          <Routes rows={report.data.routes} />
         </>
       )}
     </div>
@@ -336,5 +348,62 @@ function Journal({ journal }: { journal: Report['journal'] }) {
         </ul>
       )}
     </>
+  );
+}
+
+const percentText = (part: number, whole: number): string =>
+  whole === 0 ? '—' : `${String(Math.round((part * 100) / whole))} %`;
+
+/** Сколько людей у каждого клиента перешли в бота и сколько сообщений ушло каким путём (ADR-0094). */
+function Routes({ rows }: { rows: readonly RouteRow[] }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="flex items-center gap-1">
+        <h2 className="font-semibold">Бот или аккаунты</h2>
+        <Hint label="Как считается">
+          <p>
+            «Людей» — разные номера, которым за период ушло хоть одно сообщение. «В боте» — сколько
+            из них сейчас подписаны на бота клиента и поделились номером. Сообщения — только
+            ушедшие.
+          </p>
+        </Hint>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="h-8">Клиент</TableHead>
+              <TableHead className="h-8 text-right">Людей</TableHead>
+              <TableHead className="h-8 text-right">В боте</TableHead>
+              <TableHead className="h-8 text-right">Через бота</TableHead>
+              <TableHead className="h-8 text-right">Через аккаунты</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 && (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={5} className="text-muted-foreground">
+                  За период сообщений не было.
+                </TableCell>
+              </TableRow>
+            )}
+            {rows.map((row) => (
+              <TableRow key={row.client_id}>
+                <TableCell>{row.name}</TableCell>
+                <TableCell className="num text-right">{String(row.recipients)}</TableCell>
+                <TableCell className="num text-right">
+                  {String(row.in_bot)}{' '}
+                  <span className="text-muted-foreground">
+                    ({percentText(row.in_bot, row.recipients)})
+                  </span>
+                </TableCell>
+                <TableCell className="num text-right">{String(row.via_bot)}</TableCell>
+                <TableCell className="num text-right">{String(row.via_accounts)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </section>
   );
 }

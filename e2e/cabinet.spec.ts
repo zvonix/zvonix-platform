@@ -762,6 +762,26 @@ test.describe('конструктор сообщения (ADR-0087)', () => {
   });
 });
 
+test.describe('требования к аккаунтам MAX (ADR-0092)', () => {
+  test('клиент задаёт требования на странице «Аккаунты», они сохраняются', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await page.locator('a[href="/my/max-accounts"]').click();
+    await expect(page.getByRole('heading', { name: 'Какие аккаунты мне подходят' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Только со «СТОП»' }).click();
+    await page.getByLabel('Цена не дороже, ₽').fill('0,90');
+    await page.getByRole('button', { name: 'Сохранить требования' }).click();
+    await expect(page.getByRole('status')).toHaveText('Сохранено');
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Только со «СТОП»' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.getByLabel('Цена не дороже, ₽')).toHaveValue('0,9');
+  });
+});
+
 test.describe('свой бот клиента (ADR-0077, этап 2)', () => {
   test('клиент вставляет токен своего бота: бот подключён, ссылка с его именем; токен нигде не показан', async ({
     browser,

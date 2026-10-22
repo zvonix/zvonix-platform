@@ -12,6 +12,7 @@ import { loadConfig } from '@zvonix/config';
 import type { Logger } from '@zvonix/logger';
 import { AppModule } from './app.module.js';
 import { registerCorrelationId } from './http/correlation-id.hook.js';
+import { registerSlowRequestLog } from './http/slow-request.hook.js';
 import { APP_CONFIG, APP_LOGGER, type Config } from './infra/tokens.js';
 
 /** Верхняя граница тела запроса. Больше в этом API отправлять нечего. */
@@ -57,6 +58,7 @@ export async function buildApplication(): Promise<BuiltApplication> {
   const logger = app.get<Logger>(APP_LOGGER);
 
   registerCorrelationId(app.getHttpAdapter().getInstance());
+  registerSlowRequestLog(app.getHttpAdapter().getInstance(), logger);
 
   // Разбор `application/x-www-form-urlencoded` отдельно включать не нужно: адаптер
   // NestJS регистрирует его сам. Плагин `@fastify/formbody` поверх этого даёт второй

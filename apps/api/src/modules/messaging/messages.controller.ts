@@ -30,8 +30,9 @@ import {
 
 const withoutText = ({
   text: _text,
+  full_text: _fullText,
   ...rest
-}: ClientMessageView): Omit<ClientMessageView, 'text'> => rest;
+}: ClientMessageView): Omit<ClientMessageView, 'text' | 'full_text'> => rest;
 
 /** Сообщение так, как его видит клиент. */
 interface ClientMessageView {
@@ -44,6 +45,8 @@ interface ClientMessageView {
   readonly failure_reason: string | null;
   /** В конец сообщения добавлена строка про «СТОП». */
   readonly stop_line: boolean;
+  /** Как сообщение получил человек (ADR-0093); `null` — не ушло или стёрто по сроку. */
+  readonly full_text: string | null;
   /** Списано, ₽. Не отправлено — `null`: деньги возвращены. */
   readonly cost: string | null;
   readonly created_at: string;
@@ -62,6 +65,7 @@ const toClientView = (row: MessageRow): ClientMessageView => ({
   status: row.status,
   failure_reason: row.failureReason,
   stop_line: row.stopLine,
+  full_text: row.sentText,
   cost: row.status === 'failed' ? null : Money.format(row.clientAmount),
   created_at: row.createdAt.toISOString(),
   sent_at: iso(row.sentAt),
@@ -70,7 +74,7 @@ const toClientView = (row: MessageRow): ClientMessageView => ({
 });
 
 /** То же для сотрудника плюс деньги по трём счетам и чей это аккаунт. */
-interface StaffMessageView extends Omit<ClientMessageView, 'text'> {
+interface StaffMessageView extends Omit<ClientMessageView, 'text' | 'full_text'> {
   readonly client_id: string;
   /** `bot` — сообщение ушло ботом; у него нет ни партнёра, ни аккаунта. */
   readonly route: 'account' | 'bot';
@@ -113,6 +117,17 @@ export class ClientMessagesController {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     const quote = enabled ? await this.messages.quote(client.id) : undefined;
     return { enabled, price: quote === undefined ? null : Money.format(quote.clientAmount) };
+  }
+
+  /** Бот или аккаунты у клиента: сколько людей перешли в бота и сколько сообщений каким путём (ADR-0094). */
+  @Cabinets('client')
+  @Get('client/messages/route-stats')
+  async routeStats(
+    @CurrentUser() actor: Principal,
+    @Query(zodQuery(messagesReportQuerySchema)) query: z.infer<typeof messagesReportQuerySchema>,
+  ) {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return { days: query.days, ...(await this.messages.routeStatsOf(client.id, query.days)) };
   }
 
   /** Партнёры с ценой сообщения для клиента — из чего строится список приоритетов (ADR-0081). */
@@ -243,6 +258,15 @@ export class StaffMessagesController {
     return {
       days: query.days,
       clients: report.clients.map(({ clientId, ...rest }) => ({ client_id: clientId, ...rest })),
+      // Бот или аккаунты по клиентам (ADR-0094).
+      routes: report.routes.map((row) => ({
+        client_id: row.clientId,
+        name: row.name,
+        recipients: row.recipients,
+        in_bot: row.inBot,
+        via_bot: row.viaBot,
+        via_accounts: row.viaAccounts,
+      })),
       accounts: report.accounts.map(({ accountId, partnerName, ...rest }) => ({
         account_id: accountId,
         partner_name: partnerName,

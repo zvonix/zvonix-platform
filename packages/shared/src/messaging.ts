@@ -94,6 +94,12 @@ export const NUMBER_CHECK_RESULTS = ['exists', 'absent', 'unknown', 'limited'] a
 export type NumberCheckResult = (typeof NUMBER_CHECK_RESULTS)[number];
 
 /** Откуда номер попал в список «не писать»: ответ на аккаунт партнёра или «СТОП» боту. */
+/** Требование клиента к строке «СТОП» у аккаунта ([ADR-0092](../../../docs/adr/0092-trebovaniya-klienta-k-akkauntam.md)). */
+export const STOP_LINE_REQUIREMENTS = ['any', 'required', 'forbidden'] as const;
+export type StopLineRequirement = (typeof STOP_LINE_REQUIREMENTS)[number];
+/** Предел требования «аккаунт работает не меньше N суток». */
+export const ACCOUNT_MIN_AGE_DAYS_MAX = 365;
+
 export const MESSAGE_STOP_SOURCES = ['account', 'bot'] as const;
 export type MessageStopSource = (typeof MESSAGE_STOP_SOURCES)[number];
 export type MessageFailureReason = (typeof MESSAGE_FAILURE_REASONS)[number];

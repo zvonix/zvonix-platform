@@ -182,6 +182,7 @@ describe('заведение аккаунта', () => {
       'state_checked_at',
       'state_reason',
       'status',
+      'stop_line',
       'tariff_id',
       'warmup_day',
       'warmup_enabled',

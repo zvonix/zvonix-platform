@@ -254,6 +254,45 @@ describe('отправка ботом и деньги', () => {
     expect(state).toBe('stopped');
   });
 
+  it('остановка бота (bot_stopped): по умолчанию — только бот перестаёт писать; с настройкой — номер в «Не писать» (ADR-0091)', async () => {
+    const stopsOf = (phone: string) =>
+      withDatabase(async (execute) => {
+        const result = await execute(
+          sql`select source, client_id as "clientId" from message_stops where phone = ${phone}`,
+        );
+        return result.rows as { source: string; clientId: string | null }[];
+      });
+    const stateOf = (user: string) =>
+      withDatabase(async (execute) => {
+        const result = await execute(
+          sql`select state from bot_subscribers where max_user_id = ${user}`,
+        );
+        return (result.rows[0] as { state: string }).state;
+      });
+
+    const off = await subscribed(561, 81, '79005550081');
+    await event(off.botId, { update_type: 'bot_stopped', chat_id: 561, user: { user_id: 81 } });
+    expect(await stateOf('81')).toBe('stopped');
+    expect(await stopsOf(off.phone)).toHaveLength(0);
+
+    expect((await fx.put(adminToken, { 'bot.block_stops_accounts': true })).statusCode).toBe(200);
+    try {
+      const on = await subscribed(562, 82, '79005550082');
+      await event(on.botId, { update_type: 'dialog_removed', chat_id: 562, user: { user_id: 82 } });
+      expect(await stateOf('82')).toBe('stopped');
+      expect(await stopsOf(on.phone)).toMatchObject([{ source: 'bot' }]);
+      expect((await stopsOf(on.phone))[0]?.clientId).not.toBeNull();
+
+      // Блокировка, замеченная по отказу MAX при отправке, — тоже запрет.
+      const rejected = await subscribed(1120000, 83, '79005550083');
+      await sendTo(rejected.client.token, rejected.phone);
+      await dispatch();
+      expect(await stopsOf(rejected.phone)).toMatchObject([{ source: 'bot' }]);
+    } finally {
+      await fx.put(adminToken, { 'bot.block_stops_accounts': false });
+    }
+  });
+
   it('номера без подписчика идут обычным путём через аккаунты партнёров', async () => {
     await fx.put(adminToken, { 'bot.message_price': 0.25 });
     const { client } = await subscribed();
@@ -633,6 +672,83 @@ describe('настройки бота клиента и шаблон сообщ�
     expect(second.statusCode).toBe(201);
     await api().get(MessagesService).dispatchDue(new Date());
     expect(simulatedBotSent.at(-1)?.text).toBe(`Здравствуйте, Иван!\nМашина у подъезда\n${link}`);
+  });
+
+  it('«только первое» считается по пути: первое через бота — после подписки, сколько бы ни ушло через аккаунты', async () => {
+    await connectPlatform();
+    await fx.partnerWithAccount('0.45');
+    const { client, phone } = await subscribed(557, 79, '79001234569', 'Иван');
+    expect(
+      (
+        await putTemplate(client.token, [
+          { kind: 'body', when: 'always' },
+          { kind: 'text', text: 'Промокод 2233', when: 'first', via: 'bot' },
+        ])
+      ).statusCode,
+    ).toBe(200);
+    const setState = (state: string) =>
+      withDatabase(async (execute) => {
+        await execute(sql`update bot_subscribers set state = ${state} where max_user_id = '79'`);
+      });
+
+    // Пока человек не подписан — сообщение уходит через аккаунт партнёра.
+    await setState('stopped');
+    expect((await sendTo(client.token, phone, { text: 'Через аккаунт' })).statusCode).toBe(201);
+    await dispatch();
+    expect(simulatedBotSent).toHaveLength(0);
+
+    // Подписался — первое сообщение через бота всё равно «первое».
+    await setState('started');
+    expect((await sendTo(client.token, phone, { text: 'Машина подана' })).statusCode).toBe(201);
+    await dispatch();
+    expect(simulatedBotSent.at(-1)?.text).toBe('Машина подана\nПромокод 2233');
+
+    expect((await sendTo(client.token, phone, { text: 'Машина у подъезда' })).statusCode).toBe(201);
+    await dispatch();
+    expect(simulatedBotSent.at(-1)?.text).toBe('Машина у подъезда');
+  });
+
+  it('статистика «бот или аккаунты»: люди в боте и сообщения по путям — у клиента и в отчёте админа (ADR-0094)', async () => {
+    await connectPlatform();
+    await fx.partnerWithAccount('0.45');
+    const { client, phone } = await subscribed(558, 84, '79001234570');
+    const setState = (state: string) =>
+      withDatabase(async (execute) => {
+        await execute(sql`update bot_subscribers set state = ${state} where max_user_id = '84'`);
+      });
+    await setState('stopped');
+    await sendTo(client.token, phone, { text: 'Через аккаунт' });
+    await sendTo(client.token, '79005550099', { text: 'Через аккаунт другому' });
+    await dispatch();
+    // Второе через тот же аккаунт ждёт паузу между отправками — время вперёд.
+    await api()
+      .get(MessagesService)
+      .dispatchDue(new Date(Date.now() + 10 * 60_000));
+    await setState('started');
+    await sendTo(client.token, phone, { text: 'Через бота' });
+    await dispatch();
+
+    const own = await api().inject({
+      method: 'GET',
+      url: '/client/messages/route-stats?days=7',
+      headers: bearer(client.token),
+    });
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toMatchObject({
+      days: 7,
+      recipients: 2,
+      in_bot: 1,
+      via_bot: 1,
+      via_accounts: 2,
+    });
+
+    const report = await api().inject({
+      method: 'GET',
+      url: '/messages/report?days=7',
+      headers: bearer(adminToken),
+    });
+    const routes = report.json<{ routes: { client_id: string; in_bot: number }[] }>().routes;
+    expect(routes.find((row) => row.client_id === client.clientId)?.in_bot).toBe(1);
   });
 
   it('«где»: блок «только аккаунты» в сообщение бота не попадает, «только бот» — попадает; неверное значение отвергается', async () => {

@@ -98,3 +98,13 @@
   это условие входит в правила площадки, продукт предназначен для уведомлений и кодов.
 - Текст сообщения — персональные данные: в журналах логов не пишется, в базе хранится ограниченный срок
   (настройка `retention.messages_days`, по умолчанию 30 суток).
+
+## Факт 2026-10-22: кнопки в сообщениях
+
+- **Аккаунты партнёров (Green API, MAX):** методов отправки кнопок нет. В разделе отправки для MAX
+  (https://green-api.com/v3/docs/api/sending/) только SendMessage, SendFileByUpload, SendFileByUrl, UploadFile, SendLocation,
+  SendContact, SendPoll, ForwardMessages. Кнопки (`SendInteractiveButtons`) есть только у WhatsApp, и то в бета-версии.
+  Кнопку «Отписаться» в сообщение через аккаунт поставить нельзя — только строку текстом.
+- **Бот площадки (официальный MAX Bot API):** кнопки есть — `POST /messages`, вложение `type = inline_keyboard`, кнопка
+  `callback` присылает событие `message_callback`, ответ — `POST /answers`
+  (https://dev.max.ru/docs-api/use-cases/sending-messages/keyboard). Поле с данными кнопки на живом боте не проверено.

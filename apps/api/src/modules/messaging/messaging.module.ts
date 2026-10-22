@@ -28,6 +28,9 @@ import {
 } from './messages.controller.js';
 import { MessagesRepository } from './messages.repository.js';
 import { AccountPicker } from './account-picker.js';
+import { RequirementsController } from './requirements.controller.js';
+import { RequirementsRepository } from './requirements.repository.js';
+import { RequirementsService } from './requirements.service.js';
 import { DistributionController } from './distribution.controller.js';
 import { MessagesService } from './messages.service.js';
 import { TemplatesController } from './templates.controller.js';
@@ -78,6 +81,7 @@ import { StopsService } from './stops.service.js';
     StaffBotController,
     ClientBotController,
     BotWebhookController,
+    RequirementsController,
   ],
   providers: [
     MessagingService,
@@ -86,6 +90,8 @@ import { StopsService } from './stops.service.js';
     MessengerTariffsService,
     MessengerTariffsRepository,
     AccountPicker,
+    RequirementsRepository,
+    RequirementsService,
     MessagesService,
     MessagesRepository,
     TemplatesRepository,

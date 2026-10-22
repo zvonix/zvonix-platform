@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MESSAGE_MAX_LENGTH } from '@zvonix/shared';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,10 +27,20 @@ interface Message {
   readonly status: string;
   readonly failure_reason: string | null;
   readonly cost: string | null;
+  /** Как получил человек — с шаблоном и «СТОП» (ADR-0093); `null` — не ушло. */
+  readonly full_text: string | null;
   readonly created_at: string;
 }
 
 const LIST_KEY = ['client', 'messages'] as const;
+const ROUTES_KEY = ['client', 'messages', 'route-stats'] as const;
+
+interface RouteStats {
+  readonly recipients: number;
+  readonly in_bot: number;
+  readonly via_bot: number;
+  readonly via_accounts: number;
+}
 const PRICE_KEY = ['client', 'messages', 'price'] as const;
 
 /**
@@ -39,6 +49,12 @@ const PRICE_KEY = ['client', 'messages', 'price'] as const;
  * кабинета по цене, как у всех.
  */
 export function SendMessages() {
+  const routes = useQuery({
+    queryKey: ROUTES_KEY,
+    queryFn: ({ signal }) => request<RouteStats>('/client/messages/route-stats?days=7', { signal }),
+    refetchInterval: 60_000,
+  });
+  const [opened, setOpened] = useState<string | undefined>(undefined);
   const queryClient = useQueryClient();
   const [to, setTo] = useState('');
   const [text, setText] = useState('');
@@ -154,6 +170,16 @@ export function SendMessages() {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
+      {enabled && routes.data !== undefined && routes.data.recipients > 0 && (
+        // Бот или аккаунты за неделю (ADR-0094): видно, сколько людей уже перешли в бота.
+        <p className="text-muted-foreground">
+          За 7 суток: людей {String(routes.data.recipients)}, из них в боте{' '}
+          {String(routes.data.in_bot)} (
+          {String(Math.round((routes.data.in_bot * 100) / routes.data.recipients))} %); сообщений
+          через бота {String(routes.data.via_bot)}, через аккаунты партнёров{' '}
+          {String(routes.data.via_accounts)}.
+        </p>
+      )}
       {enabled && (
         <div className="rounded-lg border border-border bg-card">
           <Table>
@@ -175,39 +201,69 @@ export function SendMessages() {
                 </TableRow>
               )}
               {list.data?.messages.map((message) => (
-                <TableRow key={message.id}>
-                  <TableCell>
-                    <span className="num text-muted-foreground">{moment(message.created_at)}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="num">{message.to}</span>
-                  </TableCell>
-                  <TableCell className="max-w-[320px] truncate" title={message.text}>
-                    {message.text === '' ? (
-                      <span className="text-faint">текст удалён по сроку хранения</span>
-                    ) : (
-                      message.text
-                    )}
-                  </TableCell>
-                  <TableCell className="whitespace-normal">
-                    <span className={`rounded-md px-2 py-0.5 ${messageTone(message.status)}`}>
-                      {MESSAGE_STATUS_NAME[message.status] ?? message.status}
-                    </span>
-                    {message.failure_reason !== null && (
-                      <span className="block pt-0.5 text-muted-foreground">
-                        {MESSAGE_FAILURE_NAME[message.failure_reason] ?? message.failure_reason};
-                        деньги возвращены
+                <Fragment key={message.id}>
+                  <TableRow>
+                    <TableCell>
+                      <span className="num text-muted-foreground">
+                        {moment(message.created_at)}
                       </span>
-                    )}
-                  </TableCell>
-                  <TableCell className="num text-right">
-                    {message.cost === null ? (
-                      <span className="text-faint">—</span>
-                    ) : (
-                      money(message.cost)
-                    )}
-                  </TableCell>
-                </TableRow>
+                    </TableCell>
+                    <TableCell>
+                      <span className="num">{message.to}</span>
+                    </TableCell>
+                    <TableCell className="max-w-[320px]">
+                      <span className="block truncate" title={message.text}>
+                        {message.text === '' ? (
+                          <span className="text-faint">текст удалён по сроку хранения</span>
+                        ) : (
+                          message.text
+                        )}
+                      </span>
+                      {message.full_text !== null && (
+                        <button
+                          type="button"
+                          aria-expanded={opened === message.id}
+                          onClick={() => {
+                            setOpened(opened === message.id ? undefined : message.id);
+                          }}
+                          className="text-sm text-primary underline-offset-2 hover:underline"
+                        >
+                          {opened === message.id ? 'Скрыть полный текст' : 'Полный текст'}
+                        </button>
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-normal">
+                      <span className={`rounded-md px-2 py-0.5 ${messageTone(message.status)}`}>
+                        {MESSAGE_STATUS_NAME[message.status] ?? message.status}
+                      </span>
+                      {message.failure_reason !== null && (
+                        <span className="block pt-0.5 text-muted-foreground">
+                          {MESSAGE_FAILURE_NAME[message.failure_reason] ?? message.failure_reason};
+                          деньги возвращены
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="num text-right">
+                      {message.cost === null ? (
+                        <span className="text-faint">—</span>
+                      ) : (
+                        money(message.cost)
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  {opened === message.id && message.full_text !== null && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={5} className="whitespace-normal bg-muted/40">
+                        <span className="mb-1 block text-sm text-muted-foreground">
+                          Так сообщение получил человек
+                        </span>
+                        <span className="block max-w-xl whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm bg-card px-3.5 py-2.5 shadow-sm">
+                          {message.full_text}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               ))}
             </TableBody>
           </Table>

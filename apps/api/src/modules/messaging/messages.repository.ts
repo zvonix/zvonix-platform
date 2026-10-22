@@ -15,6 +15,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  lte,
   max,
   min,
   ne,
@@ -44,6 +45,7 @@ import {
   type SmppReceiptMap,
   WARMUP_IDLE_DAYS,
 } from '@zvonix/shared';
+import type { ClientRules } from './requirements.service.js';
 import { DatabaseService } from '../../infra/database.service.js';
 import type { MessengerAccountRow } from './messaging.repository.js';
 
@@ -124,6 +126,18 @@ export interface MessageFilter {
   readonly offset: number;
 }
 
+/** Бот или аккаунты по клиенту (ADR-0094). */
+export interface RouteStatsRow {
+  readonly clientId: string;
+  readonly name: string;
+  /** Разные номера, которым ушло хоть одно сообщение. */
+  readonly recipients: number;
+  /** Из них сейчас подписаны на бота клиента. */
+  readonly inBot: number;
+  readonly viaBot: number;
+  readonly viaAccounts: number;
+}
+
 @Injectable()
 export class MessagesRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -174,6 +188,7 @@ export class MessagesRepository {
     clientId: Id<'client'>,
     recipient: string,
     exceptId: MessageId,
+    route: MessageRoute,
   ): Promise<boolean> {
     const [row] = await this.database.db
       .select({ id: messages.id })
@@ -182,6 +197,7 @@ export class MessagesRepository {
         and(
           eq(messages.clientId, clientId),
           eq(messages.recipient, recipient),
+          eq(messages.route, route),
           ne(messages.id, exceptId),
           inArray(messages.status, ['sent', 'delivered', 'read']),
         ),
@@ -233,7 +249,11 @@ export class MessagesRepository {
     /** Только эти партнёры — одна цифра списка клиента (ADR-0081). */
     onlyPartners?: readonly Id<'partner'>[];
     offset?: number;
+    /** Требования клиента и его ручные отключения (ADR-0092). */
+    rules?: ClientRules;
   }): Promise<MessengerAccountRow[]> {
+    const rules = filter.rules;
+    if (rules?.impossible === true) return [];
     const conditions = [
       eq(messengerAccounts.status, 'active'),
       isNotNull(messengerAccounts.price),
@@ -249,6 +269,17 @@ export class MessagesRepository {
       filter.onlyPartners === undefined
         ? undefined
         : inArray(messengerAccounts.partnerId, [...filter.onlyPartners]),
+      rules?.stopLine === undefined ? undefined : eq(messengerAccounts.stopLine, rules.stopLine),
+      rules?.recommendedOnly === true ? eq(messengerAccounts.recommended, true) : undefined,
+      rules?.maxPartnerPrice === undefined
+        ? undefined
+        : lte(messengerAccounts.price, rules.maxPartnerPrice),
+      rules?.createdBefore === undefined
+        ? undefined
+        : lte(messengerAccounts.createdAt, rules.createdBefore),
+      rules === undefined || rules.exceptAccounts.length === 0
+        ? undefined
+        : notInArray(messengerAccounts.id, [...rules.exceptAccounts]),
     ];
     // Самая дешёвая цена среди подходящих: только её группа — цена клиента не прыгает на дорогой аккаунт.
     const [cheapest] = await this.database.db
@@ -457,11 +488,12 @@ export class MessagesRepository {
     id: MessageId,
     providerMessageId: string,
     at: Date,
+    sentText: string,
     stopLine = false,
   ): Promise<void> {
     await this.database.db
       .update(messages)
-      .set({ status: 'sent', providerMessageId, sentAt: at, stopLine })
+      .set({ status: 'sent', providerMessageId, sentAt: at, stopLine, sentText })
       .where(and(eq(messages.id, id), eq(messages.status, 'sending')));
   }
 
@@ -887,6 +919,38 @@ export class MessagesRepository {
     };
   }
 
+  /**
+   * Бот или аккаунты (ADR-0094): сколько получателей писали клиенту с `since`, сколько из них сейчас подписаны на его бота
+   * (поделились номером и не остановили), сколько ушедших сообщений прошло ботом и сколько через аккаунты партнёров.
+   * Без клиента — по каждому клиенту, у которого были сообщения.
+   */
+  async routeStats(since: Date, clientId?: Id<'client'>): Promise<RouteStatsRow[]> {
+    const result = await this.database.db.execute(sql`
+      with sent as (
+        select m.client_id, m.recipient, m.route
+          from messages m
+         where m.created_at >= ${since}
+           and m.status in ('sent', 'delivered', 'read')
+           ${clientId === undefined ? sql`` : sql`and m.client_id = ${clientId}`}
+      ),
+      people as (
+        select distinct client_id, recipient from sent
+      )
+      select c.id as "clientId", c.name as name,
+             (select count(*)::int from people p where p.client_id = c.id) as recipients,
+             (select count(*)::int from people p
+               where p.client_id = c.id
+                 and exists (select 1 from bot_subscribers b
+                              where b.client_id = p.client_id and b.phone = p.recipient and b.state = 'started')
+             ) as "inBot",
+             (select count(*)::int from sent s where s.client_id = c.id and s.route = 'bot') as "viaBot",
+             (select count(*)::int from sent s where s.client_id = c.id and s.route = 'account') as "viaAccounts"
+        from clients c
+       where c.id in (select client_id from people)
+       order by recipients desc, c.name`);
+    return result.rows as unknown as RouteStatsRow[];
+  }
+
   /** Принято и окончательно не отправлено с `since`: по этому судят, что отправка в целом сломалась. */
   async healthSince(since: Date): Promise<{ total: number; failed: number }> {
     const [row] = await this.database.db
@@ -903,8 +967,13 @@ export class MessagesRepository {
   async purgeTexts(before: Date): Promise<number> {
     const erased = await this.database.db
       .update(messages)
-      .set({ text: '' })
-      .where(and(lt(messages.createdAt, before), ne(messages.text, '')))
+      .set({ text: '', sentText: null })
+      .where(
+        and(
+          lt(messages.createdAt, before),
+          or(ne(messages.text, ''), isNotNull(messages.sentText)),
+        ),
+      )
       .returning({ id: messages.id });
     return erased.length;
   }
