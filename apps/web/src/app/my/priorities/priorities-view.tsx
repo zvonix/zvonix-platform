@@ -17,7 +17,8 @@ import {
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
 import { TERMINATION_KIND_MEANING, TERMINATION_KIND_NAME } from '@/lib/labels';
-import { integerFromInput, money } from '@/lib/money';
+import { integerFromInput, microunits, money } from '@/lib/money';
+import { CallRequirementsForm, type CallRequirements } from './call-requirements-form';
 
 /** Предложение партнёра: у звонков — SIM или транк, у сообщений — MAX. Цена — только у звонков. */
 interface Offer {
@@ -25,6 +26,35 @@ interface Offer {
   readonly name: string;
   readonly offer: 'sim' | 'sip' | 'message';
   readonly price: string | null;
+  /** Только у звонков: границы цены, слушает ли партнёр записи (ADR-0095). */
+  readonly minPrice?: string;
+  readonly maxPrice?: string;
+  readonly listens?: boolean;
+}
+
+/** Почему предложение не подходит под требования; `partial` — подходит не на всех направлениях. */
+function mismatch(
+  offer: Offer,
+  requirements: CallRequirements | undefined,
+): { reasons: string[]; partial: boolean } {
+  if (requirements === undefined || offer.offer === 'message')
+    return { reasons: [], partial: false };
+  const reasons: string[] = [];
+  if (requirements.termination_kind !== null && offer.offer !== requirements.termination_kind) {
+    reasons.push(`только ${TERMINATION_KIND_NAME[requirements.termination_kind]}`);
+  }
+  if (requirements.no_recording_listeners && offer.listens === true) reasons.push('слушает записи');
+  let partial = false;
+  if (
+    requirements.max_price !== null &&
+    offer.minPrice !== undefined &&
+    offer.maxPrice !== undefined
+  ) {
+    const cap = microunits(requirements.max_price);
+    if (microunits(offer.minPrice) > cap) reasons.push('дороже вашего предела');
+    else if (microunits(offer.maxPrice) > cap) partial = true;
+  }
+  return { reasons, partial };
 }
 
 interface Stored {
@@ -80,6 +110,7 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
           termination_kind: TerminationKind;
           min_price: string;
           max_price: string;
+          listens_to_recordings: boolean;
         }[];
       }>('/client/prices');
       return rows.map((row) => ({
@@ -87,6 +118,9 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
         name: row.display_name,
         offer: row.termination_kind,
         price: priceRange(row.min_price, row.max_price),
+        minPrice: row.min_price,
+        maxPrice: row.max_price,
+        listens: row.listens_to_recordings,
       }));
     },
     staleTime: 5 * 60_000,
@@ -97,6 +131,13 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
     queryFn: async () =>
       (await request<{ priorities: Stored[] }>(`/client/partner-priorities?product=${product}`))
         .priorities,
+  });
+
+  const requirements = useQuery({
+    queryKey: ['my', 'call-requirements'],
+    queryFn: async () =>
+      (await request<{ requirements: CallRequirements }>('/client/call-requirements')).requirements,
+    enabled: product === 'calls',
   });
 
   const save = useMutation({
@@ -144,10 +185,29 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
     setDraft(next);
   };
 
-  const error = [offers.error, stored.error, save.error].find((e) => e instanceof ApiError);
+  const error = [offers.error, stored.error, save.error, requirements.error].find(
+    (e) => e instanceof ApiError,
+  );
+  const calls = product === 'calls';
+  const fitting = calls
+    ? all.filter(
+        (offer) =>
+          values[keyOf(offer)] !== BANNED &&
+          mismatch(offer, requirements.data).reasons.length === 0,
+      ).length
+    : 0;
 
   return (
     <div className="flex flex-col gap-3">
+      {calls && requirements.data !== undefined && (
+        <CallRequirementsForm current={requirements.data} />
+      )}
+      {calls && loaded && requirements.data !== undefined && all.length > 0 && (
+        <p className={fitting === 0 ? 'text-warn' : 'text-muted-foreground'}>
+          Подходят {String(fitting)} из {String(all.length)}
+          {fitting === 0 && ' — звонки не пройдут, пока вы не смягчите требования'}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Input
           aria-label="Найти партнёра"
@@ -237,13 +297,18 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
               <TableHead className="h-8 text-right">
                 {product === 'calls' ? 'Цена за вызов' : 'Цена за сообщение'}
               </TableHead>
+              {calls && <TableHead className="h-8">Записи</TableHead>}
+              {calls && <TableHead className="h-8">Подходит</TableHead>}
               <TableHead className="h-8">Очерёдность</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loaded && shown.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="whitespace-normal text-muted-foreground">
+                <TableCell
+                  colSpan={calls ? 7 : 5}
+                  className="whitespace-normal text-muted-foreground"
+                >
                   {all.length === 0 ? 'Партнёров пока нет.' : 'Никого не нашли: измените запрос.'}
                 </TableCell>
               </TableRow>
@@ -280,6 +345,22 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                     </TableCell>
                   )}
                   <TableCell className="num text-right">{offer.price ?? '—'}</TableCell>
+                  {calls && (
+                    <TableCell>
+                      {offer.listens === true ? (
+                        'слушает'
+                      ) : (
+                        <span className="text-muted-foreground">не слушает</span>
+                      )}
+                    </TableCell>
+                  )}
+                  {calls && (
+                    <FitCell
+                      offer={offer}
+                      banned={value === BANNED}
+                      requirements={requirements.data}
+                    />
+                  )}
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Input
@@ -353,5 +434,34 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
         )}
       </div>
     </div>
+  );
+}
+
+function FitCell({
+  offer,
+  banned,
+  requirements,
+}: {
+  offer: Offer;
+  banned: boolean;
+  requirements: CallRequirements | undefined;
+}) {
+  if (banned) {
+    return <TableCell className="text-muted-foreground">не используется</TableCell>;
+  }
+  const { reasons, partial } = mismatch(offer, requirements);
+  return (
+    <TableCell className="whitespace-normal">
+      {reasons.length > 0 ? (
+        <span className="text-warn">нет: {reasons.join(', ')}</span>
+      ) : partial ? (
+        <span title="На части направлений цена выше вашего предела — туда звонки через этого партнёра не пойдут">
+          <span className="text-ok">да</span>
+          <span className="text-muted-foreground">, кроме дорогих направлений</span>
+        </span>
+      ) : (
+        <span className="text-ok">да</span>
+      )}
+    </TableCell>
   );
 }

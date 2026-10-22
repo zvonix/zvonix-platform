@@ -1,5 +1,6 @@
-import { CLIENT_PRIORITY_MAX, CLIENT_PRIORITY_OFFERS } from '@zvonix/shared';
+import { CLIENT_PRIORITY_MAX, CLIENT_PRIORITY_OFFERS, TERMINATION_KINDS } from '@zvonix/shared';
 import { z } from 'zod';
+import { amount } from '../billing/schemas.js';
 
 /** Список приоритетов клиента целиком: партнёр (псевдоним), предложение, цифра или `null` — «не использовать». */
 export const clientPrioritiesSchema = z.object({
@@ -26,3 +27,11 @@ export const PRODUCT_OFFERS = {
 } as const;
 
 export const productSchema = z.enum(['calls', 'messages']);
+
+/** Требования клиента к партнёрам для звонков (ADR-0095); `null` — без ограничения. */
+export const callRequirementsSchema = z.object({
+  terminationKind: z.enum(TERMINATION_KINDS).nullable(),
+  noRecordingListeners: z.boolean(),
+  /** Стоимость вызова в 60 секунд для клиента не дороже. */
+  maxPrice: amount.refine((value) => value > 0n, 'должна быть больше нуля').nullable(),
+});

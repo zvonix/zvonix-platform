@@ -650,7 +650,12 @@ export class TelephonyRepository {
    */
   async findTrunkCandidates(
     nodeId: Id<'node'>,
-    options: { channelId?: ChannelId; region?: string | null } = {},
+    options: {
+      channelId?: ChannelId;
+      region?: string | null;
+      /** Без партнёров, которые слушают записи своих вызовов — требование клиента (ADR-0095). */
+      excludeRecordingListeners?: boolean;
+    } = {},
   ): Promise<TrunkCandidate[]> {
     const { channelId } = options;
     const priorities = priorityScope(channelId, 'sip', gateways.partnerId);
@@ -662,6 +667,9 @@ export class TelephonyRepository {
     ];
     if (options.region !== undefined) {
       conditions.push(coversRegion(options.region, gateways.partnerId));
+    }
+    if (options.excludeRecordingListeners === true) {
+      conditions.push(eq(partners.listensToRecordings, false));
     }
     if (channelId !== undefined) {
       conditions.push(priorities.allowed);
@@ -1184,6 +1192,8 @@ export class TelephonyRepository {
        * «какие SIM вообще подходят», где узел ещё не при чём.
        */
       nodeId?: Id<'node'>;
+      /** Без партнёров, которые слушают записи своих вызовов — требование клиента (ADR-0095). */
+      excludeRecordingListeners?: boolean;
     } = {},
   ): Promise<SimCandidate[]> {
     const channelId = options.channelId;
@@ -1212,6 +1222,9 @@ export class TelephonyRepository {
     }
     if (options.excludeRecordingIncapable === true) {
       conditions.push(ne(gateways.type, 'android'));
+    }
+    if (options.excludeRecordingListeners === true) {
+      conditions.push(eq(partners.listensToRecordings, false));
     }
     if (options.region !== undefined) {
       conditions.push(coversRegion(options.region));

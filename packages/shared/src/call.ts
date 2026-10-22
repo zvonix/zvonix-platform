@@ -115,6 +115,11 @@ export const CALL_FAILURE_REASONS = [
   /** Регион номера не покрыт ни одним партнёром. */
   'no_coverage',
   /**
+   * Кандидаты были, но ни один не подошёл под требования клиента к партнёрам: способ, записи, цена
+   * ([ADR-0095](../../../docs/adr/0095-trebovaniya-klienta-k-partnyoram-zvonkov.md)). Настройка самого клиента — видна ему как есть.
+   */
+  'requirements_unmet',
+  /**
    * Узел не прислал CDR: вызов провисел открытым дольше предельной длительности.
    *
    * Отдельная причина, а не общая внутренняя ошибка: для поддержки это диагноз узла,
@@ -153,6 +158,8 @@ export const CLIENT_FAILURE_REASONS = [
   'insufficient_funds',
   /** Исчерпано окно лимита клиента или канала. */
   'limit_exceeded',
+  /** Никто не подошёл под требования клиента к партнёрам (ADR-0095). */
+  'requirements_unmet',
   /** Отказ на нашей стороне. Подробности — у поддержки, а не в ответе API. */
   'platform',
 ] as const;
@@ -166,6 +173,7 @@ const CLIENT_VISIBLE_REASONS: readonly CallFailureReason[] = [
   'operator_not_allowed',
   'insufficient_funds',
   'limit_exceeded',
+  'requirements_unmet',
 ];
 
 /**
