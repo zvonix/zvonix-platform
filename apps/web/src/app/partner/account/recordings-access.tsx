@@ -1,6 +1,8 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Hint } from '@/components/hint';
+import { Switch } from '@/components/ui/switch';
 import { request } from '@/lib/api';
 
 /**
@@ -10,7 +12,15 @@ import { request } from '@/lib/api';
  * через `curl`. Цена решения названа прямо: признак виден клиенту в списке псевдонимов,
  * и клиент, которому это не подходит, поставит такого партнёра ниже.
  */
-export function RecordingsAccess({ partnerId, listens }: { partnerId: string; listens: boolean }) {
+export function RecordingsAccess({
+  partnerId,
+  listens,
+  alias,
+}: {
+  partnerId: string;
+  listens: boolean;
+  alias: string | null;
+}) {
   const queryClient = useQueryClient();
 
   const declare = useMutation({
@@ -24,35 +34,36 @@ export function RecordingsAccess({ partnerId, listens }: { partnerId: string; li
     },
   });
 
+  // Всё, что о партнёре видит клиент, — одной карточкой: псевдоним и отметка о записях (осмотр 2026-10-21).
   return (
-    <div className="flex max-w-prose flex-col gap-2 rounded-lg border border-border bg-card p-3">
-      <h3 className="font-semibold">Записи разговоров</h3>
-
-      <label className="flex items-start gap-2">
-        <input
-          type="checkbox"
+    <section className="flex max-w-xl flex-col gap-3 rounded-lg border border-border bg-card p-4">
+      <h2 className="font-semibold">Что видят клиенты</h2>
+      <div className="flex flex-col gap-0.5">
+        <span className="text-muted-foreground">Псевдоним</span>
+        <span>{alias ?? <span className="text-faint">не задан</span>}</span>
+      </div>
+      <label className="flex items-center gap-2">
+        <Switch
           checked={listens}
           disabled={declare.isPending}
-          onChange={(event) => {
-            declare.mutate(event.target.checked);
+          onCheckedChange={(next) => {
+            declare.mutate(next);
           }}
-          className="mt-1"
         />
-        <span>
-          Я слушаю записи разговоров, прошедших через моё оборудование.
-          <span className="block text-muted-foreground">
-            Это видно клиентам рядом с вашим псевдонимом. Клиент, которому это не подходит, поставит
-            вас ниже в своём порядке — то есть отметка стоит трафика. Без неё записи вам не
+        Я слушаю записи разговоров
+        <Hint label="Про записи разговоров">
+          <p>
+            Отметка видна клиентам рядом с вашим псевдонимом. Клиент, которому это не подходит,
+            поставит вас ниже в своём порядке — то есть отметка стоит трафика. Без неё записи вам не
             выдаются.
-          </span>
-        </span>
+          </p>
+        </Hint>
       </label>
-
       {declare.error !== null && (
         <p role="alert" className="text-crit">
           {declare.error.message}
         </p>
       )}
-    </div>
+    </section>
   );
 }

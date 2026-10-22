@@ -176,9 +176,10 @@ export const REGISTRATION_MODE_NAME: Record<GatewayRegistrationMode, string> = {
   gateway: 'весь шлюз одним входом',
 };
 
+/** «Включён», а не «Работает»: связь шлюза показывается отдельно, и «Работает · не на связи» спорило само с собой. */
 export const GATEWAY_STATUS_NAME: Record<GatewayStatus, string> = {
   pending: 'Ждёт',
-  active: 'Работает',
+  active: 'Включён',
   suspended: 'Приостановлен',
   retired: 'Выведен',
 };
@@ -210,7 +211,7 @@ export const GATEWAY_LOCK_MEANING =
 
 export const SIM_STATUS_NAME: Record<SimStatus, string> = {
   new: 'Новая',
-  active: 'Работает',
+  active: 'Включена',
   throttled: 'Придержана',
   blocked: 'Заблокирована',
   retired: 'Выведена',

@@ -65,7 +65,7 @@ export function Feature({
 }) {
   return (
     <Reveal delay={delay} className="h-full">
-      <article className="flex h-full flex-col gap-2 rounded-lg border border-border bg-card p-5">
+      <article className="site-lift flex h-full flex-col gap-2 rounded-lg border border-border bg-card p-5 hover:border-primary/60">
         <h3 className="text-base font-semibold">{title}</h3>
         <p className="text-muted-foreground">{children}</p>
       </article>
@@ -148,9 +148,12 @@ export function CallPath() {
     <ol className="flex flex-col md:flex-row md:items-stretch" aria-label="Путь вызова">
       {PATH.map((node, index) => (
         <li key={node.title} className="flex flex-col md:flex-1 md:flex-row md:items-center">
-          <div className="flex-1 rounded-lg border border-border bg-card p-4 md:min-h-32">
+          <div
+            data-node={String(index + 1)}
+            className="site-flow-node flex-1 rounded-lg border border-border bg-card p-4 md:min-h-32"
+          >
             <div className="flex items-center gap-2">
-              <span aria-hidden className="size-2 rounded-full bg-primary" />
+              <span aria-hidden className="site-flow-dot size-2.5 rounded-full bg-primary" />
               <h3 className="font-semibold">{node.title}</h3>
             </div>
             <p className="mt-1.5 text-muted-foreground">{node.text}</p>
@@ -159,7 +162,7 @@ export function CallPath() {
             <span
               aria-hidden
               data-step={String((index % 4) + 1)}
-              className="site-flow-line mx-auto h-8 w-0.5 md:h-0.5 md:w-8"
+              className="site-flow-line mx-auto h-8 w-1 rounded-full md:h-1 md:w-10"
             />
           )}
         </li>

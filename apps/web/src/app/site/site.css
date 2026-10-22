@@ -122,6 +122,109 @@
   }
 }
 
+/* Подъём при наведении: карточки и кнопки отзываются движением, а не только цветом. */
+.site-lift {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.site-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px -12px color-mix(in oklab, var(--foreground) 35%, transparent);
+}
+
+/* Путь вызова: узлы подсвечиваются по очереди — вызов «проходит» схему слева направо. */
+.site-flow-node {
+  animation: site-node 5s ease-in-out infinite;
+}
+.site-flow-node[data-node='2'] {
+  animation-delay: 1s;
+}
+.site-flow-node[data-node='3'] {
+  animation-delay: 2s;
+}
+.site-flow-node[data-node='4'] {
+  animation-delay: 3s;
+}
+.site-flow-node[data-node='5'] {
+  animation-delay: 4s;
+}
+
+@keyframes site-node {
+  0%,
+  24%,
+  100% {
+    border-color: var(--border);
+    box-shadow: none;
+  }
+  8%,
+  14% {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--primary) 18%, transparent);
+  }
+}
+
+.site-flow-node .site-flow-dot {
+  animation: site-dot 5s ease-in-out infinite;
+  animation-delay: inherit;
+}
+
+@keyframes site-dot {
+  0%,
+  24%,
+  100% {
+    transform: scale(1);
+  }
+  10% {
+    transform: scale(1.7);
+  }
+}
+
+/* Первый экран: строки ленты въезжают сверху, точка «идут вызовы» дышит. */
+.site-console-row {
+  animation: site-row-in 0.45s ease both;
+}
+
+@keyframes site-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.site-live-dot {
+  animation: site-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes site-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.site-console {
+  animation: site-float 7s ease-in-out infinite;
+}
+
+@keyframes site-float {
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+/* Контрастная полоса с цифрами: цвета переставлены — в светлой теме тёмная, в тёмной светлая. */
+.site-band {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.site-band-muted {
+  color: color-mix(in oklab, var(--background) 70%, transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-reveal],
   [data-reveal='pending'] {
@@ -134,5 +237,19 @@
     animation: none;
     width: 100%;
     opacity: 0.25;
+  }
+
+  .site-flow-node,
+  .site-flow-node .site-flow-dot,
+  .site-console,
+  .site-console-row,
+  .site-live-dot {
+    animation: none;
+  }
+
+  .site-lift,
+  .site-lift:hover {
+    transition: none;
+    transform: none;
   }
 }

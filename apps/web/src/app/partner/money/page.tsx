@@ -50,12 +50,6 @@ function PartnerMoney() {
             <dt className="text-muted-foreground">Заработано, к выплате</dt>
             <dd className="num text-[15px] font-semibold">{money(funds.balance)}</dd>
           </div>
-          <div>
-            <dt className="text-muted-foreground">Клиент вас видит как</dt>
-            <dd>
-              {partner.display_name ?? <span className="text-faint">псевдоним не задан</span>}
-            </dd>
-          </div>
         </dl>
       </div>
 

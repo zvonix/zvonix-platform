@@ -52,7 +52,7 @@ async function findClient(id: string): Promise<ClientRow | null> {
 
 export default function ClientCardPage() {
   return (
-    <ConsoleShell title="Клиенты и деньги" requireRole={['admin', 'support']}>
+    <ConsoleShell title="Клиент" requireRole={['admin', 'support']}>
       {() => <ClientCard />}
     </ConsoleShell>
   );
