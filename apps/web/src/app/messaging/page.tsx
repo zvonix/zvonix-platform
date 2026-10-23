@@ -48,6 +48,9 @@ interface StaffMessage {
   readonly status: string;
   readonly failure_reason: string | null;
   readonly created_at: string;
+  /** Когда ушло в MAX — по разнице с приёмом видно, сколько ждало (разбор владельца 2026-10-23). */
+  readonly sent_at: string | null;
+  readonly attempts: number;
   readonly money: { client: string; partner: string; margin: string };
 }
 
@@ -350,9 +353,21 @@ function RecentMessages() {
           filters.delete('offset');
           const found = await loadAllRows<StaffMessage>('/messages', filters, 'messages');
           return {
-            header: ['Когда', 'Клиент', 'Кому', 'Итог', 'Клиент, ₽', 'Партнёру, ₽', 'Площадке, ₽'],
+            header: [
+              'Принято',
+              'Ушло',
+              'Попыток',
+              'Клиент',
+              'Кому',
+              'Итог',
+              'Клиент, ₽',
+              'Партнёру, ₽',
+              'Площадке, ₽',
+            ],
             rows: found.rows.map((message) => [
               moment(message.created_at),
+              message.sent_at === null ? '' : moment(message.sent_at),
+              message.attempts,
               clientName(message.client_id),
               message.to,
               MESSAGE_STATUS_NAME[message.status] ?? message.status,
@@ -406,7 +421,8 @@ function RecentMessages() {
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
+              <TableHead className="h-8">Принято</TableHead>
+              <TableHead className="h-8">Ушло</TableHead>
               <TableHead className="h-8">Кому</TableHead>
               <TableHead className="h-8">Итог</TableHead>
               <TableHead className="h-8 text-right">Клиент</TableHead>
@@ -417,7 +433,7 @@ function RecentMessages() {
           <TableBody>
             {list.data?.messages.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={7} className="text-muted-foreground">
                   По этому отбору сообщений нет.
                 </TableCell>
               </TableRow>
@@ -426,6 +442,14 @@ function RecentMessages() {
               <TableRow key={message.id}>
                 <TableCell>
                   <span className="num text-muted-foreground">{moment(message.created_at)}</span>
+                </TableCell>
+                <TableCell>
+                  <span className="num text-muted-foreground">
+                    {message.sent_at === null ? '—' : moment(message.sent_at)}
+                  </span>
+                  {message.attempts > 1 && (
+                    <span className="block text-faint">попыток {String(message.attempts)}</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <span className="num">{message.to}</span>

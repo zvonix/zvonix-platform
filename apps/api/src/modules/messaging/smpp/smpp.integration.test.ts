@@ -27,6 +27,7 @@ import {
   Status,
   type Pdu,
 } from './codec.js';
+import { RedisService } from '../../../infra/redis.js';
 import { SmppServer } from './server.js';
 
 prepareEnvironment();
@@ -212,6 +213,9 @@ beforeEach(async () => {
     await execute(sql`delete from messages`);
     await execute(sql`delete from messenger_accounts`);
   });
+  // Память «есть ли MAX» переживала бы тест: «нет MAX» из одного отказывало бы сразу в следующем.
+  const redis = api().get(RedisService).connection;
+  for (const key of await redis.keys('messaging:max:*')) await redis.del(key);
 });
 
 afterEach(() => {

@@ -26,7 +26,11 @@ const ACTION_LABEL: Record<SmppReceiptAction, string> = {
 
 /** Готовые наборы: лишь заполняют три выбора, сохраняется то, что в них стоит. */
 const PRESETS: readonly { readonly name: string; readonly map: SmppReceiptMap }[] = [
-  { name: 'Как сейчас', map: { sent: 'none', delivered: 'delivered', read: 'delivered' } },
+  // Как в SMS: подтверждение приёма — сразу ответом на отправку, отчёт — один окончательный DELIVRD при доставке.
+  {
+    name: 'Как в SMS (рекомендуется)',
+    map: { sent: 'none', delivered: 'delivered', read: 'delivered' },
+  },
   { name: 'Сразу, как ушло', map: { sent: 'delivered', delivered: 'none', read: 'none' } },
   { name: 'Только прочитанные', map: { sent: 'none', delivered: 'none', read: 'delivered' } },
   {
@@ -71,6 +75,11 @@ export function SmppReceipts({
           <p>
             На каждое событие выберите, что площадка пришлёт по SMPP. «Принято» — состояние ACCEPTD,
             «доставлено» — DELIVRD. Один и тот же ответ по сообщению приходит один раз.
+          </p>
+          <p className="mt-2">
+            «Принято» (ACCEPTD) по стандарту SMPP — окончательный ответ, как «доставлено»: многие
+            программы, получив его, следующий уже не ждут. «Принято на отправку» программа и так
+            получает сразу — ответом на само сообщение. Поэтому рекомендуется «Как в SMS».
           </p>
           <p className="mt-2">
             Если сообщение не дошло (у номера нет MAX, не отправилось), отказ приходит всегда, а
