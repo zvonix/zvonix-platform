@@ -429,3 +429,107 @@ describe('события бота', () => {
     expect(await subscribers()).toHaveLength(0);
   });
 });
+
+describe('статистика бота (ADR-0099)', () => {
+  const start = (code: string, user: number, chat: number) => ({
+    update_type: 'bot_started',
+    chat_id: chat,
+    user: { user_id: user },
+    payload: code,
+  });
+  const share = (user: number, chat: number, tel: string) => ({
+    update_type: 'message_created',
+    message: {
+      sender: { user_id: user },
+      recipient: { chat_id: chat },
+      body: {
+        attachments: [
+          {
+            type: 'contact',
+            payload: {
+              vcf_info: `BEGIN:VCARD\r\nTEL;TYPE=cell:${tel}\r\nEND:VCARD`,
+              max_info: { user_id: user },
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  it('события — только при смене состояния; статистика, воронка и подписчики у клиента и сотрудника', async () => {
+    await register(adminToken, { token: 'ok-taxibot' });
+    const client = await fx.clientWithMoney('1');
+    const connected = await api().inject({
+      method: 'POST',
+      url: '/client/messages/bot',
+      headers: bearer(client.token),
+    });
+    const code =
+      connected.json<{ connection: { link: string } }>().connection.link.split('start=')[1] ?? '';
+    const botId = await botIdOf();
+
+    // Первый: запустил, повторил запуск, поделился номером дважды, остановил дважды, вернулся.
+    await event(botId, start(code, 77, 555));
+    await event(botId, start(code, 77, 555));
+    await event(botId, share(77, 555, '+7 900 123-45-67'));
+    await event(botId, share(77, 555, '+7 900 123-45-67'));
+    await event(botId, { update_type: 'bot_stopped', user: { user_id: 77 } });
+    await event(botId, { update_type: 'dialog_removed', user: { user_id: 77 } });
+    await event(botId, start(code, 77, 555));
+    // Второй: MAX доставил запуск дважды одновременно — событие одно; потом «СТОП».
+    await Promise.all([event(botId, start(code, 88, 666)), event(botId, start(code, 88, 666))]);
+    await event(botId, {
+      update_type: 'message_created',
+      message: { sender: { user_id: 88 }, recipient: { chat_id: 666 }, body: { text: 'стоп' } },
+    });
+
+    const stats = (
+      await api().inject({
+        method: 'GET',
+        url: '/client/messages/bot/stats',
+        headers: bearer(client.token),
+      })
+    ).json<{
+      events: Record<string, number>;
+      now: { subscribed: number; with_phone: number };
+      funnel: { started: number; shared: number; received: number; stopped: number };
+      daily: { day: string; started: number }[];
+    }>();
+    expect(stats.events).toEqual({ started: 2, restarted: 1, phone_shared: 1, stopped: 2, net: 1 });
+    expect(stats.now).toEqual({ subscribed: 1, with_phone: 1 });
+    expect(stats.funnel).toEqual({ started: 2, shared: 1, received: 0, stopped: 1 });
+    expect(stats.daily.reduce((sum, day) => sum + day.started, 0)).toBe(2);
+
+    const list = (
+      await api().inject({
+        method: 'GET',
+        url: '/client/messages/bot/subscribers?phone=1234',
+        headers: bearer(client.token),
+      })
+    ).json<{ total: number; subscribers: { phone: string; state: string }[] }>();
+    expect(list.total).toBe(1);
+    expect(list.subscribers[0]).toMatchObject({ phone: '79001234567', state: 'started' });
+
+    // Сотрудник видит то же по клиенту; клиенту путь сотрудников закрыт.
+    const staff = await api().inject({
+      method: 'GET',
+      url: `/bots/clients/${client.clientId}/stats`,
+      headers: bearer(adminToken),
+    });
+    expect(staff.json<{ events: { started: number } }>().events.started).toBe(2);
+    const denied = await api().inject({
+      method: 'GET',
+      url: `/bots/clients/${client.clientId}/stats`,
+      headers: bearer(client.token),
+    });
+    expect(denied.statusCode).toBe(403);
+
+    // Перевёрнутый период — понятный отказ.
+    const bad = await api().inject({
+      method: 'GET',
+      url: `/client/messages/bot/stats?from=${encodeURIComponent('2026-10-20T00:00:00Z')}&to=${encodeURIComponent('2026-10-10T00:00:00Z')}`,
+      headers: bearer(client.token),
+    });
+    expect(bad.statusCode).toBe(400);
+  });
+});

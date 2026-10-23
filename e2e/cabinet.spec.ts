@@ -734,9 +734,13 @@ test.describe('бот MAX (ADR-0077)', () => {
     await expect(
       page.getByText(/^https:\/\/max\.ru\/e2ebot_bot\?start=[a-z0-9]{10}$/u),
     ).toBeVisible();
-    await expect(page.getByText(/Подписчиков/u)).toBeVisible();
+    await expect(page.getByText('Подписчиков', { exact: true })).toBeVisible();
     await expect(page.getByText('Условия', { exact: true })).toBeVisible();
     await expect(page.getByText(/Работает через/u)).toBeVisible();
+    // Статистика бота (ADR-0099): появляется, как только бот подключён; подписчиков пока нет.
+    await expect(page.getByRole('heading', { name: 'Статистика бота' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Период' })).toBeVisible();
+    await expect(page.getByText('Подписчиков пока нет.')).toBeVisible();
 
     // Администратор видит клиента среди подключённых и задаёт ему свою цену сообщения.
     await admin.goto('/messaging');

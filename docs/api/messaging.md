@@ -426,6 +426,19 @@ failure_reason, earned, created_at, sent_at, delivered_at, read_at }], total }` 
   ← `{ "messagePrice": "0.5" | null, "monthlyFee": "100" | null }` — любое из двух; пишется в журнал
   (`bot_connection.terms_changed`).
 
+### Статистика бота ([ADR-0099](../adr/0099-istoriya-podpischikov-bota.md))
+
+- `GET /client/messages/bot/stats?from=&to=&offset=` (клиент; по умолчанию — последние 7 суток, не длиннее 366; `offset` — минуты
+  пояса для разбивки по суткам) → `{ from, to, events: { started, restarted, phone_shared, stopped, net }, now: { subscribed,
+  with_phone }, funnel: { started, shared, received, stopped }, daily: [{ day, started, restarted, phone_shared, stopped }],
+  messages: { total, delivered, failed, cost }, failures: [{ reason, n }], median_seconds_to_phone }`. События — из
+  `bot_subscriber_events`: только смена состояния (повторный запуск или номер не считаются). Воронка — по впервые запустившим в
+  периоде. Перевёрнутый период — `400`.
+- `GET /client/messages/bot/subscribers?phone=&limit=&offset=` → `{ subscribers: [{ id, first_name, phone, state, since, messages,
+  last_message_at }], total }`, новые сверху; `phone` — часть номера; `messages` — сколько бот отправил подписчику.
+- Сотрудникам (`admin`, `support`) — то же по клиенту: `GET /bots/clients/:clientId/stats`, `GET /bots/clients/:clientId/subscribers`;
+  страница «Статистика бота».
+
 ### Свой бот клиента (этап 2)
 
 Клиент сам создаёт бота в «MAX для бизнеса» (до 5 ботов на организацию, модерация до 48 часов) и вставляет токен.

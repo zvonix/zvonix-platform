@@ -53,6 +53,8 @@ import { SmppService } from './smpp/smpp.service.js';
 import { StaffStopsController } from './stops.controller.js';
 import { StopsRepository } from './stops.repository.js';
 import { RefusalsRepository } from './refusals.repository.js';
+import { BotStatsRepository } from './bot/bot-stats.repository.js';
+import { BotStatsService } from './bot/bot-stats.service.js';
 import { StopsService } from './stops.service.js';
 
 /**
@@ -102,6 +104,8 @@ import { StopsService } from './stops.service.js';
     TemplatesService,
     StopsRepository,
     RefusalsRepository,
+    BotStatsRepository,
+    BotStatsService,
     StopsService,
     SmppRepository,
     SmppEventsRepository,

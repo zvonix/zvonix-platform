@@ -14,6 +14,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import {
   BOT_GREETING_MAX,
@@ -25,7 +26,7 @@ import {
 import { z } from 'zod';
 import { Cabinets, Public, Roles } from '../../../http/auth.guard.js';
 import { CurrentUser } from '../../../http/request-context.js';
-import { zodBody } from '../../../http/zod.pipe.js';
+import { zodBody, zodQuery } from '../../../http/zod.pipe.js';
 import { BillingService } from '../../billing/billing.service.js';
 import type { Principal } from '../../identity/identity.service.js';
 import {
@@ -34,6 +35,8 @@ import {
   type BotClientRow,
   type BotClientView,
 } from './bots.service.js';
+import { BotStatsService, type BotStatsView, type BotSubscriberView } from './bot-stats.service.js';
+import { botStatsQuerySchema, botSubscribersQuerySchema } from '../schemas.js';
 
 const registerBotSchema = z.object({ token: z.string().trim().min(1).max(500) });
 const connectionSchema = z.object({ enabled: z.boolean() });
@@ -111,7 +114,10 @@ const botUpdateSchema = z.looseObject({
 /** Бот площадки у администратора: вписать токен, проверить, отключить. */
 @Controller()
 export class StaffBotController {
-  constructor(private readonly bots: BotsService) {}
+  constructor(
+    private readonly bots: BotsService,
+    private readonly stats: BotStatsService,
+  ) {}
 
   @Roles('admin', 'support')
   @Get('bots/platform')
@@ -120,6 +126,25 @@ export class StaffBotController {
   }
 
   /** Подключённые к боту клиенты: условия (свои и действующие), подписчики, оплачен ли месяц. */
+  /** Статистика бота любого клиента — та же, что у клиента (ADR-0099). */
+  @Roles('admin', 'support')
+  @Get('bots/clients/:clientId/stats')
+  async clientStats(
+    @Param('clientId') clientId: string,
+    @Query(zodQuery(botStatsQuerySchema)) query: z.infer<typeof botStatsQuerySchema>,
+  ): Promise<BotStatsView> {
+    return this.stats.stats(parseId(clientId, 'client'), query);
+  }
+
+  @Roles('admin', 'support')
+  @Get('bots/clients/:clientId/subscribers')
+  async clientSubscribers(
+    @Param('clientId') clientId: string,
+    @Query(zodQuery(botSubscribersQuerySchema)) query: z.infer<typeof botSubscribersQuerySchema>,
+  ): Promise<{ subscribers: BotSubscriberView[]; total: number }> {
+    return this.stats.subscribers(parseId(clientId, 'client'), query);
+  }
+
   @Roles('admin', 'support')
   @Get('bots/platform/clients')
   clients(): Promise<{ clients: BotClientRow[] }> {
@@ -167,6 +192,7 @@ export class ClientBotController {
   constructor(
     private readonly bots: BotsService,
     private readonly billing: BillingService,
+    private readonly stats_: BotStatsService,
   ) {}
 
   @Cabinets('client')
@@ -174,6 +200,28 @@ export class ClientBotController {
   async get(@CurrentUser() actor: Principal): Promise<BotClientView> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     return this.bots.clientView(client.id);
+  }
+
+  /** Статистика своего бота за период (ADR-0099). */
+  @Cabinets('client')
+  @Get('client/messages/bot/stats')
+  async stats(
+    @CurrentUser() actor: Principal,
+    @Query(zodQuery(botStatsQuerySchema)) query: z.infer<typeof botStatsQuerySchema>,
+  ): Promise<BotStatsView> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return this.stats_.stats(client.id, query);
+  }
+
+  /** Свои подписчики: номером они поделились с ботом этого клиента (ADR-0099). */
+  @Cabinets('client')
+  @Get('client/messages/bot/subscribers')
+  async subscribers(
+    @CurrentUser() actor: Principal,
+    @Query(zodQuery(botSubscribersQuerySchema)) query: z.infer<typeof botSubscribersQuerySchema>,
+  ): Promise<{ subscribers: BotSubscriberView[]; total: number }> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    return this.stats_.subscribers(client.id, query);
   }
 
   @Cabinets('client')

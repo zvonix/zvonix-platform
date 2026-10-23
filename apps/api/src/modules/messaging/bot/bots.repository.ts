@@ -4,10 +4,36 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  getTableColumns,
+  isNotNull,
+  isNull,
+  ne,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { toDatabaseError } from '@zvonix/db';
-import { botConnections, botSubscribers, clients, messengerBots } from '@zvonix/db/schema';
-import { newId, type BotKind, type BotStatus, type Id, type MoneyAmount } from '@zvonix/shared';
+import {
+  botConnections,
+  botSubscriberEvents,
+  botSubscribers,
+  clients,
+  messengerBots,
+} from '@zvonix/db/schema';
+import {
+  newId,
+  type BotKind,
+  type BotStatus,
+  type BotSubscriberEventKind,
+  type Id,
+  type MoneyAmount,
+} from '@zvonix/shared';
+import type { Executor } from '@zvonix/db';
 import { DatabaseService } from '../../../infra/database.service.js';
 
 export type BotRow = typeof messengerBots.$inferSelect;
@@ -284,7 +310,37 @@ export class BotsRepository {
     /** Имя из профиля MAX, если человек его прислал (ADR-0087). */
     firstName?: string | null;
   }): Promise<BotSubscriberRow> {
-    const [row] = await this.database.db
+    return this.database.db.transaction(async (tx) => {
+      // Прежнее состояние — до записи: новое (`started`), вернулся после остановки (`restarted`), повторный запуск — без события.
+      const [before] = await tx
+        .select({ state: botSubscribers.state })
+        .from(botSubscribers)
+        .where(
+          and(
+            eq(botSubscribers.botId, draft.botId),
+            eq(botSubscribers.clientId, draft.clientId),
+            eq(botSubscribers.maxUserId, draft.maxUserId),
+          ),
+        )
+        .for('update');
+      const { inserted, ...row } = await this.upsertSubscriber(tx, draft);
+      // «Новая ли» — из самой вставки, а не из чтения: MAX повторяет доставку, и два одновременных первых запуска иначе дали бы
+      // два `started`.
+      const kind: BotSubscriberEventKind | undefined = inserted
+        ? 'started'
+        : before?.state === 'stopped'
+          ? 'restarted'
+          : undefined;
+      if (kind !== undefined) await this.recordEvents(tx, [row], kind);
+      return row;
+    });
+  }
+
+  private async upsertSubscriber(
+    tx: Executor,
+    draft: Parameters<BotsRepository['startSubscriber']>[0],
+  ): Promise<BotSubscriberRow & { inserted: boolean }> {
+    const [row] = await tx
       .insert(botSubscribers)
       .values({ id: newId<'botSubscriber'>(), ...draft })
       .onConflictDoUpdate({
@@ -299,27 +355,67 @@ export class BotsRepository {
             : { firstName: draft.firstName }),
         },
       })
-      .returning();
+      // `xmax = 0` — строка вставлена, а не обновлена (PostgreSQL).
+      .returning({ ...getTableColumns(botSubscribers), inserted: sql<boolean>`(xmax = 0)` });
     if (row === undefined) throw new Error('Подписчик не записан');
     return row;
   }
 
-  /** Человек поделился номером: он относится ко всем его подпискам в этом боте. Возвращает число подписок. */
+  /**
+   * Человек поделился номером: он относится ко всем его подпискам в этом боте. Возвращает число подписок. Событие
+   * `phone_shared` — только у подписок, где номера ещё не было (ADR-0099).
+   */
   async setPhone(botId: BotId, maxUserId: string, phone: string): Promise<number> {
-    const rows = await this.database.db
-      .update(botSubscribers)
-      .set({ phone, updatedAt: new Date() })
-      .where(and(eq(botSubscribers.botId, botId), eq(botSubscribers.maxUserId, maxUserId)))
-      .returning({ id: botSubscribers.id });
-    return rows.length;
+    return this.database.db.transaction(async (tx) => {
+      const where = and(eq(botSubscribers.botId, botId), eq(botSubscribers.maxUserId, maxUserId));
+      const first = await tx
+        .select()
+        .from(botSubscribers)
+        .where(and(where, isNull(botSubscribers.phone)))
+        .for('update');
+      const rows = await tx
+        .update(botSubscribers)
+        .set({ phone, updatedAt: new Date() })
+        .where(where)
+        .returning({ id: botSubscribers.id });
+      await this.recordEvents(tx, first, 'phone_shared');
+      return rows.length;
+    });
   }
 
-  /** «СТОП»: все подписки человека в этом боте перестают получать сообщения. */
+  /** «СТОП» или остановка бота: все подписки человека в этом боте перестают получать сообщения; событие — у живых. */
   async stopUser(botId: BotId, maxUserId: string): Promise<void> {
-    await this.database.db
-      .update(botSubscribers)
-      .set({ state: 'stopped', updatedAt: new Date() })
-      .where(and(eq(botSubscribers.botId, botId), eq(botSubscribers.maxUserId, maxUserId)));
+    await this.stopWhere(
+      and(eq(botSubscribers.botId, botId), eq(botSubscribers.maxUserId, maxUserId)),
+    );
+  }
+
+  private async stopWhere(where: ReturnType<typeof and>): Promise<void> {
+    await this.database.db.transaction(async (tx) => {
+      const stopped = await tx
+        .update(botSubscribers)
+        .set({ state: 'stopped', updatedAt: new Date() })
+        .where(and(where, eq(botSubscribers.state, 'started')))
+        .returning();
+      await this.recordEvents(tx, stopped, 'stopped');
+    });
+  }
+
+  private async recordEvents(
+    tx: Executor,
+    subscribers: readonly Pick<BotSubscriberRow, 'id' | 'clientId' | 'botId'>[],
+    kind: BotSubscriberEventKind,
+  ): Promise<void> {
+    if (subscribers.length === 0) return;
+    await tx.insert(botSubscriberEvents).values(
+      subscribers.map((subscriber) => ({
+        id: newId<'botSubscriberEvent'>(),
+        subscriberId: subscriber.id,
+        clientId: subscriber.clientId,
+        botId: subscriber.botId,
+        kind,
+      })),
+    );
   }
 
   async subscribersOf(botId: BotId, maxUserId: string): Promise<BotSubscriberRow[]> {
@@ -368,20 +464,22 @@ export class BotsRepository {
 
   /** Подписчик перестал принимать сообщения бота (остановил бота в MAX): дальше ему не пишем. */
   async stopSubscriber(id: BotSubscriberRow['id']): Promise<void> {
-    await this.database.db
-      .update(botSubscribers)
-      .set({ state: 'stopped', updatedAt: new Date() })
-      .where(eq(botSubscribers.id, id));
+    await this.stopWhere(eq(botSubscribers.id, id));
   }
 
-  /** Сколько у клиента подписчиков всего и сколько из них уже сообщили номер. */
+  /**
+   * Сколько у клиента подписчиков сейчас (остановившие не считаются — раньше считались, и число в карточке бота было завышено)
+   * и сколько из них уже сообщили номер.
+   */
   async countFor(
     clientId: Id<'client'>,
     botId?: BotId,
   ): Promise<{ total: number; withPhone: number }> {
     const [row] = await this.database.db
       .select({
-        total: count(),
+        total: sql<number>`count(*) filter (where ${botSubscribers.state} = 'started')`.mapWith(
+          Number,
+        ),
         withPhone:
           sql<number>`count(*) filter (where ${botSubscribers.phone} is not null and ${botSubscribers.state} = 'started')`.mapWith(
             Number,

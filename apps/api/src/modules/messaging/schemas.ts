@@ -211,6 +211,27 @@ export const journalQuerySchema = messagesQuerySchema.extend({
   refused: optional(z.enum(['1', 'true'])),
 });
 
+/** Статистика бота (ADR-0099): период (по умолчанию 7 суток) и пояс человека для разбивки по суткам. */
+export const botStatsQuerySchema = z.object({
+  from: moment,
+  to: moment,
+  offset: z
+    .string()
+    .optional()
+    .transform((raw) => Number(raw ?? '0'))
+    .pipe(z.number().int().min(-720).max(840)),
+});
+
+/** Подписчики бота: часть номера и страница. */
+export const botSubscribersQuerySchema = z.object({
+  phone: optional(z.string().trim().min(1).max(20)),
+  limit: z
+    .string()
+    .optional()
+    .transform((raw) => boundedLimit(raw, 200)),
+  offset: z.string().optional().transform(boundedOffset),
+});
+
 /** Список «не писать»: поиск по полному номеру и страница. */
 export const stopsQuerySchema = z.object({
   phone: optional(z.string().trim().max(30)),
