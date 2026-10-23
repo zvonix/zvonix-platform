@@ -547,6 +547,13 @@
       "when": 1792734946713,
       "tag": "0077_smpp_enroute",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1792738078276,
+      "tag": "0078_smpp_tochnye_prichiny",
+      "breakpoints": true
     }
   ]
 }

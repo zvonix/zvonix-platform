@@ -177,9 +177,21 @@ export const SMPP_SUBMIT_REFUSALS = [
   'invalid_length',
   'invalid_validity',
   'wrong_mode',
+  /** Отклонено по причине, у которой нет своего значения ниже. */
   'rejected',
   'throttled',
   'system_error',
+  /**
+   * Точные причины отказа сервиса (`details.reason`) — чтобы по строке журнала было видно, что случилось, а не «нет MAX, деньги,
+   * требования…» одной группой (владелец, 2026-10-23).
+   */
+  'recipient_not_in_max',
+  'recipient_inactive',
+  'recipient_stopped',
+  'duplicate_message',
+  'recipient_limit',
+  'insufficient_funds',
+  'requirements_unmet',
 ] as const;
 export type SmppSubmitRefusal = (typeof SMPP_SUBMIT_REFUSALS)[number];
 export const SMPP_BIND_MODES = ['transmitter', 'receiver', 'transceiver'] as const;

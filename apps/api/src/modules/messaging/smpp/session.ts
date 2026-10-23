@@ -97,6 +97,8 @@ export class SmppSession {
   private outSequence = 1;
   private closed = false;
   private binding = false;
+  /** Ждём ответа программы на наш `unbind` (остановка площадки); пришёл ответ или соединение закрылось — продолжаем. */
+  private unbound: (() => void) | undefined;
   private readonly bindTimer: NodeJS.Timeout;
   private readonly tick: NodeJS.Timeout;
 
@@ -161,7 +163,32 @@ export class SmppSession {
   }
 
   /** Закрывает соединение (идемпотентно) и сообщает серверу. */
+  /**
+   * Вежливое отключение при остановке площадки (SMPP 3.4, 4.2): `unbind` и ответ программы не дольше `waitMs`, потом закрытие.
+   * Получив `unbind`, программа считает разрыв штатным и переподключается, а обрыв соединения часть программ принимает за
+   * ошибку и ждёт перезапуска (владелец, 2026-10-23: после обновления такси писало «Connection refused»).
+   */
+  async unbind(waitMs: number): Promise<void> {
+    if (this.closed) return;
+    if (this.mode === undefined) {
+      this.destroy();
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, waitMs);
+      timer.unref();
+      this.unbound = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.write(encodePdu(Command.unbind, Status.ok, this.nextSequence(), Buffer.alloc(0)));
+    });
+    this.unbound = undefined;
+    this.destroy();
+  }
+
   destroy(): void {
+    this.unbound?.();
     if (this.closed) return;
     this.closed = true;
     clearTimeout(this.bindTimer);
@@ -235,7 +262,11 @@ export class SmppSession {
 
   private async handle(pdu: Pdu): Promise<void> {
     if ((pdu.commandId & RESPONSE_BIT) !== 0) {
-      // Ответ на наш `deliver_sm` — единственный, которого мы ждём; остальные ответы безразличны.
+      // Ждём ответы на наш `deliver_sm` и на `unbind` при остановке; остальные безразличны.
+      if (pdu.commandId === (Command.unbind | RESPONSE_BIT) >>> 0) {
+        this.unbound?.();
+        return;
+      }
       if (pdu.commandId === (Command.deliverSm | RESPONSE_BIT) >>> 0) {
         const waiter = this.awaitingAck.get(pdu.sequence);
         if (waiter !== undefined) {
@@ -399,15 +430,7 @@ export class SmppSession {
       this.respond(pdu, Status.ok, cString(id));
     } catch (cause) {
       const status = this.statusOf(cause);
-      this.refuse(
-        pdu,
-        status,
-        status === Status.throttled
-          ? 'throttled'
-          : status === Status.submitFailed
-            ? 'rejected'
-            : 'system_error',
-      );
+      this.refuse(pdu, status, refusalOf(cause, status));
     }
   }
 
@@ -449,4 +472,28 @@ export class SmppSession {
     this.logger.error('SMPP: сообщение не принято', cause, { ip: this.ip });
     return Status.systemError;
   }
+}
+
+/** Отказ сервиса со своей причиной (`details.reason`), которая есть в журнале подключения. */
+const PRECISE_REFUSALS = new Set<string>([
+  'recipient_not_in_max',
+  'recipient_inactive',
+  'recipient_stopped',
+  'duplicate_message',
+  'recipient_limit',
+  'insufficient_funds',
+  'requirements_unmet',
+]);
+
+/** Что записать в журнал подключения об отказе: точная причина сервиса, иначе — по ответу программе. */
+function refusalOf(cause: unknown, status: number): SmppSubmitRefusal {
+  const reason = isDomainError(cause) ? cause.details?.['reason'] : undefined;
+  if (typeof reason === 'string' && PRECISE_REFUSALS.has(reason)) {
+    return reason as SmppSubmitRefusal;
+  }
+  return status === Status.throttled
+    ? 'throttled'
+    : status === Status.submitFailed
+      ? 'rejected'
+      : 'system_error';
 }
