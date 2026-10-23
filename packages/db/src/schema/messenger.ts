@@ -23,6 +23,7 @@ import {
   MESSAGE_FAILURE_REASONS,
   MESSAGE_STATUSES,
   MESSAGE_STOP_SOURCES,
+  MESSAGE_REFUSAL_REASONS,
   STOP_LINE_REQUIREMENTS,
   ACCOUNT_MIN_AGE_DAYS_MAX,
   MESSENGER_ACCOUNT_EVENT_KINDS,
@@ -57,6 +58,7 @@ import {
   type MessageChannel,
   type MessageFailureReason,
   type MessageStopSource,
+  type MessageRefusalReason,
   type StopLineRequirement,
   type MessengerAccountEventKind,
   type NumberCheckResult,
@@ -781,5 +783,31 @@ export const partnerDistributions = pgTable(
         and (${t.quietFromMinute} is null or (${t.quietFromMinute} between 0 and 1439 and ${t.quietToMinute} between 0 and 1439 and ${t.quietFromMinute} <> ${t.quietToMinute}))`,
     ),
     uniqueIndex('partner_distributions_partner_product_idx').on(t.partnerId, t.product),
+  ],
+);
+
+/**
+ * Отклонённые при приёме ([ADR-0098](../../../docs/adr/0098-otklonyonnye-pri-priyome.md)): программа получила отказ, денег и
+ * аккаунта нет. Отдельно от `messages`, чтобы очередь, деньги и отчёты их не видели по построению. Текст не хранится; номер —
+ * персональные данные, стирается по сроку текстов (`retention.messages_days`).
+ */
+export const messageRefusals = pgTable(
+  'message_refusals',
+  {
+    id: primaryId<'messageRefusal'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    channel: text().$type<MessageChannel>().notNull(),
+    /** Номер в каноническом виде, как `messages.recipient`. */
+    recipient: text().notNull(),
+    reason: text().$type<MessageRefusalReason>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('message_refusals_client_idx').on(t.clientId, t.createdAt),
+    index('message_refusals_created_idx').on(t.createdAt),
+    check('message_refusals_channel_check', oneOf(t.channel, MESSAGE_CHANNELS)),
+    check('message_refusals_reason_check', oneOf(t.reason, MESSAGE_REFUSAL_REASONS)),
   ],
 );

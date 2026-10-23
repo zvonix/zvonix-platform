@@ -12,8 +12,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   conflict,
   dependencyUnavailable,
+  isDomainError,
   MESSAGE_MAX_ATTEMPTS,
   MESSAGE_MAX_LENGTH,
+  MESSAGE_REFUSAL_REASONS,
   Money,
   normalizeMsisdn,
   rateLimited,
@@ -22,6 +24,7 @@ import {
   type Id,
   type MessageChannel,
   type MessageFailureReason,
+  type MessageRefusalReason,
   type MoneyAmount,
 } from '@zvonix/shared';
 import { RedisService } from '../../infra/redis.js';
@@ -39,6 +42,7 @@ import { TemplatesService } from './templates.service.js';
 import { AccountPicker } from './account-picker.js';
 import { defaultBusyMode, RequirementsService } from './requirements.service.js';
 import { commissionOf } from './commission.js';
+import { RefusalsRepository, type MessageRefusalRow } from './refusals.repository.js';
 import { dormantStep, UNREAD_AFTER_MS } from './dormant.js';
 import { accountReadyAt, withRecommended } from './warmup.js';
 import {
@@ -53,6 +57,11 @@ import {
   type MessageProvider,
   type RecipientCheck,
 } from './provider.js';
+
+/** Строка журнала кабинета: принятое сообщение или отклонённое при приёме (ADR-0098). */
+export type JournalEntry =
+  | { readonly kind: 'message'; readonly row: MessageRow }
+  | { readonly kind: 'refused'; readonly row: MessageRefusalRow };
 
 /** Сколько сообщений воркер берёт за проход: с запасом на паузы, но без многоминутного прохода. */
 const DISPATCH_BATCH = 50;
@@ -101,6 +110,7 @@ export class MessagesService {
     private readonly stops: StopsService,
     private readonly picker: AccountPicker,
     private readonly requirements: RequirementsService,
+    private readonly refusals: RefusalsRepository,
     @Inject(MESSAGE_PROVIDER) private readonly provider: MessageProvider,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -209,6 +219,42 @@ export class MessagesService {
       throw validationFailed(`Текст сообщения — не больше ${String(MESSAGE_MAX_LENGTH)} знаков`);
     }
 
+    try {
+      return await this.accept(clientId, recipient, input, channel);
+    } catch (cause) {
+      await this.noteRefusal(clientId, recipient, channel, cause);
+      throw cause;
+    }
+  }
+
+  /**
+   * Отказ при приёме — в журнал «отклонённые при приёме» (ADR-0098): номер известен, а сообщения нет. Пишется только отказ
+   * площадки (доменная ошибка), не сбой; сбой записи не меняет ответ программе.
+   */
+  private async noteRefusal(
+    clientId: Id<'client'>,
+    recipient: string,
+    channel: MessageChannel,
+    cause: unknown,
+  ): Promise<void> {
+    if (!isDomainError(cause)) return;
+    const given = cause.details?.['reason'];
+    const reason = (MESSAGE_REFUSAL_REASONS as readonly unknown[]).includes(given)
+      ? (given as MessageRefusalReason)
+      : 'other';
+    await this.refusals
+      .insert({ clientId, channel, recipient, reason })
+      .catch((failure: unknown) => {
+        this.logger.error('Отказ при приёме не записан в журнал', failure, { reason });
+      });
+  }
+
+  private async accept(
+    clientId: Id<'client'>,
+    recipient: string,
+    input: Parameters<MessagesService['send']>[1],
+    channel: MessageChannel,
+  ): Promise<MessageRow> {
     const client = await this.billing.clientWithBalance(clientId);
     if (client.status !== 'active')
       throw conflict('Отправка сообщений доступна работающему клиенту');
@@ -261,7 +307,9 @@ export class MessagesService {
     // Сначала бот: у номера есть подписчик этого клиента (ADR-0077). Иначе — аккаунты партнёров.
     const viaBot = await this.bots.routeFor(clientId, recipient);
     if (viaBot === undefined && (await this.bots.fallbackForbidden(clientId))) {
-      throw validationFailed('Получатель не подписан на бота этого клиента');
+      throw validationFailed('Получатель не подписан на бота этого клиента', {
+        details: { reason: 'bot_only' },
+      });
     }
     // Про номер уже известно «нет MAX» — отказ сразу и без списания: программа клиента тут же отправит обычную SMS другим путём,
     // а не будет ждать отчёт «не доставлено» (владелец, 2026-10-23: «зачем отправлять повторно, если нет MAX?»).
@@ -272,9 +320,13 @@ export class MessagesService {
     // Предел на номер — только для аккаунтов партнёров: бот пишет подписчику, который сам его позвал, и жалоб на
     // аккаунт от этого не бывает.
     if (viaBot === undefined) await this.assertRecipientLimit(clientId, recipient);
+    // Пауза площадки — та же, что при отправке: иначе приём обещал «свободен», а отправка ждала паузу (ADR-0098).
     const picked =
       viaBot === undefined
-        ? await this.picker.pickWithState(now, { sticky: { clientId, recipient } })
+        ? await this.picker.pickWithState(now, {
+            sticky: { clientId, recipient },
+            paceSeconds: (await this.settings.messaging()).paceSeconds,
+          })
         : undefined;
     const account = picked?.account;
     // Свободен, но у него отложенные сообщения — новое встаёт за ними (по очереди, см. `dispatchOne`), а не «отправить сразу».
@@ -305,7 +357,9 @@ export class MessagesService {
           { details: { reason: 'requirements_unmet' } },
         );
       }
-      throw dependencyUnavailable('Сейчас нет доступных аккаунтов для отправки — повторите позже');
+      throw dependencyUnavailable('Сейчас нет доступных аккаунтов для отправки — повторите позже', {
+        details: { reason: 'no_capacity' },
+      });
     }
 
     const id = this.repository.newId();
@@ -481,20 +535,64 @@ export class MessagesService {
 
   /** Бот или аккаунты у одного клиента за `days` суток (ADR-0094). */
   async routeStatsOf(clientId: Id<'client'>, days: number, now: Date = new Date()) {
-    const [row] = await this.repository.routeStats(
-      new Date(now.getTime() - days * 86_400_000),
-      clientId,
-    );
+    const since = new Date(now.getTime() - days * 86_400_000);
+    const [[row], refused] = await Promise.all([
+      this.repository.routeStats(since, clientId),
+      this.refusals.countSince(clientId, since),
+    ]);
     return {
       recipients: row?.recipients ?? 0,
       in_bot: row?.inBot ?? 0,
       via_bot: row?.viaBot ?? 0,
       via_accounts: row?.viaAccounts ?? 0,
+      refused,
     };
   }
 
   list(filter: MessageFilter): Promise<{ rows: MessageRow[]; total: number }> {
     return this.repository.list(filter);
+  }
+
+  /**
+   * Журнал кабинета (ADR-0098): `refused` — вместе с отклонёнными при приёме, `onlyRefused` — только они. Отбор по итогу или
+   * партнёру — прежний журнал: у отклонённого нет ни итога, ни партнёра.
+   */
+  async journal(
+    filter: MessageFilter,
+    options: { refused: boolean; onlyRefused: boolean },
+  ): Promise<{ entries: JournalEntry[]; total: number }> {
+    if (
+      !options.onlyRefused &&
+      (!options.refused || filter.status !== undefined || filter.partnerId !== undefined)
+    ) {
+      const found = await this.repository.list(filter);
+      return {
+        total: found.total,
+        entries: found.rows.map((row) => ({ kind: 'message' as const, row })),
+      };
+    }
+    const { page, total } = await this.repository.journalWithRefusals(filter, options.onlyRefused);
+    const [rows, refusals] = await Promise.all([
+      this.repository.findByIds(
+        page.filter((entry) => entry.kind === 'message').map((entry) => entry.id),
+      ),
+      this.refusals.findByIds(
+        page.filter((entry) => entry.kind === 'refused').map((entry) => entry.id),
+      ),
+    ]);
+    const messageById = new Map(rows.map((row) => [row.id as string, row]));
+    const refusalById = new Map(refusals.map((row) => [row.id as string, row]));
+    const entries: JournalEntry[] = [];
+    for (const entry of page) {
+      if (entry.kind === 'message') {
+        const row = messageById.get(entry.id);
+        if (row !== undefined) entries.push({ kind: 'message', row });
+      } else {
+        const row = refusalById.get(entry.id);
+        if (row !== undefined) entries.push({ kind: 'refused', row });
+      }
+    }
+    return { entries, total };
   }
 
   async get(clientId: Id<'client'>, id: string): Promise<MessageRow | undefined> {
@@ -834,7 +932,10 @@ ${STOP_LINE}`
       EXPIRY_BATCH,
       now,
     );
-    for (const message of stale) await this.fail(message, 'wait_expired', now);
+    // Провайдер пробовал отправить и не смог — «MAX не ответил вовремя»; не пробовал — свободного маршрута не нашлось (ADR-0098).
+    for (const message of stale) {
+      await this.fail(message, message.attempts > 0 ? 'provider_timeout' : 'wait_expired', now);
+    }
     return stale.length;
   }
 
@@ -874,6 +975,8 @@ ${STOP_LINE}`
       new Date(now.getTime() - textDays * 86_400_000),
       new Date(now.getTime() - EVENTS_KEEP_DAYS * 86_400_000),
     );
+    // Отклонённые при приёме хранят номер — персональные данные: срок тот же (ADR-0098).
+    await this.refusals.purge(new Date(now.getTime() - textDays * 86_400_000));
     return this.repository.purgeTexts(new Date(now.getTime() - textDays * 86_400_000));
   }
 }

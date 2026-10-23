@@ -198,9 +198,10 @@ MAX либо нет связи; `retired` — списан (в списках е
    предел проверок провайдера, не российский и не белорусский номер) — сообщение всё равно отправляется, а
    отказ получателя ловится по ответу отправки. Если провайдер ответил «лимит проверок исчерпан» (469), проверки через этот аккаунт приостанавливаются на 2 часа: он только отправляет. Временный сбой — повтор через 1, 2, 4, 8 минут, после пяти
    попыток отказ.
-3. **Возврат.** Окончательный отказ (`recipient_not_in_max`, `account_unavailable`, `wait_expired`,
-   `platform`, `recipient_stopped`) возвращает деньги обратной проводкой (идемпотентно). Ждавшее дольше
-   `messages.max_wait_minutes` отклоняется как `wait_expired`.
+3. **Возврат.** Окончательный отказ (`recipient_not_in_max`, `account_unavailable`, `wait_expired`, `provider_timeout`,
+   `platform`, `recipient_stopped`) возвращает деньги обратной проводкой (идемпотентно). Не ушедшее за срок отклоняется как
+   `wait_expired` («свободного маршрута не нашлось»: провайдер ни разу не пробовал отправить) или `provider_timeout`
+   («MAX не ответил вовремя»: пробовал — `attempts > 0`) ([ADR-0098](../adr/0098-otklonyonnye-pri-priyome.md)).
 4. **Статусы доставки** приходят от провайдера на секретный адрес площадки: `sent` → `delivered` → `read`,
    только вперёд. Сообщение о том, что у получателя нет MAX, уже после отправки возвращает деньги.
 5. **Текст — персональные данные**: стирается через `retention.messages_days` (по умолчанию 30 суток),
@@ -225,8 +226,12 @@ MAX либо нет связи; `retired` — списан (в списках е
 
 - `GET /client/messages/price` → `{ "enabled": true, "price": "0.54" }` — сколько сообщение стоит сейчас;
   `price: null` — принять некуда.
-- `GET /client/messages?status=&from=&to=&limit=&offset=` → `{ "messages": [ … ], "total": 3 }`. `from`/`to` — моменты ISO
-  с поясом, период по `created_at` (то же у `GET /v1/messages`).
+- `GET /client/messages?status=&from=&to=&refused=&limit=&offset=` → `{ "messages": [ … ], "total": 3 }`. `from`/`to` — моменты ISO
+  с поясом, период по `created_at` (то же у `GET /v1/messages`). У строки `kind`: `message` — принятое; `refused=1` добавляет
+  **отклонённые при приёме** (`kind: "refused"`, `status: "refused"`, причина в `failure_reason`: `all_busy`, `no_capacity`,
+  `recipient_not_in_max`, `recipient_inactive`, `recipient_stopped`, `duplicate_message`, `recipient_limit`, `insufficient_funds`,
+  `requirements_unmet`, `bot_only`, `other`; `channel`; без текста и денег) — вперемешку по времени, страницы общие;
+  `status=refused` — только они ([ADR-0098](../adr/0098-otklonyonnye-pri-priyome.md)). `GET /v1/messages` их не отдаёт.
 - `POST /client/messages` `{ "to": "+7 900 123-45-67", "text": "…", "externalId": "…", "validMinutes": 5 }` → `201`
   `{ "message": { … } }` в состоянии `queued`. `validMinutes` (1–1440, необязательно) — срок сообщения: не ушло за это время —
   `wait_expired`, деньги возвращаются; действует меньшее из него и «сколько ждать» клиента ([ADR-0097](../adr/0097-zanyato-i-srok-soobshcheniya.md)).
@@ -254,7 +259,8 @@ MAX либо нет связи; `retired` — списан (в списках е
 
 ### Сотрудники
 
-`GET /messages?status=&from=&to=&clientId=&partnerId=&limit=&offset=` (роли `admin`, `support`) → сообщения всех клиентов с деньгами
+`GET /messages?status=&from=&to=&clientId=&partnerId=&refused=&limit=&offset=` (роли `admin`, `support`; `refused` — как у клиента,
+отклонённые с `client_id` и деньгами нулями) → сообщения всех клиентов с деньгами
 по трём счетам (`money.client`, `money.partner`, `money.margin`), `partner_id`, `account_id`, `attempts`.
 **Текст сотруднику не отдаётся**: разбору хватает получателя, статуса и денег.
 
@@ -493,6 +499,7 @@ failure_reason, earned, created_at, sent_at, delivered_at, read_at }], total }` 
 
 ## Бот или аккаунты ([ADR-0094](../adr/0094-statistika-bot-ili-akkaunty.md))
 
-- `GET /client/messages/route-stats?days=7` → `{ days, recipients, in_bot, via_bot, via_accounts }`.
+- `GET /client/messages/route-stats?days=7` → `{ days, recipients, in_bot, via_bot, via_accounts, refused }` (`refused` —
+  отклонено при приёме за те же сутки).
 - В `GET /messages/report` — `routes: [{ client_id, name, recipients, in_bot, via_bot, via_accounts }]`.
 

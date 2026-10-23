@@ -53,6 +53,7 @@ const ERROR_CODE: Record<NonNullable<MessageRow['failureReason']>, number> = {
   wait_expired: 3,
   platform: 4,
   recipient_stopped: 5,
+  provider_timeout: 6,
 };
 
 /** Каким состоянием отчёта отвечает выбранный клиентом ответ (`none` до отправки не доходит). */
@@ -414,7 +415,9 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
     if (row.status === 'failed' && !handled.has('failed')) {
       if (!session.hasDeliverCapacity) return;
       const reason = row.failureReason;
-      const state = reason === 'wait_expired' ? 'EXPIRED' : 'UNDELIV';
+      // Не ушло за срок — по любой из двух причин (маршрута не нашлось или MAX не ответил) — `EXPIRED`, как прежде (ADR-0098).
+      const state =
+        reason === 'wait_expired' || reason === 'provider_timeout' ? 'EXPIRED' : 'UNDELIV';
       const status = await session.sendDeliver(encodeReceiptBody(this.receiptOf(row, state, null)));
       if (status === Status.ok)
         await this.messageRows.markReceiptEvent(row.id, 'failed', new Date());

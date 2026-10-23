@@ -80,7 +80,28 @@ export const MESSAGE_FAILURE_REASONS = [
   'wait_expired',
   'platform',
   'recipient_stopped',
+  /** Срок вышел, а провайдер пробовал отправить и не смог: «MAX не ответил вовремя» (ADR-0098). */
+  'provider_timeout',
 ] as const;
+
+/**
+ * Почему сообщение не принято ([ADR-0098](../../../docs/adr/0098-otklonyonnye-pri-priyome.md)) — `details.reason` отказа при приёме;
+ * без своей причины — `other`.
+ */
+export const MESSAGE_REFUSAL_REASONS = [
+  'all_busy',
+  'no_capacity',
+  'recipient_not_in_max',
+  'recipient_inactive',
+  'recipient_stopped',
+  'duplicate_message',
+  'recipient_limit',
+  'insufficient_funds',
+  'requirements_unmet',
+  'bot_only',
+  'other',
+] as const;
+export type MessageRefusalReason = (typeof MESSAGE_REFUSAL_REASONS)[number];
 
 /**
  * События аккаунта для истории ([ADR-0088](../../../docs/adr/0088-otchety-i-zashchita-akkauntov-max.md)): стал недоступен (с причиной

@@ -17,10 +17,12 @@ import { BillingService } from '../billing/billing.service.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
 import type { MessageRow } from './messages.repository.js';
+import type { MessageRefusalRow } from './refusals.repository.js';
 import { MessagesService } from './messages.service.js';
 import { MessagingService } from './messaging.service.js';
 import { StopsService } from './stops.service.js';
 import {
+  journalQuerySchema,
   messagesOverviewQuerySchema,
   messagesQuerySchema,
   messagesReportQuerySchema,
@@ -69,6 +71,68 @@ interface ClientMessageView {
 const iso = (value: Date | null): string | null => value?.toISOString() ?? null;
 
 type MessagesQuery = z.infer<typeof messagesQuerySchema>;
+type JournalQuery = z.infer<typeof journalQuerySchema>;
+
+/** Отбор журнала кабинета и включены ли отклонённые при приёме (ADR-0098). */
+const journalOf = (query: JournalQuery) => {
+  const onlyRefused = query.status === 'refused';
+  const { status, ...rest } = query;
+  return {
+    period: periodOf({ ...rest, status: status === 'refused' ? undefined : status }),
+    options: { refused: onlyRefused || query.refused !== undefined, onlyRefused },
+  };
+};
+
+/** Отклонённое при приёме в журнале клиента: номер, когда, через что и почему; ни текста, ни денег (ADR-0098). */
+interface ClientRefusedView extends Omit<ClientMessageView, 'status' | 'failure_reason'> {
+  readonly kind: 'refused';
+  readonly status: 'refused';
+  readonly failure_reason: MessageRefusalRow['reason'];
+  readonly channel: MessageRefusalRow['channel'];
+}
+type ClientJournalView = (ClientMessageView & { readonly kind: 'message' }) | ClientRefusedView;
+
+interface StaffRefusedView extends Omit<ClientRefusedView, 'text' | 'full_text'> {
+  readonly client_id: string;
+  readonly route: null;
+  readonly partner_id: null;
+  readonly account_id: null;
+  readonly attempts: 0;
+  readonly money: { client: string; partner: string; margin: string };
+}
+type StaffJournalView = (StaffMessageView & { readonly kind: 'message' }) | StaffRefusedView;
+
+const toClientRefusedView = (row: MessageRefusalRow): ClientRefusedView => ({
+  id: row.id,
+  kind: 'refused' as const,
+  external_id: null,
+  to: row.recipient,
+  text: '',
+  status: 'refused',
+  failure_reason: row.reason,
+  channel: row.channel,
+  stop_line: false,
+  full_text: null,
+  cost: null,
+  created_at: row.createdAt.toISOString(),
+  sent_at: null,
+  delivered_at: null,
+  read_at: null,
+});
+
+/** То же для сотрудника: плюс клиент, деньги нулями. */
+const toStaffRefusedView = (row: MessageRefusalRow): StaffRefusedView => {
+  const { text: _text, full_text: _fullText, ...rest } = toClientRefusedView(row);
+  return {
+    ...rest,
+    client_id: row.clientId,
+    route: null,
+    partner_id: null,
+    account_id: null,
+    attempts: 0,
+    money: { client: '0', partner: '0', margin: '0' },
+  };
+};
 
 /** Общая часть отбора журнала: состояние и период. Клиент и партнёр — только у сотрудников, свои — из сессии. */
 const periodOf = (query: MessagesQuery) => ({
@@ -204,11 +268,19 @@ export class ClientMessagesController {
   @Get('client/messages')
   async list(
     @CurrentUser() actor: Principal,
-    @Query(zodQuery(messagesQuerySchema)) query: z.infer<typeof messagesQuerySchema>,
-  ): Promise<{ messages: ClientMessageView[]; total: number }> {
+    @Query(zodQuery(journalQuerySchema)) query: JournalQuery,
+  ): Promise<{ messages: ClientJournalView[]; total: number }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    const found = await this.messages.list({ clientId: client.id, ...periodOf(query) });
-    return { total: found.total, messages: found.rows.map(toClientView) };
+    const { period, options } = journalOf(query);
+    const found = await this.messages.journal({ clientId: client.id, ...period }, options);
+    return {
+      total: found.total,
+      messages: found.entries.map((entry) =>
+        entry.kind === 'message'
+          ? { ...toClientView(entry.row), kind: 'message' as const }
+          : toClientRefusedView(entry.row),
+      ),
+    };
   }
 
   /** Отправка из кабинета. `201` — принято и поставлено в очередь, деньги списаны. */
@@ -352,14 +424,27 @@ export class StaffMessagesController {
   @Roles('admin', 'support')
   @Get('messages')
   async list(
-    @Query(zodQuery(messagesQuerySchema)) query: z.infer<typeof messagesQuerySchema>,
-  ): Promise<{ messages: StaffMessageView[]; total: number }> {
-    const found = await this.messages.list({
-      ...periodOf(query),
-      ...(query.clientId === undefined ? {} : { clientId: parseId(query.clientId, 'client') }),
-      ...(query.partnerId === undefined ? {} : { partnerId: parseId(query.partnerId, 'partner') }),
-    });
-    return { total: found.total, messages: found.rows.map(toStaffView) };
+    @Query(zodQuery(journalQuerySchema)) query: JournalQuery,
+  ): Promise<{ messages: StaffJournalView[]; total: number }> {
+    const { period, options } = journalOf(query);
+    const found = await this.messages.journal(
+      {
+        ...period,
+        ...(query.clientId === undefined ? {} : { clientId: parseId(query.clientId, 'client') }),
+        ...(query.partnerId === undefined
+          ? {}
+          : { partnerId: parseId(query.partnerId, 'partner') }),
+      },
+      options,
+    );
+    return {
+      total: found.total,
+      messages: found.entries.map((entry) =>
+        entry.kind === 'message'
+          ? { ...toStaffView(entry.row), kind: 'message' as const }
+          : toStaffRefusedView(entry.row),
+      ),
+    };
   }
 }
 

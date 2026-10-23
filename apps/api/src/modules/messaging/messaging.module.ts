@@ -52,6 +52,7 @@ import { SmppRepository } from './smpp/smpp.repository.js';
 import { SmppService } from './smpp/smpp.service.js';
 import { StaffStopsController } from './stops.controller.js';
 import { StopsRepository } from './stops.repository.js';
+import { RefusalsRepository } from './refusals.repository.js';
 import { StopsService } from './stops.service.js';
 
 /**
@@ -100,6 +101,7 @@ import { StopsService } from './stops.service.js';
     TemplatesRepository,
     TemplatesService,
     StopsRepository,
+    RefusalsRepository,
     StopsService,
     SmppRepository,
     SmppEventsRepository,

@@ -13,6 +13,7 @@ import {
   stageColumns,
   StageHeads,
   useJournalFilter,
+  journalOutcome,
 } from '@/components/message-journal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,7 +29,6 @@ import {
 import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
-import { MESSAGE_STATUS_NAME } from '@/lib/labels';
 import { money } from '@/lib/money';
 
 interface Message {
@@ -54,6 +54,8 @@ interface RouteStats {
   readonly in_bot: number;
   readonly via_bot: number;
   readonly via_accounts: number;
+  /** Отклонено при приёме за те же сутки (ADR-0098). */
+  readonly refused: number;
 }
 const PRICE_KEY = ['client', 'messages', 'price'] as const;
 
@@ -195,11 +197,12 @@ export function SendMessages() {
           {String(routes.data.in_bot)} (
           {String(Math.round((routes.data.in_bot * 100) / routes.data.recipients))} %); сообщений
           через бота {String(routes.data.via_bot)}, через аккаунты партнёров{' '}
-          {String(routes.data.via_accounts)}.
+          {String(routes.data.via_accounts)}; отклонено при приёме {String(routes.data.refused)}.
         </p>
       )}
       {enabled && (
         <JournalFilters
+          withRefused
           filter={filter}
           onChange={changeFilter}
           exportName="сообщения-max"
@@ -223,7 +226,7 @@ export function SendMessages() {
                 message.to,
                 message.text,
                 ...stageColumns(message),
-                MESSAGE_STATUS_NAME[message.status] ?? message.status,
+                journalOutcome(message),
                 message.cost ?? '',
               ]),
               truncated: found.truncated,
@@ -266,7 +269,9 @@ export function SendMessages() {
                     </TableCell>
                     <TableCell className="max-w-[320px]">
                       <span className="block truncate" title={message.text}>
-                        {message.text === '' ? (
+                        {message.status === 'refused' ? (
+                          <span className="text-faint">текст не хранится</span>
+                        ) : message.text === '' ? (
                           <span className="text-faint">текст удалён по сроку хранения</span>
                         ) : (
                           message.text

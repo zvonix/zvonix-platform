@@ -26,6 +26,7 @@ import {
 } from 'drizzle-orm';
 import { toDatabaseError, type Executor } from '@zvonix/db';
 import {
+  messageRefusals,
   messages,
   messengerAccountEvents,
   messengerAccounts,
@@ -64,6 +65,7 @@ interface ReportCounts {
   readonly not_in_max: number;
   readonly account_unavailable: number;
   readonly wait_expired: number;
+  readonly provider_timeout: number;
   readonly platform: number;
   readonly recipient_stopped: number;
   /** Ушли через аккаунты и лежат дольше суток, ушедшие успешно; из них прочитанные — `settled_read`. */
@@ -221,6 +223,70 @@ export class MessagesRepository {
       .from(messages)
       .where(and(eq(messages.clientId, clientId), eq(messages.externalId, externalId)));
     return row;
+  }
+
+  /**
+   * Журнал вместе с отклонёнными при приёме (ADR-0098): одна страница по времени из двух таблиц. Возвращает порядок — вид и
+   * идентификатор; строки дочитывает вызывающий. Отбор по итогу сюда не приходит: у отклонённого его нет.
+   */
+  async journalWithRefusals(
+    filter: Omit<MessageFilter, 'status' | 'partnerId'>,
+    onlyRefused: boolean,
+  ): Promise<{ page: { kind: 'message' | 'refused'; id: string }[]; total: number }> {
+    const refusalsWhere = and(
+      filter.clientId === undefined ? undefined : eq(messageRefusals.clientId, filter.clientId),
+      filter.from === undefined ? undefined : gte(messageRefusals.createdAt, filter.from),
+      filter.to === undefined ? undefined : lt(messageRefusals.createdAt, filter.to),
+    );
+    const refused = this.database.db
+      .select({
+        id: sql<string>`${messageRefusals.id}::text`.as('id'),
+        at: sql<Date>`${messageRefusals.createdAt}`.mapWith(messageRefusals.createdAt).as('at'),
+        kind: sql<'message' | 'refused'>`'refused'`.as('kind'),
+      })
+      .from(messageRefusals)
+      .where(refusalsWhere);
+    const [refusedCount] = await this.database.db
+      .select({ total: count() })
+      .from(messageRefusals)
+      .where(refusalsWhere);
+    if (onlyRefused) {
+      const page = await refused
+        .orderBy(sql`at desc`, sql`id desc`)
+        .limit(filter.limit)
+        .offset(filter.offset);
+      return { page, total: refusedCount?.total ?? 0 };
+    }
+    const messagesWhere = and(
+      filter.clientId === undefined ? undefined : eq(messages.clientId, filter.clientId),
+      filter.from === undefined ? undefined : gte(messages.createdAt, filter.from),
+      filter.to === undefined ? undefined : lt(messages.createdAt, filter.to),
+    );
+    const page = await this.database.db
+      .select({
+        id: sql<string>`${messages.id}::text`.as('id'),
+        at: sql<Date>`${messages.createdAt}`.mapWith(messages.createdAt).as('at'),
+        kind: sql<'message' | 'refused'>`'message'`.as('kind'),
+      })
+      .from(messages)
+      .where(messagesWhere)
+      .unionAll(refused)
+      .orderBy(sql`at desc`, sql`id desc`)
+      .limit(filter.limit)
+      .offset(filter.offset);
+    const [messagesCount] = await this.database.db
+      .select({ total: count() })
+      .from(messages)
+      .where(messagesWhere);
+    return { page, total: (messagesCount?.total ?? 0) + (refusedCount?.total ?? 0) };
+  }
+
+  async findByIds(ids: readonly string[]): Promise<MessageRow[]> {
+    if (ids.length === 0) return [];
+    return this.database.db
+      .select()
+      .from(messages)
+      .where(inArray(messages.id, [...ids] as MessageId[]));
   }
 
   async list(filter: MessageFilter): Promise<{ rows: MessageRow[]; total: number }> {
@@ -1030,6 +1096,7 @@ export class MessagesRepository {
              (count(*) filter (where m.failure_reason = 'recipient_not_in_max'))::int as not_in_max,
              (count(*) filter (where m.failure_reason = 'account_unavailable'))::int as account_unavailable,
              (count(*) filter (where m.failure_reason = 'wait_expired'))::int as wait_expired,
+             (count(*) filter (where m.failure_reason = 'provider_timeout'))::int as provider_timeout,
              (count(*) filter (where m.failure_reason = 'platform'))::int as platform,
              (count(*) filter (where m.failure_reason = 'recipient_stopped'))::int as recipient_stopped,
              (count(*) filter (where m.route = 'account' and m.sent_at < ${settledBefore}
