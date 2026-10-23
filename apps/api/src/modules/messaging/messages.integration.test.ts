@@ -106,6 +106,9 @@ beforeEach(async () => {
       sql`delete from commission_rules where product = 'message' and effective_from > timestamptz '2001-01-01'`,
     );
   });
+  // Память «есть ли MAX» переживала бы тест: «нет MAX» из одного отказывало бы сразу в следующем.
+  const redis = api().get(RedisService).connection;
+  for (const key of await redis.keys('messaging:max:*')) await redis.del(key);
 });
 
 afterAll(async () => {
@@ -406,6 +409,37 @@ describe('отправка воркером', () => {
 
     await service.dispatchDue(new Date(now.getTime() + 2 * MINUTE));
     expect((await messageOf(client.token, b))?.status).toBe('sent');
+  });
+
+  it('по очереди: новое сообщение не обгоняет ждущее того же аккаунта', async () => {
+    await partnerWithAccount('0.45', { limitPerMinute: 1 });
+    const client = await clientWithMoney('10');
+    const idOf = async (to: string, text: string) =>
+      (await send(client.token, { to, text })).json<{ message: MessageView }>().message.id;
+    const service = api().get(MessagesService);
+
+    const a = await idOf('79005550051', 'А');
+    const start = new Date();
+    await service.dispatchDue(start);
+    expect((await messageOf(client.token, a))?.status).toBe('sent');
+
+    // «Б» ждёт: лимит минуты исчерпан. Его попытка — позже, чем аккаунт освободится (как с разбросом в жизни).
+    const b = await idOf('79005550052', 'Б');
+    await service.dispatchDue(new Date(start.getTime() + 1000));
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update messages set next_attempt_at = ${new Date(start.getTime() + 2 * MINUTE)} where id = ${b}`,
+      );
+    });
+
+    // «В» пришло позже, аккаунт уже свободен, «Б» ещё не наступило: раньше «В» уходило первым, «Б» истекало.
+    const c = await idOf('79005550053', 'В');
+    await service.dispatchDue(new Date(start.getTime() + 90_000));
+    expect((await messageOf(client.token, c))?.status).toBe('queued');
+
+    await service.dispatchDue(new Date(start.getTime() + 2 * MINUTE + 5000));
+    expect((await messageOf(client.token, b))?.status).toBe('sent');
+    expect((await messageOf(client.token, c))?.status).toBe('queued');
   });
 
   it('исчерпан лимит в час — у аккаунта «пауза до»: самое раннее сообщение окна плюс час', async () => {
@@ -1432,6 +1466,23 @@ describe('журнал сообщений: отбор и журнал партн
       })
     ).json<{ total: number }>();
     expect(none.total).toBe(0);
+  });
+});
+
+describe('известное «нет MAX» — отказ сразу', () => {
+  it('после отказа отправки «нет MAX» следующее сообщение на номер не принимается и не списывается', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    await send(client.token, { to: '79005550000', text: 'Первое' });
+    await api().get(MessagesService).dispatchDue(new Date());
+    const before = await balance(client.token);
+
+    const second = await send(client.token, { to: '79005550000', text: 'Второе' });
+    expect(second.statusCode).toBe(409);
+    expect(second.json<{ error: { details: { reason: string } } }>().error.details.reason).toBe(
+      'recipient_not_in_max',
+    );
+    expect(await balance(client.token)).toBe(before);
   });
 });
 

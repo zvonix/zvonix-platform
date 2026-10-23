@@ -10,6 +10,7 @@ import {
   desc,
   eq,
   getTableColumns,
+  gt,
   gte,
   inArray,
   isNotNull,
@@ -504,6 +505,53 @@ export class MessagesRepository {
   }
 
   /** Вернуть в очередь не раньше `at` (пауза, лимит, временный сбой). Попытка, если не засчитана, откатывается. */
+  /**
+   * Когда очередь аккаунта дойдёт до этого сообщения: позднейшая следующая попытка у сообщений того же аккаунта, принятых
+   * **раньше** и ещё не ушедших. Нет таких — `undefined`, сообщение первое в очереди. Без этого новое уходило раньше
+   * ждущего: у ждущего попытка сдвинута на «аккаунт освободится», у нового — «сейчас», и ждущее истекало (владелец,
+   * 2026-10-23: 08:56:49 истекло, 08:56:55 ушло).
+   */
+  async queuedAheadUntil(
+    accountId: MessengerAccountRow['id'],
+    message: Pick<MessageRow, 'id' | 'createdAt'>,
+  ): Promise<Date | undefined> {
+    const [row] = await this.database.db
+      .select({ until: max(messages.nextAttemptAt) })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.accountId, accountId),
+          inArray(messages.status, ['queued', 'sending']),
+          ne(messages.id, message.id),
+          or(
+            lt(messages.createdAt, message.createdAt),
+            and(eq(messages.createdAt, message.createdAt), lt(messages.id, message.id)),
+          ),
+        ),
+      );
+    return row?.until ?? undefined;
+  }
+
+  /**
+   * Есть ли у аккаунта сообщения, **отложенные** до его освобождения (попытка позже `now`): тогда новое за ними, а не
+   * «отправить сразу». Принятые, но ещё не взятые воркером (попытка уже наступила) аккаунт занятым не делают — это обычная
+   * задержка до ближайшего прохода, порядок между ними держит `claimDue`.
+   */
+  async hasDeferred(accountId: MessengerAccountRow['id'], now: Date): Promise<boolean> {
+    const [row] = await this.database.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.accountId, accountId),
+          eq(messages.status, 'queued'),
+          gt(messages.nextAttemptAt, now),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
   async requeue(id: MessageId, at: Date, refundAttempt: boolean): Promise<void> {
     await this.database.db
       .update(messages)

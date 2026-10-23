@@ -262,6 +262,11 @@ export class MessagesService {
     if (viaBot === undefined && (await this.bots.fallbackForbidden(clientId))) {
       throw validationFailed('Получатель не подписан на бота этого клиента');
     }
+    // Про номер уже известно «нет MAX» — отказ сразу и без списания: программа клиента тут же отправит обычную SMS другим путём,
+    // а не будет ждать отчёт «не доставлено» (владелец, 2026-10-23: «зачем отправлять повторно, если нет MAX?»).
+    if (viaBot === undefined && (await this.knownAbsent(recipient))) {
+      throw conflict('У получателя нет MAX', { details: { reason: 'recipient_not_in_max' } });
+    }
     // Предел на номер — только для аккаунтов партнёров: бот пишет подписчику, который сам его позвал, и жалоб на
     // аккаунт от этого не бывает.
     if (viaBot === undefined) await this.assertRecipientLimit(clientId, recipient);
@@ -270,10 +275,15 @@ export class MessagesService {
         ? await this.picker.pickWithState(now, { sticky: { clientId, recipient } })
         : undefined;
     const account = picked?.account;
+    // Свободен, но у него отложенные сообщения — новое встаёт за ними (по очереди, см. `dispatchOne`), а не «отправить сразу».
+    const free =
+      picked?.free === true &&
+      account !== undefined &&
+      !(await this.repository.hasDeferred(account.id, now));
     // Свободного нет — «первый по давности», сообщение встало бы в очередь (ADR-0097). Клиент выбрал «отказать сразу» (у SMPP —
     // по умолчанию) или аккаунт освободится только после срока — отказ сейчас: программа уйдёт к другому агрегатору, а не
     // получит «не доставлено» через полчаса. Денег не списано — проводки ещё нет.
-    if (account !== undefined && picked?.free === false) {
+    if (account !== undefined && !free) {
       const mode = delivery.busy_mode ?? defaultBusyMode(channel);
       if (mode === 'reject' || (await this.picker.freeAt(account, now)) >= expiresAt) {
         throw dependencyUnavailable('Все аккаунты сейчас заняты — повторите позже', {
@@ -477,7 +487,11 @@ export class MessagesService {
     const precheck: PrecheckMemory | null = settings.precheckEnabled
       ? { existsDays: settings.precheckExistsDays, absentDays: settings.precheckAbsentDays }
       : null;
-    const claimed = await this.repository.claimDue(now, DISPATCH_BATCH);
+    // По времени приёма: база отдаёт взятую пачку в любом порядке, а более позднее уступает раньше принятому (`dispatchOne`).
+    const claimed = (await this.repository.claimDue(now, DISPATCH_BATCH)).sort(
+      (left, right) =>
+        left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id),
+    );
     let sent = 0;
     for (const message of claimed) {
       try {
@@ -496,6 +510,26 @@ export class MessagesService {
    * (у «нет» срок короче: номер мог завести аккаунт), «неизвестно» не помнится. Частые проверки одного номера мессенджер считает подозрительными,
    * поэтому повтор идёт из памяти. Недоступный Redis — просто проверка без памяти.
    */
+  /** Номер в памяти проверок с ответом «нет MAX». Память недоступна — считаем, что не знаем: решит отправка. */
+  private async knownAbsent(recipient: string): Promise<boolean> {
+    try {
+      return (await this.redis.connection.get(`messaging:max:${recipient}`)) === 'absent';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Отправка показала «нет MAX» — запомнить, как запомнила бы проверка: следующее сообщение на этот номер получит отказ сразу,
+   * без списания (см. `send`). Срок — тот же, что у проверки («нет MAX» — `messages.precheck_absent_days`).
+   */
+  private async rememberAbsent(recipient: string): Promise<void> {
+    const { precheckAbsentDays } = await this.settings.messaging();
+    await this.redis.connection
+      .set(`messaging:max:${recipient}`, 'absent', 'EX', precheckAbsentDays * 86_400)
+      .catch(() => undefined);
+  }
+
   private async hasMax(
     account: MessengerAccountRow,
     recipient: string,
@@ -568,6 +602,7 @@ export class MessagesService {
   private async afterSendFailure(message: MessageRow, cause: unknown, now: Date): Promise<void> {
     if (cause instanceof RecipientRejectedError || cause instanceof BotRecipientRejectedError) {
       await this.fail(message, 'recipient_not_in_max', now);
+      if (cause instanceof RecipientRejectedError) await this.rememberAbsent(message.recipient);
       return;
     }
     this.logger.warn('Временный сбой отправки сообщения', {
@@ -601,6 +636,17 @@ export class MessagesService {
     if (account !== undefined) account = withRecommended(account, profile);
     if (account === undefined || account.status === 'retired') {
       await this.fail(message, 'account_unavailable', now);
+      return false;
+    }
+
+    // По очереди: у аккаунта ждёт сообщение, принятое раньше, — встать сразу за ним, а не обгонять (см. `queuedAheadUntil`).
+    const ahead = await this.repository.queuedAheadUntil(account.id, message);
+    if (ahead !== undefined) {
+      await this.repository.requeue(
+        message.id,
+        new Date(Math.max(ahead.getTime(), now.getTime()) + 1),
+        true,
+      );
       return false;
     }
 
