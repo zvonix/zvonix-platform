@@ -247,6 +247,18 @@ export type BotStatus = (typeof BOT_STATUSES)[number];
 export const BOT_SUBSCRIBER_STATES = ['started', 'stopped'] as const;
 export type BotSubscriberState = (typeof BOT_SUBSCRIBER_STATES)[number];
 
+/**
+ * События подписки бота для статистики ([ADR-0099](../../../docs/adr/0099-istoriya-podpischikov-bota.md)): впервые запустил, вернулся
+ * после остановки, впервые поделился номером, остановил. Повтор без смены состояния события не даёт.
+ */
+export const BOT_SUBSCRIBER_EVENT_KINDS = [
+  'started',
+  'restarted',
+  'phone_shared',
+  'stopped',
+] as const;
+export type BotSubscriberEventKind = (typeof BOT_SUBSCRIBER_EVENT_KINDS)[number];
+
 /** Пределы настраиваемых текстов бота клиента (ADR-0077, этап 3): приветствие и вставки до и после сообщения. */
 export const BOT_GREETING_MAX = 300;
 export const BOT_INSERT_MAX = 150;

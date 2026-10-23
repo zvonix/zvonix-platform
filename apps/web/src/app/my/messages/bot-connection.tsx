@@ -45,7 +45,8 @@ interface BotState {
   readonly subscribers: { readonly total: number; readonly with_phone: number };
 }
 
-const KEY = ['client', 'messages', 'bot'] as const;
+export const BOT_KEY = ['client', 'messages', 'bot'] as const;
+const KEY = BOT_KEY;
 
 /** Условия одной строкой: «0,25 ₽ за сообщение, 100 ₽ в месяц»; нули — «бесплатно». */
 function termsLine(terms: Terms): string {
@@ -122,7 +123,8 @@ export function BotConnection() {
       {connection !== null && (
         <>
           <div className="flex flex-wrap items-start gap-4">
-            <dl className="grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+            {/* Базовая ширина: без неё на телефоне список сжимался до нуля и QR-код вставал поверх ссылки (осмотр 2026-10-23). */}
+            <dl className="grid min-w-0 flex-1 basis-80 grid-cols-[auto_1fr] gap-x-3 gap-y-1">
               <dt className="text-muted-foreground">Работает через</dt>
               <dd translate="no">
                 {connection.kind === 'own' && own.bot !== null

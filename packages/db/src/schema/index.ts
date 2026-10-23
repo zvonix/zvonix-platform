@@ -51,6 +51,7 @@ export { serverMetrics } from './server-metrics.js';
 export {
   botConnections,
   botSubscribers,
+  botSubscriberEvents,
   messageStops,
   messageRefusals,
   clientMessageRequirements,

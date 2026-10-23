@@ -24,6 +24,7 @@ import {
   MESSAGE_STATUSES,
   MESSAGE_STOP_SOURCES,
   MESSAGE_REFUSAL_REASONS,
+  BOT_SUBSCRIBER_EVENT_KINDS,
   STOP_LINE_REQUIREMENTS,
   ACCOUNT_MIN_AGE_DAYS_MAX,
   MESSENGER_ACCOUNT_EVENT_KINDS,
@@ -59,6 +60,7 @@ import {
   type MessageFailureReason,
   type MessageStopSource,
   type MessageRefusalReason,
+  type BotSubscriberEventKind,
   type StopLineRequirement,
   type MessengerAccountEventKind,
   type NumberCheckResult,
@@ -809,5 +811,32 @@ export const messageRefusals = pgTable(
     index('message_refusals_created_idx').on(t.createdAt),
     check('message_refusals_channel_check', oneOf(t.channel, MESSAGE_CHANNELS)),
     check('message_refusals_reason_check', oneOf(t.reason, MESSAGE_REFUSAL_REASONS)),
+  ],
+);
+
+/**
+ * История подписок бота ([ADR-0099](../../../docs/adr/0099-istoriya-podpischikov-bota.md)): по ней — статистика за период и воронка.
+ * Пишется той же транзакцией, что меняет подписку. Номера здесь нет — он в подписке.
+ */
+export const botSubscriberEvents = pgTable(
+  'bot_subscriber_events',
+  {
+    id: primaryId<'botSubscriberEvent'>(),
+    subscriberId: idRef<'botSubscriber'>()
+      .notNull()
+      .references(() => botSubscribers.id, { onDelete: 'cascade' }),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    botId: idRef<'messengerBot'>()
+      .notNull()
+      .references(() => messengerBots.id, { onDelete: 'restrict' }),
+    kind: text().$type<BotSubscriberEventKind>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('bot_subscriber_events_client_idx').on(t.clientId, t.createdAt),
+    index('bot_subscriber_events_subscriber_idx').on(t.subscriberId),
+    check('bot_subscriber_events_kind_check', oneOf(t.kind, BOT_SUBSCRIBER_EVENT_KINDS)),
   ],
 );
