@@ -156,3 +156,22 @@ export function basisPointsFromPercent(value: string): number | undefined {
   const points = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
   return Number.isSafeInteger(points) ? points : undefined;
 }
+
+/**
+ * Сумма денежных строк API (`1500.5`, `-0.54`) — точно, в микроединицах, и снова строкой API. Для итогов, которые кабинет
+ * складывает сам: «звонки + MAX + бот» в сводке.
+ */
+export function sumMoney(...values: readonly (string | undefined)[]): string {
+  let total = 0n;
+  for (const value of values) {
+    if (value === undefined) continue;
+    const negative = value.startsWith('-');
+    const micros = microunits(negative ? value.slice(1) : value);
+    total += negative ? -micros : micros;
+  }
+  const sign = total < 0n ? '-' : '';
+  const absolute = total < 0n ? -total : total;
+  const whole = absolute / 1_000_000n;
+  const fraction = (absolute % 1_000_000n).toString().padStart(6, '0').replace(/0+$/u, '');
+  return `${sign}${whole.toString()}${fraction === '' ? '' : `.${fraction}`}`;
+}

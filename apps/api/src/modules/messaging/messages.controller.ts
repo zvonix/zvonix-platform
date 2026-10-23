@@ -68,6 +68,44 @@ interface ClientMessageView {
 
 const iso = (value: Date | null): string | null => value?.toISOString() ?? null;
 
+type MessagesQuery = z.infer<typeof messagesQuerySchema>;
+
+/** Общая часть отбора журнала: состояние и период. Клиент и партнёр — только у сотрудников, свои — из сессии. */
+const periodOf = (query: MessagesQuery) => ({
+  ...(query.status === undefined ? {} : { status: query.status }),
+  ...(query.from === undefined ? {} : { from: new Date(query.from) }),
+  ...(query.to === undefined ? {} : { to: new Date(query.to) }),
+  limit: query.limit,
+  offset: query.offset,
+});
+
+/**
+ * Сообщение в журнале партнёра: когда, каким аккаунтом, чем кончилось и сколько начислено. Ни получателя, ни текста, ни
+ * клиента — это чужие данные (ADR-0014, персональные данные); партнёру хватает «ушло ли через мой аккаунт и что я получил».
+ */
+interface PartnerMessageView {
+  readonly id: string;
+  readonly account_id: string | null;
+  readonly status: MessageRow['status'];
+  readonly failure_reason: MessageRow['failureReason'];
+  /** Начислено, ₽; не отправлено — `0`: начисление отменено вместе с возвратом клиенту. */
+  readonly earned: string;
+  readonly created_at: string;
+  readonly delivered_at: string | null;
+  readonly read_at: string | null;
+}
+
+const toPartnerView = (row: MessageRow): PartnerMessageView => ({
+  id: row.id,
+  account_id: row.accountId,
+  status: row.status,
+  failure_reason: row.failureReason,
+  earned: row.status === 'failed' ? '0' : Money.format(row.partnerAmount),
+  created_at: row.createdAt.toISOString(),
+  delivered_at: iso(row.deliveredAt),
+  read_at: iso(row.readAt),
+});
+
 const toClientView = (row: MessageRow): ClientMessageView => ({
   id: row.id,
   external_id: row.externalId,
@@ -167,12 +205,7 @@ export class ClientMessagesController {
     @Query(zodQuery(messagesQuerySchema)) query: z.infer<typeof messagesQuerySchema>,
   ): Promise<{ messages: ClientMessageView[]; total: number }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    const found = await this.messages.list({
-      clientId: client.id,
-      ...(query.status === undefined ? {} : { status: query.status }),
-      limit: query.limit,
-      offset: query.offset,
-    });
+    const found = await this.messages.list({ clientId: client.id, ...periodOf(query) });
     return { total: found.total, messages: found.rows.map(toClientView) };
   }
 
@@ -210,12 +243,7 @@ export class ClientApiMessagesController {
     @CurrentMachine() machine: MachinePrincipal,
     @Query(zodQuery(messagesQuerySchema)) query: z.infer<typeof messagesQuerySchema>,
   ): Promise<{ messages: ClientMessageView[]; total: number }> {
-    const found = await this.messages.list({
-      clientId: clientOf(machine),
-      ...(query.status === undefined ? {} : { status: query.status }),
-      limit: query.limit,
-      offset: query.offset,
-    });
+    const found = await this.messages.list({ clientId: clientOf(machine), ...periodOf(query) });
     return { total: found.total, messages: found.rows.map(toClientView) };
   }
 
@@ -325,11 +353,31 @@ export class StaffMessagesController {
     @Query(zodQuery(messagesQuerySchema)) query: z.infer<typeof messagesQuerySchema>,
   ): Promise<{ messages: StaffMessageView[]; total: number }> {
     const found = await this.messages.list({
-      ...(query.status === undefined ? {} : { status: query.status }),
-      limit: query.limit,
-      offset: query.offset,
+      ...periodOf(query),
+      ...(query.clientId === undefined ? {} : { clientId: parseId(query.clientId, 'client') }),
+      ...(query.partnerId === undefined ? {} : { partnerId: parseId(query.partnerId, 'partner') }),
     });
     return { total: found.total, messages: found.rows.map(toStaffView) };
+  }
+}
+
+/** Журнал партнёра: сообщения через его аккаунты и начисленное — как журнал вызовов с заработком (владелец, 2026-10-23). */
+@Controller()
+export class PartnerMessagesController {
+  constructor(
+    private readonly messages: MessagesService,
+    private readonly billing: BillingService,
+  ) {}
+
+  @Cabinets('partner')
+  @Get('partner/messages/journal')
+  async list(
+    @CurrentUser() actor: Principal,
+    @Query(zodQuery(messagesQuerySchema)) query: MessagesQuery,
+  ): Promise<{ messages: PartnerMessageView[]; total: number }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const found = await this.messages.list({ partnerId: partner.id, ...periodOf(query) });
+    return { total: found.total, messages: found.rows.map(toPartnerView) };
   }
 }
 

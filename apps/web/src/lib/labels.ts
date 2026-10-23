@@ -120,7 +120,7 @@ export type LedgerAccount = 'client' | 'partner';
  * Общая подпись показывала партнёру «Списание за вызов» рядом с суммой в плюс
  * (ui-review, 2026-09-14).
  */
-export const TRANSACTION_KIND_NAME: Record<LedgerAccount, Record<TransactionKind, string>> = {
+const TRANSACTION_KIND_NAME: Record<LedgerAccount, Record<TransactionKind, string>> = {
   client: {
     deposit: 'Пополнение',
     charge: 'Списание за вызов',
@@ -134,6 +134,30 @@ export const TRANSACTION_KIND_NAME: Record<LedgerAccount, Record<TransactionKind
     correction: 'Исправление',
   },
 };
+
+/**
+ * Подпись операции с учётом того, за что она: `charge` бывает за вызов, за сообщение MAX и платой за бота — а подпись
+ * «Списание за вызов» стояла на всех (владелец, 2026-10-23: «макс как будто не нужен»).
+ */
+export function transactionName(
+  account: LedgerAccount,
+  kind: TransactionKind,
+  referenceType: string | null,
+  negative: boolean,
+): string {
+  if (kind !== 'charge') return TRANSACTION_KIND_NAME[account][kind];
+  // Возврат за недоставленное — та же ссылка на сообщение, но с обратным знаком.
+  const refund = account === 'partner' ? negative : !negative;
+  switch (referenceType) {
+    case 'message':
+      if (refund) return 'Возврат за сообщение MAX';
+      return account === 'partner' ? 'Начисление за сообщение MAX' : 'Списание за сообщение MAX';
+    case 'bot_fee':
+      return 'Плата за бота MAX';
+    default:
+      return TRANSACTION_KIND_NAME[account][kind];
+  }
+}
 
 export const PARTNER_STATUS_NAME: Record<PartnerStatus, string> = {
   pending: 'Ждёт проверки',

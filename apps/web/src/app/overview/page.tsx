@@ -22,6 +22,10 @@ const FETCH_DAYS = 30;
 const shortDay = (day: string): string => `${day.slice(8, 10)}.${day.slice(5, 7)}`;
 const asNumber = (value: string | undefined): number => Number(value ?? '0');
 
+/** Списано с клиентов за сутки — за вызовы и за сообщения MAX. */
+const dayRevenue = (row: ReportRow): number =>
+  asNumber(row.revenue) + asNumber(row.message_revenue);
+
 /** Сумма показателей за дни. Деньги — числом: нужны только для сравнения и подписи, не для учёта. */
 function sum(rows: readonly ReportRow[]) {
   return rows.reduce(
@@ -29,8 +33,9 @@ function sum(rows: readonly ReportRow[]) {
       calls: total.calls + row.calls,
       answered: total.answered + row.answered,
       talk: total.talk + row.talk_seconds,
-      revenue: total.revenue + asNumber(row.revenue),
-      margin: total.margin + asNumber(row.margin),
+      // Деньги — звонки и MAX вместе: «Списано» и «Наш доход» считали одни вызовы (владелец, 2026-10-23).
+      revenue: total.revenue + dayRevenue(row),
+      margin: total.margin + asNumber(row.margin) + asNumber(row.message_margin),
     }),
     { calls: 0, answered: 0, talk: 0, revenue: 0, margin: 0 },
   );
@@ -186,15 +191,15 @@ function Overview() {
           />
         </section>
         <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Списано с клиентов по дням</h2>
+          <h2 className="font-semibold">Списано с клиентов по дням — звонки и MAX</h2>
           <BarChart
             bars={series.map((row) => ({
               label: shortDay(row.day),
-              value: asNumber(row.revenue),
-              title: `${shortDay(row.day)}: ${money(row.revenue ?? '0')}`,
+              value: dayRevenue(row),
+              title: `${shortDay(row.day)}: ${rubles(dayRevenue(row))}`,
             }))}
             peak={`За ${String(SPAN * 2)} суток: ${rubles(now.revenue + before.revenue)}`}
-            summary="Списано с клиентов по дням"
+            summary="Списано с клиентов по дням, звонки и MAX"
           />
         </section>
       </div>

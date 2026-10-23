@@ -203,7 +203,7 @@ function ClientsTable() {
                         path={`/clients/${client.id}/deposit`}
                         label="Пополнить"
                         title={`Пополнить счёт «${client.name}»`}
-                        description="Деньги появятся на остатке сразу и станут доступны для звонков."
+                        description="Деньги появятся на остатке сразу и станут доступны для звонков и сообщений MAX."
                         reasonPlaceholder="Платёжное поручение № 42 от 07.09.2026"
                         balanceName="Остаток"
                         doneText="Проведено"

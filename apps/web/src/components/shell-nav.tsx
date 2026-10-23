@@ -3,7 +3,7 @@
 import { ChevronDown, Menu, PanelLeftClose, PanelLeftOpen, X, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useQuery } from '@tanstack/react-query';
 import { request } from '@/lib/api';
@@ -196,6 +196,9 @@ function useClosedGroups(): [ReadonlySet<string>, (title: string, closed: boolea
   return [closed, change];
 }
 
+/** Где прокручено боковое меню — переживает переход между страницами. */
+const NAV_SCROLL_KEY = 'zvonix.nav-scroll';
+
 export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; footer: ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useCollapsed();
@@ -211,8 +214,28 @@ export function SideNav({ groups, footer }: { groups: readonly NavGroup[]; foote
     // Только смена адреса: иначе группа не сворачивалась бы вручную, пока открыта её страница.
   }, [pathname]);
 
+  const scroller = useRef<HTMLElement>(null);
+  // Каждая страница рисует меню заново, и прокрутка сбрасывалась наверх: длинное меню приходилось листать после каждого
+  // перехода (владелец, 2026-10-22). Позиция живёт на время вкладки; хранилище недоступно — просто начинаем сверху.
+  useLayoutEffect(() => {
+    try {
+      const saved = Number(sessionStorage.getItem(NAV_SCROLL_KEY));
+      if (scroller.current !== null && saved > 0) scroller.current.scrollTop = saved;
+    } catch {
+      // Хранилище закрыто (приватный режим, запрет сайта) — меню остаётся вверху.
+    }
+  }, []);
+
   return (
     <nav
+      ref={scroller}
+      onScroll={(event) => {
+        try {
+          sessionStorage.setItem(NAV_SCROLL_KEY, String(event.currentTarget.scrollTop));
+        } catch {
+          // См. выше: без хранилища позиция просто не запоминается.
+        }
+      }}
       aria-label="Разделы"
       // Свёрнутое не прокручивается: подсказка выходит за правый край колонки, а прокрутка
       // по одной оси обрезает и другую. Двенадцать значков в высоту экрана помещаются.

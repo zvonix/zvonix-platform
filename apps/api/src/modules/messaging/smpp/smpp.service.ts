@@ -67,6 +67,8 @@ export interface SmppEventView {
 
 /** Сколько событий журнала показывается. */
 const EVENTS_SHOWN = 100;
+/** Журнал площадки: больше, чем у клиента, — в нём все подключения сразу. */
+const PLATFORM_EVENTS_SHOWN = 300;
 
 const pick = (alphabet: string, length: number): string =>
   Array.from({ length }, () => alphabet[randomInt(alphabet.length)]).join('');
@@ -252,7 +254,8 @@ export class SmppService {
 
   /** Запись в журнал подключения (ADR-0096). Сбой записи не мешает работе SMPP — журнал вспомогательный. */
   async record(event: {
-    accountId: SmppAccountRow['id'];
+    accountId: SmppAccountRow['id'] | null;
+    systemId: string | null;
     kind: SmppEventKind;
     result: string;
     ip: string;
@@ -273,6 +276,37 @@ export class SmppService {
       count: row.count,
       first_at: row.createdAt.toISOString(),
       last_at: row.lastAt.toISOString(),
+    }));
+  }
+
+  /** Снятие паузы с адреса — в журнал действий: администратор пустил адрес, который подбирал пароль. */
+  async auditRelease(actor: Principal, ip: string): Promise<void> {
+    await this.audit.record({
+      action: 'smpp_ip.released',
+      entityType: 'smpp_ip',
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      after: { ip },
+    });
+  }
+
+  /** Журнал площадки — сотрудникам: и входы с неизвестным именем, которых нет ни в одном журнале клиента. */
+  async platformEvents(): Promise<
+    (SmppEventView & {
+      client_name: string | null;
+      system_id: string | null;
+    })[]
+  > {
+    return (await this.events.listAll(PLATFORM_EVENTS_SHOWN)).map((row) => ({
+      kind: row.kind,
+      result: row.result,
+      ip: row.ip,
+      mode: row.mode,
+      count: row.count,
+      first_at: row.createdAt.toISOString(),
+      last_at: row.lastAt.toISOString(),
+      client_name: row.clientName,
+      system_id: row.systemId,
     }));
   }
 

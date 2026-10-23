@@ -119,7 +119,7 @@ export function DepositForm({ client, canChange }: { client: ClientRow; canChang
           <FormDialog
             label="Пополнить"
             title={`Пополнить счёт «${client.name}»`}
-            description="Деньги появятся на остатке сразу и станут доступны для звонков."
+            description="Деньги появятся на остатке сразу и станут доступны для звонков и сообщений MAX."
             onOpenChange={(open) => {
               // Прежний итог гасится новым открытием, а не закрытием: успех закрывает окно,
               // и итог должен остаться на странице.
@@ -169,7 +169,7 @@ export function DepositForm({ client, canChange }: { client: ClientRow; canChang
                 {amountValid && (
                   <p>
                     На остаток клиента сразу поступит <b className="num">{shown}</b>, и деньги
-                    станут доступны для звонков.
+                    станут доступны для звонков и сообщений MAX.
                   </p>
                 )}
                 <p className="text-muted-foreground">

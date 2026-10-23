@@ -212,6 +212,21 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
     return count === BIND_FAILURES_LIMIT;
   }
 
+  /** Адреса на паузе за подбор пароля прямо сейчас — для «SMPP» у сотрудников (ADR-0096, дополнение 2026-10-23). */
+  blockedAddresses(): { ip: string; failures: number; until: Date }[] {
+    const now = Date.now();
+    return [...this.failures.entries()].flatMap(([ip, record]) =>
+      record.count >= BIND_FAILURES_LIMIT && now - record.since <= BIND_FAILURE_WINDOW_MS
+        ? [{ ip, failures: record.count, until: new Date(record.since + BIND_FAILURE_WINDOW_MS) }]
+        : [],
+    );
+  }
+
+  /** Снять паузу с адреса раньше срока; `false` — паузы не было. */
+  release(ip: string): boolean {
+    return this.isBlocked(ip) && this.failures.delete(ip);
+  }
+
   /**
    * Кто из клиента сейчас на связи — для «Сейчас на связи» в кабинете: программа такси сама о подключении ничего не говорит
    * (владелец, 2026-10-22). Сессии живут в памяти этого процесса — слушатель SMPP только в нём.
@@ -238,16 +253,23 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
       session.ip,
     );
     if (!result.ok) {
-      if (result.accountId !== undefined) {
-        this.journal(result.accountId, 'bind', result.refusal, session.ip, mode);
-      }
+      // Неизвестное имя — в журнал площадки с введённым именем: по нему видно, кто стучится (ADR-0096, дополнение 2026-10-23).
+      const typed = result.accountId === undefined ? credentials.systemId.slice(0, 16) : null;
+      this.journal(
+        result.accountId ?? null,
+        'bind',
+        result.refusal === 'unknown_system_id' ? 'unknown_login' : result.refusal,
+        session.ip,
+        mode,
+        typed,
+      );
       if (result.refusal !== 'unknown_system_id' && result.refusal !== 'wrong_password') {
         return { status: Status.bindFailed };
       }
       // Неизвестное имя и неверный пароль не различаются в ответе: иначе имена можно перебирать.
       // Адрес только что попал под паузу за подбор — один раз в журнал (ADR-0096): дальше его попытки не пишутся.
-      if (this.noteFailure(session.ip) && result.accountId !== undefined) {
-        this.journal(result.accountId, 'bind', 'ip_blocked', session.ip, mode);
+      if (this.noteFailure(session.ip)) {
+        this.journal(result.accountId ?? null, 'bind', 'ip_blocked', session.ip, mode, typed);
       }
       this.logger.warn('SMPP: неверные данные для входа', { ip: session.ip });
       return { status: Status.invalidPassword };
@@ -272,14 +294,15 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
    * очереди**: две одинаковые подряд иначе обе не нашли бы предыдущую и не схлопнулись бы в счётчик.
    */
   private journal(
-    accountId: SmppAccountRow['id'],
+    accountId: SmppAccountRow['id'] | null,
     kind: SmppEventKind,
     result: string,
     ip: string,
     mode: BindMode | null,
+    systemId: string | null = null,
   ): void {
     this.journalChain = this.journalChain
-      .then(() => this.smpp.record({ accountId, kind, result, ip, mode }))
+      .then(() => this.smpp.record({ accountId, systemId, kind, result, ip, mode }))
       .catch((cause: unknown) => {
         this.logger.error('SMPP: событие журнала не записано', cause, { ip });
       });

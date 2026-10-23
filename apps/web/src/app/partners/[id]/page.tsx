@@ -10,6 +10,7 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { PartnerMaxCard } from '@/components/max-card';
 import { ReadOnly } from '@/components/read-only';
 import { IssuedSecretPanel, type IssuedSecret } from '@/components/sip-credentials';
 import { Input } from '@/components/ui/input';
@@ -136,7 +137,7 @@ function PartnerCard({ id }: { id: string }) {
           <div className="flex gap-1">
             <dt className="text-muted-foreground">Причитается:</dt>
             {/*
-              Остаток на счёте партнёра — это долг площадки перед ним: доля за вызовы
+              Остаток на счёте партнёра — это долг площадки перед ним: доля за вызовы и сообщения MAX
               начислена, выплата ещё не сделана. Минус означает обратное, и это разбор,
               а не штатное состояние.
             */}
@@ -205,6 +206,7 @@ function PartnerCard({ id }: { id: string }) {
         }}
       />
       <PartnerRates partnerId={partner.id} />
+      <PartnerMaxCard partnerId={partner.id} />
       <AccountLedger source={`/partners/${partner.id}/entries`} account="partner" />
     </div>
   );

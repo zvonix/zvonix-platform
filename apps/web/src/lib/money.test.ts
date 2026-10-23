@@ -3,6 +3,7 @@ import {
   basisPointsFromPercent,
   integerFromInput,
   isNegative,
+  sumMoney,
   money,
   microunits,
   moneyFromInput,
@@ -208,5 +209,14 @@ describe('разбор набранного человеком', () => {
   it('не превращает мусор в число', () => {
     // Отказ — дело API: молча подставленный ноль на экране денег хуже отказа.
     expect(numberFromInput('нет')).toBe('нет');
+  });
+});
+
+describe('sumMoney', () => {
+  it('складывает точно, без плавающей точки, и со знаком', () => {
+    expect(sumMoney('0.1', '0.2')).toBe('0.3');
+    expect(sumMoney('11.5', '0.54', undefined, '2')).toBe('14.04');
+    expect(sumMoney('-0.54', '0.5')).toBe('-0.04');
+    expect(sumMoney()).toBe('0');
   });
 });

@@ -10,6 +10,7 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
+import { ClientMaxCard } from '@/components/max-card';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import { SipCredentials, type IssuedCredentials } from '@/components/sip-credentials';
@@ -224,6 +225,8 @@ function ClientCard() {
           }}
         />
       </section>
+
+      <ClientMaxCard clientId={client.id} />
 
       <section>
         <AccountLedger source={`/clients/${client.id}/entries`} account="client" />

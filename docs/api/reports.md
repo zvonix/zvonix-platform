@@ -26,9 +26,16 @@
 
 `series` содержит **все** сутки периода, пустые — нулями.
 
+**Сообщения MAX — в тех же ответах** (2026-10-23; сводки были только по вызовам): `messages` (принято), `messages_delivered`,
+`messages_read` и деньги за сообщения по роли — сотрудникам `message_revenue`, `message_partner_cost`, `message_margin`,
+клиенту `message_spent`, партнёру `message_earned`. Деньги — по книге: списание `message:<id>` вместе с возвратом
+`message_refund:<id>`, поэтому неотправленное с возвратом стоит ноль. Сутки сообщения — по `created_at`. В overview
+клиента и площадки — `bot_fees`, плата за бота за период (клиенту — потрачено, площадке — получено); у партнёра её нет.
+
 ## `GET /reports/breakdown?by=…` — `admin`, `support`
 
-`by`: `client`, `partner`, `operator`, `channel`, `sim`, `gateway`. Ответ
+`by`: `client`, `partner`, `operator`, `channel`, `sim`, `gateway`; разрезы сообщений — `message_route` (`account` | `bot`),
+`message_channel` (`api` | `smpp`), `message_account` (аккаунт партнёра), `message_client`, `message_partner`. Ответ
 `{ "rows": [ { "key", "name", "calls", "answered", "talk_seconds", "revenue",
 "partner_cost", "margin" } ] }`, не больше 50 строк, по убыванию выручки. Вызов без SIM
 или оператора — строка с `name: null`.
@@ -36,13 +43,13 @@
 ## `GET /client/reports/overview`, `GET /client/reports/breakdown` — кабинет клиента
 
 Поля: `calls`, `answered`, `talk_seconds`, **`spent`**. Партнёра, закупки и маржи нет
-([ADR-0014](../adr/0014-vybor-partnera-klientom.md)). Разрез `by`: `operator`, `channel`;
-остальные — `400`.
+([ADR-0014](../adr/0014-vybor-partnera-klientom.md)). Разрез `by`: `operator`, `channel`, `message_route`,
+`message_channel`; остальные — `400`.
 
 ## `GET /partner/reports/overview`, `GET /partner/reports/breakdown` — кабинет партнёра
 
 Поля: `calls`, `answered`, `talk_seconds`, **`earned`**. Клиента, его цены и маржи нет.
-Разрез `by`: `sim`, `gateway`, `operator`; остальные — `400`.
+Разрез `by`: `sim`, `gateway`, `operator`, `message_account`; остальные — `400`.
 
 ## `GET /client/statement`, `GET /partner/statement` — акт и выписка за месяц
 

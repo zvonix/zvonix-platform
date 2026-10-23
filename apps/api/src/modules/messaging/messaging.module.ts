@@ -25,6 +25,7 @@ import {
   ClientMessagesController,
   MessengerWebhookController,
   StaffMessagesController,
+  PartnerMessagesController,
 } from './messages.controller.js';
 import { MessagesRepository } from './messages.repository.js';
 import { AccountPicker } from './account-picker.js';
@@ -77,6 +78,7 @@ import { StopsService } from './stops.service.js';
     ClientSmppController,
     StaffSmppController,
     StaffMessagesController,
+    PartnerMessagesController,
     StaffStopsController,
     MessengerWebhookController,
     StaffBotController,

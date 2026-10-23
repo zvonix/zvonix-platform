@@ -6,7 +6,9 @@
 import { Injectable } from '@nestjs/common';
 import { Money, validationFailed } from '@zvonix/shared';
 import {
+  EMPTY_METRICS,
   ReportsRepository,
+  addMetrics,
   type AccountOwner,
   type BreakdownRow,
   type Dimension,
@@ -25,6 +27,8 @@ export interface Overview {
   readonly to: Date;
   readonly totals: Metrics;
   readonly series: SeriesRow[];
+  /** Плата за бота за период, в знаке книги (см. `ReportsRepository.botFees`). */
+  readonly botFees: string;
 }
 
 /** Акт или выписка за календарный месяц ([ADR-0069](../../../../../docs/adr/0069-akt-i-vypiska-za-mesyac.md)). */
@@ -35,7 +39,7 @@ export interface Statement {
   /** Месяц ещё не закончился: итоги и конечный остаток — на сейчас. */
   readonly partial: boolean;
   readonly totals: Metrics;
-  /** Только сутки, в которые были вызовы. */
+  /** Только сутки, в которые были вызовы или сообщения. */
   readonly series: SeriesRow[];
   readonly breakdowns: Partial<Record<Dimension, BreakdownRow[]>>;
   readonly openingBalance: string;
@@ -48,30 +52,8 @@ export interface Statement {
   readonly messageRefunds: string;
 }
 
-const EMPTY: Metrics = {
-  calls: 0,
-  answered: 0,
-  talkSeconds: 0,
-  clientAmount: '0',
-  partnerAmount: '0',
-  margin: '0',
-};
-
-/** Сумма микроединиц строкой: складывать деньги числами нельзя. */
-const addMicros = (left: string, right: string): string => String(BigInt(left) + BigInt(right));
-
 const sumMetrics = (rows: readonly Metrics[]): Metrics =>
-  rows.reduce<Metrics>(
-    (total, row) => ({
-      calls: total.calls + row.calls,
-      answered: total.answered + row.answered,
-      talkSeconds: total.talkSeconds + row.talkSeconds,
-      clientAmount: addMicros(total.clientAmount, row.clientAmount),
-      partnerAmount: addMicros(total.partnerAmount, row.partnerAmount),
-      margin: addMicros(total.margin, row.margin),
-    }),
-    EMPTY,
-  );
+  rows.reduce<Metrics>((total, row) => addMetrics(total, row), EMPTY_METRICS);
 
 /** Микроединицы строкой → сумма в рублях для ответа. */
 export const rubles = (micros: string): string => Money.format(Money.fromMicros(BigInt(micros)));
@@ -120,7 +102,9 @@ export class ReportsService {
         ? { kind: 'client', id: scope.clientId }
         : { kind: 'partner', id: scope.partnerId };
     const dimensions: readonly Dimension[] =
-      scope.kind === 'client' ? ['operator', 'channel'] : ['operator', 'gateway', 'sim'];
+      scope.kind === 'client'
+        ? ['operator', 'channel', 'message_route', 'message_channel']
+        : ['operator', 'gateway', 'sim', 'message_account'];
 
     const [series, openingBalance, closingBalance, moved, ...grouped] = await Promise.all([
       this.repository.series(scope, from, to, offsetMinutes),
@@ -149,7 +133,10 @@ export class ReportsService {
 
   async overview(scope: ReportScope, days: number, offsetMinutes: number): Promise<Overview> {
     const { from, to } = this.period(days, offsetMinutes);
-    const rows = await this.repository.series(scope, from, to, offsetMinutes);
+    const [rows, botFees] = await Promise.all([
+      this.repository.series(scope, from, to, offsetMinutes),
+      this.repository.botFees(scope, from, to),
+    ]);
     const byDay = new Map(rows.map((row) => [row.day, row]));
 
     // Сутки без вызовов — нули, а не дыра: график с пропусками врёт о масштабе.
@@ -157,9 +144,9 @@ export class ReportsService {
     for (let index = 0; index < days; index += 1) {
       const local = new Date(from.getTime() + index * DAY_MS + offsetMinutes * MINUTE_MS);
       const day = local.toISOString().slice(0, 10);
-      series.push(byDay.get(day) ?? { day, ...EMPTY });
+      series.push(byDay.get(day) ?? { day, ...EMPTY_METRICS });
     }
-    return { days, from, to, totals: sumMetrics(series), series };
+    return { days, from, to, totals: sumMetrics(series), series, botFees };
   }
 
   async breakdown(

@@ -16,9 +16,24 @@ interface Metrics {
   /** Клиенту — потрачено, партнёру — начислено: приходит ровно одно из двух. */
   readonly spent?: string;
   readonly earned?: string;
+  /** Сообщения MAX: приняты, доставлены и деньги за них — по той же роли. */
+  readonly messages: number;
+  readonly messages_delivered: number;
+  readonly messages_read: number;
+  readonly message_spent?: string;
+  readonly message_earned?: string;
 }
 
-type MoneyKey = 'spent' | 'earned';
+type MoneyKey = 'spent' | 'earned' | 'message_spent' | 'message_earned';
+type Product = 'calls' | 'messages';
+
+/** Названия маршрута и «откуда» в разрезах сообщений. */
+const MESSAGE_KEY_NAME: Record<string, string> = {
+  account: 'Аккаунты партнёров',
+  bot: 'Бот',
+  api: 'API и кабинет',
+  smpp: 'SMPP',
+};
 
 const amountOf = (row: Metrics, key: MoneyKey): string => row[key] ?? '0';
 
@@ -54,8 +69,9 @@ export interface StatementConfig {
   readonly path: string;
   /** Чей документ: от этого зависит название и шапка. */
   readonly party: 'client' | 'partner';
-  /** Ключ суммы в ответе: клиенту `spent`, партнёру `earned`. */
+  /** Ключ суммы в ответе: клиенту `spent`, партнёру `earned`; за сообщения — `message_spent` / `message_earned`. */
   readonly moneyKey: MoneyKey;
+  readonly messageMoneyKey: MoneyKey;
   readonly moneyLabel: string;
   /** Что за остаток на счёте: у клиента «Остаток», у партнёра «Причитается». */
   readonly balanceLabel: string;
@@ -63,11 +79,17 @@ export interface StatementConfig {
   readonly chargedLabel: string;
   /** Строка итога по сообщениям MAX: «Списано за сообщения MAX» / «Начислено за сообщения MAX». */
   readonly messageLabel: string;
-  readonly dimensions: readonly { readonly by: string; readonly label: string }[];
+  readonly dimensions: readonly {
+    readonly by: string;
+    readonly label: string;
+    readonly product: Product;
+  }[];
 }
 
 const KIND_NAME: Record<string, string> = {
   deposit: 'Пополнение',
+  // Построчно из списаний идёт только плата за бота: вызовы и сообщения — итогами.
+  charge: 'Списание',
   payout: 'Выплата',
   correction: 'Исправление',
 };
@@ -140,13 +162,25 @@ export function Statement({ config }: { config: StatementConfig }) {
           load={() => {
             if (data === undefined) return Promise.reject(new Error('Документ ещё не загружен'));
             return Promise.resolve({
-              header: ['Сутки', 'Вызовов', 'Состоялось', 'Минут разговора', config.moneyLabel],
+              header: [
+                'Сутки',
+                'Вызовов',
+                'Состоялось',
+                'Минут разговора',
+                `${config.moneyLabel} за вызовы`,
+                'Сообщений MAX',
+                'Доставлено',
+                `${config.moneyLabel} за сообщения`,
+              ],
               rows: data.series.map((row) => [
                 row.day,
                 row.calls,
                 row.answered,
                 duration(row.talk_seconds),
                 amountOf(row, config.moneyKey),
+                row.messages,
+                row.messages_delivered,
+                amountOf(row, config.messageMoneyKey),
               ]),
             });
           }}
@@ -176,44 +210,74 @@ export function Statement({ config }: { config: StatementConfig }) {
             </p>
           </header>
 
-          <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Figure title="Вызовов" value={String(data.totals.calls)} />
-            <Figure title="Состоялось" value={String(data.totals.answered)} />
-            <Figure title="Минут разговора" value={duration(data.totals.talk_seconds)} />
-            <Figure
-              title={config.moneyLabel}
-              value={money(amountOf(data.totals, config.moneyKey))}
-            />
-          </section>
+          {/* Звонки и сообщения MAX — два раздела одного документа: акт был только о вызовах (владелец, 2026-10-23). */}
+          {(['calls', 'messages'] as const).map((product) => {
+            const calls = product === 'calls';
+            const count = calls ? data.totals.calls : data.totals.messages;
+            const key = calls ? config.moneyKey : config.messageMoneyKey;
+            return (
+              <section key={product} className="flex flex-col gap-3">
+                <h3 className="border-b border-neutral-300 pb-1 font-semibold">
+                  {calls ? 'Звонки' : 'Сообщения MAX'}
+                </h3>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {calls ? (
+                    <>
+                      <Figure title="Вызовов" value={String(data.totals.calls)} />
+                      <Figure title="Состоялось" value={String(data.totals.answered)} />
+                      <Figure title="Минут разговора" value={duration(data.totals.talk_seconds)} />
+                    </>
+                  ) : (
+                    <>
+                      <Figure title="Сообщений" value={String(data.totals.messages)} />
+                      <Figure title="Доставлено" value={String(data.totals.messages_delivered)} />
+                    </>
+                  )}
+                  <Figure title={config.moneyLabel} value={money(amountOf(data.totals, key))} />
+                </div>
 
-          {data.totals.calls === 0 ? (
-            <p className="text-neutral-600">За этот месяц вызовов не было.</p>
-          ) : (
-            <>
-              <Block title="По суткам">
-                <Rows
-                  first="Сутки"
-                  moneyLabel={config.moneyLabel}
-                  moneyKey={config.moneyKey}
-                  rows={data.series.map((row) => ({ ...row, name: row.day }))}
-                />
-              </Block>
+                {count === 0 ? (
+                  <p className="text-neutral-600">
+                    {calls ? 'За этот месяц вызовов не было.' : 'За этот месяц сообщений не было.'}
+                  </p>
+                ) : (
+                  <>
+                    <Block title="По суткам">
+                      <Rows
+                        product={product}
+                        first="Сутки"
+                        moneyLabel={config.moneyLabel}
+                        moneyKey={key}
+                        rows={data.series
+                          .filter((row) => (calls ? row.calls : row.messages) > 0)
+                          .map((row) => ({ ...row, name: row.day }))}
+                      />
+                    </Block>
 
-              {config.dimensions.map((dimension) => (
-                <Block key={dimension.by} title={dimension.label}>
-                  <Rows
-                    first={dimension.label}
-                    moneyLabel={config.moneyLabel}
-                    moneyKey={config.moneyKey}
-                    rows={(data.breakdowns[dimension.by] ?? []).map((row) => ({
-                      ...row,
-                      name: row.name ?? 'не определено',
-                    }))}
-                  />
-                </Block>
-              ))}
-            </>
-          )}
+                    {config.dimensions
+                      .filter((dimension) => dimension.product === product)
+                      .map((dimension) => (
+                        <Block key={dimension.by} title={dimension.label}>
+                          <Rows
+                            product={product}
+                            first={dimension.label}
+                            moneyLabel={config.moneyLabel}
+                            moneyKey={key}
+                            rows={(data.breakdowns[dimension.by] ?? []).map((row) => ({
+                              ...row,
+                              name:
+                                row.name === null
+                                  ? 'не определено'
+                                  : (MESSAGE_KEY_NAME[row.name] ?? row.name),
+                            }))}
+                          />
+                        </Block>
+                      ))}
+                  </>
+                )}
+              </section>
+            );
+          })}
 
           <Block title="Движение по счёту">
             <table className="w-full">
@@ -286,25 +350,39 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 }
 
 function Rows({
+  product,
   first,
   rows,
   moneyKey,
   moneyLabel,
 }: {
+  product: Product;
   first: string;
   rows: readonly (Metrics & { readonly name: string })[];
   moneyKey: MoneyKey;
   moneyLabel: string;
 }) {
-  if (rows.length === 0) return <p className="text-neutral-600">Вызовов не было.</p>;
+  const calls = product === 'calls';
+  if (rows.length === 0) {
+    return <p className="text-neutral-600">{calls ? 'Вызовов не было.' : 'Сообщений не было.'}</p>;
+  }
   return (
     <table className="w-full">
       <thead>
         <tr className="border-b border-neutral-300 text-left text-neutral-600">
           <th className="py-1 font-normal">{first}</th>
-          <th className="py-1 text-right font-normal">Вызовов</th>
-          <th className="py-1 text-right font-normal">Состоялось</th>
-          <th className="py-1 text-right font-normal">Минут</th>
+          {calls ? (
+            <>
+              <th className="py-1 text-right font-normal">Вызовов</th>
+              <th className="py-1 text-right font-normal">Состоялось</th>
+              <th className="py-1 text-right font-normal">Минут</th>
+            </>
+          ) : (
+            <>
+              <th className="py-1 text-right font-normal">Сообщений</th>
+              <th className="py-1 text-right font-normal">Доставлено</th>
+            </>
+          )}
           <th className="py-1 text-right font-normal">{moneyLabel}</th>
         </tr>
       </thead>
@@ -312,9 +390,18 @@ function Rows({
         {rows.map((row) => (
           <tr key={row.name} className="border-b border-neutral-200">
             <td className="py-1">{row.name}</td>
-            <td className="num py-1 text-right">{row.calls}</td>
-            <td className="num py-1 text-right">{row.answered}</td>
-            <td className="num py-1 text-right">{duration(row.talk_seconds)}</td>
+            {calls ? (
+              <>
+                <td className="num py-1 text-right">{row.calls}</td>
+                <td className="num py-1 text-right">{row.answered}</td>
+                <td className="num py-1 text-right">{duration(row.talk_seconds)}</td>
+              </>
+            ) : (
+              <>
+                <td className="num py-1 text-right">{row.messages}</td>
+                <td className="num py-1 text-right">{row.messages_delivered}</td>
+              </>
+            )}
             <td className="num py-1 text-right">{money(amountOf(row, moneyKey))}</td>
           </tr>
         ))}

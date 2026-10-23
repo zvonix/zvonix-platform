@@ -17,12 +17,36 @@ export interface ReportRow {
   readonly spent?: string;
   /** Партнёру: заработано. */
   readonly earned?: string;
+  /** Сообщения MAX: принято к отправке и доставлено (или прочитано). */
+  readonly messages: number;
+  readonly messages_delivered: number;
+  readonly messages_read: number;
+  readonly message_revenue?: string;
+  readonly message_partner_cost?: string;
+  readonly message_margin?: string;
+  readonly message_spent?: string;
+  readonly message_earned?: string;
 }
 
-export type MoneyKey = 'revenue' | 'partner_cost' | 'margin' | 'spent' | 'earned';
+export type MoneyKey =
+  | 'revenue'
+  | 'partner_cost'
+  | 'margin'
+  | 'spent'
+  | 'earned'
+  | 'message_revenue'
+  | 'message_partner_cost'
+  | 'message_margin'
+  | 'message_spent'
+  | 'message_earned';
+
+/** Звонки или сообщения MAX: сводка показывает одно из двух, итог — оба. */
+export type ReportProduct = 'calls' | 'messages';
 
 export interface Overview {
   readonly days: number;
+  /** Плата за бота за период: клиенту — потрачено, площадке — получено; партнёру её нет. */
+  readonly bot_fees?: string;
   readonly totals: ReportRow;
   readonly series: readonly (ReportRow & { readonly day: string })[];
 }
@@ -74,6 +98,18 @@ export function asr(row: ReportRow): number | undefined {
 /** Средняя длительность состоявшегося, секунды. */
 export function acd(row: ReportRow): number | undefined {
   return row.answered === 0 ? undefined : Math.round(row.talk_seconds / row.answered);
+}
+
+/** Доля доставленных сообщений; `undefined`, пока сообщений не было. */
+export function deliveredShare(row: ReportRow): number | undefined {
+  return row.messages === 0 ? undefined : (row.messages_delivered / row.messages) * 100;
+}
+
+/** Доля прочитанных среди доставленных: доходят ли отметки о прочтении. */
+export function readShare(row: ReportRow): number | undefined {
+  return row.messages_delivered === 0
+    ? undefined
+    : (row.messages_read / row.messages_delivered) * 100;
 }
 
 /** Число для высоты столбца — не для денег: показывается всегда строка API. */

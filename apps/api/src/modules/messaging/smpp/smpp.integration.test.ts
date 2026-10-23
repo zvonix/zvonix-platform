@@ -715,6 +715,50 @@ describe('журнал подключения (ADR-0096)', () => {
     expect(events.filter((event) => event.result === 'ip_blocked')).toHaveLength(1);
   });
 
+  it('неизвестное имя — в журнал площадки с введённым именем; адрес на паузе виден сотрудникам и снимается', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const stranger = await connect();
+      await stranger.bind(Command.bindTransmitter, 'zxtaxityped', 'неверный');
+      await stranger.untilClosed();
+    }
+    // Журнал пишется в фоне — ждём, пока дойдёт.
+    let events: (EventView & { system_id: string | null; client_name: string | null })[] = [];
+    for (let wait = 0; wait < 50; wait += 1) {
+      events = (
+        await api().inject({ method: 'GET', url: '/smpp/events', headers: bearer(adminToken) })
+      ).json<{ events: typeof events }>().events;
+      if (
+        events.some((event) => event.result === 'ip_blocked' && event.system_id === 'zxtaxityped')
+      )
+        break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(events.find((event) => event.result === 'unknown_login')).toMatchObject({
+      system_id: 'zxtaxityped',
+      client_name: null,
+      count: 5,
+    });
+    expect(events.some((event) => event.result === 'ip_blocked')).toBe(true);
+
+    const blocked = (
+      await api().inject({ method: 'GET', url: '/smpp/blocked', headers: bearer(adminToken) })
+    ).json<{ blocked: { ip: string; failures: number }[] }>().blocked;
+    expect(blocked).toEqual([expect.objectContaining({ ip: '127.0.0.1', failures: 5 })]);
+
+    const released = await api().inject({
+      method: 'DELETE',
+      url: '/smpp/blocked/127.0.0.1',
+      headers: bearer(adminToken),
+    });
+    expect(released.statusCode).toBe(200);
+    const again = await api().inject({
+      method: 'DELETE',
+      url: '/smpp/blocked/127.0.0.1',
+      headers: bearer(adminToken),
+    });
+    expect(again.statusCode).toBe(404);
+  });
+
   it('«сейчас на связи»: вошедшая сессия видна клиенту с адресом и режимом, после выхода — нет', async () => {
     const { client, credentials } = await smppClient();
     const online = async () =>
