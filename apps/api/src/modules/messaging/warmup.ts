@@ -78,11 +78,12 @@ export function effectiveLimits(
     return { daily: account.limitPerDay, hourly: account.limitPerHour, warmupDay: null };
   }
   const ceiling = account.limitPerDay ?? WARMUP_DEFAULT_CEILING;
+  // Молчавший — с суток 1, а не 0: у суток 0 предел ноль, и аккаунт, не отправив ничего, не перезапустил бы прогрев вовсе.
   const day =
     account.warmupStartedAt === null
       ? null
       : isIdle(account, now)
-        ? 0
+        ? 1
         : Math.max(0, Math.floor((now.getTime() - account.warmupStartedAt.getTime()) / 86_400_000));
   const daily = day === null ? ceiling : warmupDailyLimit(day, ceiling);
   // Лимит в час из тарифа действует и во время прогрева: берётся меньшее из заданного и равномерной доли суток.
@@ -149,6 +150,8 @@ export function accountReadyAt(
     return new Date(at + RETRY_MS.minute);
   }
   const limits = effectiveLimits(account, now);
+  // Предел суток ноль (первые сутки прогрева) — не отправляет совсем; «не меньше одного» запаса партнёра тут не действует.
+  if (limits.daily === 0) return new Date(at + RETRY_MS.day);
   if (limits.hourly !== null && load.hour + queue >= keep(limits.hourly)) {
     return new Date(at + RETRY_MS.hour);
   }
@@ -159,7 +162,7 @@ export function accountReadyAt(
 }
 
 /** Почему аккаунт сейчас не берёт сообщения: пауза здоровья, тихие часы партнёра, лимит в минуту, час или сутки. */
-export type RestReason = 'health' | 'quiet' | 'minute' | 'hour' | 'day';
+export type RestReason = 'health' | 'quiet' | 'minute' | 'hour' | 'day' | 'warmup';
 
 /** Длина скользящего окна лимита и сколько сообщений в нём можно (с запасом партнёра). */
 export interface RestWindow {
@@ -200,6 +203,9 @@ export function restOf(
     };
   }
   const limits = effectiveLimits(account, now);
+  if (limits.daily === 0 && account.warmupStartedAt !== null) {
+    return { reason: 'warmup', until: new Date(account.warmupStartedAt.getTime() + 86_400_000) };
+  }
   if (limits.hourly !== null && load.hour >= keep(limits.hourly)) {
     return { reason: 'hour', window: { windowMs: 3_600_000, allowed: keep(limits.hourly) } };
   }

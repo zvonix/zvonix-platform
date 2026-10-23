@@ -54,6 +54,7 @@ const REST_NAME = {
   minute: 'лимит в минуту',
   hour: 'лимит в час',
   day: 'лимит в сутки',
+  warmup: 'прогрев: первые сутки',
 } as const;
 
 export type AccountRest =

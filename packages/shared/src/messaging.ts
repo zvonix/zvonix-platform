@@ -360,29 +360,37 @@ export const WARMUP_DAYS = 28;
  * 2026-10-18): «спящий» аккаунт, которому вдруг дали поток, рискует так же, как новый.
  */
 export const WARMUP_IDLE_DAYS = 14;
-/** Первые сутки: столько сообщений можно отправить с нового аккаунта. */
-export const WARMUP_FIRST_DAY_LIMIT = 12;
-/** К концу первой недели (седьмые сутки) аккаунт доходит до этого числа сообщений в сутки. */
-export const WARMUP_WEEK_LIMIT = 100;
+/**
+ * Первая неделя по суткам (ADR-0078, ревизия 2026-10-23): сутки 0 — ничего, аккаунт только «живёт» после подключения; дальше
+ * 3, 5, 8 и по 12. Прежние 12 → 100 за неделю дали «Ограничен» всем аккаунтам: наши сообщения всегда незнакомым людям.
+ */
+export const WARMUP_FIRST_WEEK = [0, 3, 5, 8, 12, 12, 12] as const;
+/** К концу второй недели (14-е сутки) аккаунт доходит до этого числа сообщений в сутки. */
+export const WARMUP_SECOND_WEEK_LIMIT = 40;
 /** Потолок суток, когда в тарифе лимит в сутки не задан. */
 export const WARMUP_DEFAULT_CEILING = 500;
 
 /**
  * Сколько сообщений аккаунт может отправить за скользящие сутки сейчас. `day` — номер суток с начала прогрева
- * (с нуля). Первая неделя — от 12 до 100, остальное время — линейно до потолка, с 29-х суток потолок целиком.
+ * (с нуля). Первая неделя — {@link WARMUP_FIRST_WEEK}, вторая — до {@link WARMUP_SECOND_WEEK_LIMIT}, дальше линейно до
+ * потолка, с 29-х суток потолок целиком.
  */
 export function warmupDailyLimit(day: number, ceiling: number): number {
   if (day >= WARMUP_DAYS) return ceiling;
+  const lastOfWeek = WARMUP_FIRST_WEEK[WARMUP_FIRST_WEEK.length - 1] ?? 0;
   const base =
-    day <= 6
-      ? WARMUP_FIRST_DAY_LIMIT +
-        Math.round(((WARMUP_WEEK_LIMIT - WARMUP_FIRST_DAY_LIMIT) * day) / 6)
-      : WARMUP_WEEK_LIMIT +
-        Math.round(
-          ((Math.max(ceiling, WARMUP_WEEK_LIMIT) - WARMUP_WEEK_LIMIT) * (day - 6)) /
-            (WARMUP_DAYS - 6),
-        );
-  return Math.max(1, Math.min(ceiling, base));
+    day < WARMUP_FIRST_WEEK.length
+      ? (WARMUP_FIRST_WEEK[day] ?? 0)
+      : day < 14
+        ? lastOfWeek + Math.round(((WARMUP_SECOND_WEEK_LIMIT - lastOfWeek) * (day - 6)) / 7)
+        : WARMUP_SECOND_WEEK_LIMIT +
+          Math.round(
+            ((Math.max(ceiling, WARMUP_SECOND_WEEK_LIMIT) - WARMUP_SECOND_WEEK_LIMIT) *
+              (day - 13)) /
+              (WARMUP_DAYS - 13),
+          );
+  // Ноль — «сегодня не отправлять»: первые сутки после подключения. Потолок тарифа режет и прогрев.
+  return Math.max(0, Math.min(ceiling, base));
 }
 
 /** Равномерность: за скользящий час уходит не больше двойной часовой доли суточного лимита, но не меньше одного. */

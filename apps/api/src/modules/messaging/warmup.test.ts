@@ -34,7 +34,7 @@ describe('лимит сообщений в час (тариф MAX)', () => {
       warmupStartedAt: new Date('2026-10-14T00:00:00Z'),
       limitPerDay: 500,
     };
-    // Первые сутки прогрева — 12 в сутки, равномерная доля — 1 в час.
+    // Сутки 0 прогрева — 0 в сутки; часовая доля всё равно не меньше одного (не отправит — держит суточный ноль).
     expect(effectiveLimits(account({ ...warming, limitPerHour: 40 }), NOW).hourly).toBe(1);
     // Заданный лимит ниже доли — действует заданный.
     const later = new Date('2026-12-14T10:00:00Z');
@@ -73,12 +73,26 @@ describe('прогрев и молчание аккаунта (ADR-0078, рев�
     expect(limits.warmupDay).toBeNull();
   });
 
-  it('молчал дольше 14 суток — снова первые сутки: 12 в сутки', () => {
+  it('молчал дольше 14 суток — прогрев с суток 1 (3 в сутки), а не с нуля: иначе не отправил бы ничего и не перезапустился', () => {
     const at = new Date('2026-09-10T10:00:00Z');
     const used = new Date('2026-08-20T10:00:00Z'); // 21 сутки назад
     const limits = effectiveLimits(account({ ...warming, lastUsedAt: used }), at);
-    expect(limits.daily).toBe(12);
-    expect(limits.warmupDay).toBe(0);
+    expect(limits.daily).toBe(3);
+    expect(limits.warmupDay).toBe(1);
+  });
+
+  it('сутки 0 прогрева — аккаунт не берёт сообщений; в таблице — «прогрев: первые сутки» до конца суток', () => {
+    const at = new Date('2026-09-10T10:00:00Z');
+    const started = new Date('2026-09-10T02:00:00Z');
+    const fresh = account({ ...warming, warmupStartedAt: started, lastUsedAt: null });
+    expect(effectiveLimits(fresh, at).daily).toBe(0);
+    expect(
+      accountReadyAt(fresh, load({}), at, { paceSeconds: 0, withBacklog: true }),
+    ).toBeDefined();
+    expect(restOf(fresh, load({}), at, { reservePercent: 0, quietEnd: undefined })).toEqual({
+      reason: 'warmup',
+      until: new Date('2026-09-11T02:00:00Z'),
+    });
   });
 
   it('ровно 14 суток молчания — ещё не сброс, 15 — уже сброс', () => {

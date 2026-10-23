@@ -2,16 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   spreadHourlyLimit,
   WARMUP_DAYS,
-  WARMUP_FIRST_DAY_LIMIT,
-  WARMUP_WEEK_LIMIT,
+  WARMUP_SECOND_WEEK_LIMIT,
   warmupDailyLimit,
 } from './messaging.js';
 
 describe('прогрев аккаунта', () => {
-  it('первые сутки — 12, на седьмые — 100, дальше растёт линейно и с 29-х суток равен потолку', () => {
-    expect(warmupDailyLimit(0, 500)).toBe(WARMUP_FIRST_DAY_LIMIT);
-    expect(warmupDailyLimit(6, 500)).toBe(WARMUP_WEEK_LIMIT);
-    expect(warmupDailyLimit(17, 500)).toBeGreaterThan(WARMUP_WEEK_LIMIT);
+  it('сутки 0 — ничего, неделя — 3, 5, 8, 12; 14-е — 40; дальше линейно, с 29-х суток — потолок', () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map((day) => warmupDailyLimit(day, 500))).toEqual([
+      0, 3, 5, 8, 12, 12, 12,
+    ]);
+    expect(warmupDailyLimit(13, 500)).toBe(WARMUP_SECOND_WEEK_LIMIT);
+    // Прежняя кривая на 5-е сутки давала 71 — столько было у ограниченного аккаунта (владелец, 2026-10-23).
+    expect(warmupDailyLimit(4, 80)).toBeLessThanOrEqual(12);
+    expect(warmupDailyLimit(17, 500)).toBeGreaterThan(WARMUP_SECOND_WEEK_LIMIT);
     expect(warmupDailyLimit(17, 500)).toBeLessThan(500);
     expect(warmupDailyLimit(WARMUP_DAYS - 1, 500)).toBeLessThanOrEqual(500);
     expect(warmupDailyLimit(WARMUP_DAYS, 500)).toBe(500);
@@ -27,10 +30,11 @@ describe('прогрев аккаунта', () => {
     }
   });
 
-  it('малый потолок режет и первую неделю; всегда не меньше одного', () => {
-    expect(warmupDailyLimit(0, 5)).toBe(5);
+  it('малый потолок режет и прогрев; сутки 0 — ноль при любом потолке', () => {
+    expect(warmupDailyLimit(0, 5)).toBe(0);
+    expect(warmupDailyLimit(3, 5)).toBe(5);
     expect(warmupDailyLimit(10, 5)).toBe(5);
-    expect(warmupDailyLimit(0, 1)).toBe(1);
+    expect(warmupDailyLimit(1, 1)).toBe(1);
   });
 
   it('часовая доля — двойная средняя, не меньше одного в час', () => {

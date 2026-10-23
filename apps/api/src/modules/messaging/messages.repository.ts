@@ -668,9 +668,28 @@ export class MessagesRepository {
       .update(messengerAccounts)
       .set({
         lastUsedAt: at,
-        warmupStartedAt: sql`case when ${idle} then ${at}::timestamptz else ${messengerAccounts.warmupStartedAt} end`,
+        // Начало — сутки назад: перезапущенный продолжает с суток 1, а не молчит ещё сутки (ADR-0078, ревизия 2026-10-23).
+        warmupStartedAt: sql`case when ${idle} then ${at}::timestamptz - interval '1 day' else ${messengerAccounts.warmupStartedAt} end`,
       })
       .where(eq(messengerAccounts.id, id));
+  }
+
+  /**
+   * Партнёры, у которых с `since` два и больше аккаунта стали «Ограничен» или «Заблокирован» (ADR-0078, ревизия 2026-10-23): пачка
+   * ограничений — признак, что аккаунты связаны или прогрев слишком резкий, и администратор должен узнать сразу.
+   */
+  async restrictedBursts(
+    since: Date,
+  ): Promise<{ partnerId: string; partnerName: string; accounts: number }[]> {
+    const result = await this.database.db.execute(sql`
+      select a.partner_id as "partnerId", p.name as "partnerName", count(distinct e.account_id)::int as accounts
+        from messenger_account_events e
+        join messenger_accounts a on a.id = e.account_id
+        join partners p on p.id = a.partner_id
+       where e.kind = 'unavailable' and e.reason in ('suspended', 'blocked') and e.created_at >= ${since}
+       group by a.partner_id, p.name
+      having count(distinct e.account_id) >= 2`);
+    return result.rows as { partnerId: string; partnerName: string; accounts: number }[];
   }
 
   /** Сколько сообщений этому номеру от этого клиента принято не раньше `since` (неотклонённых). */

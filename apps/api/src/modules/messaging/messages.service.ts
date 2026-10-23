@@ -446,6 +446,11 @@ export class MessagesService {
   }
 
   /** Сколько сообщений принято с `since` и сколько из них окончательно не отправлено — для тревоги. */
+  /** Пачки ограничений аккаунтов у партнёров с `since` — для тревоги администраторам. */
+  restrictedBursts(since: Date): ReturnType<MessagesRepository['restrictedBursts']> {
+    return this.repository.restrictedBursts(since);
+  }
+
   health(since: Date): Promise<{ total: number; failed: number }> {
     return this.repository.healthSince(since);
   }
