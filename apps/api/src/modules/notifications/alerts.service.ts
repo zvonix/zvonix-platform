@@ -223,6 +223,12 @@ export class AlertsService {
     }
 
     try {
+      alerts.push(...(await this.restrictedAccountAlerts(now)));
+    } catch (cause) {
+      this.logger.error('Тревоги: ограничения аккаунтов MAX не прочитаны', cause);
+    }
+
+    try {
       alerts.push(...(await this.certificateAlerts(now)));
     } catch (cause) {
       this.logger.error('Тревоги: сертификат не прочитан', cause);
@@ -346,6 +352,23 @@ export class AlertsService {
         ].join('\n'),
       },
     ];
+  }
+
+  /**
+   * У партнёра за час «Ограничен» или «Заблокирован» стали два аккаунта MAX и больше (ADR-0078, ревизия 2026-10-23): владелец
+   * узнавал об этом от такси, а не от площадки.
+   */
+  private async restrictedAccountAlerts(now: Date): Promise<Alert[]> {
+    const bursts = await this.messages.restrictedBursts(new Date(now.getTime() - HOUR_MS));
+    return bursts.map((burst) => ({
+      kind: `alert_accounts_restricted:${burst.partnerId}`,
+      subject: `Zvonix: у партнёра ${burst.partnerName} ограничены сразу ${String(burst.accounts)} аккаунта MAX`,
+      body: [
+        `За последний час у партнёра ${burst.partnerName} MAX ограничил или заблокировал ${String(burst.accounts)} аккаунта.`,
+        '',
+        'Ограниченный аккаунт не может писать тем, у кого он не в контактах, — площадка не отдаёт ему сообщения, пока MAX не снимет ограничение. Сразу несколько — признак, что аккаунты связаны (один телефон, одна сеть) или поток для них слишком большой. Не переподключайте их; проверьте раздел «Сообщения MAX».',
+      ].join('\n'),
+    }));
   }
 
   /** Заявки на пополнение, которые ждут решения администратора дольше `PAYMENT_WAIT_MINUTES`. */

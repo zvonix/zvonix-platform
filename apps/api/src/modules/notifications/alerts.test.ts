@@ -31,6 +31,7 @@ interface Setup {
     loadPerCore?: number;
   }[];
   messages?: { total: number; failed: number };
+  restricted?: { partnerId: string; partnerName: string; accounts: number }[];
   certificate?: Record<string, unknown>;
   githubToken?: Record<string, unknown>;
   payments?: {
@@ -72,7 +73,10 @@ function build(setup: Setup) {
       lowDisk: () => Promise.resolve(setup.lowDisk ?? []),
       strained: () => Promise.resolve(setup.strained ?? []),
     } as never,
-    { health: () => Promise.resolve(setup.messages ?? { total: 0, failed: 0 }) } as never,
+    {
+      health: () => Promise.resolve(setup.messages ?? { total: 0, failed: 0 }),
+      restrictedBursts: () => Promise.resolve(setup.restricted ?? []),
+    } as never,
     {
       status: () => Promise.resolve({ state: 'ok', domain: 'cp.zvonix.com', ...setup.certificate }),
     } as never,
@@ -225,6 +229,17 @@ describe('тревоги администраторам', () => {
     expect(await few.service.notify(NOW)).toBe(0);
     const fine = build({ admins: [confirmed], messages: { total: 40, failed: 3 } });
     expect(await fine.service.notify(NOW)).toBe(0);
+  });
+
+  it('у партнёра за час ограничены сразу несколько аккаунтов MAX — письмо с именем партнёра', async () => {
+    const { service, enqueue } = build({
+      admins: [confirmed],
+      restricted: [{ partnerId: 'p-1', partnerName: 'Иванов', accounts: 3 }],
+    });
+    expect(await service.notify(NOW)).toBe(1);
+    const [letter] = enqueue.mock.calls[0] as unknown as [{ kind: string; subject: string }];
+    expect(letter.kind).toBe('alert_accounts_restricted:p-1');
+    expect(letter.subject).toContain('Иванов');
   });
 
   it('сбой чтения узлов не гасит тревогу о качестве', async () => {

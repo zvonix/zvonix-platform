@@ -493,22 +493,35 @@ describe('автопрогрев и равномерная отправка (ADR
       }>()
       .accounts.find((account) => account.id === id);
 
-  it('новый аккаунт в первые сутки отправляет по одному сообщению в час: остальное ждёт, не отклоняется', async () => {
+  it('новый аккаунт: сутки 0 не отправляет (приём отказывает сразу), с суток 1 — по одному в час, остальное ждёт', async () => {
     const partner = await partnerWithAccount('0.45', {}, true);
     const client = await clientWithMoney('10');
+    const service = api().get(MessagesService);
+
+    // Сутки 0 (ADR-0078, ревизия 2026-10-23): аккаунт освободится только через сутки — позже срока, приём отказывает сразу.
+    expect(await accountView(partner.accountId)).toMatchObject({
+      warmup_enabled: true,
+      warmup_day: 0,
+      daily_limit_now: 0,
+    });
+    const refused = await send(client.token, { to: '79005550040', text: 'Сутки 0' });
+    expect(refused.statusCode).toBe(503);
+
+    await withDatabase((execute) =>
+      execute(
+        sql`update messenger_accounts set warmup_started_at = now() - interval '1 day 1 minute' where id = ${partner.accountId}`,
+      ),
+    );
+    expect(await accountView(partner.accountId)).toMatchObject({
+      warmup_day: 1,
+      daily_limit_now: 3,
+    });
     const a = (await send(client.token, { to: '79005550041', text: 'А' })).json<{
       message: MessageView;
     }>().message.id;
     const b = (await send(client.token, { to: '79005550042', text: 'Б' })).json<{
       message: MessageView;
     }>().message.id;
-    const service = api().get(MessagesService);
-
-    expect(await accountView(partner.accountId)).toMatchObject({
-      warmup_enabled: true,
-      warmup_day: 0,
-      daily_limit_now: 12,
-    });
     const now = new Date();
     await service.dispatchDue(now);
     await service.dispatchDue(new Date(now.getTime() + 5 * MINUTE));
@@ -535,7 +548,9 @@ describe('автопрогрев и равномерная отправка (ADR
     await api().get(MessagesService).dispatchDue(new Date());
     const restarted = await withDatabase(async (execute) => {
       const result = await execute(
-        sql`select warmup_started_at > now() - interval '5 minutes' as fresh from messenger_accounts where id = ${quiet.accountId}`,
+        // Перезапуск — с суток 1: начало прогрева ставится на сутки назад (ADR-0078, ревизия 2026-10-23).
+        sql`select warmup_started_at between now() - interval '1 day 5 minutes' and now() - interval '23 hours' as fresh
+              from messenger_accounts where id = ${quiet.accountId}`,
       );
       return (result.rows[0] as { fresh: boolean }).fresh;
     });
@@ -1701,6 +1716,35 @@ describe('отклонённые при приёме (ADR-0098)', () => {
     } finally {
       await put(adminToken, { 'messages.pace_seconds': 0 });
     }
+  });
+});
+
+describe('пачка ограничений аккаунтов (ADR-0078, ревизия 2026-10-23)', () => {
+  it('два аккаунта партнёра «Ограничен» за час — партнёр в тревоге; один — нет; старое не считается', async () => {
+    const partner = await partnerWithAccount('0.45');
+    // Второй аккаунт того же партнёра — так, как его заводит партнёр в кабинете.
+    const twin = (
+      await api().inject({
+        method: 'POST',
+        url: '/partner/messenger/accounts',
+        headers: bearer(partner.ownerToken),
+        payload: { label: 'Второй' },
+      })
+    ).json<{ account: { id: string } }>().account.id;
+    const restrict = (accountId: string, ago: string) =>
+      withDatabase((execute) =>
+        execute(sql`insert into messenger_account_events (id, account_id, kind, reason, created_at)
+          values (gen_random_uuid(), ${accountId}, 'unavailable', 'suspended', now() - ${ago}::interval)`),
+      );
+    const since = new Date(Date.now() - 60 * MINUTE);
+    await restrict(partner.accountId, '10 minutes');
+    expect(await api().get(MessagesService).restrictedBursts(since)).toEqual([]);
+    await restrict(twin, '3 hours');
+    expect(await api().get(MessagesService).restrictedBursts(since)).toEqual([]);
+    await restrict(twin, '5 minutes');
+    expect(await api().get(MessagesService).restrictedBursts(since)).toEqual([
+      expect.objectContaining({ partnerId: partner.partnerId, accounts: 2 }),
+    ]);
   });
 });
 
