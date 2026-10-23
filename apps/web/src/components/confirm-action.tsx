@@ -11,6 +11,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { ApiError } from '@/lib/api';
 
 /**
@@ -54,6 +55,7 @@ export function ConfirmAction({
   size = 'sm',
   disabled = false,
   className,
+  tooltip,
   children,
 }: {
   /** Подпись кнопки, открывающей окно. */
@@ -72,9 +74,11 @@ export function ConfirmAction({
    */
   tone?: 'danger' | 'neutral';
   variant?: 'outline' | 'default' | 'secondary' | 'ghost';
-  size?: 'xs' | 'sm' | 'default';
+  size?: 'xs' | 'sm' | 'default' | 'icon-xs';
   disabled?: boolean;
   className?: string;
+  /** Кнопка — значок без подписи: это её название для диктора и подсказка при наведении. */
+  tooltip?: string;
   /**
    * Поля, без которых действие не выполнить: причина отказа, псевдоним. Короткое действие
    * с парой полей — окно по центру ([DESIGN.md](../../../../docs/DESIGN.md), «Окно,
@@ -156,18 +160,21 @@ export function ConfirmAction({
         setFailure(undefined);
       }}
     >
-      <AlertDialogTrigger asChild>
-        <Button
-          ref={triggerRef}
-          type="button"
-          variant={variant}
-          size={size}
-          disabled={disabled}
-          className={className}
-        >
-          {label}
-        </Button>
-      </AlertDialogTrigger>
+      <WithTooltip label={tooltip}>
+        <AlertDialogTrigger asChild>
+          <Button
+            ref={triggerRef}
+            type="button"
+            variant={variant}
+            size={size}
+            disabled={disabled}
+            className={className}
+            aria-label={tooltip}
+          >
+            {label}
+          </Button>
+        </AlertDialogTrigger>
+      </WithTooltip>
 
       <AlertDialogContent onCloseAutoFocus={returnFocus}>
         <AlertDialogTitle>{title}</AlertDialogTitle>

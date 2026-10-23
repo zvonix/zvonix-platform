@@ -5,7 +5,13 @@ import { useEffect, useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
-import { AccountRestNote, MessengerAccountStatus } from '@/components/messenger-status';
+import { Mail, Settings2, Trash2 } from 'lucide-react';
+import {
+  AccountLimitsCell,
+  AccountRestCell,
+  MessengerAccountStatus,
+  WarmupCell,
+} from '@/components/messenger-status';
 import { Hint } from '@/components/hint';
 import { WARMUP_DAYS } from '@zvonix/shared';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
@@ -107,14 +113,9 @@ function Accounts() {
                 <TableRow className="text-muted-foreground hover:bg-transparent">
                   <TableHead className="h-8">Аккаунт</TableHead>
                   <TableHead className="h-8">Состояние</TableHead>
+                  <TableHead className="h-8">Пауза</TableHead>
                   <TableHead className="h-8">Тариф</TableHead>
-                  <TableHead className="h-8 text-right">Цена</TableHead>
-                  <TableHead className="h-8 text-right" title="Предел в минуту / в час">
-                    Мин / час
-                  </TableHead>
-                  <TableHead className="h-8 text-right" title="Сколько можно за сутки сейчас">
-                    Сутки
-                  </TableHead>
+                  <TableHead className="h-8">Лимиты</TableHead>
                   <TableHead className="h-8">Прогрев</TableHead>
                   <TableHead className="h-8" />
                 </TableRow>
@@ -122,7 +123,7 @@ function Accounts() {
               <TableBody>
                 {list.data?.accounts.length === 0 && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={8} className="whitespace-normal text-muted-foreground">
+                    <TableCell colSpan={7} className="whitespace-normal text-muted-foreground">
                       Аккаунтов пока нет. Добавьте первый и войдите в него по QR-коду.
                     </TableCell>
                   </TableRow>
@@ -207,7 +208,6 @@ function AccountRow({
 
       <TableCell className="whitespace-normal">
         <MessengerAccountStatus status={account.status} reason={account.state_reason} />
-        <AccountRestNote rest={account.rest} />
         {account.price === null && account.status === 'active' && (
           <span className="block pt-0.5 text-warn">
             Создайте тариф — без него сообщения не идут
@@ -216,54 +216,33 @@ function AccountRow({
       </TableCell>
 
       <TableCell>
-        <AccountTariffName account={account} />
-      </TableCell>
-
-      <TableCell className="num text-right">
-        {account.price === null ? (
-          <span className="text-faint">не задана</span>
-        ) : (
-          money(account.price)
-        )}
-      </TableCell>
-
-      {/* Рекомендованная работа заменяет лимиты тарифа лимитами площадки (ADR-0090): тогда здесь не числа тарифа, а это слово —
-          «не действуют» читалось как «рекомендованная работа не действует» (владелец, 2026-10-22). */}
-      <TableCell className="num text-right">
-        {account.recommended ? (
-          <span
-            className="font-sans text-muted-foreground"
-            title="Включена рекомендованная работа: темп и лимиты задаёт площадка, лимиты тарифа не применяются"
-          >
-            рекомендованные
-          </span>
-        ) : (
-          <>
-            {account.limit_per_minute === null ? '—' : String(account.limit_per_minute)}
-            {' / '}
-            {account.limit_per_hour === null ? '—' : String(account.limit_per_hour)}
-          </>
-        )}
-      </TableCell>
-
-      <TableCell className="num text-right">
-        {account.daily_limit_now === null ? '—' : String(account.daily_limit_now)}
+        <AccountRestCell rest={account.rest} />
       </TableCell>
 
       <TableCell>
-        {!account.warmup_enabled ? (
-          <span className="text-muted-foreground">выключен</span>
-        ) : account.warmup_day === null ? (
-          <span className="text-muted-foreground">пройден</span>
-        ) : (
-          <span className="num">
-            {String(account.warmup_day + 1)}-е сутки из {String(WARMUP_DAYS)}
-          </span>
+        <AccountTariffName account={account} />
+        {account.price !== null && (
+          <span className="num text-muted-foreground"> · {money(account.price)}</span>
         )}
       </TableCell>
 
+      <TableCell>
+        <AccountLimitsCell
+          recommended={account.recommended}
+          perMinute={account.limit_per_minute}
+          perHour={account.limit_per_hour}
+          perDay={account.daily_limit_now}
+        />
+      </TableCell>
+
+      <TableCell>
+        <WarmupCell enabled={account.warmup_enabled} day={account.warmup_day} days={WARMUP_DAYS} />
+      </TableCell>
+
+      {/* Действия значками с подсказкой (владелец, 2026-10-23); «Войти по QR» — словами: это главный шаг отключённого аккаунта.
+          «Удалить» — внутри «Настроек»: удаляют редко, а рядом с «Тестом» её легко задеть. */}
       <TableCell className="text-right">
-        <span className="flex flex-wrap justify-end gap-2">
+        <span className="inline-flex items-center justify-end gap-1">
           {needsLogin && (
             <Button variant="outline" size="xs" onClick={onQr}>
               Войти по QR
@@ -271,36 +250,49 @@ function AccountRow({
           )}
           {account.status === 'active' && (
             <FormDialog
-              label="Тест"
+              label={<Mail aria-hidden className="size-4" />}
+              tooltip="Пробное сообщение"
               title={`Пробное сообщение через «${account.label}»`}
               description="Бесплатно, до семи в сутки на аккаунт. Уходит именно через этот аккаунт."
-              variant="outline"
-              size="xs"
+              variant="ghost"
+              size="icon-xs"
+              className="size-7"
             >
               <TestMessageForm account={account} />
             </FormDialog>
           )}
           <FormDialog
-            label="Настройки"
+            label={<Settings2 aria-hidden className="size-4" />}
+            tooltip="Настройки аккаунта"
             title={`Аккаунт «${account.label}»`}
-            variant="outline"
-            size="xs"
+            variant="ghost"
+            size="icon-xs"
+            className="size-7"
           >
             <AccountSettingsForm account={account} />
+            <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
+              <span className="text-muted-foreground">Аккаунт больше не нужен</span>
+              <ConfirmAction
+                label={
+                  <>
+                    <Trash2 aria-hidden />
+                    Удалить аккаунт
+                  </>
+                }
+                title={`Удалить аккаунт «${account.label}»`}
+                consequence={
+                  <p>
+                    Аккаунт перестанет принимать сообщения и будет удалён вместе с подключением к
+                    площадке. Вернуть нельзя — только добавить новый и снова войти по QR-коду.
+                  </p>
+                }
+                confirmLabel="Удалить"
+                size="xs"
+                className="text-crit"
+                onConfirm={onRetire}
+              />
+            </div>
           </FormDialog>
-          <ConfirmAction
-            label="Удалить"
-            title={`Удалить аккаунт «${account.label}»`}
-            consequence={
-              <p>
-                Аккаунт перестанет принимать сообщения и будет удалён вместе с подключением к
-                площадке. Вернуть нельзя — только добавить новый и снова войти по QR-коду.
-              </p>
-            }
-            confirmLabel="Удалить"
-            size="xs"
-            onConfirm={onRetire}
-          />
         </span>
       </TableCell>
     </TableRow>

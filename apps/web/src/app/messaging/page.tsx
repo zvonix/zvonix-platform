@@ -7,9 +7,12 @@ import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
+import { Trash2 } from 'lucide-react';
 import {
-  AccountRestNote,
+  AccountLimitsCell,
+  AccountRestCell,
   MessengerAccountStatus,
+  WarmupCell,
   type AccountRest,
 } from '@/components/messenger-status';
 import { BotPlatform } from './bot-platform';
@@ -155,13 +158,9 @@ function MessagingView() {
               <TableHead className="h-8">Партнёр</TableHead>
               <TableHead className="h-8">Аккаунт</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
+              <TableHead className="h-8">Пауза</TableHead>
               <TableHead className="h-8 text-right">Цена</TableHead>
-              <TableHead className="h-8 text-right" title="Предел в минуту / в час">
-                Мин / час
-              </TableHead>
-              <TableHead className="h-8 text-right" title="Сколько ещё можно отправить сегодня">
-                Сегодня
-              </TableHead>
+              <TableHead className="h-8">Лимиты</TableHead>
               <TableHead className="h-8">
                 <span className="inline-flex items-center gap-1">
                   Прогрев
@@ -209,28 +208,30 @@ function MessagingView() {
                   />
                   {/* Время сверки — мелкой строкой под состоянием, а не отдельным столбцом: таблица влезает в 1280. */}
                   {account.state_checked_at !== null && (
-                    <span className="num block text-xs text-faint">
-                      сверено {moment(account.state_checked_at)}
+                    <span
+                      className="num block text-xs text-faint"
+                      title={`Сверено с провайдером ${moment(account.state_checked_at)}`}
+                    >
+                      сверено {checkedAt(account.state_checked_at)}
                     </span>
                   )}
-                  <AccountRestNote rest={account.rest} />
-                  {account.paused_until !== null && (
-                    <span className="mt-1 block">
-                      {canChange && (
-                        <Button
-                          variant="outline"
-                          size="xs"
-                          className="ml-2"
-                          disabled={resume.isPending}
-                          onClick={() => {
-                            resume.mutate(account.id);
-                          }}
-                        >
-                          Снять паузу
-                        </Button>
-                      )}
-                    </span>
-                  )}
+                </TableCell>
+                <TableCell>
+                  <span className="inline-flex items-center gap-2">
+                    <AccountRestCell rest={account.rest} />
+                    {account.paused_until !== null && canChange && (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        disabled={resume.isPending}
+                        onClick={() => {
+                          resume.mutate(account.id);
+                        }}
+                      >
+                        Снять паузу
+                      </Button>
+                    )}
+                  </span>
                 </TableCell>
                 <TableCell className="num text-right">
                   {account.price === null ? (
@@ -239,24 +240,13 @@ function MessagingView() {
                     money(account.price)
                   )}
                 </TableCell>
-                <TableCell className="num text-right">
-                  {account.recommended ? (
-                    <span
-                      className="font-sans text-muted-foreground"
-                      title="Рекомендованная работа: темп и лимиты — профиль площадки, лимиты тарифа не применяются"
-                    >
-                      рекомендованные
-                    </span>
-                  ) : (
-                    <>
-                      {account.limit_per_minute === null ? '—' : String(account.limit_per_minute)}
-                      {' / '}
-                      {account.limit_per_hour === null ? '—' : String(account.limit_per_hour)}
-                    </>
-                  )}
-                </TableCell>
-                <TableCell className="num text-right">
-                  {account.daily_limit_now === null ? '—' : String(account.daily_limit_now)}
+                <TableCell>
+                  <AccountLimitsCell
+                    recommended={account.recommended}
+                    perMinute={account.limit_per_minute}
+                    perHour={account.limit_per_hour}
+                    perDay={account.daily_limit_now}
+                  />
                 </TableCell>
                 <TableCell>
                   {/* Прогрев одной строкой: где он, на какой день и выключатель (владелец: «прогрев где-то непонятно где»). */}
@@ -271,21 +261,20 @@ function MessagingView() {
                         }}
                       />
                     )}
-                    {!account.warmup_enabled ? (
-                      <span className="text-muted-foreground">выключен</span>
-                    ) : account.warmup_day === null ? (
-                      <span className="text-muted-foreground">пройден</span>
-                    ) : (
-                      <span className="num">
-                        {String(account.warmup_day + 1)}-е сутки из {String(WARMUP_DAYS)}
-                      </span>
-                    )}
+                    <WarmupCell
+                      enabled={account.warmup_enabled}
+                      day={account.warmup_day}
+                      days={WARMUP_DAYS}
+                    />
                   </span>
                 </TableCell>
                 <TableCell className="text-right">
                   {canChange && (
                     <ConfirmAction
-                      label="Удалить"
+                      label={<Trash2 aria-hidden className="size-4" />}
+                      tooltip="Удалить аккаунт"
+                      variant="ghost"
+                      className="size-7 text-crit"
                       title={`Удалить аккаунт «${account.label}» партнёра ${account.partner_name}`}
                       consequence={
                         <p>
@@ -294,7 +283,7 @@ function MessagingView() {
                         </p>
                       }
                       confirmLabel="Удалить"
-                      size="xs"
+                      size="icon-xs"
                       onConfirm={() => retire.mutateAsync(account.id)}
                     />
                   )}
@@ -572,4 +561,15 @@ function ManualForm() {
       </DialogField>
     </DialogForm>
   );
+}
+
+/** Время сверки коротко: сегодня — только часы и минуты, раньше — ещё и число; полностью — в подсказке. */
+function checkedAt(iso: string): string {
+  const at = new Date(iso);
+  const today = at.toDateString() === new Date().toDateString();
+  return at.toLocaleString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(today ? {} : { day: 'numeric', month: 'short' }),
+  });
 }

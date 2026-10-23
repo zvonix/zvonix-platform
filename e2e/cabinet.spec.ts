@@ -48,6 +48,20 @@ async function signIn(page: Page, email: string): Promise<void> {
 }
 
 test.describe('вход', () => {
+  test('без входа раздел кабинета сразу уводит на вход, не рисуя рамку; открытые страницы открываются', async ({
+    request,
+  }) => {
+    // До страницы: ответ — перенаправление, а не HTML кабинета (владелец, 2026-10-23: «меню на мгновение»).
+    const updates = await request.get('/updates', { maxRedirects: 0 });
+    expect(updates.status()).toBe(307);
+    expect(new URL(updates.headers()['location'] ?? '', 'http://x').pathname).toBe('/login');
+    for (const open of ['/login', '/register', '/forgot-password', '/site']) {
+      expect((await request.get(open, { maxRedirects: 0 })).status(), open).toBe(200);
+    }
+    // API отвечает сам: прослойка его не трогает.
+    expect((await request.get('/api/auth/me', { maxRedirects: 0 })).status()).toBe(401);
+  });
+
   test('неверный пароль не пускает и говорит об этом', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel('Адрес почты').fill(PEOPLE.admin);
@@ -409,7 +423,14 @@ test.describe('сообщения MAX (ADR-0071)', () => {
     await partner.goto('/partner/messages');
     const accountRow = partner.getByRole('row', { name: /Основной/u });
     await expect(accountRow.getByText(/0,45/u)).toBeVisible();
-    await expect(accountRow.getByText(/по умолчанию/u)).toBeVisible();
+    // Общий тариф — его названием, а что он по умолчанию — в подсказке: «по умолчанию —» растягивало столбец.
+    await expect(accountRow.getByTitle(/Тариф партнёра по умолчанию/u)).toHaveText('Основной');
+    // Действия — значками с названием для диктора; «Удалить» — внутри «Настроек», а не рядом с остальными.
+    await expect(accountRow.getByRole('button', { name: 'Удалить аккаунт' })).toHaveCount(0);
+    await accountRow.getByRole('button', { name: 'Настройки аккаунта' }).click();
+    const settingsDialog = partner.getByRole('dialog', { name: /Аккаунт «Основной»/u });
+    await expect(settingsDialog.getByRole('button', { name: 'Удалить аккаунт' })).toBeVisible();
+    await partner.keyboard.press('Escape');
 
     await admin.goto('/messaging');
     await expect(admin.getByRole('row', { name: /Основной/u })).toBeVisible();
