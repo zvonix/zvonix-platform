@@ -642,7 +642,7 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/message-connections');
+    await page.goto('/my/smpp');
 
     await page.getByRole('button', { name: 'Создать подключение' }).click();
     const secret = page.getByRole('region', { name: 'Пароль SMPP' });
@@ -652,7 +652,7 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
     await expect(secret).toHaveCount(0);
 
     // Пароль после закрытия нигде не показывается; имя и сервер остаются.
-    await expect(page.getByText('Был на связи')).toBeVisible();
+    await expect(page.getByText('Последний вход')).toBeVisible();
 
     await page.getByLabel(/Разрешённые адреса/u).fill('203.0.113.5');
     // «Сохранить» на странице два (адреса и «Если отправить сразу нельзя») — берётся кнопка формы адресов.
@@ -679,8 +679,12 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
     );
     await expect(delivery.getByLabel('Сколько ждать, минут')).toHaveValue('5');
 
-    await page.getByRole('button', { name: 'Новый пароль' }).click();
-    await page.getByRole('button', { name: 'Выпустить' }).click();
+    // Пароль — в карточке «Вход», рядом с именем, а не под ответами программе.
+    const login = page.locator('section', {
+      has: page.getByRole('heading', { name: 'Вход по SMPP' }),
+    });
+    await login.getByRole('button', { name: 'Выпустить новый' }).click();
+    await page.getByRole('button', { name: 'Выпустить', exact: true }).click();
     await expect(page.getByRole('region', { name: 'Пароль SMPP' })).toBeVisible();
     await closeSecret(page);
 
@@ -725,7 +729,7 @@ test.describe('бот MAX (ADR-0077)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/message-connections');
+    await page.goto('/my/max-bot');
     await page.getByRole('button', { name: 'Подключить бота' }).click();
     await expect(
       page.getByText(/^https:\/\/max\.ru\/e2ebot_bot\?start=[a-z0-9]{10}$/u),
@@ -761,7 +765,7 @@ test.describe('бот MAX (ADR-0077)', () => {
     await expect(page.getByText('Сохранено')).toBeVisible();
     await page.reload();
     await expect(page.getByLabel('Текст ответа бота')).toHaveValue('Привет от {название}');
-    await page.goto('/my/message-connections');
+    await page.goto('/my/max-bot');
 
     // Блок бота отдельно: «Отключено» бывает и у подключения SMPP того же клиента.
     const botBlock = page.locator('section', {
@@ -853,7 +857,7 @@ test.describe('свой бот клиента (ADR-0077, этап 2)', () => {
     const clientContext = await browser.newContext();
     const page = await clientContext.newPage();
     await signIn(page, PEOPLE.client);
-    await page.goto('/my/message-connections');
+    await page.goto('/my/max-bot');
 
     await page.getByRole('button', { name: 'Подключить своего бота', exact: true }).click();
     // Негодный токен — отказ в окне, бота нет.

@@ -7,6 +7,7 @@ import {
   Banknote,
   BarChart3,
   BellOff,
+  Bot,
   CloudDownload,
   DatabaseBackup,
   Coins,
@@ -312,7 +313,9 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
       items: [
         { href: '/my/messages', label: 'Сообщения', Icon: MessageSquare, tab: true },
         { href: '/my/message-text', label: 'Текст сообщения', Icon: PenLine },
-        { href: '/my/message-connections', label: 'Подключения', Icon: Plug },
+        // Бот и SMPP — разные способы подключиться, у каждого своя страница (владелец, 2026-10-23).
+        { href: '/my/max-bot', label: 'Бот MAX', Icon: Bot },
+        { href: '/my/smpp', label: 'SMPP', Icon: Plug },
         // Цены сообщений — здесь, а не в «Цены» раздела «Звонки»: там только звонки (владелец, 2026-10-22).
         { href: '/my/message-prices', label: 'Цены', Icon: ReceiptText },
         // Требования, аккаунты и очерёдность — одна страница с вкладками, а не два пункта меню.

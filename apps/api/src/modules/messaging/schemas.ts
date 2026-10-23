@@ -6,6 +6,7 @@ import {
   MESSAGE_MAX_LENGTH,
   MESSAGE_STATUSES,
   SMPP_RECEIPT_ACTIONS,
+  SMPP_RECEIPT_FINAL_ACTIONS,
   TEMPLATE_BLOCKS_MAX,
   TEMPLATE_BLOCK_KINDS,
   TEMPLATE_TEXT_MAX,
@@ -107,8 +108,8 @@ export const updateSmppSchema = z
     receipts: z
       .object({
         sent: z.enum(SMPP_RECEIPT_ACTIONS),
-        delivered: z.enum(SMPP_RECEIPT_ACTIONS),
-        read: z.enum(SMPP_RECEIPT_ACTIONS),
+        delivered: z.enum(SMPP_RECEIPT_FINAL_ACTIONS),
+        read: z.enum(SMPP_RECEIPT_FINAL_ACTIONS),
       })
       .optional(),
   })

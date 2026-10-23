@@ -302,6 +302,7 @@ export class MessagesService {
       if (withoutRules !== undefined) {
         throw conflict(
           'Под ваши требования к аккаунтам сейчас никто не подходит — смягчите их в разделе «Аккаунты MAX»',
+          { details: { reason: 'requirements_unmet' } },
         );
       }
       throw dependencyUnavailable('Сейчас нет доступных аккаунтов для отправки — повторите позже');

@@ -33,6 +33,9 @@ const MAX_SESSIONS_PER_ACCOUNT = 5;
 const MAX_SESSIONS_PER_IP = 20;
 const MAX_SESSIONS_TOTAL = 500;
 
+/** Сколько ждать ответа программы на `unbind` при остановке площадки: служба должна погаснуть за секунды. */
+const UNBIND_WAIT_MS = 2_000;
+
 /** Неудачных входов с адреса за окно, после которых адрес не принимается до конца окна. */
 const BIND_FAILURES_LIMIT = 5;
 const BIND_FAILURE_WINDOW_MS = 60_000;
@@ -50,6 +53,13 @@ const ERROR_CODE: Record<NonNullable<MessageRow['failureReason']>, number> = {
   wait_expired: 3,
   platform: 4,
   recipient_stopped: 5,
+};
+
+/** Каким состоянием отчёта отвечает выбранный клиентом ответ (`none` до отправки не доходит). */
+const RECEIPT_STATE: Record<Exclude<SmppReceiptAction, 'none'>, Receipt['state']> = {
+  enroute: 'ENROUTE',
+  accepted: 'ACCEPTD',
+  delivered: 'DELIVRD',
 };
 
 export interface ListenOptions {
@@ -140,20 +150,23 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
     return bound;
   }
 
+  /**
+   * Остановка: новые соединения не принимаются, вошедшим программам — `unbind` и ответ не дольше `UNBIND_WAIT_MS`, затем
+   * закрываются и слушатели. Так обновление площадки для программы клиента — штатный разрыв, а не обрыв.
+   */
   async stop(): Promise<void> {
     if (this.pump !== undefined) clearInterval(this.pump);
     this.pump = undefined;
-    for (const session of [...this.sessions]) session.destroy();
-    await Promise.all(
-      this.listeners.splice(0).map(
-        (server) =>
-          new Promise<void>((resolve) => {
-            server.close(() => {
-              resolve();
-            });
-          }),
-      ),
+    const closing = this.listeners.splice(0).map(
+      (server) =>
+        new Promise<void>((resolve) => {
+          server.close(() => {
+            resolve();
+          });
+        }),
     );
+    await Promise.all([...this.sessions].map((session) => session.unbind(UNBIND_WAIT_MS)));
+    await Promise.all(closing);
   }
 
   async onApplicationShutdown(): Promise<void> {
@@ -392,7 +405,7 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
         continue;
       }
       if (!session.hasDeliverCapacity) return;
-      const receipt = this.receiptOf(row, action === 'accepted' ? 'ACCEPTD' : 'DELIVRD', event);
+      const receipt = this.receiptOf(row, RECEIPT_STATE[action], event);
       const status = await session.sendDeliver(encodeReceiptBody(receipt));
       if (status !== Status.ok) return;
       await this.messageRows.markReceiptEvent(row.id, event, new Date());

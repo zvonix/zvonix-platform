@@ -1340,7 +1340,11 @@ export class BillingService {
     // Предел хранится положительным, а остаток отрицательный: сравниваем модули.
     if (Money.compare(Money.negate(balance), limit) > 0) {
       throw conflict('Недостаточно средств на балансе', {
-        details: { balance: Money.format(balance), overdraft_limit: Money.format(limit) },
+        details: {
+          reason: 'insufficient_funds',
+          balance: Money.format(balance),
+          overdraft_limit: Money.format(limit),
+        },
       });
     }
   }

@@ -196,6 +196,12 @@ const SERVER_SAMPLE_SECONDS = 60;
 /** Сверка состояния аккаунтов MAX — раз в минуту: вышедший из мессенджера не должен принимать сообщения (ADR-0071). */
 const MESSENGER_CHECK_SECONDS = 60;
 
+/**
+ * Подписка ботов MAX на события — раз в 6 часов: MAX сам отписывает бота, чей адрес не отвечал 8 часов, и проход чаще этого
+ * срока возвращает его раньше, чем потеряются события «запустил» и «остановил».
+ */
+const BOT_SUBSCRIPTION_SECONDS = 6 * 60 * 60;
+
 /** Отправка сообщений MAX из очереди — раз в 5 секунд: пауза между сообщениями аккаунта задаётся настройкой (ADR-0071). */
 const MESSAGE_DISPATCH_SECONDS = 5;
 
@@ -352,6 +358,11 @@ export class BackgroundTasks {
         name: 'bots.charge-fees',
         everySeconds: MESSENGER_CHECK_SECONDS * 10,
         run: (now) => this.bots.chargeFees(now),
+      },
+      {
+        name: 'bots.refresh-subscriptions',
+        everySeconds: BOT_SUBSCRIPTION_SECONDS,
+        run: () => this.bots.refreshSubscriptions(),
       },
       {
         name: 'messages.expire-waiting',

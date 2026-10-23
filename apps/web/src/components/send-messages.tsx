@@ -9,6 +9,9 @@ import {
   JournalFilters,
   JournalPages,
   journalSearch,
+  StageCells,
+  stageColumns,
+  StageHeads,
   useJournalFilter,
 } from '@/components/message-journal';
 import { Button } from '@/components/ui/button';
@@ -25,7 +28,7 @@ import {
 import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
-import { MESSAGE_FAILURE_NAME, MESSAGE_STATUS_NAME, messageTone } from '@/lib/labels';
+import { MESSAGE_STATUS_NAME } from '@/lib/labels';
 import { money } from '@/lib/money';
 
 interface Message {
@@ -38,6 +41,9 @@ interface Message {
   /** Как получил человек — с шаблоном и «СТОП» (ADR-0093); `null` — не ушло. */
   readonly full_text: string | null;
   readonly created_at: string;
+  readonly sent_at: string | null;
+  readonly delivered_at: string | null;
+  readonly read_at: string | null;
 }
 
 const LIST_KEY = ['client', 'messages'] as const;
@@ -202,11 +208,21 @@ export function SendMessages() {
             filters.delete('offset');
             const found = await loadAllRows<Message>('/client/messages', filters, 'messages');
             return {
-              header: ['Когда', 'Кому', 'Текст', 'Итог', 'Стоимость, ₽'],
+              header: [
+                'Принято',
+                'Кому',
+                'Текст',
+                'Ушло',
+                'Доставлено',
+                'Прочитано',
+                'Итог',
+                'Стоимость, ₽',
+              ],
               rows: found.rows.map((message) => [
                 moment(message.created_at),
                 message.to,
                 message.text,
+                ...stageColumns(message),
                 MESSAGE_STATUS_NAME[message.status] ?? message.status,
                 message.cost ?? '',
               ]),
@@ -220,17 +236,17 @@ export function SendMessages() {
           <Table>
             <TableHeader>
               <TableRow className="text-muted-foreground hover:bg-transparent">
-                <TableHead className="h-8">Когда</TableHead>
+                <TableHead className="h-8">Принято</TableHead>
                 <TableHead className="h-8">Кому</TableHead>
                 <TableHead className="h-8">Текст</TableHead>
-                <TableHead className="h-8">Итог</TableHead>
+                <StageHeads />
                 <TableHead className="h-8 text-right">Стоимость</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {list.data?.messages.length === 0 && (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={5} className="whitespace-normal text-muted-foreground">
+                  <TableCell colSpan={7} className="whitespace-normal text-muted-foreground">
                     {filter.status === '' && filter.from === '' && filter.to === ''
                       ? 'Сообщений пока нет.'
                       : 'По этому отбору сообщений нет.'}
@@ -268,17 +284,7 @@ export function SendMessages() {
                         </button>
                       )}
                     </TableCell>
-                    <TableCell className="whitespace-normal">
-                      <span className={`rounded-md px-2 py-0.5 ${messageTone(message.status)}`}>
-                        {MESSAGE_STATUS_NAME[message.status] ?? message.status}
-                      </span>
-                      {message.failure_reason !== null && (
-                        <span className="block pt-0.5 text-muted-foreground">
-                          {MESSAGE_FAILURE_NAME[message.failure_reason] ?? message.failure_reason};
-                          деньги возвращены
-                        </span>
-                      )}
-                    </TableCell>
+                    <StageCells message={message} refundNote />
                     <TableCell className="num text-right">
                       {message.cost === null ? (
                         <span className="text-faint">—</span>

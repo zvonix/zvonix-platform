@@ -2,6 +2,7 @@
 
 import {
   SMPP_RECEIPT_ACTIONS,
+  SMPP_RECEIPT_FINAL_ACTIONS,
   SMPP_RECEIPT_EVENTS,
   type SmppReceiptAction,
   type SmppReceiptEvent,
@@ -20,6 +21,7 @@ const EVENT_LABEL: Record<SmppReceiptEvent, string> = {
 
 const ACTION_LABEL: Record<SmppReceiptAction, string> = {
   none: 'Ничего не отвечать',
+  enroute: 'Ответить «в пути» (ENROUTE)',
   accepted: 'Ответить «принято» (ACCEPTD)',
   delivered: 'Ответить «доставлено» (DELIVRD)',
 };
@@ -30,6 +32,11 @@ const PRESETS: readonly { readonly name: string; readonly map: SmppReceiptMap }[
   {
     name: 'Как в SMS (рекомендуется)',
     map: { sent: 'none', delivered: 'delivered', read: 'delivered' },
+  },
+  // Программа видит и «отправлено» (промежуточный ENROUTE), и «доставлено» (владелец, 2026-10-23).
+  {
+    name: 'Отправлено, затем доставлено',
+    map: { sent: 'enroute', delivered: 'delivered', read: 'delivered' },
   },
   { name: 'Сразу, как ушло', map: { sent: 'delivered', delivered: 'none', read: 'none' } },
   { name: 'Только прочитанные', map: { sent: 'none', delivered: 'none', read: 'delivered' } },
@@ -70,11 +77,15 @@ export function SmppReceipts({
       }}
     >
       <div className="flex items-center gap-1">
-        <h3 className="font-medium">Ответы вашей программе</h3>
+        <h2 className="font-semibold">Ответы вашей программе</h2>
         <Hint label="Как работают ответы">
           <p>
             На каждое событие выберите, что площадка пришлёт по SMPP. «Принято» — состояние ACCEPTD,
             «доставлено» — DELIVRD. Один и тот же ответ по сообщению приходит один раз.
+          </p>
+          <p className="mt-2">
+            «В пути» (ENROUTE) — промежуточный ответ: программа видит, что сообщение ушло, и ждёт
+            окончательного. Показывает ли она его — зависит от программы.
           </p>
           <p className="mt-2">
             «Принято» (ACCEPTD) по стандарту SMPP — окончательный ответ, как «доставлено»: многие
@@ -116,11 +127,13 @@ export function SmppReceipts({
               }}
               className="h-9 rounded-md border border-input bg-transparent px-2"
             >
-              {SMPP_RECEIPT_ACTIONS.map((action) => (
-                <option key={action} value={action}>
-                  {ACTION_LABEL[action]}
-                </option>
-              ))}
+              {(event === 'sent' ? SMPP_RECEIPT_ACTIONS : SMPP_RECEIPT_FINAL_ACTIONS).map(
+                (action) => (
+                  <option key={action} value={action}>
+                    {ACTION_LABEL[action]}
+                  </option>
+                ),
+              )}
             </select>
           </label>
         ))}

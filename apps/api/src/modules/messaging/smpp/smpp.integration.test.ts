@@ -678,6 +678,29 @@ describe('журнал подключения (ADR-0096)', () => {
     expect(JSON.stringify(events)).not.toContain('9876');
   });
 
+  it('отказ в приёме — с точной причиной: «нет MAX» после известного отказа и «не хватает денег»', async () => {
+    await fx.partnerWithAccount('0.45');
+    const { client, credentials } = await smppClient('10');
+    const esme = await connect();
+    await esme.bind(Command.bindTransceiver, credentials.systemId, credentials.password);
+    // Первое на номер без MAX уходит и получает отказ провайдера; второе отклоняется сразу — причина в журнале своя.
+    await esme.submit('79005550000', 'Первое');
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect((await esme.submit('79005550000', 'Второе')).status).toBe(Status.submitFailed);
+
+    const poor = await smppClient('0');
+    const broke = await connect();
+    await broke.bind(Command.bindTransceiver, poor.credentials.systemId, poor.credentials.password);
+    expect((await broke.submit('79005550031', 'Подача')).status).toBe(Status.submitFailed);
+
+    expect((await eventsOf(client.token, 2)).map((event) => event.result)).toContain(
+      'recipient_not_in_max',
+    );
+    expect((await eventsOf(poor.client.token, 2)).map((event) => event.result)).toContain(
+      'insufficient_funds',
+    );
+  });
+
   it('адрес вне списка — причина в журнале; неизвестное имя в журнал не попадает; сотрудник видит журнал клиента', async () => {
     const { client, credentials } = await smppClient();
     await api().inject({
@@ -1002,6 +1025,42 @@ describe('отчёты о доставке', () => {
       expect(texts[0]).toContain('stat:DELIVRD');
     });
 
+    it('«отправлено, затем доставлено»: промежуточный ENROUTE при отправке, потом один DELIVRD; ENROUTE на «доставлено» не принимается', async () => {
+      const partner = await fx.partnerWithAccount('0.45');
+      const { client, credentials } = await smppClient('10');
+      await setReceipts(client.token, {
+        sent: 'enroute',
+        delivered: 'delivered',
+        read: 'delivered',
+      });
+      const esme = await connect();
+      await esme.bind(Command.bindTransceiver, credentials.systemId, credentials.password);
+      await esme.submit('79005550023', 'Подача');
+      await api().get(MessagesService).dispatchDue(new Date());
+
+      const [enroute] = await drain(esme, 1);
+      expect(enroute).toContain('stat:ENROUTE');
+      expect(enroute).toContain('dlvrd:000');
+
+      const [message] = await messagesOf(client.clientId);
+      const providerId = await providerIdOf(message?.id ?? '');
+      await api()
+        .get(MessagesService)
+        .applyDeliveryStatus(partner.instance, providerId, 'delivered');
+      await api().get(MessagesService).applyDeliveryStatus(partner.instance, providerId, 'read');
+      const texts = await drain(esme, 2);
+      expect(texts[0]).toContain('stat:DELIVRD');
+
+      // Промежуточный ответ на окончательное событие бессмыслен: программа ждала бы итога вечно.
+      const refused = await api().inject({
+        method: 'PATCH',
+        url: '/client/messages/smpp',
+        headers: bearer(client.token),
+        payload: { receipts: { sent: 'none', delivered: 'enroute', read: 'none' } },
+      });
+      expect(refused.statusCode).toBe(400);
+    });
+
     it('отказ приходит всегда, даже если на все события выбрано «ничего»', async () => {
       await fx.partnerWithAccount('0.45');
       const { client, credentials } = await smppClient('10');
@@ -1038,5 +1097,26 @@ describe('отчёты о доставке', () => {
     expect(await api().get(SmppServer).deliverReceipts()).toBe(1);
     await mine.untilReceived(1);
     expect(stranger.received).toHaveLength(0);
+  });
+});
+
+// Последним: останавливает слушатель, после чего он поднимается заново на новом порту.
+describe('остановка площадки', () => {
+  it('вошедшая программа получает unbind и, ответив, отключается штатно — без ожидания предела', async () => {
+    const { credentials } = await smppClient('10');
+    const esme = await connect();
+    await esme.bind(Command.bindTransceiver, credentials.systemId, credentials.password);
+
+    const started = Date.now();
+    const stopping = api().get(SmppServer).stop();
+    const [unbind] = await esme.untilReceived(1);
+    expect(unbind?.commandId).toBe(Command.unbind);
+    if (unbind !== undefined) esme.ack(unbind);
+    await stopping;
+    await esme.untilClosed();
+    // Ответ пришёл — ждать два секунды предела незачем.
+    expect(Date.now() - started).toBeLessThan(1_500);
+
+    port = await api().get(SmppServer).listen({ host: '127.0.0.1', port: 0 });
   });
 });

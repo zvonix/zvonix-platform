@@ -124,6 +124,9 @@ export function DeliverySettings() {
             inputMode="numeric"
             placeholder={String(platformWait)}
             aria-invalid={!waitValid}
+            // «Отказать сразу» не ждёт вовсе — поле не на что влиять (владелец видел «1 минуту» рядом с отказом).
+            disabled={mode === 'reject'}
+            title={mode === 'reject' ? 'При «Отказать сразу» сообщение не ждёт' : undefined}
             value={wait}
             onChange={(event) => {
               setWait(event.target.value);

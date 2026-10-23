@@ -261,7 +261,7 @@ MAX либо нет связи; `retired` — списан (в списках е
 ### Партнёр
 
 `GET /partner/messages/journal?status=&from=&to=&limit=&offset=` (кабинет партнёра) → `{ messages: [{ id, account_id, status,
-failure_reason, earned, created_at, delivered_at, read_at }], total }` — сообщения через его аккаунты и начисленное
+failure_reason, earned, created_at, sent_at, delivered_at, read_at }], total }` — сообщения через его аккаунты и начисленное
 (`earned`; не отправлено — `0`). Получателя, текста и клиента нет ([ADR-0014](../adr/0014-vybor-partnera-klientom.md)).
 
 ### Приём статусов от провайдера

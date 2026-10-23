@@ -91,6 +91,7 @@ interface PartnerMessageView {
   /** Начислено, ₽; не отправлено — `0`: начисление отменено вместе с возвратом клиенту. */
   readonly earned: string;
   readonly created_at: string;
+  readonly sent_at: string | null;
   readonly delivered_at: string | null;
   readonly read_at: string | null;
 }
@@ -102,6 +103,7 @@ const toPartnerView = (row: MessageRow): PartnerMessageView => ({
   failure_reason: row.failureReason,
   earned: row.status === 'failed' ? '0' : Money.format(row.partnerAmount),
   created_at: row.createdAt.toISOString(),
+  sent_at: iso(row.sentAt),
   delivered_at: iso(row.deliveredAt),
   read_at: iso(row.readAt),
 });
