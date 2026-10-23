@@ -140,7 +140,13 @@ export const COMMISSION_MAX_BASIS_POINTS: Record<CommissionProduct, number> = {
  */
 export const SMPP_RECEIPT_EVENTS = ['sent', 'delivered', 'read'] as const;
 export type SmppReceiptEvent = (typeof SMPP_RECEIPT_EVENTS)[number];
-export const SMPP_RECEIPT_ACTIONS = ['none', 'accepted', 'delivered'] as const;
+/**
+ * Ответ программе клиента на событие с сообщением. `enroute` — промежуточный ENROUTE («в пути»): программа ждёт дальше, поэтому он
+ * допустим только на «ушло» (владелец, 2026-10-23: «чтобы программа видела, когда отправлено»; ADR-0076, ревизия).
+ */
+export const SMPP_RECEIPT_ACTIONS = ['none', 'enroute', 'accepted', 'delivered'] as const;
+/** Окончательные ответы: на «доставлено» и «прочитано» промежуточный не имеет смысла. */
+export const SMPP_RECEIPT_FINAL_ACTIONS = ['none', 'accepted', 'delivered'] as const;
 export type SmppReceiptAction = (typeof SMPP_RECEIPT_ACTIONS)[number];
 export type SmppReceiptMap = Record<SmppReceiptEvent, SmppReceiptAction>;
 

@@ -1002,6 +1002,42 @@ describe('отчёты о доставке', () => {
       expect(texts[0]).toContain('stat:DELIVRD');
     });
 
+    it('«отправлено, затем доставлено»: промежуточный ENROUTE при отправке, потом один DELIVRD; ENROUTE на «доставлено» не принимается', async () => {
+      const partner = await fx.partnerWithAccount('0.45');
+      const { client, credentials } = await smppClient('10');
+      await setReceipts(client.token, {
+        sent: 'enroute',
+        delivered: 'delivered',
+        read: 'delivered',
+      });
+      const esme = await connect();
+      await esme.bind(Command.bindTransceiver, credentials.systemId, credentials.password);
+      await esme.submit('79005550023', 'Подача');
+      await api().get(MessagesService).dispatchDue(new Date());
+
+      const [enroute] = await drain(esme, 1);
+      expect(enroute).toContain('stat:ENROUTE');
+      expect(enroute).toContain('dlvrd:000');
+
+      const [message] = await messagesOf(client.clientId);
+      const providerId = await providerIdOf(message?.id ?? '');
+      await api()
+        .get(MessagesService)
+        .applyDeliveryStatus(partner.instance, providerId, 'delivered');
+      await api().get(MessagesService).applyDeliveryStatus(partner.instance, providerId, 'read');
+      const texts = await drain(esme, 2);
+      expect(texts[0]).toContain('stat:DELIVRD');
+
+      // Промежуточный ответ на окончательное событие бессмыслен: программа ждала бы итога вечно.
+      const refused = await api().inject({
+        method: 'PATCH',
+        url: '/client/messages/smpp',
+        headers: bearer(client.token),
+        payload: { receipts: { sent: 'none', delivered: 'enroute', read: 'none' } },
+      });
+      expect(refused.statusCode).toBe(400);
+    });
+
     it('отказ приходит всегда, даже если на все события выбрано «ничего»', async () => {
       await fx.partnerWithAccount('0.45');
       const { client, credentials } = await smppClient('10');

@@ -52,6 +52,13 @@ const ERROR_CODE: Record<NonNullable<MessageRow['failureReason']>, number> = {
   recipient_stopped: 5,
 };
 
+/** Каким состоянием отчёта отвечает выбранный клиентом ответ (`none` до отправки не доходит). */
+const RECEIPT_STATE: Record<Exclude<SmppReceiptAction, 'none'>, Receipt['state']> = {
+  enroute: 'ENROUTE',
+  accepted: 'ACCEPTD',
+  delivered: 'DELIVRD',
+};
+
 export interface ListenOptions {
   readonly host: string;
   readonly port: number;
@@ -392,7 +399,7 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
         continue;
       }
       if (!session.hasDeliverCapacity) return;
-      const receipt = this.receiptOf(row, action === 'accepted' ? 'ACCEPTD' : 'DELIVRD', event);
+      const receipt = this.receiptOf(row, RECEIPT_STATE[action], event);
       const status = await session.sendDeliver(encodeReceiptBody(receipt));
       if (status !== Status.ok) return;
       await this.messageRows.markReceiptEvent(row.id, event, new Date());

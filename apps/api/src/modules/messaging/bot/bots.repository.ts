@@ -115,6 +115,11 @@ export class BotsRepository {
     }
   }
 
+  /** Работающие боты — площадки и клиентов: их подписку на события площадка поддерживает сама. */
+  async listActiveBots(): Promise<BotRow[]> {
+    return this.database.db.select().from(messengerBots).where(eq(messengerBots.status, 'active'));
+  }
+
   async setBotState(
     id: BotId,
     patch: { status?: BotStatus; lastError?: string | null },

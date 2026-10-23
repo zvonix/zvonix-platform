@@ -144,6 +144,23 @@ describe('бот площадки у администратора', () => {
     expect(checked.json<BotView>().bot?.status).toBe('active');
     expect(simulatedBotSubscriptions.has('ok-taxibot')).toBe(true);
   });
+
+  it('фоновый проход переподписывает работающего бота, которого MAX отписал сам; отключённого не трогает', async () => {
+    await register(adminToken, { token: 'ok-taxibot' });
+    // MAX отписывает бота, чей адрес не отвечал 8 часов: подписки у него больше нет.
+    simulatedBotSubscriptions.clear();
+    expect(await api().get(BotsService).refreshSubscriptions()).toBe(1);
+    expect(simulatedBotSubscriptions.get('ok-taxibot')?.url).toMatch(/\/api\/webhooks\/max-bot\//u);
+
+    await api().inject({
+      method: 'POST',
+      url: '/bots/platform/disable',
+      headers: bearer(adminToken),
+    });
+    simulatedBotSubscriptions.clear();
+    expect(await api().get(BotsService).refreshSubscriptions()).toBe(0);
+    expect(simulatedBotSubscriptions.has('ok-taxibot')).toBe(false);
+  });
 });
 
 describe('бот в кабинете клиента', () => {

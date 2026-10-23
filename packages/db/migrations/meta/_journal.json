@@ -540,6 +540,13 @@
       "when": 1792730015043,
       "tag": "0076_molchashchie_poluchateli",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1792734946713,
+      "tag": "0077_smpp_enroute",
+      "breakpoints": true
     }
   ]
 }

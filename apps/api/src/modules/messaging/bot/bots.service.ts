@@ -642,6 +642,37 @@ export class BotsService {
    * не взята. Не хватило денег — подключение остаётся без платы и бот ему не отправляет; следующий проход повторит,
    * и после пополнения счёта плата будет взята сама. Возвращает, у скольких плата взята.
    */
+  /**
+   * Подписка работающих ботов на события — заново, тем же адресом. Догоняющая: и новый список событий доезжает до ботов,
+   * подключённых раньше, и бот возвращается, если MAX сам отписал его — так он делает, когда адрес площадки не отвечал
+   * 8 часов (выкладка, сбой). Отказ MAX по токену записывается в состояние бота, как при проверке кнопкой; прочие сбои —
+   * в журнал, следующий проход повторит. Возвращает, сколько ботов подписано.
+   */
+  async refreshSubscriptions(): Promise<number> {
+    let subscribed = 0;
+    for (const bot of await this.repository.listActiveBots()) {
+      try {
+        await this.provider.subscribe(
+          this.tokenOf(bot),
+          this.webhookUrl(bot.id),
+          this.webhookSecret(bot.id),
+        );
+        subscribed += 1;
+      } catch (cause) {
+        if (cause instanceof BotTokenRejectedError) {
+          await this.repository.setBotState(bot.id, {
+            lastError: 'MAX не принял токен: бот удалён или токен перевыпущен',
+          });
+        }
+        this.logger.warn('Подписка бота на события не обновлена', {
+          bot_id: bot.id,
+          reason: cause instanceof Error ? cause.name : 'unknown',
+        });
+      }
+    }
+    return subscribed;
+  }
+
   async chargeFees(now: Date = new Date()): Promise<number> {
     const period = periodOf(now);
     let charged = 0;

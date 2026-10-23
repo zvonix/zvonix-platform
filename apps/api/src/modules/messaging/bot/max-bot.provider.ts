@@ -19,8 +19,12 @@ import {
 const TIMEOUT_MS = 10_000;
 const UNAVAILABLE = 'MAX временно недоступен — повторите позже';
 
-/** События, которые нужны площадке: человек запустил бота и написал боту. */
-const UPDATE_TYPES = ['bot_started', 'message_created'];
+/**
+ * События, которые нужны площадке: человек запустил бота, написал боту, остановил бота или удалил чат с ним. Список — фильтр
+ * подписки (https://dev.max.ru/docs-api/methods/POST/subscriptions): без `bot_stopped`/`dialog_removed` остановивший бота
+ * оставался у нас подписчиком, и ему продолжали писать ботом (найдено 2026-10-23).
+ */
+const UPDATE_TYPES = ['bot_started', 'message_created', 'bot_stopped', 'dialog_removed'];
 
 class BotHttpError extends Error {
   override readonly name = 'BotHttpError';

@@ -7,6 +7,9 @@ import {
   JournalFilters,
   JournalPages,
   journalSearch,
+  StageCells,
+  StageHeads,
+  stageColumns,
   useJournalFilter,
 } from '@/components/message-journal';
 import {
@@ -20,7 +23,7 @@ import {
 import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
-import { MESSAGE_FAILURE_NAME, MESSAGE_STATUS_NAME, messageTone } from '@/lib/labels';
+import { MESSAGE_STATUS_NAME } from '@/lib/labels';
 import { money } from '@/lib/money';
 
 interface PartnerMessage {
@@ -30,6 +33,9 @@ interface PartnerMessage {
   readonly failure_reason: string | null;
   readonly earned: string;
   readonly created_at: string;
+  readonly sent_at: string | null;
+  readonly delivered_at: string | null;
+  readonly read_at: string | null;
 }
 
 const PATH = '/partner/messages/journal';
@@ -80,10 +86,19 @@ function Journal() {
           filters.delete('offset');
           const found = await loadAllRows<PartnerMessage>(PATH, filters, 'messages');
           return {
-            header: ['Когда', 'Аккаунт', 'Итог', 'Начислено, ₽'],
+            header: [
+              'Принято',
+              'Аккаунт',
+              'Ушло',
+              'Доставлено',
+              'Прочитано',
+              'Итог',
+              'Начислено, ₽',
+            ],
             rows: found.rows.map((message) => [
               moment(message.created_at),
               accountName(message.account_id),
+              ...stageColumns(message),
               MESSAGE_STATUS_NAME[message.status] ?? message.status,
               message.earned,
             ]),
@@ -96,23 +111,23 @@ function Journal() {
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
+              <TableHead className="h-8">Принято</TableHead>
               <TableHead className="h-8">Аккаунт</TableHead>
-              <TableHead className="h-8">Итог</TableHead>
+              <StageHeads />
               <TableHead className="h-8 text-right">Начислено</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {list.isPending && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={4} className="text-muted-foreground">
+                <TableCell colSpan={6} className="text-muted-foreground">
                   Загружаем…
                 </TableCell>
               </TableRow>
             )}
             {list.data?.messages.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={4} className="text-muted-foreground">
+                <TableCell colSpan={6} className="text-muted-foreground">
                   По этому отбору сообщений нет.
                 </TableCell>
               </TableRow>
@@ -123,16 +138,7 @@ function Journal() {
                   <span className="num text-muted-foreground">{moment(message.created_at)}</span>
                 </TableCell>
                 <TableCell>{accountName(message.account_id)}</TableCell>
-                <TableCell className="whitespace-normal">
-                  <span className={`rounded-md px-2 py-0.5 ${messageTone(message.status)}`}>
-                    {MESSAGE_STATUS_NAME[message.status] ?? message.status}
-                  </span>
-                  {message.failure_reason !== null && (
-                    <span className="block pt-0.5 text-muted-foreground">
-                      {MESSAGE_FAILURE_NAME[message.failure_reason] ?? message.failure_reason}
-                    </span>
-                  )}
-                </TableCell>
+                <StageCells message={message} />
                 <TableCell className="num text-right">{money(message.earned)}</TableCell>
               </TableRow>
             ))}

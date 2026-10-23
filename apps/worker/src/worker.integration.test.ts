@@ -103,6 +103,7 @@ describe('реестр фоновых задач', () => {
       'notifications.partner-suspension',
       'messages.dispatch',
       'bots.charge-fees',
+      'bots.refresh-subscriptions',
       'messages.expire-waiting',
       'messages.purge-texts',
       'smpp.purge-events',

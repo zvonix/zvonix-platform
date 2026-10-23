@@ -1446,6 +1446,10 @@ describe('журнал сообщений: отбор и журнал партн
       expect(row).not.toHaveProperty('text');
       expect(row).not.toHaveProperty('client_id');
       expect(row.earned).toBe('0.45');
+      // Этапы — как у клиента: когда ушло, доставлено, прочитано (журнал со временем по этапам, 2026-10-23).
+      expect(row).toHaveProperty('sent_at');
+      expect(row).toHaveProperty('delivered_at');
+      expect(row).toHaveProperty('read_at');
     }
 
     const byClient = (

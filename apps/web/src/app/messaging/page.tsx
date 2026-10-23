@@ -20,6 +20,9 @@ import {
   JournalFilters,
   JournalPages,
   journalSearch,
+  StageCells,
+  stageColumns,
+  StageHeads,
   useJournalFilter,
 } from '@/components/message-journal';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
@@ -40,7 +43,7 @@ import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
-import { MESSAGE_FAILURE_NAME, MESSAGE_STATUS_NAME, messageTone } from '@/lib/labels';
+import { MESSAGE_STATUS_NAME } from '@/lib/labels';
 import { money } from '@/lib/money';
 import type { PartnerRow } from '../partners/partner-row';
 
@@ -53,6 +56,8 @@ interface StaffMessage {
   readonly created_at: string;
   /** Когда ушло в MAX — по разнице с приёмом видно, сколько ждало (разбор владельца 2026-10-23). */
   readonly sent_at: string | null;
+  readonly delivered_at: string | null;
+  readonly read_at: string | null;
   readonly attempts: number;
   readonly money: { client: string; partner: string; margin: string };
 }
@@ -345,6 +350,8 @@ function RecentMessages() {
             header: [
               'Принято',
               'Ушло',
+              'Доставлено',
+              'Прочитано',
               'Попыток',
               'Клиент',
               'Кому',
@@ -355,7 +362,7 @@ function RecentMessages() {
             ],
             rows: found.rows.map((message) => [
               moment(message.created_at),
-              message.sent_at === null ? '' : moment(message.sent_at),
+              ...stageColumns(message),
               message.attempts,
               clientName(message.client_id),
               message.to,
@@ -411,9 +418,8 @@ function RecentMessages() {
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Принято</TableHead>
-              <TableHead className="h-8">Ушло</TableHead>
               <TableHead className="h-8">Кому</TableHead>
-              <TableHead className="h-8">Итог</TableHead>
+              <StageHeads />
               <TableHead className="h-8 text-right">Клиент</TableHead>
               <TableHead className="h-8 text-right">Партнёру</TableHead>
               <TableHead className="h-8 text-right">Площадке</TableHead>
@@ -422,7 +428,7 @@ function RecentMessages() {
           <TableBody>
             {list.data?.messages.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   По этому отбору сообщений нет.
                 </TableCell>
               </TableRow>
@@ -431,11 +437,7 @@ function RecentMessages() {
               <TableRow key={message.id}>
                 <TableCell>
                   <span className="num text-muted-foreground">{moment(message.created_at)}</span>
-                </TableCell>
-                <TableCell>
-                  <span className="num text-muted-foreground">
-                    {message.sent_at === null ? '—' : moment(message.sent_at)}
-                  </span>
+                  {/* Сколько раз пробовали отправить — по нему и «ушло» видно, где сообщение ждало. */}
                   {message.attempts > 1 && (
                     <span className="block text-faint">попыток {String(message.attempts)}</span>
                   )}
@@ -443,16 +445,7 @@ function RecentMessages() {
                 <TableCell>
                   <span className="num">{message.to}</span>
                 </TableCell>
-                <TableCell className="whitespace-normal">
-                  <span className={`rounded-md px-2 py-0.5 ${messageTone(message.status)}`}>
-                    {MESSAGE_STATUS_NAME[message.status] ?? message.status}
-                  </span>
-                  {message.failure_reason !== null && (
-                    <span className="block pt-0.5 text-muted-foreground">
-                      {MESSAGE_FAILURE_NAME[message.failure_reason] ?? message.failure_reason}
-                    </span>
-                  )}
-                </TableCell>
+                <StageCells message={message} />
                 <TableCell className="num text-right">{money(message.money.client)}</TableCell>
                 <TableCell className="num text-right">{money(message.money.partner)}</TableCell>
                 <TableCell className="num text-right">{money(message.money.margin)}</TableCell>
