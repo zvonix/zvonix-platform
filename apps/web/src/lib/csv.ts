@@ -13,7 +13,7 @@ const SEPARATOR = ';';
 /** Предел выгрузки: больше строк браузеру собирать в памяти незачем — сужайте период. */
 export const EXPORT_ROWS_MAX = 10_000;
 
-/** Страница API: у списков вызовов предел 200. */
+/** Страница API: у списков вызовов и сообщений предел 200. */
 const PAGE = 200;
 
 /**
@@ -68,12 +68,13 @@ export interface LoadedCalls<T> {
 }
 
 /**
- * Все страницы списка вызовов под текущим отбором — не больше `EXPORT_ROWS_MAX`.
- * `truncated` — в отборе строк больше, чем выгружено.
+ * Все страницы списка под текущим отбором — не больше `EXPORT_ROWS_MAX`. `field` — где в ответе строки: `calls`,
+ * `messages`. `truncated` — в отборе строк больше, чем выгружено.
  */
-export async function loadAllCalls<T>(
+export async function loadAllRows<T>(
   path: string,
   filters: URLSearchParams,
+  field: string,
 ): Promise<LoadedCalls<T>> {
   const rows: T[] = [];
   let total = 0;
@@ -82,10 +83,18 @@ export async function loadAllCalls<T>(
     const query = new URLSearchParams(filters);
     query.set('limit', String(PAGE));
     query.set('offset', String(rows.length));
-    const page = await request<{ calls: T[]; total: number }>(`${path}?${query.toString()}`);
+    const page = await request<Record<string, unknown> & { total: number }>(
+      `${path}?${query.toString()}`,
+    );
+    const found = (page[field] ?? []) as T[];
     total = page.total;
-    rows.push(...page.calls);
-    if (page.calls.length < PAGE || rows.length >= total) break;
+    rows.push(...found);
+    if (found.length < PAGE || rows.length >= total) break;
   }
   return { rows, total, truncated: total > rows.length };
+}
+
+/** Все страницы списка вызовов — см. `loadAllRows`. */
+export function loadAllCalls<T>(path: string, filters: URLSearchParams): Promise<LoadedCalls<T>> {
+  return loadAllRows<T>(path, filters, 'calls');
 }

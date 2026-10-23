@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
-import { TRANSACTION_KIND_NAME, type LedgerAccount } from '@/lib/labels';
+import { transactionName, type LedgerAccount } from '@/lib/labels';
 import { isNegative, money } from '@/lib/money';
 
 const PAGE_SIZE = 20;
@@ -118,7 +118,14 @@ export function AccountLedger({ source, account }: { source: string; account: Le
                 <TableCell>
                   <span className="num text-muted-foreground">{moment(entry.created_at)}</span>
                 </TableCell>
-                <TableCell>{TRANSACTION_KIND_NAME[account][entry.kind]}</TableCell>
+                <TableCell>
+                  {transactionName(
+                    account,
+                    entry.kind,
+                    entry.reference_type,
+                    isNegative(entry.amount),
+                  )}
+                </TableCell>
                 <TableCell className="whitespace-normal">
                   {entry.description}
                   {/*

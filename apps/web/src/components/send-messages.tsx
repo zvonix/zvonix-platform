@@ -4,6 +4,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MESSAGE_MAX_LENGTH } from '@zvonix/shared';
 import { Fragment, useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
+import { FormDialog } from '@/components/form-dialog';
+import {
+  JournalFilters,
+  JournalPages,
+  journalSearch,
+  useJournalFilter,
+} from '@/components/message-journal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,6 +23,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
+import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
 import { MESSAGE_FAILURE_NAME, MESSAGE_STATUS_NAME, messageTone } from '@/lib/labels';
 import { money } from '@/lib/money';
@@ -67,10 +75,14 @@ export function SendMessages() {
     refetchInterval: 60_000,
   });
 
+  const [filter, changeFilter] = useJournalFilter();
+  const search = journalSearch(filter);
   const list = useQuery({
-    queryKey: LIST_KEY,
+    queryKey: [...LIST_KEY, search.toString()],
     queryFn: ({ signal }) =>
-      request<{ messages: Message[]; total: number }>('/client/messages?limit=50', { signal }),
+      request<{ messages: Message[]; total: number }>(`/client/messages?${search.toString()}`, {
+        signal,
+      }),
     // Статусы меняются в минуты: журнал обновляется сам.
     refetchInterval: 10_000,
   });
@@ -181,6 +193,29 @@ export function SendMessages() {
         </p>
       )}
       {enabled && (
+        <JournalFilters
+          filter={filter}
+          onChange={changeFilter}
+          exportName="сообщения-max"
+          load={async () => {
+            const filters = journalSearch(filter);
+            filters.delete('offset');
+            const found = await loadAllRows<Message>('/client/messages', filters, 'messages');
+            return {
+              header: ['Когда', 'Кому', 'Текст', 'Итог', 'Стоимость, ₽'],
+              rows: found.rows.map((message) => [
+                moment(message.created_at),
+                message.to,
+                message.text,
+                MESSAGE_STATUS_NAME[message.status] ?? message.status,
+                message.cost ?? '',
+              ]),
+              truncated: found.truncated,
+            };
+          }}
+        />
+      )}
+      {enabled && (
         <div className="rounded-lg border border-border bg-card">
           <Table>
             <TableHeader>
@@ -196,7 +231,9 @@ export function SendMessages() {
               {list.data?.messages.length === 0 && (
                 <TableRow className="hover:bg-transparent">
                   <TableCell colSpan={5} className="whitespace-normal text-muted-foreground">
-                    Сообщений пока нет.
+                    {filter.status === '' && filter.from === '' && filter.to === ''
+                      ? 'Сообщений пока нет.'
+                      : 'По этому отбору сообщений нет.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -222,13 +259,12 @@ export function SendMessages() {
                       {message.full_text !== null && (
                         <button
                           type="button"
-                          aria-expanded={opened === message.id}
                           onClick={() => {
-                            setOpened(opened === message.id ? undefined : message.id);
+                            setOpened(message.id);
                           }}
                           className="text-sm text-primary underline-offset-2 hover:underline"
                         >
-                          {opened === message.id ? 'Скрыть полный текст' : 'Полный текст'}
+                          Полный текст
                         </button>
                       )}
                     </TableCell>
@@ -252,16 +288,21 @@ export function SendMessages() {
                     </TableCell>
                   </TableRow>
                   {opened === message.id && message.full_text !== null && (
-                    <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={5} className="whitespace-normal bg-muted/40">
-                        <span className="mb-1 block text-sm text-muted-foreground">
-                          Так сообщение получил человек
-                        </span>
-                        <span className="block max-w-xl whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm bg-card px-3.5 py-2.5 shadow-sm">
+                    // Окном, а не строкой под сообщением: длинный текст раздвигал таблицу (владелец, 2026-10-22).
+                    <FormDialog
+                      open
+                      onOpenChange={(open) => {
+                        if (!open) setOpened(undefined);
+                      }}
+                      title="Так сообщение получил человек"
+                      description={`${moment(message.created_at)} · ${message.to}`}
+                    >
+                      <div className="overflow-y-auto px-5 pb-5">
+                        <p className="whitespace-pre-wrap break-words rounded-2xl rounded-tl-sm bg-muted px-3.5 py-2.5">
                           {message.full_text}
-                        </span>
-                      </TableCell>
-                    </TableRow>
+                        </p>
+                      </div>
+                    </FormDialog>
                   )}
                 </Fragment>
               ))}
@@ -269,6 +310,7 @@ export function SendMessages() {
           </Table>
         </div>
       )}
+      {enabled && <JournalPages filter={filter} total={list.data?.total} onChange={changeFilter} />}
     </div>
   );
 }

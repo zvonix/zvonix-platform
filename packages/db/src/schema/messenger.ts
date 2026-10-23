@@ -413,9 +413,10 @@ export const smppEvents = pgTable(
   'smpp_events',
   {
     id: primaryId<'smppEvent'>(),
-    accountId: idRef<'smppAccount'>()
-      .notNull()
-      .references(() => smppAccounts.id, { onDelete: 'cascade' }),
+    /** Подключение; пусто — вход с неизвестным именем (`unknown_login`) или пауза адреса, набранная такими входами. */
+    accountId: idRef<'smppAccount'>().references(() => smppAccounts.id, { onDelete: 'cascade' }),
+    /** Введённое имя входа — только у строк без подключения: по нему видно, кто стучится. Пароль не пишется никогда. */
+    systemId: text(),
     kind: text().$type<SmppEventKind>().notNull(),
     /** Итог входа (`SMPP_BIND_RESULTS`) или причина отказа в приёме (`SMPP_SUBMIT_REFUSALS`). */
     result: text().notNull(),
@@ -439,6 +440,10 @@ export const smppEvents = pgTable(
     ),
     check('smpp_events_mode_check', sql`${t.mode} is null or ${oneOf(t.mode, SMPP_BIND_MODES)}`),
     check('smpp_events_count_check', sql`${t.count} >= 1`),
+    check(
+      'smpp_events_owner_check',
+      sql`${t.accountId} is not null or (${t.systemId} is not null and ${t.result} in ('unknown_login', 'ip_blocked'))`,
+    ),
   ],
 );
 

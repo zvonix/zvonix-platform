@@ -583,8 +583,8 @@ test.describe('отправка сообщений из кабинета пар�
     const partner = await partnerContext.newPage();
     await signIn(partner, PEOPLE.partner);
     await partner.goto('/partner/send');
-    // Пункта «Сообщения» в меню нет (отправлять без клиентского кабинета нечем), страница ведёт к заявке.
-    await expect(partner.getByRole('link', { name: 'Сообщения', exact: true })).toHaveCount(0);
+    // Пункта «Отправить» в меню нет (отправлять без клиентского кабинета нечем), страница ведёт к заявке.
+    await expect(partner.getByRole('link', { name: 'Отправить', exact: true })).toHaveCount(0);
     await expect(partner.getByRole('link', { name: 'Стать клиентом' }).first()).toBeVisible();
     // Формы, которая отказала бы, нет.
     await expect(partner.getByLabel('Номер получателя')).toHaveCount(0);
@@ -661,6 +661,7 @@ test.describe('подключение по SMPP (ADR-0072)', () => {
     await page.getByRole('button', { name: 'Новый пароль' }).click();
     await page.getByRole('button', { name: 'Выпустить' }).click();
     await expect(page.getByRole('region', { name: 'Пароль SMPP' })).toBeVisible();
+    await closeSecret(page);
 
     await page.getByRole('button', { name: 'Отключить', exact: true }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Отключить' }).click();
@@ -808,14 +809,10 @@ test.describe('требования к аккаунтам MAX (ADR-0092)', () =>
       'true',
     );
     await expect(page.getByLabel('Цена не дороже, ₽')).toHaveValue('0,9');
-    // Очерёдность — вкладка того же раздела; прежний адрес ведёт туда же.
-    await page.getByRole('tab', { name: 'Очерёдность' }).click();
-    await expect(page.getByRole('columnheader', { name: 'Очерёдность' })).toBeVisible();
+    // Очерёдность — на той же странице, как у «Маршрутов звонков»; прежний адрес ведёт сюда же.
+    await expect(page.getByRole('columnheader', { name: 'Очерёдность' }).first()).toBeVisible();
     await page.goto('/my/max-priorities');
-    await expect(page.getByRole('tab', { name: 'Очерёдность' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    await expect(page.getByRole('heading', { name: 'Какие аккаунты мне подходят' })).toBeVisible();
   });
 });
 
@@ -1144,7 +1141,7 @@ test.describe('SMPP у сотрудников', () => {
     // Подключение могло быть создано другим сценарием: для проверки важно, что оно есть.
     expect([201, 409]).toContain(created.status());
 
-    await admin.goto('/messaging');
+    await admin.goto('/smpp');
     const block = admin.getByRole('region', { name: 'Подключения по SMPP' });
     await expect(block).toBeVisible();
     await expect(block.getByText(/^zx[a-z0-9]{8}$/u).first()).toBeVisible();
@@ -1509,6 +1506,7 @@ test.describe('кабинет клиента', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Получить линию' }).click();
 
     await expect(page.getByText(/Пароль показывается/u)).toBeVisible();
+    await closeSecret(page);
     await expect(page.getByRole('row').filter({ hasText: /Линия \d/u })).toBeVisible();
   });
 
@@ -1655,6 +1653,7 @@ test.describe('клиент заводит доступ своей систем�
       .getByRole('button', { name: 'Создать и показать секрет' })
       .click();
     await expect(page.getByText('Ключ «Ключ на отзыв»')).toBeVisible();
+    await closeSecret(page);
 
     const row = page.getByRole('row').filter({ hasText: 'Ключ на отзыв' });
     const dialog = page.getByRole('alertdialog', { name: 'Отозвать ключ «Ключ на отзыв»' });
@@ -1679,6 +1678,15 @@ test.describe('клиент заводит доступ своей систем�
   });
 });
 
+/**
+ * Закрыть окно одноразового значения (пароль, ключ): оно поверх страницы и закрывается только кнопкой — пока открыто,
+ * страница под ним не нажимается, как и у человека.
+ */
+async function closeSecret(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Записал, закрыть' }).click();
+  await expect(page.getByRole('button', { name: 'Записал, закрыть' })).toHaveCount(0);
+}
+
 /** Подтвердить действие в окне, которое называет последствие, — кнопкой с тем же именем. */
 async function confirmAction(page: Page, action: string): Promise<void> {
   await page.getByRole('button', { name: action, exact: true }).click();
@@ -1695,20 +1703,21 @@ test.describe('партнёр добавляет своё оборудовани
     await page.goto('/partner/equipment');
 
     await page.getByRole('button', { name: 'Добавить шлюз' }).click();
-    await page.getByLabel('Название').fill('GOIP на проверке');
+    // Имя с меткой времени: повтор упавшего теста идёт на той же базе (см. «SIM вставляется…»).
+    const gatewayName = `GOIP на проверке ${String(Date.now())}`;
+    await page.getByLabel('Название').fill(gatewayName);
     await page.getByLabel('Слотов под SIM').fill('4');
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
 
     // Пароли линий показываются один раз, а шлюз встаёт строкой в общую таблицу.
-    await expect(page.getByText('Входы линий шлюза «GOIP на проверке»')).toBeVisible();
-    await expect(page.getByRole('region', { name: 'GOIP на проверке', exact: true })).toContainText(
+    await expect(page.getByText(`Входы линий шлюза «${gatewayName}»`)).toBeVisible();
+    await closeSecret(page);
+    await expect(page.getByRole('region', { name: gatewayName, exact: true })).toContainText(
       'карт 0 из 4',
     );
 
-    await page.getByRole('link', { name: /Открыть шлюз/u }).click();
-    await expect(
-      page.getByRole('heading', { name: 'GOIP на проверке', exact: true }),
-    ).toBeVisible();
+    await page.getByRole('link', { name: gatewayName, exact: true }).click();
+    await expect(page.getByRole('heading', { name: gatewayName, exact: true })).toBeVisible();
 
     // Сервер, порт и режим видны всегда: раньше — только в минуту добавления.
     const connection = page.getByRole('region', { name: 'Подключение' });
@@ -1734,6 +1743,7 @@ test.describe('партнёр добавляет своё оборудовани
     await page.getByRole('button', { name: 'Добавить шлюз' }).click();
     await page.getByLabel('Название').fill(gatewayName);
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await closeSecret(page);
     await page.getByRole('link', { name: gatewayName }).click();
     // Без ожидания перехода нажатие попадало в кнопку «Вставить SIM» списка (там такие же),
     // а переход потом закрывал окно: падение примерно в одном прогоне из десяти.
@@ -1762,6 +1772,7 @@ test.describe('партнёр добавляет своё оборудовани
     const gatewayName = `Шлюз на выключение ${String(Date.now())}`;
     await page.getByLabel('Название').fill(gatewayName);
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await closeSecret(page);
     await page.getByRole('link', { name: gatewayName }).click();
 
     // Невключённый шлюз не пускают даже с верными настройками — и страница говорит это прямо.
@@ -1786,6 +1797,7 @@ test.describe('партнёр добавляет своё оборудовани
     await page.getByRole('button', { name: 'Добавить шлюз' }).click();
     await page.getByLabel('Название').fill('Шлюз на удаление');
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await closeSecret(page);
     await page.getByRole('link', { name: 'Шлюз на удаление' }).click();
 
     await page.getByRole('button', { name: 'Удалить шлюз' }).click();
@@ -1848,6 +1860,7 @@ test.describe('операторы связи (ADR-0053)', () => {
     await page.getByLabel('Подключение').selectOption({ label: 'Весь шлюз одним входом' });
     await page.getByLabel('Слотов под SIM').fill('2');
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
+    await closeSecret(page);
     await page.getByRole('link', { name: 'GOIP с префиксами' }).click();
 
     const connection = page.getByRole('region', { name: 'Подключение' });
@@ -1899,7 +1912,8 @@ test.describe('оборудование одной таблицей, вход п
     await expect(secrets.getByRole('row', { name: /^Line 1 pt-/u })).toBeVisible();
     await expect(secrets.getByRole('row', { name: /^Line 2 pt-/u })).toBeVisible();
 
-    await page.getByRole('link', { name: 'Открыть шлюз — порты и настройки →' }).click();
+    // Ссылка на шлюз — в том же окне: из него сразу к настройкам линий.
+    await secrets.getByRole('link', { name: 'Открыть шлюз — порты и настройки →' }).click();
     // Настройки — построчно для каждой линии, теми же полями, что у линии в GOIP.
     const lines = page.getByRole('table', { name: 'Настройки линий' });
     // Префикс линии — в строке: без Routing Prefix GOIP ждёт тонового набора (2026-09-29).

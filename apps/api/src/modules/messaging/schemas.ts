@@ -179,8 +179,21 @@ export const deliverySchema = z.object({
     .nullable(),
 });
 
+/** Момент времени ISO для отбора журнала по периоду, как у вызовов. */
+const moment = optional(
+  z.iso.datetime({ offset: true, message: 'должен быть моментом времени в виде ISO' }),
+);
+
+/**
+ * Отбор журнала сообщений: состояние, период, у сотрудников — клиент и партнёр. Журнал отдавал последние 50 без отбора,
+ * а у вызовов было всё (владелец, 2026-10-23).
+ */
 export const messagesQuerySchema = z.object({
   status: optional(z.enum(MESSAGE_STATUSES)),
+  from: moment,
+  to: moment,
+  clientId: optional(z.uuid('должен быть идентификатором')),
+  partnerId: optional(z.uuid('должен быть идентификатором')),
   limit: z
     .string()
     .optional()

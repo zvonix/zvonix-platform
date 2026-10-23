@@ -121,7 +121,10 @@ const LEASE_MS = 5 * 60_000;
 
 export interface MessageFilter {
   readonly clientId?: Id<'client'>;
+  readonly partnerId?: Id<'partner'>;
   readonly status?: MessageStatus;
+  readonly from?: Date;
+  readonly to?: Date;
   readonly limit: number;
   readonly offset: number;
 }
@@ -222,7 +225,10 @@ export class MessagesRepository {
   async list(filter: MessageFilter): Promise<{ rows: MessageRow[]; total: number }> {
     const where = and(
       filter.clientId === undefined ? undefined : eq(messages.clientId, filter.clientId),
+      filter.partnerId === undefined ? undefined : eq(messages.partnerId, filter.partnerId),
       filter.status === undefined ? undefined : eq(messages.status, filter.status),
+      filter.from === undefined ? undefined : gte(messages.createdAt, filter.from),
+      filter.to === undefined ? undefined : lt(messages.createdAt, filter.to),
     );
     const rows = await this.database.db
       .select()

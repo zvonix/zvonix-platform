@@ -1,22 +1,17 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { Dialog as DialogPrimitive } from 'radix-ui';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 
 /**
- * Панель со значением, которое показывается **один раз**.
+ * Значение, которое показывается **один раз**: пароль SIP и SMPP, ключ API, команда установки узла.
  *
- * Таких значений в системе два рода — пароль SIP и команда установки узла, — и общее
- * у них не оформление, а поведение: панель не сворачивается сама и не исчезает при
- * обновлении списка. Закрыть её должен человек, потому что закрытие здесь равносильно
- * потере значения.
+ * Окном поверх страницы, а не панелью в ней (владелец, 2026-10-22): панель возникала далеко от места действия, над
+ * таблицей, и её не замечали, уходя со страницы вместе с единственным показом. Окно закрывается только кнопкой —
+ * ни щелчок мимо, ни Esc его не убирают: закрытие здесь равносильно потере значения.
  *
- * Рамка предупреждения, а не обычная карточка: это не результат действия, а последняя
- * возможность его записать.
- *
- * При появлении панель прокручивается в поле зрения и берёт фокус: она может возникнуть
- * далеко от места действия — над таблицей, пока форма была внизу раскрытой строки, — и
- * человек, не увидев её, уходил со страницы вместе с единственным показом значения.
+ * Рамка предупреждения: это не результат действия, а последняя возможность его записать.
  */
 export function OneTimeSecret({
   title,
@@ -27,28 +22,30 @@ export function OneTimeSecret({
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    panelRef.current?.scrollIntoView({ block: 'nearest' });
-    panelRef.current?.focus({ preventScroll: true });
-  }, []);
-
   return (
-    <div
-      ref={panelRef}
-      role="region"
-      aria-label={title}
-      tabIndex={-1}
-      className="flex max-w-[720px] flex-col gap-2 rounded-md border border-warn bg-warn-soft p-3 outline-none"
-    >
-      <div className="flex items-baseline gap-3">
-        <h4 className="font-semibold">{title}</h4>
-        <Button variant="outline" size="sm" className="ml-auto" onClick={onClose}>
-          Записал, закрыть
-        </Button>
-      </div>
-      {children}
-    </div>
+    <Dialog open>
+      <DialogContent
+        aria-describedby={undefined}
+        onEscapeKeyDown={(event) => {
+          event.preventDefault();
+        }}
+        className="border-warn sm:max-w-[720px]"
+      >
+        <section
+          aria-label={title}
+          className="flex flex-col gap-2 overflow-y-auto rounded-xl bg-warn-soft p-4"
+        >
+          <div className="flex items-baseline gap-3">
+            <DialogTitle className="font-semibold">{title}</DialogTitle>
+            <DialogPrimitive.Close asChild>
+              <Button variant="outline" size="sm" className="ml-auto" onClick={onClose}>
+                Записал, закрыть
+              </Button>
+            </DialogPrimitive.Close>
+          </div>
+          {children}
+        </section>
+      </DialogContent>
+    </Dialog>
   );
 }

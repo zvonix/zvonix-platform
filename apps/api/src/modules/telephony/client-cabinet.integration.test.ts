@@ -357,7 +357,16 @@ describe('сводки (ADR-0059)', () => {
     ).json<Overview>();
     expect(overview.series).toHaveLength(7);
     expect(Object.keys(overview.totals).sort()).toEqual(
-      ['answered', 'calls', 'spent', 'talk_seconds'].sort(),
+      [
+        'answered',
+        'calls',
+        'spent',
+        'talk_seconds',
+        'messages',
+        'messages_delivered',
+        'messages_read',
+        'message_spent',
+      ].sort(),
     );
     expect(overview.totals).toMatchObject({ calls: 1, answered: 1, spent: '11.5' });
 
@@ -427,7 +436,16 @@ describe('сводки (ADR-0059)', () => {
       await get('/partner/reports/overview?days=7', as(partnerToken))
     ).json<Overview>();
     expect(Object.keys(overview.totals).sort()).toEqual(
-      ['answered', 'calls', 'earned', 'talk_seconds'].sort(),
+      [
+        'answered',
+        'calls',
+        'earned',
+        'talk_seconds',
+        'messages',
+        'messages_delivered',
+        'messages_read',
+        'message_earned',
+      ].sort(),
     );
     expect(overview.totals).toMatchObject({ answered: 1, earned: '10' });
 
@@ -481,7 +499,12 @@ describe('акт и выписка за месяц (ADR-0069)', () => {
     expect(statement.partial).toBe(true);
     expect(statement.totals).toMatchObject({ calls: 1, answered: 1, spent: '11.5' });
     expect(statement.series).toHaveLength(1);
-    expect(Object.keys(statement.breakdowns).sort()).toEqual(['channel', 'operator']);
+    expect(Object.keys(statement.breakdowns).sort()).toEqual([
+      'channel',
+      'message_channel',
+      'message_route',
+      'operator',
+    ]);
     expect(statement.charged).toBe('11.5');
 
     // Пополнение — в движении, списание за вызов — только цифрой «списано».
@@ -517,7 +540,12 @@ describe('акт и выписка за месяц (ADR-0069)', () => {
       await get(`/partner/statement?month=${thisMonth}&offset=0`, as(partnerToken))
     ).json<Statement>();
     expect(statement.totals).toMatchObject({ answered: 1, earned: '10' });
-    expect(Object.keys(statement.breakdowns).sort()).toEqual(['gateway', 'operator', 'sim']);
+    expect(Object.keys(statement.breakdowns).sort()).toEqual([
+      'gateway',
+      'message_account',
+      'operator',
+      'sim',
+    ]);
     expect(statement.charged).toBe('10');
     expect(JSON.stringify(statement)).not.toMatch(/client|spent|margin/u);
   }, 120_000);

@@ -5,9 +5,10 @@
  * Пароль отдаётся один раз — в ответе на создание и на смену. Дальше он нигде не читается.
  */
 
-import { Body, Controller, Get, Inject, Param, Patch, Post } from '@nestjs/common';
+import { isIP } from 'node:net';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post } from '@nestjs/common';
 import type { z } from 'zod';
-import { parseId, type Id, type SmppReceiptMap } from '@zvonix/shared';
+import { notFound, parseId, validationFailed, type Id, type SmppReceiptMap } from '@zvonix/shared';
 import { Cabinets, Roles } from '../../../http/auth.guard.js';
 import { CurrentUser } from '../../../http/request-context.js';
 import { zodBody } from '../../../http/zod.pipe.js';
@@ -172,6 +173,39 @@ export class StaffSmppController {
   @Get('smpp/accounts/:clientId/events')
   async events(@Param('clientId') clientId: string): Promise<{ events: SmppEventView[] }> {
     return { events: await this.smpp.eventsOf(parseId(clientId, 'client')) };
+  }
+
+  /** Журнал площадки: все подключения и входы с неизвестным именем (ADR-0096, дополнение 2026-10-23). */
+  @Roles('admin', 'support')
+  @Get('smpp/events')
+  async platformEvents() {
+    return { events: await this.smpp.platformEvents() };
+  }
+
+  /** Адреса на паузе за подбор пароля прямо сейчас. */
+  @Roles('admin', 'support')
+  @Get('smpp/blocked')
+  blocked() {
+    return {
+      blocked: this.server.blockedAddresses().map((row) => ({
+        ip: row.ip,
+        failures: row.failures,
+        until: row.until.toISOString(),
+      })),
+    };
+  }
+
+  /** Снять паузу раньше срока — например, клиент исправил пароль и не хочет ждать. */
+  @Roles('admin')
+  @Delete('smpp/blocked/:ip')
+  async release(
+    @CurrentUser() actor: Principal,
+    @Param('ip') ip: string,
+  ): Promise<{ released: true }> {
+    if (isIP(ip) === 0) throw validationFailed('Это не адрес IP');
+    if (!this.server.release(ip)) throw notFound('Этот адрес не на паузе');
+    await this.smpp.auditRelease(actor, ip);
+    return { released: true };
   }
 
   /** Отключение или возврат подключения клиента: пароль и адреса не трогаются. */

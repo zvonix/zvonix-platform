@@ -22,11 +22,14 @@ type OverviewQuery = z.infer<typeof overviewQuerySchema>;
 type BreakdownQuery = z.infer<typeof breakdownQuerySchema>;
 type StatementQuery = z.infer<typeof statementQuerySchema>;
 
-/** Общая часть каждого вида: вызовы, состоявшиеся, минуты разговора. */
+/** Общая часть каждого вида: вызовы, состоявшиеся, минуты разговора; сообщения MAX и доставленные. */
 const common = (metrics: Metrics) => ({
   calls: metrics.calls,
   answered: metrics.answered,
   talk_seconds: metrics.talkSeconds,
+  messages: metrics.messages,
+  messages_delivered: metrics.messagesDelivered,
+  messages_read: metrics.messagesRead,
 });
 
 const staffView = (metrics: Metrics) => ({
@@ -34,22 +37,35 @@ const staffView = (metrics: Metrics) => ({
   revenue: rubles(metrics.clientAmount),
   partner_cost: rubles(metrics.partnerAmount),
   margin: rubles(metrics.margin),
+  message_revenue: rubles(metrics.messageClientAmount),
+  message_partner_cost: rubles(metrics.messagePartnerAmount),
+  message_margin: rubles(metrics.messageMargin),
 });
 const clientView = (metrics: Metrics) => ({
   ...common(metrics),
   spent: rubles(metrics.clientAmount),
+  message_spent: rubles(metrics.messageClientAmount),
 });
 const partnerView = (metrics: Metrics) => ({
   ...common(metrics),
   earned: rubles(metrics.partnerAmount),
+  message_earned: rubles(metrics.messagePartnerAmount),
 });
 
-function overviewOf<T extends object>(overview: Overview, view: (metrics: Metrics) => T) {
+/** `botFeeSign` — знак книги платы за бота: у клиента она списание (минус), у площадки выручка (плюс); партнёру её нет. */
+function overviewOf<T extends object>(
+  overview: Overview,
+  view: (metrics: Metrics) => T,
+  botFeeSign: 1n | -1n | 0n,
+) {
   return {
     days: overview.days,
     from: overview.from.toISOString(),
     to: overview.to.toISOString(),
     totals: view(overview.totals),
+    ...(botFeeSign === 0n
+      ? {}
+      : { bot_fees: rubles(String(BigInt(overview.botFees) * botFeeSign)) }),
     series: overview.series.map((row) => ({ day: row.day, ...view(row) })),
   };
 }
@@ -115,7 +131,7 @@ export class ReportsController {
   @Get('reports/overview')
   async overview(@Query(zodQuery(overviewQuerySchema)) query: OverviewQuery) {
     const overview = await this.reports.overview({ kind: 'all' }, query.days, query.offset);
-    return overviewOf(overview, staffView);
+    return overviewOf(overview, staffView, 1n);
   }
 
   @Roles('admin', 'support')
@@ -137,7 +153,7 @@ export class ReportsController {
       query.days,
       query.offset,
     );
-    return overviewOf(overview, clientView);
+    return overviewOf(overview, clientView, -1n);
   }
 
   @Cabinets('client')
@@ -146,7 +162,7 @@ export class ReportsController {
     @CurrentUser() actor: Principal,
     @Query(zodQuery(breakdownQuerySchema)) query: BreakdownQuery,
   ) {
-    allow(query.by, ['operator', 'channel']);
+    allow(query.by, ['operator', 'channel', 'message_route', 'message_channel']);
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     const rows = await this.reports.breakdown(
       { kind: 'client', clientId: client.id },
@@ -201,7 +217,7 @@ export class ReportsController {
       query.days,
       query.offset,
     );
-    return overviewOf(overview, partnerView);
+    return overviewOf(overview, partnerView, 0n);
   }
 
   @Cabinets('partner')
@@ -210,7 +226,7 @@ export class ReportsController {
     @CurrentUser() actor: Principal,
     @Query(zodQuery(breakdownQuerySchema)) query: BreakdownQuery,
   ) {
-    allow(query.by, ['sim', 'gateway', 'operator']);
+    allow(query.by, ['sim', 'gateway', 'operator', 'message_account']);
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
     const rows = await this.reports.breakdown(
       { kind: 'partner', partnerId: partner.id },

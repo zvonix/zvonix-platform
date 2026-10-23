@@ -28,6 +28,7 @@ import {
   ReceiptText,
   Route,
   ScrollText,
+  MessagesSquare,
   Send,
   Shuffle,
   Server,
@@ -134,6 +135,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       title: 'Сообщения MAX',
       items: [
         { href: '/messaging', label: 'Аккаунты и бот', Icon: MessageSquare },
+        { href: '/smpp', label: 'SMPP', Icon: Plug },
         { href: '/message-report', label: 'Отчёты', Icon: BarChart3 },
         { href: '/message-stops', label: 'Не писать', Icon: BellOff },
       ],
@@ -201,6 +203,7 @@ const STAFF_NAVIGATION: Record<StaffRole, readonly NavGroup[]> = {
       title: 'Сообщения MAX',
       items: [
         { href: '/messaging', label: 'Аккаунты и бот', Icon: MessageSquare },
+        { href: '/smpp', label: 'SMPP', Icon: Plug },
         { href: '/message-report', label: 'Отчёты', Icon: BarChart3 },
         { href: '/message-stops', label: 'Не писать', Icon: BellOff },
       ],
@@ -263,7 +266,9 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
     {
       title: 'Сообщения MAX',
       items: [
-        { href: '/partner/send', label: 'Сообщения', Icon: Send },
+        // «Сообщения» — журнал, как «Вызовы» у звонков; отправка — отдельным пунктом (владелец, 2026-10-23: «всё одинаково»).
+        { href: '/partner/message-journal', label: 'Сообщения', Icon: MessagesSquare, tab: true },
+        { href: '/partner/send', label: 'Отправить', Icon: Send },
         { href: '/partner/messages', label: 'Аккаунты', Icon: MessageSquare },
         { href: '/partner/max-tariffs', label: 'Тарифы', Icon: ReceiptText },
         { href: '/partner/max-distribution', label: 'Распределение', Icon: Shuffle },

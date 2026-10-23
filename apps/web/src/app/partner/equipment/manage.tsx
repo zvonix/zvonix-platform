@@ -100,8 +100,10 @@ export function AddGateway() {
             onClose={() => {
               setCreated(undefined);
             }}
-          />
-          <GatewayLink id={created.id} />
+          >
+            {/* В окне, а не под ним: окно закрывает страницу, и ссылка рядом была недоступна (2026-10-23). */}
+            <GatewayLink id={created.id} />
+          </LineCredentials>
         </>
       )}
       {created !== undefined && created.lines.length === 0 && (

@@ -1,0 +1,5 @@
+ALTER TABLE "smpp_events" DROP CONSTRAINT "smpp_events_result_check";--> statement-breakpoint
+ALTER TABLE "smpp_events" ALTER COLUMN "account_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "smpp_events" ADD COLUMN "system_id" text;--> statement-breakpoint
+ALTER TABLE "smpp_events" ADD CONSTRAINT "smpp_events_owner_check" CHECK ("smpp_events"."account_id" is not null or ("smpp_events"."system_id" is not null and "smpp_events"."result" in ('unknown_login', 'ip_blocked')));--> statement-breakpoint
+ALTER TABLE "smpp_events" ADD CONSTRAINT "smpp_events_result_check" CHECK (("smpp_events"."kind" = 'bind' and "smpp_events"."result" in ('ok', 'wrong_password', 'ip_not_allowed', 'disabled', 'product_off', 'client_inactive', 'too_many_sessions', 'ip_blocked', 'unknown_login')) or ("smpp_events"."kind" = 'submit' and "smpp_events"."result" in ('invalid_destination', 'invalid_length', 'invalid_validity', 'wrong_mode', 'rejected', 'throttled', 'system_error')));

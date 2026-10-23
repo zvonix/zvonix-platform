@@ -4,6 +4,7 @@
  */
 
 import { sql } from 'drizzle-orm';
+import { Money, type Id } from '@zvonix/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
@@ -13,6 +14,7 @@ import {
   withDatabase,
 } from '../../testing/harness.js';
 import { bearer, fixtures } from './messaging.fixtures.js';
+import { BillingService } from '../billing/billing.service.js';
 import { MessagesService } from './messages.service.js';
 import { MessagingService } from './messaging.service.js';
 import { RedisService } from '../../infra/redis.js';
@@ -1296,8 +1298,16 @@ describe('акт клиента за месяц', () => {
     await send(client.token, { to: '79005550091', text: 'Дойдёт' });
     await send(client.token, { to: '79005550000', text: 'Не дойдёт' });
     await api().get(MessagesService).dispatchDue(new Date());
-
+    // Плата за бота — тоже `charge`, но не вызов и не сообщение: идёт строкой движения, иначе акт не сходится.
     const month = new Date().toISOString().slice(0, 7);
+    await api()
+      .get(BillingService)
+      .chargeBotFee({
+        clientId: client.clientId as Id<'client'>,
+        period: month,
+        amount: Money.fromMajorUnits('2'),
+      });
+
     const statement = (
       await api().inject({
         method: 'GET',
@@ -1317,10 +1327,10 @@ describe('акт клиента за месяц', () => {
       message_charged: '1.08',
       message_refunded: '0.54',
       charged: '0',
-      closing_balance: '9.46',
+      closing_balance: '7.46',
     });
-    // Сообщения не засоряют строки движения: пополнение — единственная строка.
-    expect(statement.movements).toHaveLength(1);
+    // Сообщения не засоряют строки движения: пополнение и плата за бота.
+    expect(statement.movements).toHaveLength(2);
     const moved = statement.movements.reduce((sum, row) => sum + Number(row.amount), 0);
     expect(
       Number(statement.opening_balance) +
@@ -1329,6 +1339,99 @@ describe('акт клиента за месяц', () => {
         Number(statement.message_charged) +
         Number(statement.message_refunded),
     ).toBeCloseTo(Number(statement.closing_balance), 6);
+  });
+});
+
+describe('сводки: MAX наравне со звонками', () => {
+  it('клиент и партнёр видят сообщения и деньги за них; возврат за неотправленное — ноль; плата за бота — у клиента', async () => {
+    const partner = await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    await send(client.token, { to: '79005550092', text: 'Дойдёт' });
+    await send(client.token, { to: '79005550000', text: 'Не дойдёт' });
+    await api().get(MessagesService).dispatchDue(new Date());
+    await api()
+      .get(BillingService)
+      .chargeBotFee({
+        clientId: client.clientId as Id<'client'>,
+        period: new Date().toISOString().slice(0, 7),
+        amount: Money.fromMajorUnits('2'),
+      });
+
+    const read = async (token: string, url: string) =>
+      (await api().inject({ method: 'GET', url, headers: bearer(token) })).json<{
+        totals: Record<string, unknown>;
+        bot_fees?: string;
+        rows?: Record<string, unknown>[];
+      }>();
+
+    const mine = await read(client.token, '/client/reports/overview?days=7&offset=0');
+    // Два сообщения приняты, одно не ушло — его цена вернулась: потрачено за одно.
+    expect(mine.totals).toMatchObject({ messages: 2, message_spent: '0.54', calls: 0 });
+    expect(mine.bot_fees).toBe('2');
+
+    const theirs = await read(partner.ownerToken, '/partner/reports/overview?days=7&offset=0');
+    // Недошедшее тоже прошло через его аккаунт — в счёте есть, а денег за него нет.
+    expect(theirs.totals).toMatchObject({ messages: 2, message_earned: '0.45' });
+    expect(theirs).not.toHaveProperty('bot_fees');
+
+    const routes = await read(
+      client.token,
+      '/client/reports/breakdown?days=7&offset=0&by=message_route',
+    );
+    expect(routes.rows).toEqual([expect.objectContaining({ key: 'account', messages: 2 })]);
+
+    // Клиент не видит аккаунты партнёров (ADR-0014).
+    const hidden = await api().inject({
+      method: 'GET',
+      url: '/client/reports/breakdown?days=7&offset=0&by=message_account',
+      headers: bearer(client.token),
+    });
+    expect(hidden.statusCode).toBe(400);
+  });
+});
+
+describe('журнал сообщений: отбор и журнал партнёра', () => {
+  it('партнёр видит только свои — без номера, текста и клиента; сотрудник отбирает по клиенту; период работает', async () => {
+    const partner = await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const other = await clientWithMoney('10');
+    await send(client.token, { to: '79005550093', text: 'Первый' });
+    await send(other.token, { to: '79005550094', text: 'Второй' });
+    await api().get(MessagesService).dispatchDue(new Date());
+
+    const journal = (
+      await api().inject({
+        method: 'GET',
+        url: '/partner/messages/journal',
+        headers: bearer(partner.ownerToken),
+      })
+    ).json<{ total: number; messages: Record<string, unknown>[] }>();
+    expect(journal.total).toBe(2);
+    for (const row of journal.messages) {
+      expect(row).not.toHaveProperty('to');
+      expect(row).not.toHaveProperty('text');
+      expect(row).not.toHaveProperty('client_id');
+      expect(row.earned).toBe('0.45');
+    }
+
+    const byClient = (
+      await api().inject({
+        method: 'GET',
+        url: `/messages?clientId=${client.clientId}`,
+        headers: bearer(adminToken),
+      })
+    ).json<{ total: number }>();
+    expect(byClient.total).toBe(1);
+
+    const future = new Date(Date.now() + 3_600_000).toISOString();
+    const none = (
+      await api().inject({
+        method: 'GET',
+        url: `/client/messages?from=${encodeURIComponent(future)}`,
+        headers: bearer(client.token),
+      })
+    ).json<{ total: number }>();
+    expect(none.total).toBe(0);
   });
 });
 

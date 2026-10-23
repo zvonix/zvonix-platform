@@ -92,10 +92,13 @@ export function LineCredentials({
   lines,
   title,
   onClose,
+  children,
 }: {
   lines: readonly PortAccount[];
   title: string;
   onClose: () => void;
+  /** Что делать дальше — например, ссылка на страницу шлюза. */
+  children?: ReactNode;
 }) {
   const server = lines[0]?.server ?? '';
   return (
@@ -133,6 +136,7 @@ export function LineCredentials({
           </tbody>
         </table>
       </div>
+      {children}
     </OneTimeSecret>
   );
 }

@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
-import { SectionTabs } from '@/components/section-tabs';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { Button } from '@/components/ui/button';
@@ -59,14 +58,9 @@ const STOP_OPTIONS: readonly (readonly [StopRequirement, string])[] = [
 export default function MyMaxAccountsPage() {
   return (
     <ConsoleShell title="Маршруты MAX" cabinet="client">
-      {() => (
-        <SectionTabs
-          tabs={[
-            { id: 'fit', label: 'Кто подходит', content: <Accounts /> },
-            { id: 'order', label: 'Очерёдность', content: <Priorities product="messages" /> },
-          ]}
-        />
-      )}
+      {/* Раскладка — как у «Маршрутов звонков»: требования, затем маршруты с очерёдностью; без вкладок. У MAX ниже ещё
+          аккаунты — маршрут здесь распадается на них (владелец, 2026-10-23: «примерно всё одно и то же»). */}
+      {() => <Accounts routes={<Priorities product="messages" />} />}
     </ConsoleShell>
   );
 }
@@ -76,7 +70,7 @@ export default function MyMaxAccountsPage() {
  * требования сверху — один раз, площадка соблюдает их при каждом выборе; ниже — все рабочие аккаунты под псевдонимами, с
  * причиной «не подходит» и ручным отключением. Подходящие — первыми.
  */
-function Accounts() {
+function Accounts({ routes }: { routes: React.ReactNode }) {
   const queryClient = useQueryClient();
   const answer = useQuery({
     queryKey: KEY,
@@ -112,6 +106,11 @@ function Accounts() {
   return (
     <div className="flex max-w-6xl flex-col gap-5">
       <RequirementsForm current={requirements} />
+
+      <section className="flex flex-col gap-2">
+        <h2 className="font-semibold">Маршруты</h2>
+        {routes}
+      </section>
 
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="font-semibold">Аккаунты</h2>

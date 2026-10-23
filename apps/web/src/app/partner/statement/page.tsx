@@ -7,14 +7,16 @@ const CONFIG: StatementConfig = {
   path: '/partner/statement',
   party: 'partner',
   moneyKey: 'earned',
+  messageMoneyKey: 'message_earned',
   moneyLabel: 'Начислено',
   balanceLabel: 'Причитается',
   chargedLabel: 'Начислено за вызовы',
   messageLabel: 'Начислено за сообщения MAX',
   dimensions: [
-    { by: 'operator', label: 'Операторы' },
-    { by: 'gateway', label: 'Шлюзы' },
-    { by: 'sim', label: 'SIM' },
+    { by: 'operator', label: 'Операторы', product: 'calls' },
+    { by: 'gateway', label: 'Шлюзы', product: 'calls' },
+    { by: 'sim', label: 'SIM', product: 'calls' },
+    { by: 'message_account', label: 'Аккаунты', product: 'messages' },
   ],
 };
 

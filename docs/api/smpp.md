@@ -118,6 +118,12 @@ id:<message_id> sub:001 dlvrd:001 submit date:ГГММДДччмм done date:Г�
 - `GET /smpp/accounts` (роли `admin`, `support`) → `{ "accounts": [{ "client_id", "client_name", "system_id", "enabled",
   "allowed_ips", "last_bind_at", "created_at" }] }`. Пароль не отдаётся никому, кроме клиента при создании.
 - `GET /smpp/accounts/:clientId/events` (роли `admin`, `support`) — журнал подключения клиента, как у клиента выше.
+- `GET /smpp/events` (роли `admin`, `support`) — журнал площадки: все события, новые сверху (до 300), с `client_name`; вход
+  под неизвестным именем — `result: "unknown_login"`, `client_name: null`, `system_id` — введённое имя (пароль не пишется).
+- `GET /smpp/blocked` (роли `admin`, `support`) → `{ "blocked": [{ "ip", "failures", "until" }] }` — адреса на паузе за подбор
+  пароля прямо сейчас. `DELETE /smpp/blocked/:ip` (роль `admin`) — снять паузу раньше срока; журнал `smpp_ip.released`;
+  адрес не на паузе — `404`, не адрес — `400`. В кабинете — раздел «SMPP» ([ADR-0096](../adr/0096-zhurnal-podklyucheniy-smpp.md),
+  дополнение 2026-10-23).
 - `PATCH /smpp/accounts/:clientId` (только `admin`) ← `{ "enabled": false }` — отключить подключение клиента (например,
   при подозрении на утечку пароля) или вернуть; пишется в журнал (`smpp_account.updated`). Открытые сессии доживают до
   разрыва, новые входы отклоняются (`ESME_RBINDFAIL`).

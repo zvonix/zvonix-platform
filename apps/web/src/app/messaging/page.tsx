@@ -13,7 +13,12 @@ import {
   type AccountRest,
 } from '@/components/messenger-status';
 import { BotPlatform } from './bot-platform';
-import { SmppEvents } from '@/components/smpp-events';
+import {
+  JournalFilters,
+  JournalPages,
+  journalSearch,
+  useJournalFilter,
+} from '@/components/message-journal';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
 import { Hint } from '@/components/hint';
@@ -30,6 +35,7 @@ import {
 } from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
+import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
 import { MESSAGE_FAILURE_NAME, MESSAGE_STATUS_NAME, messageTone } from '@/lib/labels';
 import { money } from '@/lib/money';
@@ -37,6 +43,7 @@ import type { PartnerRow } from '../partners/partner-row';
 
 interface StaffMessage {
   readonly id: string;
+  readonly client_id: string;
   readonly to: string;
   readonly status: string;
   readonly failure_reason: string | null;
@@ -296,7 +303,6 @@ function MessagingView() {
       </div>
 
       <BotPlatform />
-      <SmppConnections />
 
       <RecentMessages />
     </div>
@@ -305,17 +311,96 @@ function MessagingView() {
 
 /** Последние сообщения всех клиентов: статус и деньги по трём счетам; текст сотруднику не показывается. */
 function RecentMessages() {
+  const [filter, changeFilter] = useJournalFilter();
+  const [clientId, setClientId] = useState('');
+  const [partnerId, setPartnerId] = useState('');
+  const search = journalSearch(filter, { clientId, partnerId });
   const list = useQuery({
-    queryKey: ['messages', 'recent'],
+    queryKey: ['messages', 'recent', search.toString()],
     queryFn: ({ signal }) =>
-      request<{ messages: StaffMessage[]; total: number }>('/messages?limit=50', { signal }),
+      request<{ messages: StaffMessage[]; total: number }>(`/messages?${search.toString()}`, {
+        signal,
+      }),
     refetchInterval: 15_000,
   });
+  const clients = useQuery({
+    queryKey: ['clients', 'names'],
+    queryFn: ({ signal }) =>
+      request<{ clients: { id: string; name: string }[] }>('/clients?limit=200', { signal }),
+    staleTime: 60_000,
+  });
+  const partners = useQuery({
+    queryKey: ['partners', 'verified-list'],
+    queryFn: ({ signal }) =>
+      request<{ partners: PartnerRow[] }>('/partners?status=verified&limit=200', { signal }),
+  });
   const error = list.error instanceof ApiError ? list.error : undefined;
+  const clientName = (id: string): string =>
+    clients.data?.clients.find((client) => client.id === id)?.name ?? '';
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="font-semibold">Последние сообщения</h2>
+      <h2 className="font-semibold">Журнал сообщений</h2>
+      <JournalFilters
+        filter={filter}
+        onChange={changeFilter}
+        exportName="сообщения-max"
+        load={async () => {
+          const filters = journalSearch(filter, { clientId, partnerId });
+          filters.delete('offset');
+          const found = await loadAllRows<StaffMessage>('/messages', filters, 'messages');
+          return {
+            header: ['Когда', 'Клиент', 'Кому', 'Итог', 'Клиент, ₽', 'Партнёру, ₽', 'Площадке, ₽'],
+            rows: found.rows.map((message) => [
+              moment(message.created_at),
+              clientName(message.client_id),
+              message.to,
+              MESSAGE_STATUS_NAME[message.status] ?? message.status,
+              message.money.client,
+              message.money.partner,
+              message.money.margin,
+            ]),
+            truncated: found.truncated,
+          };
+        }}
+      >
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Клиент</span>
+          <select
+            value={clientId}
+            onChange={(event) => {
+              setClientId(event.target.value);
+              changeFilter({});
+            }}
+            className="h-9 w-[200px] rounded-md border border-input bg-transparent px-2"
+          >
+            <option value="">любой</option>
+            {(clients.data?.clients ?? []).map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground">Партнёр</span>
+          <select
+            value={partnerId}
+            onChange={(event) => {
+              setPartnerId(event.target.value);
+              changeFilter({});
+            }}
+            className="h-9 w-[200px] rounded-md border border-input bg-transparent px-2"
+          >
+            <option value="">любой</option>
+            {(partners.data?.partners ?? []).map((partner) => (
+              <option key={partner.id} value={partner.id}>
+                {partner.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </JournalFilters>
       {error !== undefined && <ErrorNote error={error} />}
       <div className="rounded-lg border border-border bg-card">
         <Table>
@@ -333,7 +418,7 @@ function RecentMessages() {
             {list.data?.messages.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={6} className="text-muted-foreground">
-                  Сообщений пока нет.
+                  По этому отбору сообщений нет.
                 </TableCell>
               </TableRow>
             )}
@@ -363,6 +448,7 @@ function RecentMessages() {
           </TableBody>
         </Table>
       </div>
+      <JournalPages filter={filter} total={list.data?.total} onChange={changeFilter} />
     </section>
   );
 }
@@ -461,128 +547,5 @@ function ManualForm() {
         />
       </DialogField>
     </DialogForm>
-  );
-}
-
-interface SmppConnection {
-  readonly client_id: string;
-  readonly client_name: string | null;
-  readonly system_id: string;
-  readonly enabled: boolean;
-  readonly allowed_ips: readonly string[];
-  readonly last_bind_at: string | null;
-  /** Сейчас на связи (ADR-0096). */
-  readonly online: readonly { ip: string }[];
-}
-
-/**
- * Подключения клиентов по SMPP ([ADR-0072](../../../../../docs/adr/0072-smpp-dlya-soobscheniy.md)): кто подключён и
- * когда заходил в последний раз. Администратор может отключить подключение (например, при подозрении на утечку
- * пароля) и вернуть его; пароль и адреса клиента он не видит и не меняет. Пока подключений нет, блока нет.
- */
-function SmppConnections() {
-  const canChange = useCanChange();
-  const queryClient = useQueryClient();
-  const list = useQuery({
-    queryKey: ['smpp', 'accounts'],
-    queryFn: ({ signal }) => request<{ accounts: SmppConnection[] }>('/smpp/accounts', { signal }),
-    refetchInterval: 30_000,
-  });
-  const toggle = useMutation({
-    mutationFn: (input: { clientId: string; enabled: boolean }) =>
-      request<unknown>(`/smpp/accounts/${input.clientId}`, {
-        method: 'PATCH',
-        body: { enabled: input.enabled },
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['smpp', 'accounts'] }),
-  });
-
-  const accounts = list.data?.accounts ?? [];
-  if (accounts.length === 0) return null;
-
-  return (
-    <section aria-label="Подключения по SMPP" className="flex flex-col gap-2">
-      <h2 className="font-semibold">Подключения клиентов по SMPP</h2>
-      <div className="rounded-lg border border-border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Клиент</TableHead>
-              <TableHead className="h-8">Имя входа</TableHead>
-              <TableHead className="h-8">Адреса</TableHead>
-              <TableHead className="h-8">Был на связи</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {accounts.map((account) => (
-              <TableRow key={account.client_id}>
-                <TableCell>{account.client_name ?? account.client_id}</TableCell>
-                <TableCell>
-                  <span className="num">{account.system_id}</span>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {account.allowed_ips.length === 0
-                    ? 'любые'
-                    : `ограничены: ${String(account.allowed_ips.length)}`}
-                </TableCell>
-                <TableCell>
-                  {account.online.length > 0 ? (
-                    <span className="text-ok" title={account.online.map((s) => s.ip).join(', ')}>
-                      сейчас на связи
-                    </span>
-                  ) : (
-                    <span className="num text-muted-foreground">
-                      {moment(account.last_bind_at)}
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell className={account.enabled ? 'text-ok' : 'text-warn'}>
-                  {account.enabled ? 'Включено' : 'Отключено'}
-                </TableCell>
-                <TableCell className="text-right">
-                  <span className="inline-flex items-center gap-2">
-                    {/* Журнал подключения — и поддержке: «подключается ли программа клиента» (ADR-0096). */}
-                    <FormDialog
-                      label="Журнал"
-                      title={`Журнал SMPP: ${account.client_name ?? account.system_id}`}
-                      variant="outline"
-                      size="xs"
-                    >
-                      <SmppEvents url={`/smpp/accounts/${account.client_id}/events`} />
-                    </FormDialog>
-                    {canChange &&
-                      (account.enabled ? (
-                        <ConfirmAction
-                          label="Отключить"
-                          title={`Отключить SMPP клиента «${account.client_name ?? account.system_id}»`}
-                          consequence="Новые подключения клиента будут отклоняться, пока вы не включите его снова. Открытые сессии доживут до разрыва."
-                          confirmLabel="Отключить"
-                          size="xs"
-                          onConfirm={() =>
-                            toggle.mutateAsync({ clientId: account.client_id, enabled: false })
-                          }
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={toggle.isPending}
-                          onClick={() => {
-                            toggle.mutate({ clientId: account.client_id, enabled: true });
-                          }}
-                          className="min-h-7 rounded-md border border-border px-2 hover:bg-muted"
-                        >
-                          Включить
-                        </button>
-                      ))}
-                  </span>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </section>
   );
 }

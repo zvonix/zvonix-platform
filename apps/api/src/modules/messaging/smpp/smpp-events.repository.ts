@@ -3,8 +3,8 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
-import { smppEvents } from '@zvonix/db/schema';
+import { and, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
+import { clients, smppAccounts, smppEvents } from '@zvonix/db/schema';
 import { newId, type SmppBindMode, type SmppEventKind } from '@zvonix/shared';
 import { DatabaseService } from '../../../infra/database.service.js';
 import type { SmppAccountRow } from './smpp.repository.js';
@@ -24,7 +24,9 @@ export class SmppEventsRepository {
    */
   async record(
     event: {
-      accountId: SmppAccountRow['id'];
+      accountId: SmppAccountRow['id'] | null;
+      /** Введённое имя — только у строк без подключения. */
+      systemId: string | null;
       kind: SmppEventKind;
       result: string;
       ip: string;
@@ -40,7 +42,9 @@ export class SmppEventsRepository {
         eq(
           smppEvents.id,
           sql`(select id from ${smppEvents} where ${and(
-            eq(smppEvents.accountId, event.accountId),
+            event.accountId === null
+              ? and(isNull(smppEvents.accountId), eq(smppEvents.systemId, event.systemId ?? ''))
+              : eq(smppEvents.accountId, event.accountId),
             eq(smppEvents.kind, event.kind),
             eq(smppEvents.result, event.result),
             eq(smppEvents.ip, event.ip),
@@ -64,6 +68,18 @@ export class SmppEventsRepository {
       .where(eq(smppEvents.accountId, accountId))
       .orderBy(desc(smppEvents.lastAt))
       .limit(limit);
+  }
+
+  /** Журнал площадки: все события, новые сверху, с клиентом подключения (у строк без подключения — пусто). */
+  async listAll(limit: number): Promise<(SmppEventRow & { clientName: string | null })[]> {
+    const rows = await this.database.db
+      .select({ event: smppEvents, clientName: clients.name })
+      .from(smppEvents)
+      .leftJoin(smppAccounts, eq(smppAccounts.id, smppEvents.accountId))
+      .leftJoin(clients, eq(clients.id, smppAccounts.clientId))
+      .orderBy(desc(smppEvents.lastAt))
+      .limit(limit);
+    return rows.map((row) => ({ ...row.event, clientName: row.clientName }));
   }
 
   /** Стирает события старше срока; возвращает, сколько. */

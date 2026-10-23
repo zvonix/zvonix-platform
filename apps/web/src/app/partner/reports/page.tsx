@@ -5,11 +5,12 @@ import { Report, type ReportConfig } from '@/components/report';
 
 const CONFIG: ReportConfig = {
   base: '/partner/reports',
-  money: [{ key: 'earned', label: 'Заработано' }],
+  money: [{ key: 'earned', messageKey: 'message_earned', label: 'Заработано' }],
   dimensions: [
-    { by: 'sim', label: 'SIM' },
-    { by: 'gateway', label: 'Шлюзы' },
-    { by: 'operator', label: 'Операторы' },
+    { by: 'sim', label: 'SIM', product: 'calls' },
+    { by: 'gateway', label: 'Шлюзы', product: 'calls' },
+    { by: 'operator', label: 'Операторы', product: 'calls' },
+    { by: 'message_account', label: 'Аккаунты', product: 'messages' },
   ],
 };
 

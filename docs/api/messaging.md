@@ -223,7 +223,8 @@ MAX либо нет связи; `retired` — списан (в списках е
 
 - `GET /client/messages/price` → `{ "enabled": true, "price": "0.54" }` — сколько сообщение стоит сейчас;
   `price: null` — принять некуда.
-- `GET /client/messages?status=&limit=&offset=` → `{ "messages": [ … ], "total": 3 }`.
+- `GET /client/messages?status=&from=&to=&limit=&offset=` → `{ "messages": [ … ], "total": 3 }`. `from`/`to` — моменты ISO
+  с поясом, период по `created_at` (то же у `GET /v1/messages`).
 - `POST /client/messages` `{ "to": "+7 900 123-45-67", "text": "…", "externalId": "…", "validMinutes": 5 }` → `201`
   `{ "message": { … } }` в состоянии `queued`. `validMinutes` (1–1440, необязательно) — срок сообщения: не ушло за это время —
   `wait_expired`, деньги возвращаются; действует меньшее из него и «сколько ждать» клиента ([ADR-0097](../adr/0097-zanyato-i-srok-soobshcheniya.md)).
@@ -241,9 +242,15 @@ MAX либо нет связи; `retired` — списан (в списках е
 
 ### Сотрудники
 
-`GET /messages?status=&limit=&offset=` (роли `admin`, `support`) → сообщения всех клиентов с деньгами
+`GET /messages?status=&from=&to=&clientId=&partnerId=&limit=&offset=` (роли `admin`, `support`) → сообщения всех клиентов с деньгами
 по трём счетам (`money.client`, `money.partner`, `money.margin`), `partner_id`, `account_id`, `attempts`.
 **Текст сотруднику не отдаётся**: разбору хватает получателя, статуса и денег.
+
+### Партнёр
+
+`GET /partner/messages/journal?status=&from=&to=&limit=&offset=` (кабинет партнёра) → `{ messages: [{ id, account_id, status,
+failure_reason, earned, created_at, delivered_at, read_at }], total }` — сообщения через его аккаунты и начисленное
+(`earned`; не отправлено — `0`). Получателя, текста и клиента нет ([ADR-0014](../adr/0014-vybor-partnera-klientom.md)).
 
 ### Приём статусов от провайдера
 
