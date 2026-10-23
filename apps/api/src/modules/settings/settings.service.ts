@@ -201,6 +201,11 @@ export class SettingsService {
     readonly precheckEnabled: boolean;
     readonly precheckExistsDays: number;
     readonly precheckAbsentDays: number;
+    /** «Молчащий получатель» (ADR-0088, ревизия 2026-10-23): порог серии и ступени паузы; `after` 0 — не проверять. */
+    readonly dormant: {
+      readonly after: number;
+      readonly pauseDays: readonly [number, number, number];
+    };
     readonly accountsPerPartnerMax: number;
     readonly healthEnabled: boolean;
     readonly healthMinSample: number;
@@ -227,6 +232,14 @@ export class SettingsService {
       precheckEnabled: this.flag(values, 'messages.precheck_enabled'),
       precheckExistsDays: this.number(values, 'messages.precheck_exists_days'),
       precheckAbsentDays: this.number(values, 'messages.precheck_absent_days'),
+      dormant: {
+        after: this.number(values, 'messages.dormant_after'),
+        pauseDays: [
+          this.number(values, 'messages.dormant_pause_1_days'),
+          this.number(values, 'messages.dormant_pause_2_days'),
+          this.number(values, 'messages.dormant_pause_3_days'),
+        ],
+      },
       accountsPerPartnerMax: this.number(values, 'messages.accounts_per_partner_max'),
       healthEnabled: this.flag(values, 'messages.health_enabled'),
       healthMinSample: this.number(values, 'messages.health_min_sample'),

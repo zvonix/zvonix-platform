@@ -39,6 +39,7 @@ import { TemplatesService } from './templates.service.js';
 import { AccountPicker } from './account-picker.js';
 import { defaultBusyMode, RequirementsService } from './requirements.service.js';
 import { commissionOf } from './commission.js';
+import { dormantStep, UNREAD_AFTER_MS } from './dormant.js';
 import { accountReadyAt, withRecommended } from './warmup.js';
 import {
   MessagesRepository,
@@ -267,6 +268,7 @@ export class MessagesService {
     if (viaBot === undefined && (await this.knownAbsent(recipient))) {
       throw conflict('У получателя нет MAX', { details: { reason: 'recipient_not_in_max' } });
     }
+    if (viaBot === undefined) await this.assertNotDormant(recipient, now);
     // Предел на номер — только для аккаунтов партнёров: бот пишет подписчику, который сам его позвал, и жалоб на
     // аккаунт от этого не бывает.
     if (viaBot === undefined) await this.assertRecipientLimit(clientId, recipient);
@@ -391,6 +393,29 @@ export class MessagesService {
   /** Сколько сообщений принято с `since` и сколько из них окончательно не отправлено — для тревоги. */
   health(since: Date): Promise<{ total: number; failed: number }> {
     return this.repository.healthSince(since);
+  }
+
+  /**
+   * «Молчащий получатель» (ADR-0088, ревизия 2026-10-23): номер подряд не читает сообщения через аккаунты — пауза, отказ до
+   * списания. Программа клиента тут же отправит SMS, а аккаунт партнёра не копит непрочитанное. Порог 0 — не проверяем.
+   */
+  private async assertNotDormant(recipient: string, now: Date): Promise<void> {
+    const { dormant } = await this.settings.messaging();
+    if (dormant.after <= 0) return;
+    const maturedBefore = new Date(now.getTime() - UNREAD_AFTER_MS);
+    const step = dormantStep(
+      await this.repository.unreadStreak(recipient, maturedBefore),
+      dormant.after,
+      dormant.pauseDays,
+    );
+    if (step === undefined) return;
+    const at = await this.repository.unreadAt(recipient, maturedBefore, step.position);
+    if (at === undefined) return;
+    const until = new Date(at.getTime() + UNREAD_AFTER_MS + step.days * 86_400_000);
+    if (until <= now) return;
+    throw conflict('Получатель давно не читает MAX', {
+      details: { reason: 'recipient_inactive', until: until.toISOString() },
+    });
   }
 
   /**

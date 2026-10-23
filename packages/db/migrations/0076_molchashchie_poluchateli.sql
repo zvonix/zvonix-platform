@@ -1,0 +1,1 @@
+CREATE INDEX "messages_recipient_account_idx" ON "messages" USING btree ("recipient","created_at") WHERE "messages"."route" = 'account';

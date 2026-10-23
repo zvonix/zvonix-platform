@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { ApiError } from '@/lib/api';
 
 /**
@@ -45,6 +46,7 @@ export function FormDialog({
   disabled = false,
   className,
   wide = false,
+  tooltip,
   children,
 }: {
   /** Подпись кнопки, открывающей окно. Без неё окно открывает вызывающий через `open`. */
@@ -55,11 +57,13 @@ export function FormDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   variant?: 'outline' | 'default' | 'secondary' | 'ghost';
-  size?: 'xs' | 'sm' | 'default';
+  size?: 'xs' | 'sm' | 'default' | 'icon-xs';
   disabled?: boolean;
   className?: string;
   /** Шире обычного — для таблицы внутри окна, например портов шлюза. */
   wide?: boolean;
+  /** Кнопка — значок без подписи: это её название для диктора и подсказка при наведении. */
+  tooltip?: string;
   children: ReactNode;
 }) {
   const [ownOpen, setOwnOpen] = useState(false);
@@ -75,17 +79,20 @@ export function FormDialog({
   return (
     <Dialog open={open} onOpenChange={change}>
       {label !== undefined && (
-        <DialogTrigger asChild>
-          <Button
-            type="button"
-            variant={variant}
-            size={size}
-            disabled={disabled}
-            className={className}
-          >
-            {label}
-          </Button>
-        </DialogTrigger>
+        <WithTooltip label={tooltip}>
+          <DialogTrigger asChild>
+            <Button
+              type="button"
+              variant={variant}
+              size={size}
+              disabled={disabled}
+              className={className}
+              aria-label={tooltip}
+            >
+              {label}
+            </Button>
+          </DialogTrigger>
+        </WithTooltip>
       )}
 
       <DialogContent className={wide ? 'sm:max-w-[760px]' : undefined}>

@@ -124,9 +124,12 @@ export function AccountTariffName({ account }: { account: Account }) {
   const own = list.find((tariff) => tariff.id === account.tariff_id);
   const fallback = list.find((tariff) => tariff.is_default);
   if (tariffs.isPending) return <span className="text-faint">загружаем…</span>;
+  // Свой тариф — просто название; общий партнёра — тем же названием, а что он общий — в подсказке (владелец, 2026-10-23:
+  // «по умолчанию —» растягивало столбец).
+  if (own !== undefined) return <span>{own.name}</span>;
   return (
-    <span>
-      {own?.name ?? (fallback === undefined ? 'по умолчанию' : `по умолчанию — ${fallback.name}`)}
+    <span title="Тариф партнёра по умолчанию: у аккаунта своего тарифа нет">
+      {fallback?.name ?? 'по умолчанию'}
     </span>
   );
 }

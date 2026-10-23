@@ -1486,6 +1486,93 @@ describe('известное «нет MAX» — отказ сразу', () => {
   });
 });
 
+describe('молчащий получатель (ADR-0088, ревизия 2026-10-23)', () => {
+  const DAY = 24 * 60 * MINUTE;
+  const TO = '79005550093';
+  const reasonOf = (response: Awaited<ReturnType<typeof send>>) =>
+    response.json<{ error: { details: { reason: string; until: string } } }>().error.details;
+
+  /** Все сообщения на номер — «доставлено», принятые подряд `ageDays` суток назад (с разницей в секунду). */
+  const deliveredAgo = (ageDays: number) =>
+    withDatabase(async (execute) => {
+      await execute(sql`update messages set status = 'delivered',
+        created_at = now() - make_interval(secs => ${ageDays * 86_400})
+          + (select count(*) from messages p where p.recipient = messages.recipient and p.id < messages.id) * interval '1 second'
+        where recipient = ${TO}`);
+    });
+
+  async function sendSeveral(token: string, count: number, from = 0) {
+    for (let index = from; index < from + count; index += 1) {
+      expect((await send(token, { to: TO, text: `Сообщение ${String(index)}` })).statusCode).toBe(
+        201,
+      );
+    }
+    await api().get(MessagesService).dispatchDue(new Date());
+  }
+
+  afterAll(async () => {
+    await put(adminToken, { 'messages.dormant_after': 0 });
+  });
+
+  it('не прочитал подряд — пауза 10, потом 20 суток; прочитал — сброс; свежие и выключенная проверка не считаются', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('20');
+    const other = await clientWithMoney('20');
+
+    // Выключено по умолчанию: молчание не проверяется вовсе.
+    await sendSeveral(client.token, 3);
+    await deliveredAgo(2);
+    expect((await send(client.token, { to: TO, text: 'Выключено' })).statusCode).toBe(201);
+
+    expect((await put(adminToken, { 'messages.dormant_after': 3 })).statusCode).toBe(200);
+    await withDatabase((execute) => execute(sql`delete from messages`));
+    await sendSeveral(client.token, 3);
+
+    // Свежие (младше суток) ещё могут прочитать — не в счёт.
+    await deliveredAgo(0);
+    expect((await send(client.token, { to: TO, text: 'Свежие' })).statusCode).toBe(201);
+    await withDatabase((execute) => execute(sql`delete from messages where text = 'Свежие'`));
+
+    // Три доставленных и не прочитанных за сутки — отказ без списания, и у другого клиента тоже: молчит человек.
+    await deliveredAgo(2);
+    const before = await balance(client.token);
+    const refused = await send(client.token, { to: TO, text: 'Четвёртое' });
+    expect(refused.statusCode).toBe(409);
+    const details = reasonOf(refused);
+    expect(details.reason).toBe('recipient_inactive');
+    // Пауза от «созревания» третьего: принят 2 суток назад + сутки + 10 суток.
+    const until = new Date(details.until).getTime();
+    expect(Math.abs(until - (Date.now() - 2 * DAY + DAY + 10 * DAY))).toBeLessThan(MINUTE);
+    expect(await balance(client.token)).toBe(before);
+    expect(reasonOf(await send(other.token, { to: TO, text: 'Другой клиент' })).reason).toBe(
+      'recipient_inactive',
+    );
+
+    // Прочитал последнее — серия обнулилась.
+    await withDatabase((execute) =>
+      execute(sql`update messages set status = 'read'
+        where id = (select id from messages where recipient = ${TO} order by created_at desc limit 1)`),
+    );
+    expect((await send(client.token, { to: TO, text: 'Прочитал' })).statusCode).toBe(201);
+    await withDatabase((execute) => execute(sql`delete from messages`));
+
+    // Первая пауза прошла (12 суток назад + сутки + 10 < сейчас) — пишем снова.
+    await sendSeveral(client.token, 3);
+    await deliveredAgo(12);
+    expect((await send(client.token, { to: TO, text: 'Пауза прошла' })).statusCode).toBe(201);
+    await withDatabase((execute) => execute(sql`delete from messages where text = 'Пауза прошла'`));
+
+    // Снова три молчания после первой паузы — вторая ступень, 20 суток.
+    await sendSeveral(client.token, 3, 3);
+    await deliveredAgo(2);
+    const second = reasonOf(await send(client.token, { to: TO, text: 'Вторая' }));
+    expect(second.reason).toBe('recipient_inactive');
+    expect(
+      Math.abs(new Date(second.until).getTime() - (Date.now() - 2 * DAY + DAY + 20 * DAY)),
+    ).toBeLessThan(MINUTE);
+  });
+});
+
 describe('текст — персональные данные', () => {
   it('по истечении срока хранения текст стирается, строка с суммами остаётся', async () => {
     await partnerWithAccount('0.45');

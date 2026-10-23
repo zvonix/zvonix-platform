@@ -533,6 +533,13 @@
       "when": 1792692212793,
       "tag": "0075_smpp_zhurnal_ploshchadki",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1792730015043,
+      "tag": "0076_molchashchie_poluchateli",
+      "breakpoints": true
     }
   ]
 }

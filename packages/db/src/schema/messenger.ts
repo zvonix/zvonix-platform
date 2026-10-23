@@ -354,6 +354,10 @@ export const messages = pgTable(
     index('messages_account_sent_idx').on(t.accountId, t.sentAt),
     // «Один получатель — один аккаунт» (ADR-0080): последнее сообщение клиента этому номеру.
     index('messages_recipient_idx').on(t.clientId, t.recipient, t.createdAt),
+    // «Молчащий получатель» (ADR-0088, ревизия 2026-10-23): серия непрочитанных у номера через всех клиентов.
+    index('messages_recipient_account_idx')
+      .on(t.recipient, t.createdAt)
+      .where(sql`${t.route} = 'account'`),
     // Очередь воркера: что ждёт отправки.
     index('messages_queue_idx')
       .on(t.nextAttemptAt)

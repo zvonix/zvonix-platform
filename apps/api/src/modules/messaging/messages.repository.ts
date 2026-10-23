@@ -623,6 +623,54 @@ export class MessagesRepository {
     return row?.n ?? 0;
   }
 
+  /**
+   * Серия непрочитанных у номера (ADR-0088, ревизия 2026-10-23): доставленные через аккаунты партнёров, принятые до `maturedBefore`,
+   * после последнего прочитанного им сообщения. Через всех клиентов: молчит человек, а не клиент.
+   */
+  async unreadStreak(recipient: string, maturedBefore: Date): Promise<number> {
+    const [row] = await this.database.db
+      .select({ n: count() })
+      .from(messages)
+      .where(this.unreadWhere(recipient, maturedBefore));
+    return row?.n ?? 0;
+  }
+
+  /** Когда принято `position`-е по счёту (с 1, от старых) непрочитанное серии; нет такого — `undefined`. */
+  async unreadAt(
+    recipient: string,
+    maturedBefore: Date,
+    position: number,
+  ): Promise<Date | undefined> {
+    const [row] = await this.database.db
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(this.unreadWhere(recipient, maturedBefore))
+      .orderBy(asc(messages.createdAt), asc(messages.id))
+      .offset(position - 1)
+      .limit(1);
+    return row?.createdAt;
+  }
+
+  private unreadWhere(recipient: string, maturedBefore: Date) {
+    const lastRead = this.database.db
+      .select({ at: max(messages.createdAt) })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.recipient, recipient),
+          eq(messages.route, 'account'),
+          eq(messages.status, 'read'),
+        ),
+      );
+    return and(
+      eq(messages.recipient, recipient),
+      eq(messages.route, 'account'),
+      eq(messages.status, 'delivered'),
+      lt(messages.createdAt, maturedBefore),
+      sql`${messages.createdAt} > coalesce((${lastRead}), '-infinity'::timestamptz)`,
+    );
+  }
+
   /** Было ли такое же сообщение этому номеру от этого клиента не раньше `since` (неотклонённое). */
   async hasRecentDuplicate(
     clientId: Id<'client'>,
