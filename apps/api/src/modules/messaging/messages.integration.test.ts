@@ -1577,6 +1577,133 @@ describe('молчащий получатель (ADR-0088, ревизия 2026-1
   });
 });
 
+describe('отклонённые при приёме (ADR-0098)', () => {
+  interface JournalRow {
+    id: string;
+    kind: string;
+    status: string;
+    to: string;
+    failure_reason: string | null;
+  }
+  const journal = async (token: string, query: string) =>
+    (
+      await api().inject({
+        method: 'GET',
+        url: `/client/messages?${query}`,
+        headers: bearer(token),
+      })
+    ).json<{ total: number; messages: JournalRow[] }>();
+
+  it('отказ записывается с причиной; в журнале — только по переключателю, вперемешку по времени; партнёру и /v1 не виден', async () => {
+    const partner = await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    // Принятое — первым; затем номер без MAX: первое уходит и получает отказ, второе — отклонено при приёме.
+    expect((await send(client.token, { to: '79005550061', text: 'Принято' })).statusCode).toBe(201);
+    await send(client.token, { to: '79005550000', text: 'Первое' });
+    await api().get(MessagesService).dispatchDue(new Date());
+    expect((await send(client.token, { to: '79005550000', text: 'Второе' })).statusCode).toBe(409);
+
+    // По умолчанию — как прежде: только принятые.
+    const plain = await journal(client.token, 'limit=50');
+    expect(plain.total).toBe(2);
+    expect(plain.messages.every((row) => row.kind === 'message')).toBe(true);
+
+    // С переключателем — три строки, новая сверху — отклонённая, с причиной и без текста.
+    const all = await journal(client.token, 'limit=50&refused=1');
+    expect(all.total).toBe(3);
+    expect(all.messages[0]).toMatchObject({
+      kind: 'refused',
+      status: 'refused',
+      to: '79005550000',
+      failure_reason: 'recipient_not_in_max',
+    });
+    // Страницы — общие: вторая страница по одной строке продолжает ту же ленту.
+    const second = await journal(client.token, 'limit=1&offset=1&refused=1');
+    expect(second.messages[0]?.id).toBe(all.messages[1]?.id);
+
+    // «Только отклонённые» и отбор по итогу.
+    const onlyRefused = await journal(client.token, 'limit=50&status=refused');
+    expect(onlyRefused.messages.map((row) => row.kind)).toEqual(['refused']);
+    const onlyFailed = await journal(client.token, 'limit=50&status=failed&refused=1');
+    expect(onlyFailed.messages.every((row) => row.kind === 'message')).toBe(true);
+
+    // Сотрудник видит отклонённое с клиентом; партнёру его нет — аккаунт не назначался.
+    const staff = (
+      await api().inject({
+        method: 'GET',
+        url: `/messages?clientId=${client.clientId}&refused=1`,
+        headers: bearer(adminToken),
+      })
+    ).json<{ messages: (JournalRow & { client_id: string })[] }>();
+    expect(staff.messages.find((row) => row.kind === 'refused')?.client_id).toBe(client.clientId);
+    const partnerJournal = (
+      await api().inject({
+        method: 'GET',
+        url: '/partner/messages/journal?refused=1',
+        headers: bearer(partner.ownerToken),
+      })
+    ).json<{ total: number }>();
+    expect(partnerJournal.total).toBe(2);
+
+    // Строка «За 7 суток» считает отклонённые.
+    const stats = (
+      await api().inject({
+        method: 'GET',
+        url: '/client/messages/route-stats?days=7',
+        headers: bearer(client.token),
+      })
+    ).json<{ refused: number }>();
+    expect(stats.refused).toBe(1);
+
+    // Номер — персональные данные: по сроку текстов строка стирается.
+    await api()
+      .get(MessagesService)
+      .purgeTexts(new Date(Date.now() + 400 * 24 * 60 * MINUTE));
+    expect((await journal(client.token, 'limit=50&status=refused')).total).toBe(0);
+  });
+
+  it('«не ушло»: не пробовали отправить — маршрута не нашлось; пробовали — MAX не ответил вовремя', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    const idle = (await send(client.token, { to: '79005550071', text: 'Ждёт' })).json<{
+      message: MessageView;
+    }>().message.id;
+    const tried = (await send(client.token, { to: '79005550072', text: 'Пробовали' })).json<{
+      message: MessageView;
+    }>().message.id;
+    await withDatabase((execute) =>
+      execute(sql`update messages set expires_at = now() - interval '1 minute',
+        attempts = case when id = ${tried} then 2 else 0 end
+        where id in (${idle}, ${tried})`),
+    );
+    await api().get(MessagesService).expireWaiting(new Date());
+    expect((await messageOf(client.token, idle))?.failure_reason).toBe('wait_expired');
+    expect((await messageOf(client.token, tried))?.failure_reason).toBe('provider_timeout');
+  });
+
+  it('приём учитывает паузу площадки, как отправка: «отказать сразу» отказывает, пока аккаунт на паузе', async () => {
+    await partnerWithAccount('0.45');
+    const client = await clientWithMoney('10');
+    await api().inject({
+      method: 'PUT',
+      url: '/client/messages/delivery',
+      headers: bearer(client.token),
+      payload: { busyMode: 'reject', maxWaitMinutes: null },
+    });
+    expect((await put(adminToken, { 'messages.pace_seconds': 600 })).statusCode).toBe(200);
+    try {
+      expect((await send(client.token, { to: '79005550081', text: 'Первое' })).statusCode).toBe(
+        201,
+      );
+      await api().get(MessagesService).dispatchDue(new Date());
+      const second = await send(client.token, { to: '79005550082', text: 'Второе' });
+      expect(second.statusCode).toBe(503);
+    } finally {
+      await put(adminToken, { 'messages.pace_seconds': 0 });
+    }
+  });
+});
+
 describe('текст — персональные данные', () => {
   it('по истечении срока хранения текст стирается, строка с суммами остаётся', async () => {
     await partnerWithAccount('0.45');

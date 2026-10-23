@@ -683,13 +683,31 @@ export const MESSAGE_STATUS_NAME: Record<string, string> = {
   delivered: 'Доставлено',
   read: 'Прочитано',
   failed: 'Не отправлено',
+  refused: 'Отклонено при приёме',
 };
 
 /** Почему не отправлено — нашими словами; деньги в таких случаях возвращаются. */
+/** Почему сообщение не принято (ADR-0098) — в журнале строкой «Отклонено при приёме». */
+export const MESSAGE_REFUSAL_NAME: Record<string, string> = {
+  all_busy: 'все маршруты заняты',
+  no_capacity: 'нет доступных маршрутов',
+  recipient_not_in_max: 'у получателя нет MAX',
+  recipient_inactive: 'получатель давно не читает MAX',
+  recipient_stopped: 'получатель ответил «СТОП»',
+  duplicate_message: 'такое же уже принято этому номеру',
+  recipient_limit: 'предел сообщений одному номеру',
+  insufficient_funds: 'не хватает денег на счёте',
+  requirements_unmet: 'под требования к аккаунтам никто не подходит',
+  bot_only: 'получатель не подписан на бота',
+  other: 'другая причина',
+};
+
 export const MESSAGE_FAILURE_NAME: Record<string, string> = {
   recipient_not_in_max: 'У получателя нет MAX',
   account_unavailable: 'Аккаунт отправки недоступен',
-  wait_expired: 'Не ушло за отведённое время',
+  // Две причины «не ушло» (ADR-0098): маршрута не нашлось за срок или MAX не принял вовремя.
+  wait_expired: 'Свободного маршрута не нашлось',
+  provider_timeout: 'MAX не ответил вовремя',
   platform: 'Сбой на нашей стороне',
   recipient_stopped: 'Получатель ответил «СТОП»',
 };

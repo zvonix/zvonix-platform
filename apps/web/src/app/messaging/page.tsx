@@ -24,6 +24,7 @@ import {
   stageColumns,
   StageHeads,
   useJournalFilter,
+  journalOutcome,
 } from '@/components/message-journal';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
@@ -43,7 +44,6 @@ import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
-import { MESSAGE_STATUS_NAME } from '@/lib/labels';
 import { money } from '@/lib/money';
 import type { PartnerRow } from '../partners/partner-row';
 
@@ -339,6 +339,7 @@ function RecentMessages() {
     <section className="flex flex-col gap-2">
       <h2 className="font-semibold">Журнал сообщений</h2>
       <JournalFilters
+        withRefused
         filter={filter}
         onChange={changeFilter}
         exportName="сообщения-max"
@@ -366,7 +367,7 @@ function RecentMessages() {
               message.attempts,
               clientName(message.client_id),
               message.to,
-              MESSAGE_STATUS_NAME[message.status] ?? message.status,
+              journalOutcome(message),
               message.money.client,
               message.money.partner,
               message.money.margin,

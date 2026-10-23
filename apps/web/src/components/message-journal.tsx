@@ -5,9 +5,15 @@ import { useState } from 'react';
 import { ExportButton, type ExportTable } from '@/components/export-button';
 import { PageNav } from '@/components/page-nav';
 import { PeriodInput } from '@/components/period-input';
+import { Switch } from '@/components/ui/switch';
 import { TableCell, TableHead } from '@/components/ui/table';
 import { moment } from '@/lib/format';
-import { MESSAGE_FAILURE_NAME, MESSAGE_STATUS_NAME, messageTone } from '@/lib/labels';
+import {
+  MESSAGE_FAILURE_NAME,
+  MESSAGE_REFUSAL_NAME,
+  MESSAGE_STATUS_NAME,
+  messageTone,
+} from '@/lib/labels';
 
 /** Строк журнала на страницу. */
 const JOURNAL_PAGE = 50;
@@ -17,6 +23,19 @@ export interface JournalFilter {
   readonly from: string;
   readonly to: string;
   readonly offset: number;
+  /** Показывать отклонённые при приёме (ADR-0098); по умолчанию нет, выбор помнится в браузере. */
+  readonly refused: boolean;
+}
+
+/** Где помнится переключатель «Показывать отклонённые при приёме». */
+const REFUSED_KEY = 'zvonix.journal-refused';
+
+function rememberedRefused(): boolean {
+  try {
+    return window.localStorage.getItem(REFUSED_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -24,9 +43,22 @@ export interface JournalFilter {
  * отбора и выгрузки, у вызовов всё это было (владелец, 2026-10-23).
  */
 export function useJournalFilter() {
-  const [filter, setFilter] = useState<JournalFilter>({ status: '', from: '', to: '', offset: 0 });
+  const [filter, setFilter] = useState<JournalFilter>(() => ({
+    status: '',
+    from: '',
+    to: '',
+    offset: 0,
+    refused: typeof window === 'undefined' ? false : rememberedRefused(),
+  }));
   /** Смена отбора возвращает на первую страницу; смена страницы — только страницу. */
   const change = (next: Partial<JournalFilter>): void => {
+    if (next.refused !== undefined) {
+      try {
+        window.localStorage.setItem(REFUSED_KEY, next.refused ? '1' : '0');
+      } catch {
+        // Хранилище браузера недоступно (частный режим) — выбор просто не запомнится.
+      }
+    }
     setFilter((current) => ({ ...current, offset: 0, ...next }));
   };
   return [filter, change] as const;
@@ -42,6 +74,7 @@ export function journalSearch(
     offset: String(filter.offset),
   });
   if (filter.status !== '') search.set('status', filter.status);
+  if (filter.refused) search.set('refused', '1');
   if (filter.from !== '') search.set('from', filter.from);
   if (filter.to !== '') search.set('to', filter.to);
   for (const [key, value] of Object.entries(extra)) if (value !== '') search.set(key, value);
@@ -53,12 +86,15 @@ export function JournalFilters({
   onChange,
   exportName,
   load,
+  withRefused = false,
   children,
 }: {
   filter: JournalFilter;
   onChange: (next: Partial<JournalFilter>) => void;
   exportName: string;
   load: () => Promise<ExportTable>;
+  /** Журнал умеет показывать отклонённые при приёме (клиент, сотрудники; у партнёра их нет). */
+  withRefused?: boolean;
   /** Свои отборы страницы — перед периодом. */
   children?: React.ReactNode;
 }) {
@@ -80,6 +116,7 @@ export function JournalFilters({
               {MESSAGE_STATUS_NAME[status] ?? status}
             </option>
           ))}
+          {withRefused && <option value="refused">Отклонено при приёме</option>}
         </select>
       </label>
       <PeriodInput
@@ -96,6 +133,17 @@ export function JournalFilters({
           onChange({ to });
         }}
       />
+      {withRefused && (
+        <label className="flex h-9 items-center gap-2">
+          <Switch
+            checked={filter.refused}
+            onCheckedChange={(refused) => {
+              onChange({ refused });
+            }}
+          />
+          <span>Показывать отклонённые при приёме</span>
+        </label>
+      )}
       <div className="ml-auto">
         <ExportButton name={exportName} load={load} />
       </div>
@@ -181,6 +229,20 @@ export function StageCells({
   /** Дописать «деньги возвращены» к причине отказа — клиенту. */
   readonly refundNote?: boolean;
 }) {
+  if (message.status === 'refused') {
+    return (
+      <TableCell colSpan={3} className="whitespace-normal">
+        <span className="rounded-md bg-muted px-2 py-0.5 text-muted-foreground">
+          Отклонено при приёме
+        </span>
+        {message.failure_reason !== null && (
+          <span className="pl-2 text-muted-foreground">
+            {MESSAGE_REFUSAL_NAME[message.failure_reason] ?? message.failure_reason}
+          </span>
+        )}
+      </TableCell>
+    );
+  }
   if (message.status === 'failed') {
     return (
       <TableCell colSpan={3} className="whitespace-normal">
@@ -243,4 +305,15 @@ export function stageColumns(message: MessageStages): string[] {
   return [message.sent_at, message.delivered_at, message.read_at].map((at) =>
     at === null ? '' : moment(at),
   );
+}
+
+/** Итог строки для выгрузки: состояние и, у отказов, причина — как в таблице. */
+export function journalOutcome(message: MessageStages): string {
+  const name = MESSAGE_STATUS_NAME[message.status] ?? message.status;
+  if (message.failure_reason === null) return name;
+  const reason =
+    message.status === 'refused'
+      ? MESSAGE_REFUSAL_NAME[message.failure_reason]
+      : MESSAGE_FAILURE_NAME[message.failure_reason];
+  return `${name}: ${reason ?? message.failure_reason}`;
 }

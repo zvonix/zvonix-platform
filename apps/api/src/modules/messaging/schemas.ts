@@ -202,6 +202,15 @@ export const messagesQuerySchema = z.object({
   offset: z.string().optional().transform(boundedOffset),
 });
 
+/**
+ * Журнал кабинета (клиент, сотрудники) — с отклонёнными при приёме (ADR-0098): `refused=1` — вместе с ними, `status=refused` —
+ * только они. Внешний `GET /v1/messages` идёт по `messagesQuerySchema` и не меняется.
+ */
+export const journalQuerySchema = messagesQuerySchema.extend({
+  status: optional(z.enum([...MESSAGE_STATUSES, 'refused'])),
+  refused: optional(z.enum(['1', 'true'])),
+});
+
 /** Список «не писать»: поиск по полному номеру и страница. */
 export const stopsQuerySchema = z.object({
   phone: optional(z.string().trim().max(30)),
