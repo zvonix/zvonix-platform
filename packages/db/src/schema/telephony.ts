@@ -81,6 +81,12 @@ export const gateways = pgTable(
     suspendedBy: text().$type<GatewaySuspendedBy>(),
 
     /**
+     * Когда состояние сменилось последний раз ([ADR-0100](../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)):
+     * порог отказов считает только после него, а снятый порогом шлюз партнёр включает после пробы, сделанной позже него.
+     */
+    statusChangedAt: timestamptz().notNull().defaultNow(),
+
+    /**
      * Имя учётной записи SIP: `gw-a1b2c3d4e5f6`. Уникально по всей платформе, потому что
      * realm один на всю платформу и шлюз может зарегистрироваться на любом узле.
      */
@@ -243,6 +249,9 @@ export const simCards = pgTable(
     iccid: text(),
 
     status: text().$type<SimStatus>().notNull().default('new'),
+
+    /** Когда состояние сменилось последний раз — как у шлюза (ADR-0100). */
+    statusChangedAt: timestamptz().notNull().defaultNow(),
 
     /** Куда SIM может звонить по тарифу. В v1 значение одно — только своя сеть. */
     networkScope: text().$type<SimNetworkScope>().notNull().default('own_network'),
@@ -663,10 +672,11 @@ export const testCalls = pgTable(
   {
     id: primaryId<'testCall'>(),
 
-    // Проба — диагностика карты: без карты она не значит ничего.
-    simCardId: idRef<'simCard'>()
-      .notNull()
-      .references(() => simCards.id, { onDelete: 'cascade' }),
+    /**
+     * Карта, с которой звонили. Пусто — проба SIP-транка: у него карт нет, набирается сам транк
+     * ([ADR-0100](../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)).
+     */
+    simCardId: idRef<'simCard'>().references(() => simCards.id, { onDelete: 'cascade' }),
 
     /** Владелец карты на момент пробы — по нему партнёр видит свои пробы. */
     partnerId: idRef<'partner'>()
@@ -677,8 +687,8 @@ export const testCalls = pgTable(
       .notNull()
       .references(() => gateways.id, { onDelete: 'cascade' }),
 
-    /** Номер порта на момент пробы: карту потом могут переставить. */
-    portNumber: integer().notNull(),
+    /** Номер порта на момент пробы: карту потом могут переставить. У пробы транка пусто, как и карта. */
+    portNumber: integer(),
 
     /** Узел, которому отдана команда. Выведенный узел запись не удаляет. */
     nodeId: idRef<'node'>().references(() => nodes.id, { onDelete: 'set null' }),
@@ -723,6 +733,16 @@ export const testCalls = pgTable(
     uniqueIndex('test_calls_one_dialing_per_sim')
       .on(t.simCardId)
       .where(sql`${t.status} = 'dialing'`),
+    // То же у транка: вторая проба заняла бы его линию и ничего не сказала бы о нём.
+    uniqueIndex('test_calls_one_dialing_per_trunk')
+      .on(t.gatewayId)
+      .where(sql`${t.status} = 'dialing' and ${t.simCardId} is null`),
+    check(
+      'test_calls_sim_and_port_together',
+      sql`(${t.simCardId} is null) = (${t.portNumber} is null)`,
+    ),
+    // Последняя проба шлюза или транка — для включения после пробы (ADR-0100).
+    index('test_calls_gateway_created_idx').on(t.gatewayId, t.createdAt),
     // Предел и последняя проба карты — по времени внутри карты.
     index('test_calls_sim_created_idx').on(t.simCardId, t.createdAt),
   ],

@@ -1,6 +1,7 @@
 /**
- * Тестовый звонок с SIM — партнёру со своих карт, администратору с любых
- * ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md), docs/api/partner.md,
+ * Тестовый звонок с SIM и через SIP-транк — партнёру со своих, администратору с любых
+ * ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md),
+ * [ADR-0100](../../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md), docs/api/partner.md,
  * docs/api/telephony.md).
  *
  * Запуск отвечает `202` сразу: дозвон идёт до сорока секунд, итог кабинет узнаёт
@@ -21,9 +22,10 @@ import { TestCallService } from './test-call.service.js';
 
 interface TestCallView {
   readonly id: string;
-  readonly sim_card_id: string;
+  /** Пусто — проба SIP-транка. */
+  readonly sim_card_id: string | null;
   readonly gateway_id: string;
-  readonly port_number: number;
+  readonly port_number: number | null;
   readonly destination: string;
   readonly status: TestCallStatus;
   readonly hangup_cause: string | null;
@@ -61,6 +63,23 @@ export class TestCallController {
   }
 
   @Cabinets('partner')
+  @Post('partner/sip-trunks/:id/test-call')
+  @HttpCode(202)
+  async partnerStartTrunk(
+    @Param('id') id: string,
+    @Body(zodBody(testCallSchema)) body: z.infer<typeof testCallSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ test_call: TestCallView }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const row = await this.testCalls.startTrunk(parseId(id, 'gateway'), body.destination, {
+      userId: actor.userId,
+      role: actor.role,
+      partnerId: partner.id,
+    });
+    return { test_call: toTestCallView(row) };
+  }
+
+  @Cabinets('partner')
   @Get('partner/test-calls/:id')
   async partnerGet(
     @Param('id') id: string,
@@ -81,6 +100,21 @@ export class TestCallController {
     @CurrentUser() actor: Principal,
   ): Promise<{ test_call: TestCallView }> {
     const row = await this.testCalls.start(parseId(id, 'simCard'), body.destination, {
+      userId: actor.userId,
+      role: actor.role,
+    });
+    return { test_call: toTestCallView(row) };
+  }
+
+  @Roles('admin')
+  @Post('sip-trunks/:id/test-call')
+  @HttpCode(202)
+  async adminStartTrunk(
+    @Param('id') id: string,
+    @Body(zodBody(testCallSchema)) body: z.infer<typeof testCallSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ test_call: TestCallView }> {
+    const row = await this.testCalls.startTrunk(parseId(id, 'gateway'), body.destination, {
       userId: actor.userId,
       role: actor.role,
     });

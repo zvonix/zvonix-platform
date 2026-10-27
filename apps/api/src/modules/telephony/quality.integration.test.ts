@@ -121,6 +121,17 @@ async function environment(): Promise<Environment> {
   ).json<{ channel: { id: string } }>().channel.id;
   await post(`/channels/${channel}/status`, { status: 'active' });
 
+  // Карта и шлюз работают давно: порог считает отказы только с последней смены состояния (ADR-0100), а вызовы
+  // ниже пишутся задним числом.
+  await withDatabase(async (execute) => {
+    await execute(
+      sql`update sim_cards set status_changed_at = now() - interval '1 day' where id = ${sim}`,
+    );
+    await execute(
+      sql`update gateways set status_changed_at = now() - interval '1 day' where id = ${gateway}`,
+    );
+  });
+
   return { partner, gateway, sim, channel, operator };
 }
 
@@ -341,6 +352,30 @@ describe('за что отключают', () => {
     expect(await simStatus(env.sim)).toBe('throttled');
   }, 120_000);
 
+  it('отказы до последней смены состояния не в счёт: включённая после пробы карта не снимается старыми', async () => {
+    const env = await environment();
+    await api().inject({ method: 'DELETE', url: '/failure-thresholds/gateway', headers: auth() });
+    await setThreshold('sim', 3, 60);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await recordCall(env, 'failed', { minutesAgo: 10 });
+    }
+    // Партнёр включил карту пять минут назад — отказы десятиминутной давности были до этого.
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update sim_cards set status_changed_at = now() - interval '5 minutes' where id = ${env.sim}`,
+      );
+    });
+    await recordCall(env, 'failed');
+    await sweep();
+    expect(await simStatus(env.sim)).toBe('active');
+
+    await recordCall(env, 'failed');
+    await recordCall(env, 'failed');
+    await sweep();
+    expect(await simStatus(env.sim)).toBe('throttled');
+  }, 120_000);
+
   it('записывает отключение в журнал: партнёр спросит «за что»', async () => {
     const env = await environment();
     await setThreshold('sim', 2, 60);
@@ -494,6 +529,60 @@ describe('качество для человека', () => {
       gateways: { subject_id: string; answered: number }[];
     }>().gateways;
     expect(rows.find((row) => row.subject_id === env.gateway)?.answered).toBe(1);
+  }, 120_000);
+});
+
+describe('ложный ответ транка (ADR-0100, п. 6)', () => {
+  /** Транк партнёра и отвеченные через него вызовы заданной длительности за последние минуты. */
+  async function trunkWithCalls(durations: readonly number[]): Promise<string> {
+    const env = await environment();
+    const trunk = (
+      await post('/sip-trunks', {
+        partnerId: env.partner,
+        nodeId,
+        name: unique('Провайдер'),
+        proxyHost: 'sip.provider.test',
+        registersOutbound: false,
+        maxConcurrentCalls: 5,
+      })
+    ).json<{ trunk: { id: string } }>().trunk.id;
+    await withDatabase(async (execute) => {
+      for (const duration of durations) {
+        await execute(sql`
+          insert into calls
+            (id, external_id, channel_id, node_id, destination, operator_id, gateway_id,
+             status, duration_seconds, started_at)
+          values (gen_random_uuid()::text::uuid, ${unique('call')}, ${env.channel}::uuid, ${nodeId}::uuid,
+                  ${nextMsisdn()}, ${env.operator}::uuid, ${trunk}::uuid,
+                  'completed', ${duration}, now() - interval '5 minutes')
+        `);
+      }
+    });
+    return trunk;
+  }
+
+  async function suspects(): Promise<string[]> {
+    const { QualityService } = await import('./quality.service.js');
+    const rows = await api()
+      .get(QualityService)
+      .shortAnswerTrunks(new Date(Date.now() - 3_600_000));
+    return rows.map((row) => row.gatewayId);
+  }
+
+  it('почти все отвеченные короче 3 секунд — подозрение', async () => {
+    const trunk = await trunkWithCalls([...Array<number>(28).fill(1), 40, 60]);
+    expect(await suspects()).toContain(trunk);
+  }, 120_000);
+
+  it('честные разговоры и малое число вызовов — не подозрение', async () => {
+    const honest = await trunkWithCalls([
+      ...Array<number>(20).fill(2),
+      ...Array<number>(15).fill(30),
+    ]);
+    const few = await trunkWithCalls(Array<number>(10).fill(1));
+    const found = await suspects();
+    expect(found).not.toContain(honest);
+    expect(found).not.toContain(few);
   }, 120_000);
 });
 

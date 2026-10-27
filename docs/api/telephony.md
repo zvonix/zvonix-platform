@@ -407,6 +407,11 @@ SIM не уникален»). Лимиты от этого не слабеют: 
 
 ---
 
+## `POST /sip-trunks/:id/test-call` — роль `admin`
+
+Проба через транк любого партнёра ([ADR-0100](../adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)) — как у партнёра
+([partner.md](partner.md), `POST /partner/sip-trunks/:id/test-call`), кроме `404` за чужой. Итог — `GET /test-calls/:id`.
+
 ## `POST /sim-cards/:id/test-call` — роль `admin`
 
 Тестовый звонок с любой карты ([ADR-0055](../adr/0055-testovyy-zvonok-s-sim.md)):

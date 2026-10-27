@@ -247,6 +247,12 @@ export const DEFAULT_TRUNK_CONCURRENT_CALLS = 10;
 export const MAX_TRUNK_CONCURRENT_CALLS = 1000;
 
 /**
+ * Сколько транков партнёр заводит сам (ADR-0100). Предел против опечатки в цикле или чужой программы с ключом
+ * партнёра, а не деловое ограничение: двадцать провайдеров у одного партнёра — уже не случайность.
+ */
+export const MAX_PARTNER_TRUNKS = 20;
+
+/**
  * Область действия порога отключения
  * ([ADR-0027](../../../docs/adr/0027-porog-otklyucheniya.md)).
  *

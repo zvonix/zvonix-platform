@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
@@ -38,14 +38,14 @@ import { EQUIPMENT_KEY, gatewayStateName, type Gateway, type Port, type Sim } fr
 const MAX_PORTS = 256;
 
 /** Общий хвост любого действия: перечитать оборудование целиком. */
-function useRefresh(): () => Promise<void> {
+export function useRefresh(): () => Promise<void> {
   const queryClient = useQueryClient();
   return async () => {
     await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEY });
   };
 }
 
-const asApiError = (error: unknown): ApiError | undefined =>
+export const asApiError = (error: unknown): ApiError | undefined =>
   error instanceof ApiError ? error : undefined;
 
 /**
@@ -263,7 +263,8 @@ function GatewayForm({ onCreate }: { onCreate: (draft: GatewayDraft) => Promise<
  * вызовы, удаление необратимо — оба с подтверждением, названным последствием.
  *
  * Показываются только переходы, которые API примет: кто выключил, решает, кто вправе
- * вернуть (ADR-0047). Отключённым площадкой или порогом партнёр не распоряжается вовсе.
+ * вернуть (ADR-0047). Отключённым площадкой партнёр не распоряжается; отключённое порогом
+ * включает сам после удачного тестового звонка (ADR-0100).
  */
 export function GatewayStatus({ gateway }: { gateway: Gateway }) {
   const refresh = useRefresh();
@@ -285,14 +286,27 @@ export function GatewayStatus({ gateway }: { gateway: Gateway }) {
     </span>
   );
 
+  if (gateway.status === 'suspended' && gateway.suspended_by === 'failure_threshold') {
+    return (
+      <AfterTestCall
+        badge={badge}
+        label="Включить шлюз"
+        hint="Много неудачных вызовов. Проверьте оборудование, сделайте тестовый звонок с любой карты шлюза — после удачного включите."
+        pending={change.isPending}
+        error={error}
+        onEnable={() => {
+          change.mutate('active');
+        }}
+      />
+    );
+  }
+
   if (gateway.status === 'suspended' && gateway.suspended_by !== 'partner') {
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {badge}
         <span className="text-muted-foreground">
-          {gateway.suspended_by === 'failure_threshold'
-            ? 'Много неудачных вызовов — проверьте оборудование и напишите площадке: включит администратор.'
-            : 'Включить или удалить этот шлюз может только администратор площадки.'}
+          Включить или удалить этот шлюз может только администратор площадки.
         </span>
       </div>
     );
@@ -343,6 +357,39 @@ export function GatewayStatus({ gateway }: { gateway: Gateway }) {
           onConfirm={() => change.mutateAsync('retired')}
         />
       </div>
+      {error !== undefined && <ErrorNote error={error} />}
+    </div>
+  );
+}
+
+/**
+ * Отключённое автоматом — карта, шлюз или SIP-провайдер (ADR-0100): что сделать и кнопка «Включить». Включит API только
+ * после удачного тестового звонка, сделанного позже отключения; иначе отказ с той же подсказкой виден здесь же.
+ */
+export function AfterTestCall({
+  badge,
+  label,
+  hint,
+  pending,
+  error,
+  onEnable,
+}: {
+  badge?: ReactNode;
+  label: string;
+  hint: string;
+  pending: boolean;
+  error: ApiError | undefined;
+  onEnable: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        {badge}
+        <Button size="sm" disabled={pending} onClick={onEnable}>
+          {label}
+        </Button>
+      </div>
+      <p className="max-w-64 whitespace-normal text-muted-foreground">{hint}</p>
       {error !== undefined && <ErrorNote error={error} />}
     </div>
   );
@@ -742,8 +789,8 @@ export function RemoveSim({ portId }: { portId: string }) {
 /**
  * Включить или удалить свою карту.
  *
- * Рисуется только то, что API примет. Заблокированную или придержанную площадкой карту
- * партнёр не трогает — это её рычаг; стоящую в порту не удалить, сначала её вынимают.
+ * Рисуется только то, что API примет. Заблокированную площадкой карту партнёр не трогает — это её рычаг; придержанную
+ * за неудачные вызовы включает сам после удачного тестового звонка (ADR-0100). Стоящую в порту не удалить, сначала её вынимают.
  */
 export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
   const refresh = useRefresh();
@@ -768,8 +815,21 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
 
   const error = asApiError(activate.error);
   if (sim.status === 'retired') return null;
-  if (sim.status === 'blocked' || sim.status === 'throttled') {
+  if (sim.status === 'blocked') {
     return <span className="text-muted-foreground">распоряжается администратор площадки</span>;
+  }
+  if (sim.status === 'throttled') {
+    return (
+      <AfterTestCall
+        label="Включить"
+        hint="Много неудачных вызовов. Проверьте карту и сделайте с неё тестовый звонок — после удачного включите."
+        pending={activate.isPending}
+        error={error}
+        onEnable={() => {
+          activate.mutate();
+        }}
+      />
+    );
   }
   // Включённая карта в порту действий здесь не имеет; вне шлюза её можно удалить
   // (владелец, 2026-09-29: «карты вне шлюза — как удалить?»).

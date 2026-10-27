@@ -17,7 +17,7 @@ interface Threshold {
 
 const SCOPES = [
   { scope: 'sim', name: 'SIM' },
-  { scope: 'gateway', name: 'Шлюз' },
+  { scope: 'gateway', name: 'Шлюз и SIP-провайдер' },
 ] as const;
 
 const KEY = ['failure-thresholds'] as const;
@@ -25,7 +25,9 @@ const KEY = ['failure-thresholds'] as const;
 /**
  * Автоотключение по отказам сети (ADR-0027). Считаются только отказы сети — не «не ответил»
  * и не причины платформы; доля состоявшихся на отключение не влияет. Вернуть объект в
- * строй может только администратор.
+ * строй может администратор, а партнёр — сам после удачного тестового звонка (ADR-0100).
+ * Порога нет — автоотключения нет вовсе, и это говорится прямо: на нём держится то, что
+ * оборудование партнёров никто не проверяет руками.
  */
 export function Thresholds() {
   const canChange = useCanChange();
@@ -39,6 +41,13 @@ export function Thresholds() {
     <section className="flex flex-col gap-2">
       <h2 className="font-semibold">Автоотключение при отказах сети</h2>
       {error !== undefined && <ErrorNote error={error} />}
+      {list.data !== undefined && list.data.thresholds.length < SCOPES.length && (
+        <p role="status" className="text-warn">
+          {list.data.thresholds.length === 0
+            ? 'Пороги не заданы — неисправные SIM, шлюзы и SIP-провайдеры не отключаются сами.'
+            : 'Задан не каждый порог — без него неисправное оборудование этого вида не отключается само.'}
+        </p>
+      )}
       {list.data !== undefined && (
         <ul className="flex flex-col gap-2">
           {SCOPES.map(({ scope, name }) => (

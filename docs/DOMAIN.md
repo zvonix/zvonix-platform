@@ -188,16 +188,18 @@ released          (звонок не состоялся или резерв ис
 ```
 new → active → throttled → blocked → retired
          ↑         │
-         └─────────┘   (включает только администратор; сама не возвращается)
+         └─────────┘   (администратор; партнёр — после отвеченной пробы; сама не возвращается)
 ```
 `throttled` ставит порог отказов сети или администратор. Автоматического возврата нет
-([ADR-0027](adr/0027-porog-otklyucheniya.md)), и партнёр придержанную карту не включает
-([ADR-0047](adr/0047-kto-vyklyuchil-shlyuz.md)).
+([ADR-0027](adr/0027-porog-otklyucheniya.md)). Партнёр включает придержанную карту сам, если после придержания с неё
+была отвеченная проба ([ADR-0100](adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)); `blocked` снимает только администратор. Порог считает отказы
+только с последней смены состояния (`status_changed_at`).
 
 ### Gateway
 ```
 pending → active → suspended(partner) → active          (партнёр сам)
-             └───→ suspended(admin | failure_threshold) → active   (только администратор)
+             └───→ suspended(admin) → active                (только администратор)
+             └───→ suspended(failure_threshold) → active    (администратор; партнёр — после отвеченной пробы, ADR-0100)
 suspended(partner) → suspended(admin)                   (администратор запирает)
 любое, кроме retired → retired                          (окончательно)
 ```

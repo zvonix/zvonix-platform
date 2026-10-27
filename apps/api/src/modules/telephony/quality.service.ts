@@ -16,6 +16,7 @@ import {
   QualityRepository,
   type FailureThresholdRow,
   type QualityRow,
+  type ShortAnswerRow,
 } from './quality.repository.js';
 import { TelephonyRepository } from './telephony.repository.js';
 
@@ -33,6 +34,9 @@ interface Suspension {
   readonly subjectId: string;
   readonly failures: number;
 }
+
+/** Признак ложного ответа: сколько отвеченных достаточно, что считать коротким и какая доля коротких подозрительна. */
+const SHORT_ANSWER_RULE = { minAnswered: 30, maxSeconds: 3, minShareBasisPoints: 8000 } as const;
 
 @Injectable()
 export class QualityService {
@@ -53,6 +57,14 @@ export class QualityService {
 
   async gateways(since: Date, partnerId?: Id<'partner'>): Promise<QualityView[]> {
     return (await this.repository.gatewayQuality(since, partnerId)).map(withRatios);
+  }
+
+  /**
+   * Транки, похожие на ложный ответ (ADR-0100, п. 6): за окно отвечено не меньше 30 вызовов, и 80 % из них короче 3 секунд.
+   * Только для письма администратору — автомат по ним ничего не отключает: у такси короткий отвеченный звонок бывает честным.
+   */
+  async shortAnswerTrunks(since: Date): Promise<ShortAnswerRow[]> {
+    return this.repository.shortAnswerTrunks(since, SHORT_ANSWER_RULE);
   }
 
   // --- Пороги ---------------------------------------------------------------------

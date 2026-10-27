@@ -335,6 +335,15 @@ export class NodesService {
       .flatMap((row) => (row.sipAddress === null ? [] : [row.sipAddress]));
   }
 
+  /**
+   * Узел для транка, который завёл партнёр (ADR-0100): работающий, иначе любой не списанный — к провайдеру регистрируемся
+   * мы, и поднять транк может любой узел. Пусто — узлов нет вовсе.
+   */
+  async trunkNode(): Promise<NodeRow | undefined> {
+    const rows = (await this.list()).filter((row) => row.status !== 'decommissioned');
+    return rows.find((row) => row.status === 'online' || row.status === 'degraded') ?? rows[0];
+  }
+
   async list(): Promise<NodeRow[]> {
     await this.retireSilent();
     return this.repository.list();

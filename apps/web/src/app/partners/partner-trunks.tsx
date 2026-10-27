@@ -2,9 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  DEFAULT_TRUNK_CONCURRENT_CALLS,
   GATEWAY_STATUSES,
-  MAX_TRUNK_CONCURRENT_CALLS,
   REGISTRABLE_GATEWAY_STATUSES,
   type GatewayStatus,
   type GatewaySuspendedBy,
@@ -12,9 +10,10 @@ import {
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
-import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { FormDialog } from '@/components/form-dialog';
+import { TestCallButton } from '@/components/test-call';
+import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -27,7 +26,6 @@ import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
 import { GATEWAY_STATUS_NAME, GATEWAY_SUSPENDED_BY_NAME, usableTone } from '@/lib/labels';
-import { integerFromInput } from '@/lib/money';
 
 const COLUMNS = 6;
 
@@ -148,9 +146,11 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
             className="ml-auto"
           >
             <NewTrunkForm
-              nodes={nodes.data ?? []}
-              nodesReady={nodes.isSuccess}
-              nodesError={asApiError(nodes.error)}
+              nodes={{
+                list: nodes.data ?? [],
+                ready: nodes.isSuccess,
+                error: asApiError(nodes.error),
+              }}
               onCreate={(body) => create.mutateAsync(body)}
             />
           </FormDialog>
@@ -257,16 +257,24 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
 
                 <TableCell>
                   {canChange && (
-                    <FormDialog
-                      label="Настроить"
-                      title={`Настроить транк «${trunk.name}»`}
-                      variant="outline"
-                    >
-                      <EditTrunkForm
-                        trunk={trunk}
-                        onSave={(changes) => update.mutateAsync({ id: trunk.id, changes })}
-                      />
-                    </FormDialog>
+                    <div className="flex flex-wrap gap-2">
+                      <FormDialog
+                        label="Настроить"
+                        title={`Настроить транк «${trunk.name}»`}
+                        variant="outline"
+                      >
+                        <EditTrunkForm
+                          trunk={trunk}
+                          onSave={(changes) => update.mutateAsync({ id: trunk.id, changes })}
+                        />
+                      </FormDialog>
+                      {trunk.status !== 'retired' && (
+                        <TestCallButton
+                          scope="admin"
+                          subject={{ kind: 'trunk', id: trunk.id, name: trunk.name }}
+                        />
+                      )}
+                    </div>
                   )}
                 </TableCell>
               </TableRow>
@@ -333,248 +341,5 @@ function TrunkStatus({
         />
       )}
     </div>
-  );
-}
-
-/** Заведение транка — поля окна «Новый транк»: адрес провайдера, способ доступа и ёмкость. */
-function NewTrunkForm({
-  nodes,
-  nodesReady,
-  nodesError,
-  onCreate,
-}: {
-  nodes: readonly Node[];
-  nodesReady: boolean;
-  nodesError: ApiError | undefined;
-  onCreate: (body: Record<string, unknown>) => Promise<unknown>;
-}) {
-  const [name, setName] = useState('');
-  const [nodeId, setNodeId] = useState('');
-  const [proxyHost, setProxyHost] = useState('');
-  const [registers, setRegisters] = useState(true);
-  const [username, setUsername] = useState('');
-  const [secret, setSecret] = useState('');
-  const [channels, setChannels] = useState(String(DEFAULT_TRUNK_CONCURRENT_CALLS));
-
-  const channelCount = integerFromInput(channels);
-  const channelsValid =
-    channelCount !== undefined && channelCount >= 1 && channelCount <= MAX_TRUNK_CONCURRENT_CALLS;
-  const ready =
-    name.trim().length >= 2 &&
-    nodeId !== '' &&
-    proxyHost.trim() !== '' &&
-    channelsValid &&
-    (!registers || (username.trim() !== '' && secret !== ''));
-
-  return (
-    <DialogForm
-      submitLabel="Добавить транк"
-      canSubmit={ready}
-      onSubmit={() =>
-        onCreate({
-          nodeId,
-          name: name.trim(),
-          proxyHost: proxyHost.trim(),
-          registersOutbound: registers,
-          ...(registers ? { outboundUsername: username.trim(), outboundSecret: secret } : {}),
-          maxConcurrentCalls: channelCount,
-        })
-      }
-    >
-      <DialogField label="Название">
-        <Input
-          placeholder="Транзит основной"
-          autoComplete="off"
-          autoFocus
-          value={name}
-          onChange={(event) => {
-            setName(event.target.value);
-          }}
-        />
-      </DialogField>
-
-      <DialogField label="Узел">
-        <select
-          value={nodeId}
-          disabled={!nodesReady}
-          onChange={(event) => {
-            setNodeId(event.target.value);
-          }}
-          className="h-9 rounded-md border border-input bg-transparent px-2"
-        >
-          <option value="">{nodesReady ? 'выберите' : 'загружаем узлы…'}</option>
-          {nodes.map((node) => (
-            <option key={node.id} value={node.id}>
-              {node.name}
-            </option>
-          ))}
-        </select>
-      </DialogField>
-
-      {nodesError !== undefined && (
-        <div className="sm:col-span-2">
-          <ErrorNote error={nodesError} />
-        </div>
-      )}
-
-      <DialogField label="Адрес провайдера">
-        <Input
-          className="num"
-          placeholder="sip.provider.ru:5060"
-          autoComplete="off"
-          spellCheck={false}
-          value={proxyHost}
-          onChange={(event) => {
-            setProxyHost(event.target.value);
-          }}
-        />
-      </DialogField>
-
-      <DialogField
-        label="Каналов"
-        hint={
-          channelsValid ? undefined : `Целое число от 1 до ${String(MAX_TRUNK_CONCURRENT_CALLS)}.`
-        }
-      >
-        <Input
-          className="num"
-          inputMode="numeric"
-          autoComplete="off"
-          value={channels}
-          onChange={(event) => {
-            setChannels(event.target.value);
-          }}
-        />
-      </DialogField>
-
-      <label className="flex items-center gap-2 sm:col-span-2">
-        <input
-          type="checkbox"
-          checked={registers}
-          onChange={(event) => {
-            setRegisters(event.target.checked);
-          }}
-        />
-        <span>Регистрироваться у провайдера</span>
-      </label>
-
-      {registers && (
-        <>
-          <DialogField label="Имя у провайдера">
-            <Input
-              className="num"
-              autoComplete="off"
-              spellCheck={false}
-              value={username}
-              onChange={(event) => {
-                setUsername(event.target.value);
-              }}
-            />
-          </DialogField>
-
-          <DialogField label="Пароль провайдера">
-            {/*
-              `new-password`: иначе браузер предложит сохранить эту пару как вход в кабинет,
-              а при следующей правке сам подставит пароль кабинета в поле провайдера.
-            */}
-            <Input
-              className="num"
-              type="password"
-              autoComplete="new-password"
-              value={secret}
-              onChange={(event) => {
-                setSecret(event.target.value);
-              }}
-            />
-          </DialogField>
-        </>
-      )}
-
-      <p className="text-muted-foreground sm:col-span-2">
-        Транк добавляется выключенным: включите его, когда провайдер подтвердит доступ. Пароль после
-        сохранения не показывается — его можно заменить, но не посмотреть.
-      </p>
-    </DialogForm>
-  );
-}
-
-/**
- * Правка транка — поля окна «Настроить».
- *
- * Пустое поле пароля означает «не трогать», а не «очистить»: правка адреса не должна
- * стирать учётные данные — транк перестал бы подниматься, и увидеть это можно было бы
- * только в логе узла.
- */
-function EditTrunkForm({
-  trunk,
-  onSave,
-}: {
-  trunk: Trunk;
-  onSave: (changes: Record<string, unknown>) => Promise<unknown>;
-}) {
-  const [proxyHost, setProxyHost] = useState(trunk.proxy_host);
-  const [channels, setChannels] = useState(String(trunk.max_concurrent_calls));
-  const [secret, setSecret] = useState('');
-
-  const channelCount = integerFromInput(channels);
-  const channelsValid =
-    channelCount !== undefined && channelCount >= 1 && channelCount <= MAX_TRUNK_CONCURRENT_CALLS;
-
-  const changes: Record<string, unknown> = {};
-  if (proxyHost.trim() !== trunk.proxy_host) changes.proxyHost = proxyHost.trim();
-  if (channelsValid && channelCount !== trunk.max_concurrent_calls) {
-    changes.maxConcurrentCalls = channelCount;
-  }
-  if (secret !== '') changes.outboundSecret = secret;
-  const dirty = Object.keys(changes).length > 0;
-
-  return (
-    <DialogForm
-      submitLabel="Сохранить"
-      canSubmit={dirty && channelsValid}
-      onSubmit={() => onSave(changes)}
-    >
-      <DialogField label="Адрес провайдера">
-        <Input
-          className="num"
-          autoComplete="off"
-          spellCheck={false}
-          autoFocus
-          value={proxyHost}
-          onChange={(event) => {
-            setProxyHost(event.target.value);
-          }}
-        />
-      </DialogField>
-
-      <DialogField
-        label="Каналов"
-        hint={
-          channelsValid ? undefined : `Целое число от 1 до ${String(MAX_TRUNK_CONCURRENT_CALLS)}.`
-        }
-      >
-        <Input
-          className="num"
-          inputMode="numeric"
-          autoComplete="off"
-          value={channels}
-          onChange={(event) => {
-            setChannels(event.target.value);
-          }}
-        />
-      </DialogField>
-
-      <DialogField label="Новый пароль провайдера" hint="Пусто — пароль остаётся прежним." wide>
-        <Input
-          className="num"
-          type="password"
-          autoComplete="new-password"
-          value={secret}
-          onChange={(event) => {
-            setSecret(event.target.value);
-          }}
-        />
-      </DialogField>
-    </DialogForm>
   );
 }

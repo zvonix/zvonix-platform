@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { PhoneOutgoing } from 'lucide-react';
 import { useState } from 'react';
 import type { TestCallStatus } from '@zvonix/shared';
 import { ErrorNote } from '@/components/error-note';
@@ -11,7 +12,8 @@ import { ApiError, request } from '@/lib/api';
 import { TEST_CALL_STATUS_TEXT, testCallFailureText } from '@/lib/labels';
 
 /**
- * Тестовый звонок с SIM ([ADR-0055](../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)) —
+ * Тестовый звонок с SIM ([ADR-0055](../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)) или через SIP-транк
+ * ([ADR-0100](../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)) —
  * одно окно на кабинет партнёра и на администратора: различаются только пути.
  *
  * Площадка звонит с карты на введённый номер; ответивший слышит пять коротких сигналов.
@@ -34,31 +36,52 @@ interface TestCall {
 /** Пути партнёра и администратора. */
 export type TestCallScope = 'partner' | 'admin';
 
-function paths(scope: TestCallScope, simId: string) {
+/** С чего звонить: с карты или через транк. */
+export type TestCallSubject =
+  | { readonly kind: 'sim'; readonly id: string; readonly msisdn: string }
+  | { readonly kind: 'trunk'; readonly id: string; readonly name: string };
+
+function paths(scope: TestCallScope, subject: TestCallSubject) {
+  const object = subject.kind === 'sim' ? 'sim-cards' : 'sip-trunks';
   return scope === 'partner'
-    ? { start: `/partner/sim-cards/${simId}/test-call`, read: '/partner/test-calls' }
-    : { start: `/sim-cards/${simId}/test-call`, read: '/test-calls' };
+    ? { start: `/partner/${object}/${subject.id}/test-call`, read: '/partner/test-calls' }
+    : { start: `/${object}/${subject.id}/test-call`, read: '/test-calls' };
 }
 
 export function TestCallButton({
   scope,
-  simId,
-  msisdn,
+  subject,
+  compact = false,
 }: {
   scope: TestCallScope;
-  simId: string;
-  msisdn: string;
+  subject: TestCallSubject;
+  /** Значок с подсказкой вместо подписи — для строки таблицы (DESIGN.md, «Кнопки-значки»). */
+  compact?: boolean;
 }) {
   const [callId, setCallId] = useState<string | undefined>(undefined);
 
   return (
     <FormDialog
-      label="Тестовый звонок"
-      variant="outline"
+      label={compact ? <PhoneOutgoing aria-hidden className="size-4" /> : 'Тестовый звонок'}
+      {...(compact
+        ? ({
+            tooltip: 'Тестовый звонок',
+            variant: 'ghost',
+            size: 'icon-xs',
+            className: 'size-7',
+          } as const)
+        : ({ variant: 'outline' } as const))}
       title="Тестовый звонок"
       description={
         <>
-          С карты <span className="num">{msisdn}</span>. Площадка за пробу ничего не списывает.
+          {subject.kind === 'sim' ? (
+            <>
+              С карты <span className="num">{subject.msisdn}</span>.
+            </>
+          ) : (
+            <>Через SIP-провайдера «{subject.name}».</>
+          )}{' '}
+          Площадка за пробу ничего не списывает.
         </>
       }
       onOpenChange={(open) => {
@@ -68,7 +91,7 @@ export function TestCallButton({
       {callId === undefined ? (
         <TestCallForm
           start={async (destination) => {
-            const started = await request<{ test_call: TestCall }>(paths(scope, simId).start, {
+            const started = await request<{ test_call: TestCall }>(paths(scope, subject).start, {
               method: 'POST',
               body: { destination },
             });
@@ -77,7 +100,7 @@ export function TestCallButton({
         />
       ) : (
         <TestCallResult
-          readPath={`${paths(scope, simId).read}/${callId}`}
+          readPath={`${paths(scope, subject).read}/${callId}`}
           onAgain={() => {
             setCallId(undefined);
           }}

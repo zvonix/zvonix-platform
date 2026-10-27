@@ -71,13 +71,19 @@ export interface Gateway {
   readonly ports: readonly Port[];
 }
 
-interface Trunk {
+/** SIP-провайдер партнёра (ADR-0039, ADR-0100): в коде это шлюз типа `sip_trunk`, без портов и карт. */
+export interface Trunk {
   readonly id: string;
   readonly name: string;
   readonly status: GatewayStatus;
+  /** Кто выключил — как у шлюза. */
+  readonly suspended_by: PartnerFacingSuspension | null;
+  /** Тариф провайдера; пусто — тариф по умолчанию. */
+  readonly tariff_id: string | null;
   readonly proxy_host: string;
   readonly registers_outbound: boolean;
   readonly outbound_username: string | null;
+  readonly has_secret: boolean;
   readonly max_concurrent_calls: number;
   readonly on_node: boolean;
 }
@@ -112,7 +118,7 @@ export function simsOf(equipment: Equipment | undefined): Sim[] {
  * `pending` — «Не включён»: «Ждёт» читалось как «ждёт площадку», хотя включает сам
  * партнёр (владелец, 2026-09-25).
  */
-export function gatewayStateName(gateway: Gateway): string {
+export function gatewayStateName(gateway: Pick<Gateway, 'status' | 'suspended_by'>): string {
   if (gateway.status === 'pending') return 'Не включён';
   return gateway.suspended_by === null
     ? GATEWAY_STATUS_NAME[gateway.status]
