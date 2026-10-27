@@ -1,8 +1,9 @@
 /**
- * Тестовый звонок с SIM ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
+ * Тестовый звонок с SIM ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)) и через SIP-транк
+ * ([ADR-0100](../../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)).
  *
- * Площадка сама звонит с выбранной карты через ESL узла. Проверяется ровно одно —
- * работают ли GOIP, линия и SIM: ни клиента, ни цены, ни оператора номера здесь нет,
+ * Площадка сама звонит с выбранной карты или через транк через ESL узла. Проверяется ровно одно —
+ * работают ли GOIP, линия и SIM или транк: ни клиента, ни цены, ни оператора номера здесь нет,
  * и звонок в деньгах не участвует.
  */
 
@@ -15,6 +16,7 @@ import {
   TEST_CALL_STALE_AFTER_MS,
   TESTABLE_SIM_STATUSES,
   type Id,
+  type Msisdn,
   type TestCallStatus,
   type UserRole,
 } from '@zvonix/shared';
@@ -25,8 +27,8 @@ import { BlockedNumberService } from '../catalog/blocked-numbers.service.js';
 import { NodesService } from '../nodes/nodes.service.js';
 import type { ParsedCdr } from './cdr-parse.js';
 import { statusFromHangupCause } from './cdr-parse.js';
-import { simDialTarget, simEndpoint } from './sim-dial.js';
-import { TelephonyRepository, type SimCardId } from './telephony.repository.js';
+import { simDialTarget, simEndpoint, trunkEndpoint } from './sim-dial.js';
+import { TelephonyRepository, type GatewayId, type SimCardId } from './telephony.repository.js';
 import { TestCallRepository, type TestCallId, type TestCallRow } from './test-call.repository.js';
 
 /** Сколько узел ждёт ответа абонента. Дольше — это уже не проба, а ожидание. */
@@ -94,11 +96,7 @@ export class TestCallService {
       );
     }
 
-    if ((await this.blocked.findBlock(destination)) !== undefined) {
-      throw conflict('Номер в чёрном списке площадки — на него не звонят', {
-        details: { reason: 'destination_blocked' },
-      });
-    }
+    await this.rejectBlocked(destination);
 
     const port = await this.telephony.findPortBySim(sim.id);
     if (port === undefined) {
@@ -145,9 +143,10 @@ export class TestCallService {
       // ограничение»); одна проба одновременно остаётся — вторая застала бы линию занятой.
       await this.telephony.lockSimCard(sim.id, tx);
       const now = Date.now();
-      await this.repository.expireStale(sim.id, new Date(now - TEST_CALL_STALE_AFTER_MS), tx);
+      const subject = { simCardId: sim.id };
+      await this.repository.expireStale(subject, new Date(now - TEST_CALL_STALE_AFTER_MS), tx);
 
-      const last = await this.repository.lastForSim(sim.id, tx);
+      const last = await this.repository.lastFor(subject, tx);
       if (last?.status === 'dialing') {
         throw conflict('С этой карты уже идёт тестовый звонок — дождитесь итога', {
           details: { reason: 'test_call_in_progress', test_call_id: last.id },
@@ -192,6 +191,96 @@ export class TestCallService {
     });
 
     return row;
+  }
+
+  /**
+   * Проба SIP-транка (ADR-0100): площадка звонит через транк так же, как звонит через него клиенту, — `sofia/gateway`
+   * на узле транка. Как и проба SIM, начинается сразу, итог дописывается в фоне.
+   */
+  async startTrunk(
+    gatewayId: GatewayId,
+    rawDestination: string,
+    actor: TestCallActor,
+  ): Promise<TestCallRow> {
+    const destination = parseMsisdn(rawDestination, 'destination');
+
+    const found = await this.telephony.findTrunk(gatewayId);
+    const gateway = found?.gateway;
+    if (
+      gateway === undefined ||
+      (actor.partnerId !== undefined && gateway.partnerId !== actor.partnerId)
+    ) {
+      throw notFound('SIP-провайдер не найден');
+    }
+    if (gateway.status === 'retired') {
+      throw conflict('SIP-провайдер удалён — через него не звонят', {
+        details: { reason: 'gateway_retired' },
+      });
+    }
+    await this.rejectBlocked(destination);
+
+    const nodeId = gateway.nodeId;
+    const esl = nodeId === null ? undefined : await this.nodes.eslTargetOf(nodeId);
+    if (nodeId === null || esl === undefined) {
+      throw conflict(
+        'Узел площадки пока не принимает команды на звонок — напишите администратору площадки',
+        { details: { reason: 'node_not_ready' } },
+      );
+    }
+
+    const row = await this.telephony.transaction(async (tx) => {
+      // Транк запирается, как карта: две пробы одновременно не пройдут проверку «идёт ли уже» вместе.
+      await this.telephony.lockGateway(gateway.id, tx);
+      const subject = { trunkId: gateway.id };
+      await this.repository.expireStale(
+        subject,
+        new Date(Date.now() - TEST_CALL_STALE_AFTER_MS),
+        tx,
+      );
+      const last = await this.repository.lastFor(subject, tx);
+      if (last?.status === 'dialing') {
+        throw conflict('Через этого провайдера уже идёт тестовый звонок — дождитесь итога', {
+          details: { reason: 'test_call_in_progress', test_call_id: last.id },
+        });
+      }
+      return this.repository.create(
+        {
+          simCardId: null,
+          partnerId: gateway.partnerId,
+          gatewayId: gateway.id,
+          portNumber: null,
+          nodeId,
+          destination,
+          sipUsername: gateway.sipUsername,
+          requestedBy: actor.userId,
+        },
+        tx,
+      );
+    });
+
+    await this.audit.record({
+      action: 'sip_trunk.test_call',
+      entityType: 'gateway',
+      entityId: gateway.id,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      after: { test_call_id: row.id, destination: maskPhone(destination) },
+    });
+
+    void this.dial(row.id, esl, trunkEndpoint(gateway.sipUsername, destination)).catch(
+      (cause: unknown) => {
+        this.logger.error('Итог тестового звонка не записан', cause, { test_call_id: row.id });
+      },
+    );
+    return row;
+  }
+
+  private async rejectBlocked(destination: Msisdn): Promise<void> {
+    if ((await this.blocked.findBlock(destination)) !== undefined) {
+      throw conflict('Номер в чёрном списке площадки — на него не звонят', {
+        details: { reason: 'destination_blocked' },
+      });
+    }
   }
 
   /** Проба с итогом, видимым человеку. Чужая для партнёра — «не найдена». */

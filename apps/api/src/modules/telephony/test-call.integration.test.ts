@@ -3,7 +3,7 @@
  * ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)).
  *
  * Узел заменён поддельным ESL: он принимает пароль и отвечает на `originate` заданным
- * ответом. Проверяется то, что без живого FreeSWITCH проверить можно: пароль ESL
+ * ответом. Здесь же — проба SIP-транка и включение отключённого автоматом после пробы (ADR-0100). Проверяется то, что без живого FreeSWITCH проверить можно: пароль ESL
  * хранится и отдаётся только своей машине, команда набирает ту же линию, что
  * маршрутизация, партнёр не дотягивается до чужих карт, предел держится, CDR пробы
  * принимается вне биллинга.
@@ -540,6 +540,220 @@ describe('тестовый звонок с SIM', () => {
       partner.token,
     );
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('SIP-провайдер партнёра и включение после пробы (ADR-0100)', () => {
+  let partner: { id: string; token: string };
+  let neighbour: { id: string; token: string };
+
+  beforeAll(async () => {
+    vi.spyOn(api().get(NodesService), 'eslTargetOf').mockImplementation(() =>
+      Promise.resolve({ host: '127.0.0.1', port: eslPort, password: ESL_PASSWORD }),
+    );
+    partner = await createPartner();
+    neighbour = await createPartner();
+  });
+
+  async function patch(url: string, payload: Record<string, unknown>, bearer: string) {
+    return api().inject({ method: 'PATCH', url, headers: as(bearer), payload });
+  }
+
+  async function createTrunk(bearer: string, proxyHost = '203.0.113.10:5060') {
+    return post(
+      '/partner/sip-trunks',
+      {
+        name: unique('Провайдер'),
+        proxyHost,
+        registersOutbound: true,
+        outboundUsername: 'acc-1',
+        outboundSecret: 'провайдерский-пароль',
+        maxConcurrentCalls: 5,
+      },
+      bearer,
+    );
+  }
+
+  async function trunkId(bearer: string): Promise<string> {
+    return (await createTrunk(bearer)).json<{ trunk: { id: string } }>().trunk.id;
+  }
+
+  /** Проба через транк или с карты, дождаться итога. */
+  async function probe(path: string, destination: string, reply: string): Promise<string> {
+    nextReply = reply;
+    const started = await post(path, { destination }, partner.token);
+    expect(started.statusCode).toBe(202);
+    const id = started.json<{ test_call: { id: string } }>().test_call.id;
+    return (await settled(id, partner.token, '/partner/test-calls')).status;
+  }
+
+  const enable = (path: string) => post(path, { status: 'active' }, partner.token);
+
+  it('партнёр сам заводит провайдера: узел выбран площадкой, транк не включён, пароль не отдаётся', async () => {
+    const created = await createTrunk(partner.token);
+    expect(created.statusCode).toBe(201);
+    const trunk = created.json<{ trunk: { id: string; status: string; node_id: string } }>().trunk;
+    expect(trunk.status).toBe('pending');
+    // Узел выбрала площадка: в наборе их несколько, важно, что он назначен.
+    expect(trunk.node_id).toEqual(expect.any(String));
+    expect(created.body).not.toContain('провайдерский-пароль');
+
+    const equipment = (await get('/partner/equipment', partner.token)).json<{
+      trunks: { id: string; has_secret: boolean; suspended_by: string | null }[];
+    }>();
+    expect(equipment.trunks.find((row) => row.id === trunk.id)).toMatchObject({
+      has_secret: true,
+      suspended_by: null,
+    });
+
+    expect((await enable(`/partner/gateways/${trunk.id}/status`)).statusCode).toBe(201);
+  });
+
+  it.each(['127.0.0.1', '10.0.0.7:5060', '192.168.1.1', 'localhost'])(
+    'внутренний адрес %s не принимается — узел пошёл бы во внутреннюю сеть площадки',
+    async (host) => {
+      const response = await createTrunk(partner.token, host);
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ error: { message: string } }>().error.message).toMatch(/внутренний/u);
+    },
+  );
+
+  it('правка: чужой провайдер — 404, внутренний адрес — 400, внешний — сохраняется', async () => {
+    const id = await trunkId(partner.token);
+    const path = `/partner/sip-trunks/${id}`;
+    expect((await patch(path, { maxConcurrentCalls: 7 }, neighbour.token)).statusCode).toBe(404);
+    expect((await patch(path, { proxyHost: '10.1.1.1' }, partner.token)).statusCode).toBe(400);
+    const saved = await patch(path, { proxyHost: '198.51.100.20:5070' }, partner.token);
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json<{ trunk: { proxy_host: string } }>().trunk.proxy_host).toBe(
+      '198.51.100.20:5070',
+    );
+  });
+
+  it('проба транка набирает его так же, как маршрутизация: sofia/gateway/<имя>/<номер>', async () => {
+    const created = (await createTrunk(partner.token)).json<{
+      trunk: { id: string; sip_username: string };
+    }>().trunk;
+    nextReply = '+OK 5f1c7d2e-0000-4000-8000-000000000101';
+
+    const started = await post(
+      `/partner/sip-trunks/${created.id}/test-call`,
+      { destination: '+7 913 000-33-44' },
+      partner.token,
+    );
+    expect(started.statusCode).toBe(202);
+    const call = started.json<{
+      test_call: { id: string; sim_card_id: string | null; port_number: number | null };
+    }>().test_call;
+    expect(call).toMatchObject({ sim_card_id: null, port_number: null });
+    expect((await settled(call.id, partner.token, '/partner/test-calls')).status).toBe('answered');
+    expect(commands.at(-1) ?? '').toContain(
+      `}sofia/gateway/${created.sip_username}/79130003344 &playback(`,
+    );
+
+    // Чужой транк партнёр не проверит.
+    const foreign = await post(
+      `/partner/sip-trunks/${created.id}/test-call`,
+      { destination: '79130003344' },
+      neighbour.token,
+    );
+    expect(foreign.statusCode).toBe(404);
+  });
+
+  it('снятый порогом транк партнёр включает только после отвеченной пробы, сделанной позже отключения', async () => {
+    const id = await trunkId(partner.token);
+    const status = `/partner/gateways/${id}/status`;
+    const test = `/partner/sip-trunks/${id}/test-call`;
+    await enable(status);
+
+    // Удачная проба до отключения не в счёт.
+    expect(await probe(test, '79130003345', '+OK 5f1c7d2e-0000-4000-8000-000000000102')).toBe(
+      'answered',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Как сделал бы порог (ADR-0027): шлюз снят отказами, отметка смены состояния — сейчас.
+    await withDatabase((execute) =>
+      execute(
+        sql`update gateways set status = 'suspended', suspended_by = 'failure_threshold', status_changed_at = now() where id = ${id}`,
+      ),
+    );
+
+    const refused = await enable(status);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { details: { reason: string } } }>().error.details.reason).toBe(
+      'test_call_required',
+    );
+    // Удалить снятое порогом нельзя: «удалил — добавил заново» обошёл бы отключение.
+    expect((await post(status, { status: 'retired' }, partner.token)).statusCode).toBe(409);
+
+    // Неотвеченная проба не включает.
+    expect(await probe(test, '79130003345', '-ERR USER_BUSY')).toBe('busy');
+    expect((await enable(status)).statusCode).toBe(409);
+
+    expect(await probe(test, '79130003345', '+OK 5f1c7d2e-0000-4000-8000-000000000103')).toBe(
+      'answered',
+    );
+    const enabled = await enable(status);
+    expect(enabled.statusCode).toBe(201);
+    expect(
+      enabled.json<{ gateway: { status: string; suspended_by: string | null } }>().gateway,
+    ).toMatchObject({ status: 'active', suspended_by: null });
+  });
+
+  it('отключённое администратором партнёр не включает и после пробы', async () => {
+    const id = await trunkId(partner.token);
+    await withDatabase((execute) =>
+      execute(
+        sql`update gateways set status = 'suspended', suspended_by = 'admin', status_changed_at = now() where id = ${id}`,
+      ),
+    );
+    expect(
+      await probe(
+        `/partner/sip-trunks/${id}/test-call`,
+        '79130003346',
+        '+OK 5f1c7d2e-0000-4000-8000-000000000104',
+      ),
+    ).toBe('answered');
+    expect((await enable(`/partner/gateways/${id}/status`)).statusCode).toBe(409);
+  });
+
+  it('придержанную карту партнёр включает после отвеченной пробы с неё', async () => {
+    const gateway = await createGateway(partner.token, 1);
+    const line = gateway.ports[0];
+    if (line === undefined) throw new Error('Нет порта');
+    const simId = await simInPort(partner.token, line);
+    await withDatabase((execute) =>
+      execute(
+        sql`update sim_cards set status = 'throttled', status_changed_at = now() where id = ${simId}`,
+      ),
+    );
+    const status = `/partner/sim-cards/${simId}/status`;
+
+    const refused = await enable(status);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { details: { reason: string } } }>().error.details.reason).toBe(
+      'test_call_required',
+    );
+
+    expect(
+      await probe(
+        `/partner/sim-cards/${simId}/test-call`,
+        '79130003347',
+        '+OK 5f1c7d2e-0000-4000-8000-000000000105',
+      ),
+    ).toBe('answered');
+    const enabled = await enable(status);
+    expect(enabled.statusCode, enabled.body).toBe(201);
+    expect(enabled.json<{ sim: { status: string } }>().sim.status).toBe('active');
+  });
+
+  it('администратор проверяет транк любого партнёра', async () => {
+    const id = await trunkId(partner.token);
+    nextReply = '+OK 5f1c7d2e-0000-4000-8000-000000000106';
+    const started = await post(`/sip-trunks/${id}/test-call`, { destination: '79130003348' });
+    expect(started.statusCode).toBe(202);
+    const callId = started.json<{ test_call: { id: string } }>().test_call.id;
+    expect((await settled(callId, adminToken, '/test-calls')).status).toBe('answered');
   });
 });
 

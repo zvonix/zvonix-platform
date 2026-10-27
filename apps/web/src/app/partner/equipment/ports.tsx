@@ -91,7 +91,10 @@ export function PortRow({
             <>
               <SimActions sim={port.sim} inPort />
               {TESTABLE_SIM_STATUSES.includes(port.sim.status) && (
-                <TestCallButton scope="partner" simId={port.sim.id} msisdn={port.sim.msisdn} />
+                <TestCallButton
+                  scope="partner"
+                  subject={{ kind: 'sim', id: port.sim.id, msisdn: port.sim.msisdn }}
+                />
               )}
               <RemoveSim portId={port.id} />
             </>

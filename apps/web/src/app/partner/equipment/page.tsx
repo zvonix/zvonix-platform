@@ -18,12 +18,7 @@ import {
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
-import {
-  GATEWAY_STATUS_NAME,
-  GATEWAY_TYPE_NAME,
-  REGISTRATION_MODE_NAME,
-  SIM_STATUS_NAME,
-} from '@/lib/labels';
+import { GATEWAY_TYPE_NAME, REGISTRATION_MODE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
 import {
   EQUIPMENT_KEY,
   gatewayStateName,
@@ -34,6 +29,7 @@ import {
   type Sim,
 } from './equipment';
 import { AddGateway, SimActions } from './manage';
+import { AddTrunk, TrunksSection } from './trunks';
 import { PORT_COLUMNS, PortHeader, PortRow, Presence } from './ports';
 
 export default function PartnerEquipmentPage() {
@@ -107,6 +103,7 @@ function PartnerEquipment() {
 
       <div className="flex flex-wrap items-center gap-3">
         <AddGateway />
+        <AddTrunk />
         <div className="ml-auto">
           <LiveSwitch />
         </div>
@@ -120,60 +117,13 @@ function PartnerEquipment() {
             <li>Введите в настройках устройства сервер, логин и пароль со страницы шлюза.</li>
             <li>Вставьте SIM-карты в порты и включите шлюз.</li>
           </ol>
+          <p>Есть SIP-провайдер — добавьте его, проверьте тестовым звонком и включите.</p>
         </div>
       ) : (
         gateways.length > 0 && <GatewaysTable gateways={gateways} spare={spare} />
       )}
 
-      {trunks.length > 0 && (
-        <section aria-labelledby="trunks" className="flex flex-col gap-2">
-          <h3 id="trunks" className="font-semibold">
-            SIP-транки
-          </h3>
-          <div className="overflow-x-auto rounded-lg border border-border bg-card">
-            <Table>
-              <TableHeader>
-                <TableRow className="text-muted-foreground hover:bg-transparent">
-                  <TableHead className="h-8">Название</TableHead>
-                  <TableHead className="h-8">Провайдер</TableHead>
-                  <TableHead className="h-8">Доступ</TableHead>
-                  <TableHead className="h-8 text-right">Каналов</TableHead>
-                  <TableHead className="h-8">Состояние</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {trunks.map((trunk) => (
-                  <TableRow key={trunk.id}>
-                    <TableCell>{trunk.name}</TableCell>
-                    <TableCell className="num">{trunk.proxy_host}</TableCell>
-                    <TableCell>
-                      {trunk.registers_outbound ? (
-                        <>
-                          регистрация
-                          <span className="block text-faint num">
-                            {trunk.outbound_username ?? '—'}
-                          </span>
-                        </>
-                      ) : (
-                        'по адресу'
-                      )}
-                    </TableCell>
-                    <TableCell className="num text-right">{trunk.max_concurrent_calls}</TableCell>
-                    <TableCell>
-                      {GATEWAY_STATUS_NAME[trunk.status]}
-                      {!trunk.on_node && <span className="block text-warn">узел не назначен</span>}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <p className="max-w-prose text-muted-foreground">
-            Транк добавляет и настраивает площадка. Пароль провайдера она не показывает никому: он
-            уходит только на узел. Сменился пароль у провайдера — сообщите площадке.
-          </p>
-        </section>
-      )}
+      {trunks.length > 0 && <TrunksSection trunks={trunks} />}
 
       {spare.length > 0 && (
         <section aria-labelledby="spare" className="flex flex-col gap-2">

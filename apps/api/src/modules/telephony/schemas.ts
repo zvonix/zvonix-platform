@@ -453,6 +453,48 @@ export const partnerCallsQuerySchema = z.object({
   offset: z.string().optional().transform(boundedOffset),
 });
 
+/** Поля транка — общие у администратора и партнёра. */
+const sipTrunkFields = {
+  name,
+
+  /** Куда отправлять вызовы: `sip.provider.ru` либо `sip.provider.ru:5070`. */
+  proxyHost: z
+    .string()
+    .trim()
+    .min(3, 'слишком короткий')
+    .max(200, 'слишком длинный')
+    .regex(/^[a-zA-Z0-9.\-_]+(:[0-9]{1,5})?$/u, 'должен быть узлом сети, возможно с портом'),
+
+  /**
+   * Регистрируемся ли мы у провайдера. Второй способ — доступ по адресу источника:
+   * провайдер узнаёт нас по IP, и регистрация не нужна.
+   */
+  registersOutbound: z.boolean().default(true),
+
+  outboundUsername: z.string().trim().min(1, 'не может быть пустым').max(200).optional(),
+  outboundSecret: z.string().min(1, 'не может быть пустым').max(300).optional(),
+
+  maxConcurrentCalls: z.coerce
+    .number()
+    .int('должно быть целым числом')
+    .min(1, 'ноль каналов означал бы, что звонить нельзя вовсе')
+    .max(MAX_TRUNK_CONCURRENT_CALLS, 'неправдоподобно много')
+    .default(DEFAULT_TRUNK_CONCURRENT_CALLS),
+};
+
+const trunkCredentials = {
+  check: (value: {
+    registersOutbound: boolean;
+    outboundUsername?: string | undefined;
+    outboundSecret?: string | undefined;
+  }): boolean =>
+    !value.registersOutbound ||
+    (value.outboundUsername !== undefined && value.outboundSecret !== undefined),
+  // База это тоже проверяет, но отказ базы читается как «нарушено ограничение»,
+  // а здесь человек получает названную причину.
+  message: 'Для регистрации нужны имя и пароль провайдера',
+};
+
 /**
  * Заведение SIP-транка ([ADR-0039](../../../../../docs/adr/0039-terminaciya-cherez-sip-trank.md)).
  *
@@ -463,42 +505,17 @@ export const createSipTrunkSchema = z
   .object({
     partnerId: z.uuid('должен быть идентификатором'),
     nodeId: z.uuid('должен быть идентификатором'),
-    name,
-
-    /** Куда отправлять вызовы: `sip.provider.ru` либо `sip.provider.ru:5070`. */
-    proxyHost: z
-      .string()
-      .trim()
-      .min(3, 'слишком короткий')
-      .max(200, 'слишком длинный')
-      .regex(/^[a-zA-Z0-9.\-_]+(:[0-9]{1,5})?$/u, 'должен быть узлом сети, возможно с портом'),
-
-    /**
-     * Регистрируемся ли мы у провайдера. Второй способ — доступ по адресу источника:
-     * провайдер узнаёт нас по IP, и регистрация не нужна.
-     */
-    registersOutbound: z.boolean().default(true),
-
-    outboundUsername: z.string().trim().min(1, 'не может быть пустым').max(200).optional(),
-    outboundSecret: z.string().min(1, 'не может быть пустым').max(300).optional(),
-
-    maxConcurrentCalls: z.coerce
-      .number()
-      .int('должно быть целым числом')
-      .min(1, 'ноль каналов означал бы, что звонить нельзя вовсе')
-      .max(MAX_TRUNK_CONCURRENT_CALLS, 'неправдоподобно много')
-      .default(DEFAULT_TRUNK_CONCURRENT_CALLS),
+    ...sipTrunkFields,
   })
-  .refine(
-    (value) =>
-      !value.registersOutbound ||
-      (value.outboundUsername !== undefined && value.outboundSecret !== undefined),
-    {
-      // База это тоже проверяет, но отказ базы читается как «нарушено ограничение»,
-      // а здесь человек получает названную причину.
-      message: 'Для регистрации нужны имя и пароль провайдера',
-    },
-  );
+  .refine(trunkCredentials.check, { message: trunkCredentials.message });
+
+/**
+ * Транк заводит сам партнёр ([ADR-0100](../../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)):
+ * владелец — из сессии, узел выбирает площадка.
+ */
+export const partnerSipTrunkSchema = z
+  .object(sipTrunkFields)
+  .refine(trunkCredentials.check, { message: trunkCredentials.message });
 
 /**
  * Правка транка. Все поля необязательны, «поля нет» означает «не трогать».

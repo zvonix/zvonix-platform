@@ -269,6 +269,16 @@ export class TelephonyRepository {
    * Отдельный запрос по `id`, без соединений: дождавшись чужой транзакции, он вернёт
    * уже новую версию строки, и проверка «шлюз списан» увидит зафиксированное.
    */
+  /** Шлюз под запись: одна проба транка одновременно (ADR-0100). */
+  async lockGateway(id: GatewayId, executor: Executor): Promise<GatewayRow | undefined> {
+    const [row] = await executor
+      .select()
+      .from(gateways)
+      .where(eq(gateways.id, id))
+      .for('no key update');
+    return row;
+  }
+
   async lockGatewayForPorts(id: GatewayId, executor: Executor): Promise<GatewayRow | undefined> {
     const [row] = await executor.select().from(gateways).where(eq(gateways.id, id)).for('share');
     return row;
@@ -299,7 +309,7 @@ export class TelephonyRepository {
   ): Promise<GatewayRow | undefined> {
     const [row] = await executor
       .update(gateways)
-      .set({ status: to.status, suspendedBy: to.suspendedBy })
+      .set({ status: to.status, suspendedBy: to.suspendedBy, statusChangedAt: sql`now()` })
       .where(
         and(
           eq(gateways.id, id),
@@ -801,8 +811,9 @@ export class TelephonyRepository {
    * Есть ли у партнёра карта с этим номером, которую держит площадка: `throttled`
    * или `blocked`. Заведение того же номера заново обходило бы её решение — новая
    * запись пришла бы без него ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+   * `except` — сама включаемая карта: придержанную её включает партнёр после пробы (ADR-0100).
    */
-  async hasHeldSim(partnerId: Id<'partner'>, msisdn: Msisdn): Promise<boolean> {
+  async hasHeldSim(partnerId: Id<'partner'>, msisdn: Msisdn, except?: SimCardId): Promise<boolean> {
     const [row] = await this.db
       .select({ value: count() })
       .from(simCards)
@@ -811,6 +822,7 @@ export class TelephonyRepository {
           eq(simCards.partnerId, partnerId),
           eq(simCards.msisdn, msisdn),
           inArray(simCards.status, ['throttled', 'blocked']),
+          except === undefined ? undefined : ne(simCards.id, except),
         ),
       );
     return (row?.value ?? 0) > 0;
@@ -877,7 +889,7 @@ export class TelephonyRepository {
   async setSimStatus(id: SimCardId, status: SimStatus): Promise<SimCardRow | undefined> {
     const [row] = await this.db
       .update(simCards)
-      .set({ status })
+      .set({ status, statusChangedAt: sql`now()` })
       .where(eq(simCards.id, id))
       .returning();
     return row;
@@ -900,7 +912,7 @@ export class TelephonyRepository {
   ): Promise<SimCardRow | undefined> {
     const [row] = await executor
       .update(simCards)
-      .set({ status: to })
+      .set({ status: to, statusChangedAt: sql`now()` })
       .where(and(eq(simCards.id, id), eq(simCards.status, from)))
       .returning();
     return row;

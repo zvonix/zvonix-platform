@@ -1662,20 +1662,25 @@ describe('транк не подчиняется контуру шлюзов (AD
     return { status: found?.status ?? '', sip_username: found?.sip_username ?? '' };
   }
 
-  // Транк партнёру только показывается: заводит и настраивает его площадка, он привязан
-  // к её узлу. Пути шлюзов проверяли владельца, но не вид, — и через них партнёр
-  // выключал транк, перевыпускал ему доступ и заводил порты.
+  // У транка нет ни портов, ни входа SIP: пути шлюзов проверяли владельца, но не вид, — и через них партнёр
+  // перевыпускал транку доступ и заводил порты. Состоянием и тарифом своего транка он распоряжается сам (ADR-0100).
   it.each([
-    [
-      'status',
-      () => post(`/partner/gateways/${myTrunk}/status`, { status: 'suspended' }, as(mine.token)),
-    ],
     ['credentials', () => post(`/partner/gateways/${myTrunk}/credentials`, {}, as(mine.token))],
     ['ports', () => post(`/partner/gateways/${myTrunk}/ports`, { portNumber: 7 }, as(mine.token))],
   ])('%s — 404, как на чужой объект, и транк не меняется', async (_path, send) => {
     const before = await trunkAsAdmin();
     expect((await send()).statusCode).toBe(404);
     expect(await trunkAsAdmin()).toEqual(before);
+  });
+
+  it('состоянием своего транка партнёр распоряжается сам (ADR-0100)', async () => {
+    const enabled = await post(
+      `/partner/gateways/${myTrunk}/status`,
+      { status: 'active' },
+      as(mine.token),
+    );
+    expect(enabled.statusCode).toBe(201);
+    expect((await trunkAsAdmin()).status).toBe('active');
   });
 
   it('портов у транка нет и у администратора', async () => {

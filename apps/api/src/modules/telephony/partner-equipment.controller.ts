@@ -152,9 +152,15 @@ interface TrunkView {
   readonly id: string;
   readonly name: string;
   readonly status: GatewayStatus;
+  /** Кто выключил — как у шлюза (ADR-0047): транк и есть шлюз. */
+  readonly suspended_by: PartnerFacingSuspension | null;
+  /** Тариф транка; пусто — тариф по умолчанию (ADR-0056). */
+  readonly tariff_id: string | null;
   readonly proxy_host: string;
   readonly registers_outbound: boolean;
   readonly outbound_username: string | null;
+  /** Задан ли пароль провайдера. Сам пароль не отдаётся никому, кроме узла. */
+  readonly has_secret: boolean;
   readonly max_concurrent_calls: number;
   readonly on_node: boolean;
 }
@@ -321,7 +327,8 @@ export class PartnerEquipmentController {
   ): Promise<{ gateway: { id: string; tariff_id: string | null } }> {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
     const gatewayId = parseId(id, 'gateway');
-    await this.telephony.requireOwnGateway(gatewayId, partner.id);
+    // Тариф назначается и своему SIP-провайдеру: цены транка — его тариф (ADR-0100).
+    await this.telephony.requireOwnGateway(gatewayId, partner.id, { trunks: true });
     const updated = await this.telephony.setGatewayTariff(
       gatewayId,
       body.tariffId === null ? null : parseId(body.tariffId, 'partnerTariff'),
@@ -621,9 +628,13 @@ function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): TrunkVie
     id: row.gateway.id,
     name: row.gateway.name,
     status: row.gateway.status,
+    suspended_by:
+      row.gateway.suspendedBy === null ? null : partnerFacingSuspension(row.gateway.suspendedBy),
+    tariff_id: row.gateway.tariffId,
     proxy_host: row.trunk.proxyHost,
     registers_outbound: row.trunk.registersOutbound,
     outbound_username: row.trunk.outboundUsername,
+    has_secret: row.trunk.outboundSecret !== null,
     max_concurrent_calls: row.trunk.maxConcurrentCalls,
     on_node: row.gateway.nodeId !== null,
   };

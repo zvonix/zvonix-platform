@@ -34,6 +34,15 @@ export interface QualityRow {
   readonly talkSeconds: number;
 }
 
+/** Транк с подозрительно короткими отвеченными вызовами. */
+export interface ShortAnswerRow {
+  readonly gatewayId: string;
+  readonly gatewayName: string;
+  readonly partnerName: string;
+  readonly answered: number;
+  readonly short: number;
+}
+
 /** Объект, набравший отказов сверх порога. */
 export interface FailureCount {
   readonly subjectId: string;
@@ -128,8 +137,9 @@ export class QualityRepository {
   /**
    * SIM, набравшие отказов сети не меньше порога и **ещё работающие**.
    *
-   * Отбор сразу по состоянию: уже отключённую отключать второй раз незачем, а вернуть
-   * её в строй — дело человека (ADR-0027).
+   * Отбор сразу по состоянию: уже отключённую отключать второй раз незачем (ADR-0027). Отказы считаются только
+   * с последней смены состояния карты и шлюза (ADR-0100): включённую после пробы карту старые отказы, ещё лежащие
+   * в окне, иначе сняли бы следующим же проходом.
    */
   async simsOverThreshold(since: Date, failures: number): Promise<FailureCount[]> {
     return (
@@ -147,6 +157,8 @@ export class QualityRepository {
         .where(
           and(
             gte(calls.startedAt, since),
+            gte(calls.startedAt, simCards.statusChangedAt),
+            gte(calls.startedAt, gateways.statusChangedAt),
             eq(simCards.status, 'active'),
             eq(gateways.status, 'active'),
             NETWORK_FAILURE,
@@ -165,9 +177,52 @@ export class QualityRepository {
       })
       .from(calls)
       .innerJoin(gateways, eq(gateways.id, calls.gatewayId))
-      .where(and(gte(calls.startedAt, since), eq(gateways.status, 'active'), NETWORK_FAILURE))
+      .where(
+        and(
+          gte(calls.startedAt, since),
+          gte(calls.startedAt, gateways.statusChangedAt),
+          eq(gateways.status, 'active'),
+          NETWORK_FAILURE,
+        ),
+      )
       .groupBy(gateways.id)
       .having(sql`count(*) >= ${failures}`);
+  }
+
+  /**
+   * Транки, похожие на ложный ответ (ADR-0100, п. 6): с `since` отвечено не меньше `minAnswered`, и не меньше
+   * `minShareBasisPoints` из них — короче `maxSeconds`. Провайдер, «снимающий трубку» сам, даёт ровно такую картину.
+   */
+  async shortAnswerTrunks(
+    since: Date,
+    rule: { minAnswered: number; maxSeconds: number; minShareBasisPoints: number },
+  ): Promise<ShortAnswerRow[]> {
+    const shortCalls = sql<number>`count(*) filter (where ${calls.durationSeconds} < ${rule.maxSeconds})::int`;
+    return this.db
+      .select({
+        gatewayId: gateways.id,
+        gatewayName: gateways.name,
+        partnerName: partners.name,
+        answered: sql<number>`count(*)::int`,
+        short: shortCalls,
+      })
+      .from(calls)
+      .innerJoin(gateways, eq(gateways.id, calls.gatewayId))
+      .innerJoin(partners, eq(partners.id, gateways.partnerId))
+      .where(
+        and(
+          gte(calls.startedAt, since),
+          eq(gateways.type, 'sip_trunk'),
+          eq(calls.status, 'completed'),
+        ),
+      )
+      .groupBy(gateways.id, gateways.name, partners.name)
+      .having(
+        and(
+          sql`count(*) >= ${rule.minAnswered}`,
+          sql`${shortCalls} * 10000 >= count(*) * ${rule.minShareBasisPoints}`,
+        ),
+      );
   }
 
   // --- Пороги ---------------------------------------------------------------------

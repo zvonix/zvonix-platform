@@ -11,6 +11,7 @@ import {
   conflict,
   dependencyUnavailable,
   internal as internalError,
+  MAX_PARTNER_TRUNKS,
   regionKeyOf,
   notFound,
   supportsPortRegistration,
@@ -39,6 +40,8 @@ import { TariffService } from '../catalog/tariff.service.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { directoryDocument, notFoundDocument, type DirectoryUser } from './directory-xml.js';
 import { MAX_GATEWAY_PORTS } from './schemas.js';
+import { sipHostProblem } from './sip-host.js';
+import { TestCallRepository } from './test-call.repository.js';
 import {
   issueSipCredentials,
   issueSipUsername,
@@ -128,6 +131,7 @@ export class TelephonyService {
     private readonly catalog: CatalogRepository,
     private readonly tariffs: TariffService,
     private readonly nodes: NodesService,
+    private readonly testCalls: TestCallRepository,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -1269,6 +1273,68 @@ export class TelephonyService {
     return created;
   }
 
+  /**
+   * Транк заводит сам партнёр (ADR-0100): без модерации, но только с внешним адресом и не больше `MAX_PARTNER_TRUNKS`.
+   * Заводится в `pending`, включает партнёр, как GOIP (ADR-0043). Узел выбирает площадка.
+   */
+  async createOwnTrunk(
+    partnerId: PartnerId,
+    draft: {
+      name: string;
+      proxyHost: string;
+      registersOutbound: boolean;
+      outboundUsername: string | null;
+      outboundSecret: string | null;
+      maxConcurrentCalls: number;
+    },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
+    const own = await this.repository.listTrunks(partnerId);
+    if (own.filter((row) => row.gateway.status !== 'retired').length >= MAX_PARTNER_TRUNKS) {
+      throw conflict(`Больше ${String(MAX_PARTNER_TRUNKS)} SIP-провайдеров завести нельзя`, {
+        details: { remedy: 'Удалите ненужного провайдера.' },
+      });
+    }
+    await this.requirePublicTrunkHost(draft.proxyHost);
+    const node = await this.nodes.trunkNode();
+    if (node === undefined) {
+      throw conflict(
+        'Площадка пока не может подключать SIP-провайдеров — напишите администратору',
+        {
+          details: { reason: 'no_node' },
+        },
+      );
+    }
+    return this.createTrunk({ ...draft, partnerId, nodeId: node.id }, actorUserId, actorRole);
+  }
+
+  /** Правка своего транка партнёром (ADR-0100); новый адрес проверяется так же, как при заведении. */
+  async updateOwnTrunk(
+    gatewayId: GatewayId,
+    partnerId: PartnerId,
+    changes: Parameters<TelephonyService['updateTrunk']>[1],
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
+    const found = await this.repository.findTrunk(gatewayId);
+    // Чужой — «не найден», как у шлюзов: иначе по разнице ответов перебираются чужие идентификаторы.
+    if (found === undefined || found.gateway.partnerId !== partnerId) {
+      throw notFound('SIP-провайдер не найден');
+    }
+    if (found.gateway.status === 'retired')
+      throw conflict('SIP-провайдер удалён: настраивать нечего');
+    if (changes.proxyHost !== undefined) await this.requirePublicTrunkHost(changes.proxyHost);
+    return this.updateTrunk(gatewayId, changes, actorUserId, actorRole);
+  }
+
+  private async requirePublicTrunkHost(proxyHost: string): Promise<void> {
+    const problem = await sipHostProblem(proxyHost, await this.nodes.sipAddresses());
+    if (problem !== undefined) {
+      throw validationFailed(problem, { details: { field: 'proxyHost' } });
+    }
+  }
+
   async listTrunks(partnerId?: PartnerId): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }[]> {
     return this.repository.listTrunks(partnerId);
   }
@@ -1679,14 +1745,22 @@ export class TelephonyService {
    * не должен узнавать даже этого. Ту же границу с другой стороны держит
    * [ADR-0014](../../../../../docs/adr/0014-vybor-partnera-klientom.md).
    *
-   * **Свой транк — тоже `404`.** Он лежит в той же таблице, но партнёру только
-   * показывается: заводит и настраивает его площадка, он привязан к её узлу. Без этой
-   * проверки через пути шлюзов партнёр выключал транк, перевыпускал ему доступ
-   * и заводил порты ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
+   * **Свой транк — тоже `404`, кроме состояния и тарифа** (`trunks: true`). Транк лежит в той же таблице, но портов,
+   * входа SIP и способа подключения у него нет: без этой проверки через пути шлюзов партнёр перевыпускал бы ему доступ
+   * и заводил порты ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)). Включает, выключает, удаляет
+   * и назначает тариф своему транку партнёр сам ([ADR-0100](../../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)).
    */
-  async requireOwnGateway(id: GatewayId, partnerId: PartnerId): Promise<GatewayRow> {
+  async requireOwnGateway(
+    id: GatewayId,
+    partnerId: PartnerId,
+    options: { readonly trunks?: boolean } = {},
+  ): Promise<GatewayRow> {
     const gateway = await this.repository.findGateway(id);
-    if (!isOwnPartnerGateway(gateway, partnerId)) throw notFound('Шлюз не найден');
+    const own =
+      options.trunks === true
+        ? gateway !== undefined && gateway.partnerId === partnerId
+        : isOwnPartnerGateway(gateway, partnerId);
+    if (!own || gateway === undefined) throw notFound('Шлюз не найден');
     return gateway;
   }
 
@@ -1791,8 +1865,12 @@ export class TelephonyService {
    * «Ревизия»). Проверка без блокировки: придержание в те же миллисекунды не ловится —
    * принятая цена, записанная там же.
    */
-  private async rejectHeldNumber(partnerId: PartnerId, msisdn: Msisdn): Promise<void> {
-    if (await this.repository.hasHeldSim(partnerId, msisdn)) {
+  private async rejectHeldNumber(
+    partnerId: PartnerId,
+    msisdn: Msisdn,
+    except?: SimCardId,
+  ): Promise<void> {
+    if (await this.repository.hasHeldSim(partnerId, msisdn, except)) {
       throw conflict('Карта с этим номером придержана или заблокирована площадкой', {
         details: { remedy: 'Включить её может только администратор — напишите площадке.' },
       });
@@ -1818,17 +1896,26 @@ export class TelephonyService {
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<GatewayRow> {
-    const gateway = await this.requireOwnGateway(id, partnerId);
+    const gateway = await this.requireOwnGateway(id, partnerId, { trunks: true });
     const from = gatewayStateOf(gateway);
 
     if (from.status === 'retired') {
       throw conflict('Шлюз списан: заведите новый');
     }
-    if (from.status === 'suspended' && from.suspendedBy !== 'partner') {
+    // Снятое порогом партнёр включает сам после отвеченной пробы, сделанной позже отключения (ADR-0100): починил,
+    // проверил звонком — включил. Списать его нельзя по-прежнему: «списал — завёл новый» обошёл бы порог.
+    const recovered =
+      from.status === 'suspended' &&
+      from.suspendedBy === 'failure_threshold' &&
+      status === 'active' &&
+      (await this.testCalls.answeredAfter({ gatewayId: id }, gateway.statusChangedAt));
+    if (from.status === 'suspended' && from.suspendedBy !== 'partner' && !recovered) {
       throw from.suspendedBy === 'failure_threshold'
-        ? conflict('Шлюз отключён автоматически: много неудачных вызовов', {
+        ? conflict('Отключено автоматически: много неудачных вызовов', {
             details: {
-              remedy: 'Проверьте оборудование и напишите площадке — включит администратор.',
+              reason: 'test_call_required',
+              remedy:
+                'Проверьте оборудование и сделайте тестовый звонок — после удачного включите.',
             },
           })
         : conflict('Шлюз отключён площадкой — распорядиться им может только администратор', {
@@ -1934,19 +2021,24 @@ export class TelephonyService {
     if (sim.status === 'blocked' || sim.status === 'retired') {
       throw conflict('SIM отключена площадкой — включить её может только администратор');
     }
-    // Придерживает порог отказов или администратор — оба решение площадки. Включённая
-    // партнёром карта, пока старые отказы ещё в окне, отключилась бы на следующем
-    // проходе снова ([ADR-0047](../../../../../docs/adr/0047-kto-vyklyuchil-shlyuz.md)).
-    if (sim.status === 'throttled') {
-      throw conflict('Карта придержана площадкой — включить её может только администратор', {
-        details: { remedy: 'Проверьте карту и напишите площадке.' },
+    // Придержанную карту партнёр включает сам после отвеченной пробы с неё, сделанной позже придержания (ADR-0100).
+    // Старые отказы её снова не снимут: порог считает с последней смены состояния.
+    if (
+      sim.status === 'throttled' &&
+      !(await this.testCalls.answeredAfter({ simCardId: id }, sim.statusChangedAt))
+    ) {
+      throw conflict('Карта придержана: много неудачных вызовов', {
+        details: {
+          reason: 'test_call_required',
+          remedy: 'Проверьте карту и сделайте с неё тестовый звонок — после удачного включите.',
+        },
       });
     }
     if (sim.status === 'active') return sim;
 
     // Номер в базе заведомо канонический — его держит `sim_cards_msisdn_format`.
     const msisdn = parseMsisdn(sim.msisdn);
-    await this.rejectHeldNumber(partnerId, msisdn);
+    await this.rejectHeldNumber(partnerId, msisdn, id);
 
     const resolution =
       sim.operatorConfirmedAt === null ? await this.resolver.resolve(msisdn) : undefined;

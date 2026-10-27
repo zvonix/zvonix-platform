@@ -820,5 +820,5 @@ function GatewayPorts({
  */
 function PortTestCall({ sim }: { sim: SimOption | undefined }) {
   if (sim === undefined || !TESTABLE_SIM_STATUSES.includes(sim.status)) return null;
-  return <TestCallButton scope="admin" simId={sim.id} msisdn={sim.msisdn} />;
+  return <TestCallButton scope="admin" subject={{ kind: 'sim', id: sim.id, msisdn: sim.msisdn }} />;
 }

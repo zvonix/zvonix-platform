@@ -24,6 +24,7 @@ import { NodesService } from '../nodes/nodes.service.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { ServersService } from '../servers/servers.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import type { ShortAnswerRow } from '../telephony/quality.repository.js';
 import { QualityService, type QualityView } from '../telephony/quality.service.js';
 import { CertificateStatusService } from '../updates/certificate-status.service.js';
 import { GithubTokenStatusService } from '../updates/github-token-status.service.js';
@@ -159,6 +160,15 @@ export class AlertsService {
       }
     } catch (cause) {
       this.logger.error('Тревоги: качество не прочитано', cause);
+    }
+
+    try {
+      const since = new Date(now.getTime() - QUALITY_WINDOW_MINUTES * 60_000);
+      for (const row of await this.quality.shortAnswerTrunks(since)) {
+        alerts.push(shortAnswerAlert(row));
+      }
+    } catch (cause) {
+      this.logger.error('Тревоги: короткие ответы транков не прочитаны', cause);
     }
 
     try {
@@ -431,6 +441,23 @@ const isSick = (row: QualityView): boolean =>
   row.subjectStatus === 'active' &&
   row.attempts >= ENOUGH_CALLS &&
   row.asrBasisPoints < LOW_ASR_BASIS_POINTS;
+
+/**
+ * Транк похож на ложный ответ (ADR-0100, п. 6): провайдер «снимает трубку» сам, чтобы взять плату за вызов. Это решение
+ * о партнёре, а не поломка, — поэтому письмо, а не автомат.
+ */
+function shortAnswerAlert(row: ShortAnswerRow): Alert {
+  return {
+    kind: `alert_short_answer:${row.gatewayId}`,
+    subject: `Zvonix: SIP-провайдер ${row.gatewayName} — подозрительно короткие разговоры`,
+    body: [
+      `SIP-провайдер ${row.gatewayName} (партнёр «${row.partnerName}») за последний час: отвечено ${String(row.answered)}, из них короче 3 секунд — ${String(row.short)}.`,
+      '',
+      'Так выглядит ложный ответ: провайдер сам «снимает трубку», и клиент платит за звонок, которого не было. Площадка его не отключала — честные короткие звонки у такси тоже бывают.',
+      'Посмотрите записи разговоров в «Звонки» и, если это обман, отключите провайдера в карточке партнёра.',
+    ].join('\n'),
+  };
+}
 
 function qualityAlert(scope: 'sim' | 'gateway', label: string, row: QualityView): Alert {
   const percent = (row.asrBasisPoints / 100).toFixed(1).replace('.', ',');

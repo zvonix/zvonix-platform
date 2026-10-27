@@ -7,7 +7,7 @@
  */
 
 import type { CallFailureReason, TerminationKind } from '@zvonix/shared';
-import { simBridgeEndpoint } from '../telephony/sim-dial.js';
+import { simBridgeEndpoint, trunkEndpoint } from '../telephony/sim-dial.js';
 import { escapeXmlAttribute } from '../telephony/sip-credentials.js';
 
 const HEADER = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>';
@@ -151,8 +151,10 @@ export function routeDocument(plan: RoutePlan): string {
  */
 function endpointOf(candidate: RouteCandidate, plan: RoutePlan): string {
   if (candidate.kind === 'sip') {
-    const name = escapeXmlAttribute(candidate.sipUsername);
-    return `sofia/gateway/${name}/${escapeXmlAttribute(plan.destination)}`;
+    return trunkEndpoint(
+      escapeXmlAttribute(candidate.sipUsername),
+      escapeXmlAttribute(plan.destination),
+    );
   }
   // Без экранирования здесь: `action` экранирует значение целиком сам.
   return simBridgeEndpoint(

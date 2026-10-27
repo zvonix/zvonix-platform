@@ -9,18 +9,19 @@
  * Состояние меняется общим обработчиком `POST /gateways/:id/status`: транк это шлюз,
  * и второй способ включать и выключать его разошёлся бы с первым.
  *
- * Заводит **администратор**: пароль провайдера — чужой секрет, за утечку которого
- * платит партнёр, а своего кабинета у партнёра ещё нет.
+ * Заводит администратор или сам партнёр ([ADR-0100](../../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)):
+ * у партнёра — без модерации, но только с внешним адресом, а узел выбирает площадка.
  */
 
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
-import { Roles } from '../../http/auth.guard.js';
+import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
+import { BillingService } from '../billing/billing.service.js';
 import type { Principal } from '../identity/identity.service.js';
-import { createSipTrunkSchema, updateSipTrunkSchema } from './schemas.js';
+import { createSipTrunkSchema, partnerSipTrunkSchema, updateSipTrunkSchema } from './schemas.js';
 import { TelephonyService } from './telephony.service.js';
 import type { GatewayRow, SipTrunkRow } from './telephony.repository.js';
 
@@ -50,7 +51,10 @@ interface SipTrunkView {
 
 @Controller()
 export class SipTrunkController {
-  constructor(private readonly telephony: TelephonyService) {}
+  constructor(
+    private readonly telephony: TelephonyService,
+    private readonly billing: BillingService,
+  ) {}
 
   @Roles('admin')
   @Post('sip-trunks')
@@ -100,22 +104,69 @@ export class SipTrunkController {
   ): Promise<{ trunk: SipTrunkView }> {
     const updated = await this.telephony.updateTrunk(
       parseId(id, 'gateway'),
-      {
-        ...(body.proxyHost === undefined ? {} : { proxyHost: body.proxyHost }),
-        ...(body.registersOutbound === undefined
-          ? {}
-          : { registersOutbound: body.registersOutbound }),
-        ...(body.outboundUsername === undefined ? {} : { outboundUsername: body.outboundUsername }),
-        ...(body.outboundSecret === undefined ? {} : { outboundSecret: body.outboundSecret }),
-        ...(body.maxConcurrentCalls === undefined
-          ? {}
-          : { maxConcurrentCalls: body.maxConcurrentCalls }),
-      },
+      trunkChanges(body),
       parseId(actor.userId, 'user'),
       actor.role,
     );
     return { trunk: toTrunkView(updated) };
   }
+
+  /** Партнёр заводит своего провайдера (ADR-0100). Включает его потом сам — `POST /partner/gateways/:id/status`. */
+  @Cabinets('partner')
+  @Post('partner/sip-trunks')
+  async partnerCreate(
+    @Body(zodBody(partnerSipTrunkSchema)) body: z.infer<typeof partnerSipTrunkSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ trunk: SipTrunkView }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const created = await this.telephony.createOwnTrunk(
+      partner.id,
+      {
+        name: body.name,
+        proxyHost: body.proxyHost,
+        registersOutbound: body.registersOutbound,
+        outboundUsername: body.outboundUsername ?? null,
+        outboundSecret: body.outboundSecret ?? null,
+        maxConcurrentCalls: body.maxConcurrentCalls,
+      },
+      actor.userId,
+      actor.role,
+    );
+    return { trunk: toTrunkView(created) };
+  }
+
+  @Cabinets('partner')
+  @Patch('partner/sip-trunks/:id')
+  async partnerUpdate(
+    @Param('id') id: string,
+    @Body(zodBody(updateSipTrunkSchema)) body: z.infer<typeof updateSipTrunkSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ trunk: SipTrunkView }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const updated = await this.telephony.updateOwnTrunk(
+      parseId(id, 'gateway'),
+      partner.id,
+      trunkChanges(body),
+      actor.userId,
+      actor.role,
+    );
+    return { trunk: toTrunkView(updated) };
+  }
+}
+
+/** «Поля нет» — «не трогать»: в службу уходят только переданные. */
+function trunkChanges(
+  body: z.infer<typeof updateSipTrunkSchema>,
+): Parameters<TelephonyService['updateTrunk']>[1] {
+  return {
+    ...(body.proxyHost === undefined ? {} : { proxyHost: body.proxyHost }),
+    ...(body.registersOutbound === undefined ? {} : { registersOutbound: body.registersOutbound }),
+    ...(body.outboundUsername === undefined ? {} : { outboundUsername: body.outboundUsername }),
+    ...(body.outboundSecret === undefined ? {} : { outboundSecret: body.outboundSecret }),
+    ...(body.maxConcurrentCalls === undefined
+      ? {}
+      : { maxConcurrentCalls: body.maxConcurrentCalls }),
+  };
 }
 
 function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): SipTrunkView {

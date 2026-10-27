@@ -98,3 +98,12 @@ export function simBridgeEndpoint(
     `|^(sofia/[^/]+/)sip:[^@]+(@.*)$|%1sip:${dialled}%2)}`
   );
 }
+
+/**
+ * Набор через SIP-транк: `sofia/gateway/<имя>/<номер>` — одно правило для диалплана и пробы транка
+ * ([ADR-0100](../../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)). Имя sofia-gateway —
+ * `sip_username` шлюза, под ним узел поднимает транк. Не экранирована, как и строки выше.
+ */
+export function trunkEndpoint(gatewaySipUsername: string, destination: string): string {
+  return `sofia/gateway/${gatewaySipUsername}/${destination}`;
+}
