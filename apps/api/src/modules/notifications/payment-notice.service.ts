@@ -8,6 +8,8 @@
  * Догоняющая задача ([ADR-0020](../../../../../docs/adr/0020-fonovye-zadachi.md)): отбирает
  * решённые за последние сутки и сверяется с очередью писем (`kind` с номером заявки), а не с
  * «сделанным с прошлого запуска» — пропущенный проход ничего не теряет, повтор не возникает.
+ *
+ * Клиент может выключить письмо у себя ([ADR-0104](../../../../../docs/adr/0104-pisma-nastraivaet-sam-poluchatel.md)).
  */
 
 import { Inject, Injectable } from '@nestjs/common';
@@ -19,6 +21,7 @@ import { MailService } from '../mail/mail.service.js';
 import type { PaymentRow } from '../payments/payments.repository.js';
 import { PaymentsService } from '../payments/payments.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { NotificationPreferencesService } from './notification-preferences.service.js';
 
 /** Решённые за какой срок ещё подлежат письму: сутки с запасом на простой воркера. */
 const LOOKBACK_MS = 86_400_000;
@@ -39,6 +42,7 @@ export class PaymentNoticeService {
     private readonly identity: IdentityService,
     private readonly mail: MailService,
     private readonly settings: SettingsService,
+    private readonly preferences: NotificationPreferencesService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('payment-notice');
@@ -66,6 +70,7 @@ export class PaymentNoticeService {
       const owner = await this.identity.findPublicUser(client.ownerUserId);
       // Письмо о деньгах не уходит на неподтверждённый адрес: оно достанется постороннему.
       if (owner.emailConfirmedAt === null || owner.status !== 'active') return false;
+      if (!(await this.preferences.of(owner.id)).paymentDecision) return false;
 
       const kind = `payment_resolved:${payment.id}`;
       if (await this.mail.hasRecent(kind, owner.email, since)) return false;

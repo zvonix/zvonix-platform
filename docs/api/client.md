@@ -295,6 +295,25 @@
 
 Закрытый клиент ничего здесь не меняет — `403`.
 
+## Какие письма получать ([ADR-0104](../adr/0104-pisma-nastraivaet-sam-poluchatel.md))
+
+`GET /client/notifications` → 
+
+```json
+{
+  "low_balance": { "enabled": true, "platform_enabled": true, "threshold": null, "platform_threshold": 100 },
+  "payment_decision": { "enabled": true, "platform_enabled": false }
+}
+```
+
+- `enabled` — выбор клиента, по умолчанию `true`.
+- `platform_enabled` — рассылает ли такие письма площадка: `false` — не уйдёт никому, что бы клиент ни выбрал.
+- `threshold` — свой порог «мало денег», целых рублей; `null` — порог площадки `platform_threshold`.
+
+`PUT /client/notifications` — любые из `{ "lowBalance": false, "lowBalanceThreshold": 1000, "paymentDecision": true }`;
+непереданное не меняется, `lowBalanceThreshold: null` снимает свой порог. Порог — целое от 1 до 10 000 000, иначе `400`;
+чужое поле — `400`. Ответ — как у `GET`. Ответы поддержки и письма о входе и пароле не отключаются.
+
 ## Ключи API
 
 Доступ своей диспетчерской системы к `/v1` ([client-api.md](client-api.md)) клиент заводит

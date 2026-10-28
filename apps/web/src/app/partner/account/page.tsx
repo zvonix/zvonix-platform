@@ -2,11 +2,12 @@
 
 import { AccountView } from '@/components/account-view';
 import { ConsoleShell } from '@/components/console-shell';
+import { PartnerNotificationSettings } from '@/components/notification-settings';
 import { TimezoneSetting } from '@/components/timezone-setting';
 import { usePartnerAccount } from '@/lib/account';
 import { RecordingsAccess } from './recordings-access';
 
-/** Аккаунт партнёра: пароль, входы, второй фактор, объявление о прослушивании записей и часовой пояс лимитов. */
+/** Аккаунт партнёра: пароль, входы, второй фактор, объявление о прослушивании записей, часовой пояс лимитов и какие письма получать. */
 export default function PartnerAccountPage() {
   return (
     <ConsoleShell title="Аккаунт" cabinet="partner">
@@ -37,6 +38,7 @@ function PartnerAccount() {
           ]}
         />
       )}
+      <PartnerNotificationSettings />
     </div>
   );
 }
