@@ -21,8 +21,9 @@ import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
 import { useCanChange } from '@/lib/access';
 import { useChannels, useClients, usePartners, useSimCards } from '@/lib/dictionaries';
-import { moment } from '@/lib/format';
+import { momentInZone } from '@/lib/format';
 import { LIMIT_METRIC_NAME, LIMIT_WINDOW_NAME, limitRuleNote } from '@/lib/labels';
+import { amount, counted } from '@/lib/limits';
 import { integerFromInput } from '@/lib/money';
 
 const COLUMNS = 5;
@@ -44,7 +45,9 @@ interface Rule {
   readonly per_sim: boolean;
   readonly rounding: 'second' | 'minute';
   readonly period_start_day: number | null;
-  readonly set_by: 'platform' | 'partner';
+  readonly set_by: 'platform' | 'partner' | 'client';
+  /** Пояс, в котором считаются окна, — пояс владельца (ADR-0102). */
+  readonly timezone: string;
   /** У правила «на каждую карту» — карта этой строки (ADR-0057). */
   readonly usage_sim_card_id: string | null;
   readonly bucket_start: string;
@@ -226,8 +229,7 @@ export function LimitRules() {
                   </TableCell>
 
                   <TableCell>
-                    <span className="num">{rule.value}</span> {LIMIT_METRIC_NAME[rule.metric]}{' '}
-                    {LIMIT_WINDOW_NAME[rule.window]}
+                    {counted(rule.metric, rule.value)} {LIMIT_WINDOW_NAME[rule.window]}
                     <span className="block text-faint">{limitRuleNote(rule)}</span>
                     {rule.usage_sim_card_id !== null && (
                       <span className="num block text-faint">
@@ -237,14 +239,18 @@ export function LimitRules() {
                   </TableCell>
 
                   <TableCell>
-                    <span className={rule.exceeded ? 'num text-crit' : 'num'}>{rule.used}</span>
+                    <span className={rule.exceeded ? 'num text-crit' : 'num'}>
+                      {amount(rule.metric, rule.used)}
+                    </span>
                     {rule.exceeded && (
                       <span className="block text-crit">исчерпан — вызовы отклоняются</span>
                     )}
                   </TableCell>
 
                   <TableCell>
-                    <span className="num text-muted-foreground">{moment(rule.bucket_start)}</span>
+                    <span className="num text-muted-foreground">
+                      {momentInZone(rule.bucket_start, rule.timezone)}
+                    </span>
                   </TableCell>
 
                   <TableCell>
@@ -256,8 +262,8 @@ export function LimitRules() {
                           title={`Предел лимита: ${subjectTitle}`}
                           description={
                             <>
-                              Сейчас <span className="num">{rule.value}</span>{' '}
-                              {LIMIT_METRIC_NAME[rule.metric]} {LIMIT_WINDOW_NAME[rule.window]}.
+                              Сейчас {counted(rule.metric, rule.value)}{' '}
+                              {LIMIT_WINDOW_NAME[rule.window]}.
                             </>
                           }
                         >
@@ -302,10 +308,13 @@ function NewLimitForm({
   const [metric, setMetric] = useState<LimitMetric>('calls');
   const [value, setValue] = useState('');
 
-  const amount = integerFromInput(value);
-  const valueValid = amount !== undefined && amount >= 1 && amount <= LIMIT_MAX;
+  const limit = integerFromInput(value);
+  const valueValid = limit !== undefined && limit >= 1 && limit <= LIMIT_MAX;
   const [kind = '', id = ''] = subject.split(':');
-  const ready = isSubjectKind(kind) && id !== '' && valueValid;
+  // Деньги на звонки тратит только клиент: у партнёра и SIM лимита денег нет (ADR-0102).
+  const moneyAllowed = kind === 'client' || kind === 'channel';
+  const metrics = LIMIT_METRICS.filter((item) => item !== 'money' || moneyAllowed);
+  const ready = isSubjectKind(kind) && id !== '' && valueValid && metrics.includes(metric);
 
   return (
     <DialogForm
@@ -313,7 +322,7 @@ function NewLimitForm({
       canSubmit={ready}
       onSubmit={async () => {
         if (!isSubjectKind(kind)) return;
-        await onCreate({ [SUBJECT_FIELD[kind]]: id, window, metric, value: amount });
+        await onCreate({ [SUBJECT_FIELD[kind]]: id, window, metric, value: limit });
       }}
     >
       {/*
@@ -385,7 +394,7 @@ function NewLimitForm({
           }}
           className="h-9 w-full rounded-md border border-input bg-transparent px-2"
         >
-          {LIMIT_METRICS.map((item) => (
+          {metrics.map((item) => (
             <option key={item} value={item}>
               {LIMIT_METRIC_NAME[item]}
             </option>
@@ -427,16 +436,16 @@ function ChangeValue({
   onSave: (value: number) => Promise<unknown>;
 }) {
   const [value, setValue] = useState(String(rule.value));
-  const amount = integerFromInput(value);
-  const valid = amount !== undefined && amount >= 1 && amount <= LIMIT_MAX;
-  const changed = valid && amount !== rule.value;
+  const next = integerFromInput(value);
+  const valid = next !== undefined && next >= 1 && next <= LIMIT_MAX;
+  const changed = valid && next !== rule.value;
 
   return (
     <DialogForm
       submitLabel="Сохранить предел"
       canSubmit={changed}
       onSubmit={async () => {
-        if (amount !== undefined) await onSave(amount);
+        if (next !== undefined) await onSave(next);
       }}
     >
       <DialogField label="Новый предел">

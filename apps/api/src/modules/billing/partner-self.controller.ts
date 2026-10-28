@@ -38,6 +38,8 @@ interface SelfView {
   readonly status: PartnerStatus;
   /** Объявленное намерение слушать записи своих вызовов (ADR-0036). */
   readonly listens_to_recordings: boolean;
+  /** Часовой пояс лимитов (ADR-0102); пусто — не выбран, сутки по UTC. */
+  readonly timezone: string | null;
   readonly created_at: string;
 }
 
@@ -70,6 +72,7 @@ export class PartnerSelfController {
         display_name: alias ?? null,
         status: partner.status,
         listens_to_recordings: partner.listensToRecordings,
+        timezone: partner.timezone,
         created_at: partner.createdAt.toISOString(),
       },
       funds: { balance: Money.format(account.balance) },

@@ -28,6 +28,7 @@ import {
   LIMIT_PERIOD_START_DAY_MAX,
   LIMIT_ROUNDINGS,
   LIMIT_SET_BY,
+  LIMIT_TIMEZONE_FALLBACK,
   LIMIT_WINDOWS,
   type LimitMetric,
   type LimitRounding,
@@ -70,7 +71,10 @@ export const limitRules = pgTable(
     window: text().$type<LimitWindow>().notNull(),
     metric: text().$type<LimitMetric>().notNull(),
 
-    /** Предел в единицах метрики: звонков или минут. В счётчике минуты копятся секундами. */
+    /**
+     * Предел в единицах метрики: звонков, минут или рублей. В счётчике минуты копятся секундами,
+     * рубли — микроединицами.
+     */
     value: integer().notNull(),
 
     /**
@@ -86,8 +90,15 @@ export const limitRules = pgTable(
     /** День обновления месячного окна (1–28); пусто — первое число. Только у `month`. */
     periodStartDay: smallint(),
 
-    /** Кто задал: площадка или сам партнёр. Партнёр меняет только свои правила. */
+    /** Кто задал: площадка, сам партнёр или сам клиент. Партнёр и клиент меняют только свои правила. */
     setBy: text().$type<LimitSetBy>().notNull().default('platform'),
+
+    /**
+     * Пояс, в котором считаются окна, — копия пояса владельца субъекта
+     * ([ADR-0102](../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md)). Меняется только вместе с поясом
+     * аккаунта, одной транзакцией. Правила до ADR-0102 — `UTC`.
+     */
+    timezone: text().notNull().default(LIMIT_TIMEZONE_FALLBACK),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -113,10 +124,17 @@ export const limitRules = pgTable(
       'limit_rules_period_start_day',
       sql`${t.periodStartDay} is null or (${t.window} = 'month' and ${t.periodStartDay} between 1 and ${sql.raw(String(LIMIT_PERIOD_START_DAY_MAX))})`,
     ),
-    // Партнёр видит правила площадки, а своё задаёт рядом, не стирая чужого.
+    // Партнёр и клиент видят правила площадки, а свои задают рядом, не стирая чужого, — и только себе.
     check(
-      'limit_rules_partner_sets_own',
-      sql`${t.setBy} = 'platform' or ${t.partnerId} is not null or ${t.simCardId} is not null or ${t.tariffId} is not null`,
+      'limit_rules_owner_sets_own',
+      sql`${t.setBy} = 'platform'
+        or (${t.setBy} = 'partner' and (${t.partnerId} is not null or ${t.simCardId} is not null or ${t.tariffId} is not null))
+        or (${t.setBy} = 'client' and (${t.clientId} is not null or ${t.channelId} is not null))`,
+    ),
+    // Деньги на звонки тратит только клиент: у партнёра и его карт их нет (ADR-0102).
+    check(
+      'limit_rules_money_client',
+      sql`${t.metric} <> 'money' or ${t.clientId} is not null or ${t.channelId} is not null`,
     ),
     check(
       'limit_rules_single_subject',
@@ -152,7 +170,7 @@ export const limitRules = pgTable(
  * Израсходованное за конкретное окно.
  *
  * Ключ — правило и начало окна. Начало вычисляется чистой функцией `bucketStart`
- * в UTC: одно и то же значение при проверке и при инкременте, иначе счётчик писался бы
+ * в поясе правила: одно и то же значение при проверке и при инкременте, иначе счётчик писался бы
  * в одно окно, а читался из другого.
  *
  * Старые окна не нужны никому, кроме разбора, и убираются фоновой задачей по сроку

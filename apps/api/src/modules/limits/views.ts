@@ -26,6 +26,8 @@ export interface LimitView {
   /** День обновления месячного окна; пусто — первое число. */
   readonly period_start_day: number | null;
   readonly set_by: LimitSetBy;
+  /** Пояс, в котором считаются окна, — пояс владельца (ADR-0102); у правил до него — `UTC`. */
+  readonly timezone: string;
 }
 
 /**
@@ -33,7 +35,7 @@ export interface LimitView {
  *
  * `used` и `limit` — в единицах хранения: звонки штуками, минуты секундами. У правила
  * «на каждую карту» строк столько, сколько карт, и `usage_sim_card_id` называет карту.
- * `resets_at` — когда окно закончится: окна считаются в UTC, а человеку нужен момент.
+ * `resets_at` — когда окно закончится: окна считаются в поясе владельца, а человеку нужен момент.
  */
 export interface LimitUsageView extends LimitView {
   readonly usage_sim_card_id: string | null;
@@ -59,6 +61,7 @@ export function toLimitView(row: LimitRuleRow): LimitView {
     rounding: row.rounding,
     period_start_day: row.periodStartDay,
     set_by: row.setBy,
+    timezone: row.timezone,
   };
 }
 

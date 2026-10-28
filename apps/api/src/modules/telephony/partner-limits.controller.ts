@@ -22,9 +22,10 @@ import type { PartnerRow } from '../billing/billing.repository.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { LimitRuleRow } from '../limits/limit.repository.js';
 import { TariffService } from '../catalog/tariff.service.js';
-import { LimitService } from '../limits/limit.service.js';
+import { LimitService, type RuleOwner } from '../limits/limit.service.js';
 import { changeLimitSchema, partnerLimitSchema } from '../limits/schemas.js';
 import { toLimitView, toUsageView, type LimitUsageView, type LimitView } from '../limits/views.js';
+import { accountTimezone } from './limit-owners.service.js';
 import { TelephonyService } from './telephony.service.js';
 
 @Controller()
@@ -122,6 +123,7 @@ export class PartnerLimitsController {
         rounding: body.rounding,
         periodStartDay: body.periodStartDay ?? null,
         setBy: 'partner',
+        timezone: accountTimezone(partner),
       },
       actor.userId,
       actor.role,
@@ -155,17 +157,20 @@ export class PartnerLimitsController {
   }
 
   /** Своё правило — на себя, на свою карту или в своём тарифе. Чужое для партнёра не существует. */
-  private async ownerCheck(partner: PartnerRow): Promise<(rule: LimitRuleRow) => boolean> {
+  private async ownerCheck(partner: PartnerRow): Promise<RuleOwner> {
     const [sims, tariffs] = await Promise.all([
       this.telephony.listSims(partner.id),
       this.tariffs.listTariffs(partner.id),
     ]);
     const ownSims = new Set<string>(sims.map((sim) => sim.id));
     const ownTariffs = new Set<string>(tariffs.map((tariff) => tariff.id));
-    return (rule) =>
-      rule.partnerId === partner.id ||
-      (rule.simCardId !== null && ownSims.has(rule.simCardId)) ||
-      (rule.tariffId !== null && ownTariffs.has(rule.tariffId));
+    return {
+      setBy: 'partner',
+      owns: (rule: LimitRuleRow) =>
+        rule.partnerId === partner.id ||
+        (rule.simCardId !== null && ownSims.has(rule.simCardId)) ||
+        (rule.tariffId !== null && ownTariffs.has(rule.tariffId)),
+    };
   }
 
   /** Закрытый партнёр не меняет ничего: запись осталась бы от участника, которого нет. */

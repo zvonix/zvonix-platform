@@ -345,6 +345,14 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 счётчики уходят вместе с правилом. Лимит площадки — `403`, чужой — `404`. Журнал:
 `limit.added`, `limit.changed`, `limit.removed` с партнёром в роли автора.
 
+
+### `PUT /partner/account/timezone`
+
+`{ "timezone": "Asia/Omsk" }` — пояс, в котором считаются сутки, недели и месяцы лимитов партнёра, его карт и тарифов
+([ADR-0102](../adr/0102-chasovoy-poyas-akkaunta-i-limity.md)). Только имя IANA, иначе `400`. Набранное за текущее окно переносится. Пояс — и в
+`GET /partner/account` (`partner.timezone`; `null` — не выбран, окна по UTC). У лимитов партнёра метрики `money` нет —
+`400`: денег на звонки партнёр не тратит.
+
 ## `GET /partner/calls?from=…&to=…&status=…&limit=…&offset=…`
 
 `200` → `{ "calls": [ … ], "total": 342 }`

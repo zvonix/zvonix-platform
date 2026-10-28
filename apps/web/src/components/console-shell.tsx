@@ -305,6 +305,7 @@ const CABINET_NAVIGATION: Record<Cabinet, readonly NavGroup[]> = {
       items: [
         { href: '/my/calls', label: 'Вызовы', Icon: PhoneCall, tab: true },
         { href: '/my/channels', label: 'Линии', Icon: Route },
+        { href: '/my/limits', label: 'Лимиты', Icon: ShieldBan },
         { href: '/my/prices', label: 'Цены', Icon: ReceiptText },
         // «Маршруты», а не «Приоритеты» и не «Партнёры»: клиент не обязан знать, кто за маршрутом (владелец, 2026-10-22).
         { href: '/my/priorities', label: 'Маршруты', Icon: Waypoints },

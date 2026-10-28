@@ -886,6 +886,31 @@ export class BillingService {
     return client;
   }
 
+  async requirePartner(partnerId: PartnerId): Promise<PartnerRow> {
+    const partner = await this.repository.findPartner(partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+    return partner;
+  }
+
+  /**
+   * Новый часовой пояс аккаунта ([ADR-0102](../../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md)) —
+   * в транзакции вызывающего, вместе с поясом правил лимитов. Журнал пишет вызывающий: он знает, сколько правил
+   * переехало.
+   */
+  async setTimezone(
+    owner: { kind: 'client'; id: ClientId } | { kind: 'partner'; id: PartnerId },
+    timezone: string,
+    executor: Executor,
+  ): Promise<void> {
+    const updated =
+      owner.kind === 'client'
+        ? await this.repository.setClientTimezone(owner.id, timezone, executor)
+        : await this.repository.setPartnerTimezone(owner.id, timezone, executor);
+    if (updated === undefined) {
+      throw notFound(owner.kind === 'client' ? 'Клиент не найден' : 'Партнёр не найден');
+    }
+  }
+
   /**
    * Клиент, которым владеет учётная запись.
    *

@@ -1,3 +1,4 @@
+import { timezoneLabel } from './timezones';
 import type {
   ApplicationStatus,
   Cabinet,
@@ -466,7 +467,8 @@ export function nodeTone(status: NodeStatus): string {
 }
 
 /**
- * Окно лимита — **календарное и в UTC** ([ADR-0026](../../../../docs/adr/0026-limity-po-oknam.md)).
+ * Окно лимита — **календарное, в поясе владельца** ([ADR-0026](../../../../docs/adr/0026-limity-po-oknam.md),
+ * [ADR-0102](../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md)).
  *
  * Названо так, чтобы было видно, когда счётчик обнулится, а не «за последние сутки»:
  * окно фиксированное, а не скользящее.
@@ -480,14 +482,15 @@ export const LIMIT_WINDOW_NAME: Record<LimitWindow, string> = {
 };
 
 /**
- * Что считает лимит.
+ * Что считает лимит — подпись к пределу, который задаётся в этих единицах: «500 минут разговора». Хранятся минуты
+ * секундами, а рубли микроединицами — показывает их `amount` из `@/lib/limits`.
  *
- * Минуты хранятся секундами: разговор в 90 секунд — это не «полторы минуты»
- * и не «одна», а ровно девяносто.
+ * Было «секунд разговора» при пределе в минутах: лимит в 500 минут читался как 500 секунд (2026-10-28).
  */
 export const LIMIT_METRIC_NAME: Record<LimitMetric, string> = {
   calls: 'вызовов',
-  minutes: 'секунд разговора',
+  minutes: 'минут разговора',
+  money: '₽ расхода',
 };
 
 /**
@@ -499,15 +502,25 @@ export function limitRuleNote(rule: {
   readonly per_sim: boolean;
   readonly rounding: 'second' | 'minute';
   readonly period_start_day: number | null;
-  readonly set_by: 'platform' | 'partner';
+  readonly set_by: 'platform' | 'partner' | 'client';
+  readonly window: LimitWindow;
+  readonly timezone: string;
 }): string {
   const parts: string[] = [];
   if (rule.per_sim) parts.push('на каждую карту');
   if (rule.rounding === 'minute') parts.push('поминутно');
   if (rule.period_start_day !== null) parts.push(`обновляется ${String(rule.period_start_day)}-го`);
-  parts.push(rule.set_by === 'partner' ? 'задал партнёр' : 'задала площадка');
+  // Пояс важен окнам от суток: час и минута одинаковы почти везде (ADR-0102).
+  if (rule.window !== 'minute' && rule.window !== 'hour') parts.push(timezoneLabel(rule.timezone));
+  parts.push(LIMIT_SET_BY_NAME[rule.set_by]);
   return parts.join(' · ');
 }
+
+const LIMIT_SET_BY_NAME = {
+  platform: 'задала площадка',
+  partner: 'задал партнёр',
+  client: 'задал клиент',
+} as const;
 
 /**
  * Причина отказа так, как её видит клиент.

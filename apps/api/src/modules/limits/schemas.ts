@@ -7,6 +7,7 @@ import {
   LIMIT_PERIOD_START_DAY_MAX,
   LIMIT_ROUNDINGS,
   LIMIT_WINDOWS,
+  PARTNER_LIMIT_METRICS,
 } from '@zvonix/shared';
 import { z } from 'zod';
 
@@ -36,7 +37,7 @@ export const addLimitSchema = z.object({
   window: z.enum(LIMIT_WINDOWS),
   metric: z.enum(LIMIT_METRICS),
 
-  /** Звонков или минут за окно. Ноль означал бы «нельзя вовсе» — это состояние, не лимит. */
+  /** Звонков, минут или рублей за окно. Ноль означал бы «нельзя вовсе» — это состояние, не лимит. */
   value: z.coerce
     .number()
     .int('должно быть целым числом')
@@ -67,6 +68,8 @@ export const changeLimitSchema = z.object({
 export const partnerLimitSchema = addLimitSchema
   .omit({ clientId: true, channelId: true, partnerId: true, perSim: true })
   .extend({
+    // Денег на звонки у партнёра нет: лимит денег — только у клиента (ADR-0102).
+    metric: z.enum(PARTNER_LIMIT_METRICS),
     scope: z.enum(['partner', 'each_sim', 'sim', 'tariff']),
     tariffId: z.uuid('должен быть идентификатором').optional(),
   })
@@ -78,3 +81,27 @@ export const partnerLimitSchema = addLimitSchema
     message: 'тариф называется ровно тогда, когда лимит — в тарифе',
     path: ['tariffId'],
   });
+
+/**
+ * Лимит, который клиент задаёт себе сам ([ADR-0102](../../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md)):
+ * на все свои линии вместе (`client`) или на одну (`channel`). «На каждую карту» и день обновления месяца — понятия
+ * партнёра, у клиента их нет; минуты считаются посекундно, как и тарифицируются.
+ */
+export const clientLimitSchema = addLimitSchema
+  .pick({ window: true, metric: true, value: true })
+  .extend({
+    scope: z.enum(['client', 'channel']),
+    channelId: z.uuid('должен быть идентификатором').optional(),
+  })
+  .refine((body) => (body.scope === 'channel') === (body.channelId !== undefined), {
+    message: 'линия называется ровно тогда, когда лимит — на одну линию',
+    path: ['channelId'],
+  });
+
+/** Лимиту клиента меняется только предел: остальное — другое правило. */
+export const changeClientLimitSchema = changeLimitSchema.pick({ value: true });
+
+/** Часовой пояс аккаунта — имя IANA (ADR-0102). Проверку по списку среды делает служба. */
+export const accountTimezoneSchema = z.object({
+  timezone: z.string().trim().min(1, 'пояс не выбран').max(64, 'слишком длинное имя пояса'),
+});

@@ -858,6 +858,150 @@ describe('линия глазами клиента (ADR-0101)', () => {
   }, 120_000);
 });
 
+describe('свои лимиты и часовой пояс (ADR-0102)', () => {
+  interface OwnLimit {
+    id: string;
+    client_id: string | null;
+    channel_id: string | null;
+    metric: string;
+    window: string;
+    value: number;
+    set_by: string;
+    timezone: string;
+    used: number;
+    limit: number;
+  }
+
+  it('клиент заводит лимит денег на себя и на линию, меняет и снимает; пояс — его аккаунта', async () => {
+    const line = await ownLine();
+
+    const own = await post(
+      '/client/limits',
+      { scope: 'client', metric: 'money', window: 'day', value: 300 },
+      as(line.token),
+    );
+    expect(own.statusCode).toBe(201);
+    expect(own.json<{ limit: OwnLimit }>().limit).toMatchObject({
+      set_by: 'client',
+      metric: 'money',
+      timezone: 'Europe/Moscow',
+    });
+    const onLine = await post(
+      '/client/limits',
+      { scope: 'channel', channelId: line.channel.id, metric: 'calls', window: 'hour', value: 40 },
+      as(line.token),
+    );
+    expect(onLine.statusCode).toBe(201);
+
+    const listed = (await get('/client/limits', as(line.token))).json<{
+      limits: OwnLimit[];
+      timezone: string | null;
+    }>();
+    expect(listed.timezone).toBe('Europe/Moscow');
+    expect(listed.limits).toHaveLength(2);
+    expect(listed.limits.find((row) => row.metric === 'money')).toMatchObject({
+      used: 0,
+      limit: 300_000_000,
+    });
+
+    const id = own.json<{ limit: OwnLimit }>().limit.id;
+    expect((await patch(`/client/limits/${id}`, { value: 500 }, as(line.token))).statusCode).toBe(
+      200,
+    );
+    const removed = await api().inject({
+      method: 'DELETE',
+      url: `/client/limits/${id}`,
+      headers: as(line.token),
+    });
+    expect(removed.statusCode).toBe(204);
+    expect(
+      (await get('/client/limits', as(line.token))).json<{ limits: OwnLimit[] }>().limits,
+    ).toHaveLength(1);
+  }, 120_000);
+
+  it('чужую линию и чужое правило клиент не трогает, правило площадки — видит, но не меняет', async () => {
+    const line = await ownLine();
+    const other = await ownLine();
+
+    const foreignLine = await post(
+      '/client/limits',
+      { scope: 'channel', channelId: other.channel.id, metric: 'calls', window: 'day', value: 5 },
+      as(line.token),
+    );
+    expect(foreignLine.statusCode).toBe(403);
+
+    const otherRule = (
+      await post(
+        '/client/limits',
+        { scope: 'client', metric: 'calls', window: 'day', value: 5 },
+        as(other.token),
+      )
+    ).json<{ limit: OwnLimit }>().limit.id;
+    expect(
+      (await patch(`/client/limits/${otherRule}`, { value: 9 }, as(line.token))).statusCode,
+    ).toBe(404);
+
+    const platform = (
+      await post('/limits', { clientId: line.clientId, window: 'day', metric: 'calls', value: 100 })
+    ).json<{ limit: OwnLimit }>().limit.id;
+    const listed = (await get('/client/limits', as(line.token))).json<{ limits: OwnLimit[] }>();
+    expect(listed.limits.find((row) => row.id === platform)?.set_by).toBe('platform');
+    expect(
+      (await patch(`/client/limits/${platform}`, { value: 1 }, as(line.token))).statusCode,
+    ).toBe(403);
+  }, 120_000);
+
+  it('часовой пояс: только имя IANA; смена видна в аккаунте и у правил', async () => {
+    const line = await ownLine();
+    await post(
+      '/client/limits',
+      { scope: 'client', metric: 'calls', window: 'day', value: 5 },
+      as(line.token),
+    );
+
+    for (const timezone of ['MSK', '+07:00', 'Europe/Атлантида']) {
+      const bad = await api().inject({
+        method: 'PUT',
+        url: '/client/account/timezone',
+        headers: as(line.token),
+        payload: { timezone },
+      });
+      expect(bad.statusCode).toBe(400);
+    }
+
+    const saved = await api().inject({
+      method: 'PUT',
+      url: '/client/account/timezone',
+      headers: as(line.token),
+      payload: { timezone: 'Asia/Novosibirsk' },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(
+      (await get('/client/account', as(line.token))).json<{ client: { timezone: string } }>().client
+        .timezone,
+    ).toBe('Asia/Novosibirsk');
+    const listed = (await get('/client/limits', as(line.token))).json<{
+      limits: OwnLimit[];
+      timezone: string;
+    }>();
+    expect(listed.timezone).toBe('Asia/Novosibirsk');
+    expect(listed.limits[0]?.timezone).toBe('Asia/Novosibirsk');
+
+    // Партнёру этот путь закрыт: пояс клиента меняет только клиент.
+    const partnerToken = rich.token;
+    expect(
+      (
+        await api().inject({
+          method: 'PUT',
+          url: '/partner/account/timezone',
+          headers: as(partnerToken),
+          payload: { timezone: 'Asia/Omsk' },
+        })
+      ).statusCode,
+    ).toBe(403);
+  }, 120_000);
+});
+
 describe('подключена ли линия — опрос регистраций узла (ADR-0101)', () => {
   const ESL_PASSWORD = 'b'.repeat(48);
   let registrations: Record<string, string>[] = [];

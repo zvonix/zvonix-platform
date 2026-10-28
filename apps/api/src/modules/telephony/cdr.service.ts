@@ -169,6 +169,20 @@ export class CdrService {
           // это принятая цена (ADR-0026).
           { verify: false },
         );
+        // Деньги клиента — тем же проходом и по той же причине (ADR-0102): известны только после разговора,
+        // перебор возможен на стоимость одного вызова. Сумма — та же, что ушла в проводку.
+        await this.limits.consume(
+          limitRules,
+          'money',
+          {
+            seconds: cdr.billableSeconds,
+            micros: Number(Money.toMicros(priced.charge.clientAmount)),
+            simCardId: call.simCardId,
+          },
+          call.startedAt,
+          tx,
+          { verify: false },
+        );
       },
     });
 

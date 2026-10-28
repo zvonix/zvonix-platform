@@ -1573,6 +1573,27 @@ test.describe('кабинет клиента', () => {
     await expect(page.getByRole('link', { name: 'Ночная смена' })).toHaveCount(0);
   });
 
+  // ADR-0102: клиент сам заводит лимит денег; сутки — в поясе, который он выбрал в «Аккаунте».
+  test('лимит денег и часовой пояс клиента', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/account');
+    await page.getByLabel('Часовой пояс').selectOption('Asia/Novosibirsk');
+    // Повторный прогон застаёт пояс уже выбранным — тогда кнопка недоступна, и это правильно.
+    const save = page.getByRole('button', { name: 'Сохранить' });
+    if (await save.isEnabled()) await save.click();
+    await expect(page.getByText(/Сутки лимитов начинаются в 00:00 · Новосибирск/u)).toBeVisible();
+
+    await page.goto('/my/limits');
+    await expect(page.getByText(/Новосибирск/u).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Добавить лимит' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Что считать').selectOption('money');
+    await dialog.getByLabel('Рублей, не больше').fill('300');
+    await dialog.getByRole('button', { name: 'Добавить лимит' }).click();
+    await expect(page.getByRole('cell', { name: /300 рублей в сутки/u })).toBeVisible();
+    await expect(page.getByRole('cell', { name: '0 ₽', exact: true }).first()).toBeVisible();
+  });
+
   test('обновление вызовов включается и помнится после перезагрузки', async ({ page }) => {
     await signIn(page, PEOPLE.client);
     await page.goto('/my/calls');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { amountFor, bucketEnd, bucketStart, limitInStoredUnits } from './limits.js';
+import { amountFor, bucketEnd, bucketStart, isTimeZone, limitInStoredUnits } from './limits.js';
 
 const at = (iso: string) => new Date(iso);
 
@@ -56,8 +56,8 @@ describe('начало окна', () => {
 
 describe('единицы метрики', () => {
   it('вызов стоит единицу в метрике звонков и свою длительность в минутах', () => {
-    expect(amountFor('calls', 137)).toBe(1);
-    expect(amountFor('minutes', 137)).toBe(137);
+    expect(amountFor('calls', { seconds: 137 })).toBe(1);
+    expect(amountFor('minutes', { seconds: 137 })).toBe(137);
   });
 
   it('минуты задаются человеком, а копятся секундами', () => {
@@ -120,11 +120,116 @@ describe('окна партнёра (ADR-0057)', () => {
 
   it('поминутный счёт округляет каждый разговор вверх до минуты', () => {
     // 61 секунда — две минуты пакета, как считает оператор, а не 1,02.
-    expect(amountFor('minutes', 61, 'minute')).toBe(120);
-    expect(amountFor('minutes', 60, 'minute')).toBe(60);
-    expect(amountFor('minutes', 1, 'minute')).toBe(60);
-    expect(amountFor('minutes', 0, 'minute')).toBe(0);
-    expect(amountFor('minutes', 61, 'second')).toBe(61);
-    expect(amountFor('calls', 61, 'minute')).toBe(1);
+    expect(amountFor('minutes', { seconds: 61 }, 'minute')).toBe(120);
+    expect(amountFor('minutes', { seconds: 60 }, 'minute')).toBe(60);
+    expect(amountFor('minutes', { seconds: 1 }, 'minute')).toBe(60);
+    expect(amountFor('minutes', { seconds: 0 }, 'minute')).toBe(0);
+    expect(amountFor('minutes', { seconds: 61 }, 'second')).toBe(61);
+    expect(amountFor('calls', { seconds: 61 }, 'minute')).toBe(1);
+  });
+});
+
+describe('окна в поясе владельца (ADR-0102)', () => {
+  it('сутки Новосибирска начинаются в его полночь — 17:00 UTC накануне', () => {
+    const moment = at('2026-10-28T05:00:00Z'); // 12:00 по Новосибирску
+    expect(bucketStart('day', moment, null, 'Asia/Novosibirsk').toISOString()).toBe(
+      '2026-10-27T17:00:00.000Z',
+    );
+    expect(bucketEnd('day', moment, null, 'Asia/Novosibirsk').toISOString()).toBe(
+      '2026-10-28T17:00:00.000Z',
+    );
+    // Через минуту после местной полуночи — уже новые сутки, хотя по UTC ещё вчера.
+    expect(
+      bucketStart('day', at('2026-10-28T17:01:00Z'), null, 'Asia/Novosibirsk').toISOString(),
+    ).toBe('2026-10-28T17:00:00.000Z');
+  });
+
+  it('неделя — с местного понедельника, месяц — с местного числа обновления', () => {
+    // Понедельник 26 октября 00:30 по Москве — это ещё воскресенье по UTC.
+    const moment = at('2026-10-25T21:30:00Z');
+    expect(bucketStart('week', moment, null, 'Europe/Moscow').toISOString()).toBe(
+      '2026-10-25T21:00:00.000Z',
+    );
+    expect(
+      bucketStart('month', at('2026-10-31T22:00:00Z'), null, 'Europe/Moscow').toISOString(),
+    ).toBe('2026-10-31T21:00:00.000Z');
+    expect(
+      bucketStart('month', at('2026-10-10T12:00:00Z'), 15, 'Europe/Moscow').toISOString(),
+    ).toBe('2026-09-14T21:00:00.000Z');
+  });
+
+  it('час в поясе с получасовым смещением — с местного часа', () => {
+    // Индия +5:30: 10:15 UTC — 15:45 местного, час начался в 15:00 местного = 09:30 UTC.
+    expect(
+      bucketStart('hour', at('2026-10-28T10:15:00Z'), null, 'Asia/Kolkata').toISOString(),
+    ).toBe('2026-10-28T09:30:00.000Z');
+  });
+
+  it('летнее время: сутки перевода длятся 23 и 25 часов, полночь остаётся полночью', () => {
+    // Берлин: 29 марта 2026 часы вперёд, 25 октября 2026 — назад.
+    const spring = at('2026-03-29T12:00:00Z');
+    const springStart = bucketStart('day', spring, null, 'Europe/Berlin');
+    const springEnd = bucketEnd('day', spring, null, 'Europe/Berlin');
+    expect(springStart.toISOString()).toBe('2026-03-28T23:00:00.000Z');
+    expect(springEnd.toISOString()).toBe('2026-03-29T22:00:00.000Z');
+    expect(springEnd.getTime() - springStart.getTime()).toBe(23 * 3_600_000);
+
+    const autumn = at('2026-10-25T12:00:00Z');
+    const autumnStart = bucketStart('day', autumn, null, 'Europe/Berlin');
+    const autumnEnd = bucketEnd('day', autumn, null, 'Europe/Berlin');
+    expect(autumnStart.toISOString()).toBe('2026-10-24T22:00:00.000Z');
+    expect(autumnEnd.getTime() - autumnStart.getTime()).toBe(25 * 3_600_000);
+  });
+
+  it('полночи, которой не было, — окно с первого момента после перевода часов', () => {
+    // Чили (Сантьяго): 6 сентября 2026 часы переводят с 00:00 сразу на 01:00.
+    const start = bucketStart('day', at('2026-09-06T15:00:00Z'), null, 'America/Santiago');
+    expect(start.toISOString()).toBe('2026-09-06T04:00:00.000Z');
+  });
+
+  it('конец окна — начало следующего в любом поясе', () => {
+    for (const zone of ['Europe/Moscow', 'Asia/Kamchatka', 'Europe/Berlin', 'Asia/Kolkata']) {
+      for (const window of ['minute', 'hour', 'day', 'week', 'month'] as const) {
+        for (const iso of [
+          '2026-03-29T00:30:00Z',
+          '2026-10-25T01:30:00Z',
+          '2026-12-31T23:59:00Z',
+        ]) {
+          const moment = at(iso);
+          const end = bucketEnd(window, moment, null, zone);
+          expect(bucketStart(window, end, null, zone).getTime()).toBe(end.getTime());
+          expect(bucketStart(window, moment, null, zone).getTime()).toBeLessThanOrEqual(
+            moment.getTime(),
+          );
+          expect(end.getTime()).toBeGreaterThan(moment.getTime());
+        }
+      }
+    }
+  });
+
+  it('UTC — ровно прежние окна', () => {
+    const moment = at('2026-09-03T14:37:52.123Z');
+    for (const window of ['minute', 'hour', 'day', 'week', 'month'] as const) {
+      expect(bucketStart(window, moment, null, 'UTC').getTime()).toBe(
+        bucketStart(window, moment).getTime(),
+      );
+    }
+  });
+
+  it('пояс — только имя IANA', () => {
+    expect(isTimeZone('Europe/Moscow')).toBe(true);
+    expect(isTimeZone('America/Argentina/Buenos_Aires')).toBe(true);
+    expect(isTimeZone('UTC')).toBe(true);
+    for (const bad of ['MSK', '+07:00', 'Europe/Атлантида', '', 'Europe/Moscow\nX']) {
+      expect(isTimeZone(bad)).toBe(false);
+    }
+  });
+});
+
+describe('лимит денег (ADR-0102)', () => {
+  it('копится микроединицами, задаётся рублями', () => {
+    expect(amountFor('money', { seconds: 60, micros: 2_500_000 })).toBe(2_500_000);
+    expect(amountFor('money', { seconds: 60 })).toBe(0);
+    expect(limitInStoredUnits('money', 300)).toBe(300_000_000);
   });
 });

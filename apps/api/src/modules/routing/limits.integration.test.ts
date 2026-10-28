@@ -11,6 +11,7 @@
  */
 
 import { sql } from 'drizzle-orm';
+import { parseId } from '@zvonix/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
@@ -428,6 +429,108 @@ describe('лимит минут', () => {
   }, 180_000);
 });
 
+describe('лимит денег (ADR-0102)', () => {
+  it('копится по CDR суммой списания и закрывает следующий вызов; повтор CDR не удваивает', async () => {
+    const env = await scenario();
+    await createPartner(env.operator);
+    // Цена партнёра — 1 ₽ в минуту, наценки нет: 90 секунд — 1,50 ₽.
+    expect(
+      (await limit({ clientId: env.client, window: 'day', metric: 'money', value: 1 })).statusCode,
+    ).toBe(201);
+
+    const call = await route(env.channel, env.destination);
+    expect(call.outcome).toBe('routed');
+    await sendCdr(call.callId, '90');
+    expect((await usage(`clientId=${env.client}`))[0]).toMatchObject({
+      metric: 'money',
+      used: 1_500_000,
+      limit: 1_000_000,
+      exceeded: true,
+    });
+    await sendCdr(call.callId, '90');
+    expect((await usage(`clientId=${env.client}`))[0]?.used).toBe(1_500_000);
+
+    expect((await route(env.channel, env.destination)).reason).toBe('limit_exceeded');
+  }, 180_000);
+
+  it('у партнёра и SIM лимита денег нет: денег на звонки они не тратят', async () => {
+    const env = await scenario();
+    const partner = await createPartner(env.operator);
+    const refused = await limit({
+      partnerId: partner.id,
+      window: 'day',
+      metric: 'money',
+      value: 5,
+    });
+    expect(refused.statusCode).toBe(400);
+    const sim = await limit({ simCardId: partner.simId, window: 'day', metric: 'money', value: 5 });
+    expect(sim.statusCode).toBe(400);
+  }, 180_000);
+});
+
+describe('часовой пояс владельца (ADR-0102)', () => {
+  interface RuleView {
+    id: string;
+    timezone: string;
+  }
+
+  it('правило линии берёт пояс клиента; клиент без выбранного пояса — UTC', async () => {
+    const env = await scenario();
+    // Новый клиент — Москва по умолчанию.
+    const moscow = (
+      await limit({ channelId: env.channel, window: 'day', metric: 'calls', value: 5 })
+    ).json<{ limit: RuleView }>().limit;
+    expect(moscow.timezone).toBe('Europe/Moscow');
+
+    // Клиент, заведённый до ADR-0102, — пояс не выбран: окна по UTC, как раньше.
+    await withDatabase(async (execute) => {
+      await execute(sql`update clients set timezone = null where id = ${env.client}`);
+    });
+    const legacy = (
+      await limit({ clientId: env.client, window: 'week', metric: 'calls', value: 5 })
+    ).json<{ limit: RuleView }>().limit;
+    expect(legacy.timezone).toBe('UTC');
+  }, 180_000);
+
+  it('смена пояса переносит набранное в окно по новому поясу и правила линий тоже', async () => {
+    const env = await scenario();
+    // Мест на карте больше, чем вызовов в тесте: отказ должен прийти от лимита, а не от занятой SIM.
+    await createPartner(env.operator, 8);
+    await limit({ clientId: env.client, window: 'day', metric: 'calls', value: 5 });
+    await limit({ channelId: env.channel, window: 'month', metric: 'calls', value: 50 });
+    await route(env.channel, env.destination);
+    await route(env.channel, env.destination);
+
+    const { BillingService } = await import('../billing/billing.service.js');
+    const { LimitOwnersService } = await import('../telephony/limit-owners.service.js');
+    const client = await api().get(BillingService).requireClient(parseId(env.client, 'client'));
+    const actor = await withDatabase(async (execute) => {
+      const result = await execute(sql`select id from users where role = 'admin' limit 1`);
+      return parseId((result.rows[0] as { id: string }).id, 'user');
+    });
+    // Камчатка: сутки начинаются на девять часов раньше московских — окно другое.
+    await api()
+      .get(LimitOwnersService)
+      .setClientTimezone(client, 'Asia/Kamchatka', { userId: actor, role: 'admin' });
+
+    const rows = (await get(`/limits?clientId=${env.client}`)).json<{
+      limits: (LimitUsageView & { timezone: string })[];
+    }>().limits;
+    expect(rows[0]).toMatchObject({ timezone: 'Asia/Kamchatka', used: 2 });
+    const line = (await get(`/limits?channelId=${env.channel}`)).json<{
+      limits: (LimitUsageView & { timezone: string })[];
+    }>().limits;
+    expect(line[0]).toMatchObject({ timezone: 'Asia/Kamchatka', used: 2 });
+
+    // Перебрать сменой пояса нельзя: третий, четвёртый и пятый проходят, шестой — нет.
+    for (let i = 0; i < 3; i += 1) {
+      const next = await route(env.channel, env.destination);
+      expect(next.reason ?? next.outcome).toBe('routed');
+    }
+    expect((await route(env.channel, env.destination)).reason).toBe('limit_exceeded');
+  }, 180_000);
+});
+
 describe('ведение лимитов', () => {
   it('изменение предела не трогает израсходованное', async () => {
     const env = await scenario();
@@ -612,7 +715,10 @@ describe('лимит «на каждую карту» (ADR-0057)', () => {
     const [row] = await usage(`partnerId=${partner.id}`);
     expect(row).toMatchObject({ usage_sim_card_id: partner.simId, used: 120, limit: 6000 });
     // Окно обнуляется 15-го, а не первого числа.
-    expect(new Date(row?.resets_at ?? '').getUTCDate()).toBe(15);
+    // Новый партнёр считает по Москве (ADR-0102): 15-е наступает в 00:00 МСК — по UTC это ещё 14-е.
+    expect(
+      new Date(row?.resets_at ?? '').toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' }),
+    ).toMatch(/-15$/u);
   }, 180_000);
 
   it('несогласованное правило отвергается внятно, а не ошибкой базы', async () => {
