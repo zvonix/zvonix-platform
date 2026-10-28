@@ -84,7 +84,7 @@ describe('реестр фоновых задач', () => {
     ).toEqual([
       'reservations.release-expired',
       'calls.close-without-cdr',
-      'channels.poll-registrations',
+      'registrations.poll',
       'nodes.retire-silent',
       'recordings.remove-expired',
       'sessions.purge-expired',
@@ -101,7 +101,7 @@ describe('реестр фоновых задач', () => {
       'support.purge-uploads',
       'platform.heartbeat',
       'notifications.payment-decisions',
-      'notifications.partner-suspension',
+      'notifications.partner-equipment',
       'messages.dispatch',
       'bots.charge-fees',
       'bots.refresh-subscriptions',

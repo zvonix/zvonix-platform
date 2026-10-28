@@ -33,7 +33,7 @@ export { ReservationService, EXPIRY_SWEEP_LIMIT } from './modules/billing/reserv
 export { TelephonyModule } from './modules/telephony/telephony.module.js';
 export { CdrService } from './modules/telephony/cdr.service.js';
 export { QualityService } from './modules/telephony/quality.service.js';
-export { ChannelRegistrationsService } from './modules/telephony/channel-registrations.service.js';
+export { RegistrationsService } from './modules/telephony/registrations.service.js';
 
 export { IdentityModule } from './modules/identity/identity.module.js';
 export { IdentityService, SESSION_SWEEP_LIMIT } from './modules/identity/identity.service.js';
@@ -73,7 +73,7 @@ export { SupportModule } from './modules/support/support.module.js';
 export { SupportService } from './modules/support/support.service.js';
 export { PlatformHealthService } from './modules/notifications/platform-health.service.js';
 export { PaymentNoticeService } from './modules/notifications/payment-notice.service.js';
-export { SuspensionNoticeService } from './modules/notifications/suspension-notice.service.js';
+export { EquipmentNoticeService } from './modules/notifications/equipment-notice.service.js';
 export { ServersModule } from './modules/servers/servers.module.js';
 export { ServersService } from './modules/servers/servers.service.js';
 export { LowBalanceService } from './modules/notifications/low-balance.service.js';

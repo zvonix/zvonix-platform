@@ -15,7 +15,7 @@ import { PreflightService } from './preflight.service.js';
 import { PlatformHealthController } from './platform-health.controller.js';
 import { PlatformHealthService } from './platform-health.service.js';
 import { PaymentNoticeService } from './payment-notice.service.js';
-import { SuspensionNoticeService } from './suspension-notice.service.js';
+import { EquipmentNoticeService } from './equipment-notice.service.js';
 
 /** Уведомления по условию: «на счёте мало» (ADR-0060) и тревоги администраторам (ADR-0062). */
 @Module({
@@ -36,7 +36,7 @@ import { SuspensionNoticeService } from './suspension-notice.service.js';
     LowBalanceService,
     AlertsService,
     PaymentNoticeService,
-    SuspensionNoticeService,
+    EquipmentNoticeService,
     PlatformHealthService,
     PreflightService,
   ],
@@ -44,7 +44,7 @@ import { SuspensionNoticeService } from './suspension-notice.service.js';
     LowBalanceService,
     AlertsService,
     PaymentNoticeService,
-    SuspensionNoticeService,
+    EquipmentNoticeService,
     PlatformHealthService,
   ],
 })

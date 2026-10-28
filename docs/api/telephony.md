@@ -114,7 +114,7 @@ FreeSWITCH принимает его в каталоге вместо парол
 ```json
 {
   "gateway": { "id", "partner_id", "name", "type", "status", "registration_mode", "sip_username",
-               "node_id", "registered_at", "model", "port_count" },
+               "node_id", "connection", "model", "port_count" },
   "account": { "username": "gw-a1b2c3d4e5f6", "password": "…", "realm": "sip.zvonix.ru", "server": "203.0.113.10" },
   "port_accounts": [ { "port_id", "port_number", "username": "pt-…", "password", "realm", "server" } ]
 }
@@ -196,14 +196,17 @@ FreeSWITCH принимает его в каталоге вместо парол
 только имя, без пароля.
 
 У порта в `GET /gateways/:id/ports` — `sip_username` (пусто — вход не выдан), `node_id`
-и `registered_at` линии.
+и `connection` линии.
 
 ## `GET /gateways?partnerId=…` — роли `admin`, `support`
 
 `200` → `{ "gateways": [ … ] }`. Ни пароля, ни `a1-hash` в ответе нет.
 
-`node_id` и `registered_at` показывают, на каком узле шлюз зарегистрирован и когда —
-по ним видно, живой ли он. `suspended_by` — кто выключил: `partner`, `admin` или
+`node_id` — узел, который последним запрашивал учётную запись шлюза: по нему отбор SIM
+сужается узлом. `connection` — подключён ли шлюз по опросу узлов, с адресом устройства,
+как у партнёра ([partner.md](partner.md), `GET /partner/equipment`;
+[ADR-0103](../adr/0103-shlyuz-na-svyazi-po-oprosu-i-trevoga-partnyoru.md)). У транка
+`connection` смысла не имеет: к провайдеру регистрируемся мы. `suspended_by` — кто выключил: `partner`, `admin` или
 `failure_threshold`; задан ровно у `suspended`. То же поле есть и у транка.
 
 ## `POST /channels` — роль `admin`

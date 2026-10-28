@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CHANNEL_REGISTRATION_FRESH_MS,
-  isChannelConnected,
+  deviceConnection,
+  KNOCK_RECENT_MS,
+  REGISTRATION_FRESH_MS,
+  isRegistered,
   parseRegistrations,
-} from './channel-registrations.service.js';
+} from './registrations.service.js';
 import type { ChannelRow } from './telephony.repository.js';
 
 describe('разбор `show registrations as json`', () => {
@@ -69,18 +71,58 @@ describe('подключена ли линия', () => {
     }) as ChannelRow;
 
   it('свежая и не истекшая — подключена', () => {
-    expect(isChannelConnected(line(30_000, 600_000), now)).toBe(true);
+    expect(isRegistered(line(30_000, 600_000), now)).toBe(true);
   });
 
   it('истекшая регистрация — нет', () => {
-    expect(isChannelConnected(line(30_000, -1), now)).toBe(false);
+    expect(isRegistered(line(30_000, -1), now)).toBe(false);
   });
 
   it('опрос давно не видел — нет: узел молчит или программа ушла', () => {
-    expect(isChannelConnected(line(CHANNEL_REGISTRATION_FRESH_MS + 1, 600_000), now)).toBe(false);
+    expect(isRegistered(line(REGISTRATION_FRESH_MS + 1, 600_000), now)).toBe(false);
   });
 
   it('никогда не видели — нет', () => {
-    expect(isChannelConnected(line(null, null), now)).toBe(false);
+    expect(isRegistered(line(null, null), now)).toBe(false);
+  });
+});
+
+describe('подключение шлюза или линии GOIP', () => {
+  const now = new Date('2026-10-28T12:00:00Z');
+  const device = (marks: { seenAgoMs?: number; knockedAgoMs?: number }) => ({
+    registrationSeenAt:
+      marks.seenAgoMs === undefined ? null : new Date(now.getTime() - marks.seenAgoMs),
+    registrationExpiresAt: marks.seenAgoMs === undefined ? null : new Date(now.getTime() + 600_000),
+    registrationAddress: '203.0.113.5:5060/udp',
+    registeredAt:
+      marks.knockedAgoMs === undefined ? null : new Date(now.getTime() - marks.knockedAgoMs),
+  });
+
+  it('вошло — на связи, с адресом', () => {
+    expect(
+      deviceConnection(device({ seenAgoMs: 30_000, knockedAgoMs: 60_000 }), now),
+    ).toMatchObject({
+      connected: true,
+      address: '203.0.113.5:5060/udp',
+      rejected: false,
+    });
+  });
+
+  it('стучится, но не вошло — «проверьте пароль»; адрес прежней регистрации не показывается', () => {
+    expect(
+      deviceConnection(device({ seenAgoMs: REGISTRATION_FRESH_MS + 1, knockedAgoMs: 20_000 }), now),
+    ).toMatchObject({ connected: false, address: null, rejected: true });
+  });
+
+  it('давно не стучалось — просто не на связи', () => {
+    expect(deviceConnection(device({ knockedAgoMs: KNOCK_RECENT_MS + 1 }), now)).toMatchObject({
+      connected: false,
+      rejected: false,
+    });
+    expect(deviceConnection(device({}), now)).toMatchObject({
+      connected: false,
+      knocked_at: null,
+      rejected: false,
+    });
   });
 });

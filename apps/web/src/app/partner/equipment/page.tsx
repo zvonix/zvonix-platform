@@ -17,7 +17,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
-import { moment } from '@/lib/format';
 import { GATEWAY_TYPE_NAME, REGISTRATION_MODE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
 import {
   EQUIPMENT_KEY,
@@ -30,7 +29,8 @@ import {
 } from './equipment';
 import { AddGateway, SimActions } from './manage';
 import { AddTrunk, TrunksSection } from './trunks';
-import { PORT_COLUMNS, PortHeader, PortRow, Presence } from './ports';
+import { Presence } from '@/components/presence';
+import { PORT_COLUMNS, PoorConnection, PortHeader, PortRow } from './ports';
 
 export default function PartnerEquipmentPage() {
   return (
@@ -69,7 +69,9 @@ function PartnerEquipment() {
   }
 
   const { gateways, trunks, spare_sims: spare } = equipment.data;
-  const offline = gateways.filter((gateway) => gateway.status === 'active' && !gateway.on_node);
+  const offline = gateways.filter(
+    (gateway) => gateway.status === 'active' && !gateway.connection.connected,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -96,8 +98,10 @@ function PartnerEquipment() {
           {offline.length === 1
             ? 'Шлюз не на связи'
             : `Шлюзов не на связи: ${String(offline.length)}`}{' '}
-          — вызовы на {offline.length === 1 ? 'него' : 'них'} не идут. Проверьте питание, сеть и
-          настройки подключения на странице шлюза.
+          — вызовы на {offline.length === 1 ? 'него' : 'них'} не идут.{' '}
+          {offline.every((gateway) => gateway.connection.rejected)
+            ? 'Устройство обращается, но не входит — сверьте логин и пароль на странице шлюза.'
+            : 'Проверьте питание, сеть и настройки подключения на странице шлюза.'}
         </p>
       )}
 
@@ -270,11 +274,11 @@ function GatewayCard({
           {gateway.model !== null && ` · ${gateway.model}`}
           {gateway.type === 'goip' && ` · ${REGISTRATION_MODE_NAME[gateway.registration_mode]}`}
         </span>
-        <span>{gatewayStateName(gateway)}</span>
-        <Presence
-          online={gateway.on_node}
-          title={gateway.on_node ? `отметка ${moment(gateway.registered_at)}` : undefined}
-        />
+        <span>
+          {gatewayStateName(gateway)}
+          {gateway.poor_connection === true && <PoorConnection />}
+        </span>
+        <Presence connection={gateway.connection} />
         <span className="text-muted-foreground">
           карт <span className="num">{filled.length}</span> из{' '}
           <span className="num">{gateway.ports.length}</span>

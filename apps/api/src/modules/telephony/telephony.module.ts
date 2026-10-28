@@ -27,7 +27,7 @@ import { PartnerLimitsController } from './partner-limits.controller.js';
 import { TestCallController } from './test-call.controller.js';
 import { TestCallRepository } from './test-call.repository.js';
 import { TestCallService } from './test-call.service.js';
-import { ChannelRegistrationsService } from './channel-registrations.service.js';
+import { RegistrationsService } from './registrations.service.js';
 import { ClientLimitsController } from './client-limits.controller.js';
 import { LimitController } from './limit.controller.js';
 import { LimitOwnersService } from './limit-owners.service.js';
@@ -62,7 +62,7 @@ import { LimitOwnersService } from './limit-owners.service.js';
     PartnerReportService,
     TestCallService,
     TestCallRepository,
-    ChannelRegistrationsService,
+    RegistrationsService,
     LimitOwnersService,
   ],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.
@@ -74,7 +74,7 @@ import { LimitOwnersService } from './limit-owners.service.js';
     CallRepository,
     CdrService,
     QualityService,
-    ChannelRegistrationsService,
+    RegistrationsService,
   ],
 })
 export class TelephonyModule {}

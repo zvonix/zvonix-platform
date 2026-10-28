@@ -159,7 +159,7 @@ https://cp.example.com/*      →  Next  (apps/web, порт 3000)
 |---|---|---|
 | `reservations.release-expired` | Потерянный CDR замораживает деньги клиента навсегда: он перестаёт звонить, причина не видна | 60 с |
 | `calls.close-without-cdr` | Вызов узла, умершего посреди разговора, вечно занимает место на SIM — она больше не примет звонков | 60 с |
-| `channels.poll-registrations` | Клиент видит «подключена» у линии, чья программа давно отключилась или стучится со старым паролем ([ADR-0101](adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)) | 60 с |
+| `registrations.poll` | Клиент и партнёр видят «на связи» у линии, шлюза или линии GOIP, которые давно отключились или стучатся со старым паролем: одна команда `show registrations` на узел, разбор по префиксу `ch-`/`gw-`/`pt-` ([ADR-0101](adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md), [ADR-0103](adr/0103-shlyuz-na-svyazi-po-oprosu-i-trevoga-partnyoru.md)) | 60 с |
 | `nodes.retire-silent` | Замолчавший узел остаётся в маршрутизации и получает вызовы, которые некому обслужить | 15 с |
 | `recordings.remove-expired` | Разговоры пассажиров хранятся дольше объявленного срока | 5 мин |
 | `sessions.purge-expired` | Просроченные сессии хранят адрес и клиента — данные о человеке — без причины | 1 ч |

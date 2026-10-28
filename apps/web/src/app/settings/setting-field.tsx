@@ -88,7 +88,7 @@ const LABELS: Record<string, string> = {
   'security.admin_second_factor_required': 'Второй фактор обязателен администраторам',
   'notifications.payment_decision_enabled': 'Писать клиенту о решении по заявке на пополнение',
   'notifications.partner_suspension_enabled':
-    'Писать партнёру, когда его SIM или шлюз отключились из-за отказов',
+    'Писать партнёру о его SIM и шлюзах: отключились или почти не соединяют',
   'recordings.record_all': 'Записывать разговоры по всем линиям',
   'retention.recordings_days': 'Срок хранения записей, суток',
   'retention.metrics_days': 'Срок хранения истории нагрузки, суток',

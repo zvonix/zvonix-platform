@@ -11,7 +11,7 @@
  * изменяющий обработчик начинается с проверки владения, и чужой объект отвечает `404`,
  * а не `403`: партнёр не должен узнавать даже того, что объект существует.
  *
- * Отдаются **факты, а не приговор**: состояние шлюза, есть ли у него регистрация на узле,
+ * Отдаются **факты, а не приговор**: состояние шлюза, подключён ли он к узлу (по опросу, ADR-0103),
  * что вставлено в порты и в каком состоянии SIM. Вывод «почему через меня не идут вызовы»
  * складывается из этих фактов вместе с состоянием самого партнёра
  * (`GET /partner/account`) и наличием цены по направлению (`GET /partner/rates`).
@@ -48,6 +48,8 @@ import {
   tariffChoiceSchema,
 } from './schemas.js';
 import { firstAndAll, toPortAccountView, type PortAccountView } from './telephony.controller.js';
+import { failsOnNetwork, QualityService } from './quality.service.js';
+import { deviceConnection, type DeviceConnectionView } from './registrations.service.js';
 import { TelephonyService, type IssuedPortAccount } from './telephony.service.js';
 import type {
   GatewayPortRow,
@@ -74,12 +76,17 @@ interface SimView {
   readonly operator_confirmed_at: string | null;
   /** Свой тариф карты; пусто — как у шлюза (ADR-0056). */
   readonly tariff_id: string | null;
+  /**
+   * Почти не соединяет за последний час из-за отказов сети (ADR-0103, п. 5) — только в списке оборудования.
+   * «Не ответил» и «занято» сюда не входят: это база клиента, а не карта.
+   */
+  readonly poor_connection?: boolean;
 }
 
 /**
  * Порт с картой. Вход линии — у шлюза со входом по линиям
  * ([ADR-0054](../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)): имя (пароль
- * не отдаётся никогда) и есть ли у линии регистрация.
+ * не отдаётся никогда) и подключена ли линия.
  */
 interface PortView {
   readonly id: string;
@@ -87,17 +94,16 @@ interface PortView {
   readonly state: GatewayPortState;
   readonly sim: SimView | null;
   readonly sip_username: string | null;
-  readonly on_node: boolean;
-  readonly registered_at: string | null;
+  readonly connection: DeviceConnectionView;
 }
 
 /**
  * Шлюз партнёра вместе с портами.
  *
- * `on_node` — есть ли у шлюза регистрация на узле. Без неё вызов на него не уйдёт
- * вообще: диалплан набирает шлюз как зарегистрированного пользователя, и отбор
- * кандидатов сужается узлом, приславшим запрос. Это единственная строчка, которую
- * может починить только партнёр, — и до сих пор она была видна только нам.
+ * `connection` — подключён ли шлюз к узлу. Без регистрации вызов на него не уйдёт
+ * вообще: диалплан набирает шлюз как зарегистрированного пользователя. Это строчка,
+ * которую может починить только партнёр, — поэтому по опросу узлов, а не по запросу
+ * учётной записи: тот бывает и у устройства с неверным паролем (ADR-0103).
  */
 interface GatewayView {
   readonly id: string;
@@ -121,11 +127,12 @@ interface GatewayView {
    */
   readonly sip_username: string;
   /**
-   * На связи ли шлюз: при входе на шлюз — его регистрация, при входе по линиям —
-   * хоть одна линия (какая именно — у портов). Отметка — самая свежая из них.
+   * Подключён ли шлюз: при входе на шлюз — его регистрация, при входе по линиям —
+   * хоть одна линия (какая именно — у портов).
    */
-  readonly on_node: boolean;
-  readonly registered_at: string | null;
+  readonly connection: DeviceConnectionView;
+  /** Почти не соединяет из-за отказов сети (ADR-0103, п. 5) — только в списке оборудования. */
+  readonly poor_connection?: boolean;
   readonly ports: readonly PortView[];
 }
 
@@ -171,6 +178,7 @@ export class PartnerEquipmentController {
     private readonly telephony: TelephonyService,
     private readonly billing: BillingService,
     private readonly catalog: CatalogService,
+    private readonly quality: QualityService,
   ) {}
 
   /** Входы линий с адресом узла — один запрос адреса на весь ответ. */
@@ -198,16 +206,24 @@ export class PartnerEquipmentController {
     spare_sims: SimView[];
   }> {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const now = new Date();
 
-    const [gateways, sims, trunks, ports] = await Promise.all([
+    const [gateways, sims, trunks, ports, poor] = await Promise.all([
       this.telephony.listGateways(partner.id),
       this.telephony.listSims(partner.id),
       this.telephony.listTrunks(partner.id),
       this.telephony.listPartnerPorts(partner.id),
+      this.quality.poorlyConnecting(now, partner.id),
     ]);
+    const poorSims = new Set(poor.sims.filter(failsOnNetwork).map((row) => row.subjectId));
+    const poorGateways = new Set(poor.gateways.filter(failsOnNetwork).map((row) => row.subjectId));
 
     const operators = await this.catalog.operatorNamesOf(sims.map((sim) => sim.operatorId));
     const simById = new Map(sims.map((sim) => [sim.id, sim]));
+    const listed = (sim: SimCardRow): SimView => ({
+      ...toSimView(sim, operators),
+      poor_connection: poorSims.has(sim.id),
+    });
 
     const portsByGateway = new Map<string, GatewayPortRow[]>();
     for (const port of ports) {
@@ -225,16 +241,18 @@ export class PartnerEquipmentController {
     const occupied = new Set<string>();
     const gatewayViews = gateways
       .filter((gateway) => gateway.type !== 'sip_trunk' && gateway.status !== 'retired')
-      .map((gateway) =>
-        toGatewayView(
+      .map((gateway) => ({
+        ...toGatewayView(
           gateway,
           (portsByGateway.get(gateway.id) ?? []).map((port) => {
             const sim = port.simCardId === null ? undefined : simById.get(port.simCardId);
             if (sim !== undefined) occupied.add(sim.id);
-            return toPortView(port, sim === undefined ? null : toSimView(sim, operators));
+            return toPortView(port, sim === undefined ? null : listed(sim), now);
           }),
+          now,
         ),
-      );
+        poor_connection: poorGateways.has(gateway.id),
+      }));
 
     return {
       connection: { server: await this.telephony.sipServer(), port: NODE_SIP_PORT },
@@ -244,7 +262,7 @@ export class PartnerEquipmentController {
         .map((row) => toTrunkView(row)),
       spare_sims: sims
         .filter((sim) => !occupied.has(sim.id) && sim.status !== 'retired')
-        .map((sim) => toSimView(sim, operators)),
+        .map(listed),
     };
   }
 
@@ -275,7 +293,7 @@ export class PartnerEquipmentController {
       actor.role,
     );
     return {
-      gateway: toGatewayView(created.gateway, []),
+      gateway: toGatewayView(created.gateway, [], new Date()),
       account: {
         username: created.account.username,
         password: created.account.password,
@@ -309,7 +327,7 @@ export class PartnerEquipmentController {
       actor.role,
     );
     return {
-      gateway: toGatewayView(result.gateway, []),
+      gateway: toGatewayView(result.gateway, [], new Date()),
       port_accounts: await this.portViews(result.portAccounts),
     };
   }
@@ -413,7 +431,7 @@ export class PartnerEquipmentController {
       actor.userId,
       actor.role,
     );
-    return { gateway: toGatewayView(updated, []) };
+    return { gateway: toGatewayView(updated, [], new Date()) };
   }
 
   /**
@@ -568,19 +586,18 @@ function toSimView(sim: SimCardRow, operators: Map<string, string>): SimView {
   };
 }
 
-function toPortView(port: GatewayPortRow, sim: SimView | null): PortView {
+function toPortView(port: GatewayPortRow, sim: SimView | null, now: Date): PortView {
   return {
     id: port.id,
     port_number: port.portNumber,
     state: port.state,
     sim,
     sip_username: port.sipUsername,
-    on_node: port.nodeId !== null,
-    registered_at: port.registeredAt?.toISOString() ?? null,
+    connection: deviceConnection(port, now),
   };
 }
 
-function toGatewayView(gateway: GatewayRow, ports: readonly PortView[]): GatewayView {
+function toGatewayView(gateway: GatewayRow, ports: readonly PortView[], now: Date): GatewayView {
   return {
     id: gateway.id,
     name: gateway.name,
@@ -592,34 +609,35 @@ function toGatewayView(gateway: GatewayRow, ports: readonly PortView[]): Gateway
     registration_mode: gateway.registrationMode,
     tariff_id: gateway.tariffId,
     sip_username: gateway.sipUsername,
-    ...presenceOf(gateway, ports),
+    connection: connectionOf(gateway, ports, now),
     ports,
   };
 }
 
 /**
- * Связь шлюза с площадкой — по той стороне, что регистрируется (ADR-0054).
+ * Подключение шлюза — по той стороне, что регистрируется (ADR-0054).
  *
  * При входе по линиям у самого шлюза регистрации нет и быть не должно: каталог
- * его вход не отдаёт. «На связи» тогда значит «хоть одна линия на связи».
+ * его вход не отдаёт. «Подключён» тогда значит «хоть одна линия подключена»,
+ * а «стучится, но не вошёл» — ни одна не подключена и хоть одна стучится.
  */
-function presenceOf(
+function connectionOf(
   gateway: GatewayRow,
   ports: readonly PortView[],
-): { on_node: boolean; registered_at: string | null } {
-  if (gateway.registrationMode === 'gateway') {
-    return {
-      on_node: gateway.nodeId !== null,
-      registered_at: gateway.registeredAt?.toISOString() ?? null,
-    };
-  }
-  const moments = ports.flatMap((port) =>
-    port.registered_at === null ? [] : [port.registered_at],
-  );
-  return {
-    on_node: ports.some((port) => port.on_node),
+  now: Date,
+): DeviceConnectionView {
+  if (gateway.registrationMode === 'gateway') return deviceConnection(gateway, now);
+  const latest = (values: readonly (string | null)[]): string | null =>
     // ISO-строки в UTC сравниваются как строки.
-    registered_at: moments.length === 0 ? null : moments.reduce((a, b) => (a > b ? a : b)),
+    values.reduce<string | null>((a, b) => (b !== null && (a === null || b > a) ? b : a), null);
+  const connected = ports.some((port) => port.connection.connected);
+  return {
+    connected,
+    seen_at: latest(ports.map((port) => port.connection.seen_at)),
+    // Адрес у каждой линии свой — у портов.
+    address: null,
+    knocked_at: latest(ports.map((port) => port.connection.knocked_at)),
+    rejected: !connected && ports.some((port) => port.connection.rejected),
   };
 }
 

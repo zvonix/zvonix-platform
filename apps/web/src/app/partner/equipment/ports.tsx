@@ -2,11 +2,11 @@
 
 import { goipLinePrefix, TESTABLE_SIM_STATUSES } from '@zvonix/shared';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
-import { moment } from '@/lib/format';
 import { PORT_STATE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
 import { TestCallButton } from '@/components/test-call';
 import { TariffSelect, useTariffName } from '@/components/tariff-select';
 import { PARTNER_RATES_KEY } from '@/lib/tariffs';
+import { Presence } from '@/components/presence';
 import { EQUIPMENT_KEY, type Gateway, type Port, type Sim } from './equipment';
 import { InsertSim, RemoveSim, SimActions } from './manage';
 
@@ -66,6 +66,7 @@ export function PortRow({
               не требует (владелец, 2026-09-25) — здесь только состояние карты.
             */}
             {SIM_STATUS_NAME[port.sim.status]}
+            {port.sim.poor_connection === true && <PoorConnection block />}
           </>
         )}
         {/*
@@ -149,29 +150,24 @@ function LineCell({ gateway, port }: { gateway: Gateway; port: Port }) {
       {port.sip_username === null ? (
         <span className="text-warn">вход не выдан</span>
       ) : (
-        // Когда отмечена связь — подсказкой: в строке важно «да или нет», время — по запросу.
-        <Presence
-          online={port.on_node}
-          title={port.on_node ? `отметка ${moment(port.registered_at)}` : undefined}
-        />
+        // В строке важно «да или нет», адрес и время — подсказкой.
+        <Presence connection={port.connection} />
       )}
     </>
   );
 }
 
 /**
- * На связи ли устройство: точка и слово одного цвета — зелёный «да», жёлтый «нет»
- * (владелец, 2026-09-29: «на связи может писать другим цветом»). Слово остаётся:
- * один цвет не читается при нарушенном цветовосприятии.
+ * Почти не соединяет из-за отказов сети за последний час (ADR-0103, п. 5) — то же, о чём партнёру пришло письмо.
+ * В строке порта — отдельной строкой ячейки: в одну строку она раздвигала таблицу шире экрана.
  */
-export function Presence({ online, title }: { online: boolean; title?: string | undefined }) {
+export function PoorConnection({ block = false }: { block?: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 ${online ? 'text-ok' : 'text-warn'}`}
-      title={title}
+      className={block ? 'block text-warn' : 'text-warn'}
+      title="За последний час большинство вызовов сорвались в сети: проверьте баланс и блокировку SIM, сигнал, сам шлюз"
     >
-      <span aria-hidden className={`size-2 rounded-full ${online ? 'bg-ok' : 'bg-warn'}`} />
-      {online ? 'на связи' : 'не на связи'}
+      {block ? 'почти не соединяет' : ' · почти не соединяет'}
     </span>
   );
 }

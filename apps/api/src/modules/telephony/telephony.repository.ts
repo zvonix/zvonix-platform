@@ -64,6 +64,24 @@ export type PartnerCoverageRow = typeof partnerCoverage.$inferSelect;
 export type AllowedOperatorRow = typeof channelAllowedOperators.$inferSelect;
 export type PartnerId = Id<'partner'>;
 
+/** Отметки опроса стираются вместе с паролем: регистрация сделана прежним (ADR-0103, п. 4). */
+const NO_REGISTRATION = {
+  registrationSeenAt: null,
+  registrationExpiresAt: null,
+  registrationAddress: null,
+} as const;
+
+/** Регистрации из опроса узла строками `r(username, expires_at, address)` — одним параметром на столбец. */
+function registrationRows(
+  registrations: readonly { username: string; expiresAt: Date; address: string }[],
+): SQL {
+  return sql`unnest(
+    ${sql.param(registrations.map((entry) => entry.username))}::text[],
+    ${sql.param(registrations.map((entry) => entry.expiresAt.toISOString()))}::timestamptz[],
+    ${sql.param(registrations.map((entry) => entry.address))}::text[]
+  ) as r(username, expires_at, address)`;
+}
+
 /**
  * Состояние шлюза из строки.
  *
@@ -334,7 +352,7 @@ export class TelephonyRepository {
       // шлюз не на связи — отбор не должен набирать его по старой отметке.
       const [row] = await this.db
         .update(gateways)
-        .set({ sipUsername, a1Hash, nodeId: null, registeredAt: null })
+        .set({ sipUsername, a1Hash, nodeId: null, registeredAt: null, ...NO_REGISTRATION })
         .where(eq(gateways.id, id))
         .returning();
       return row;
@@ -366,7 +384,7 @@ export class TelephonyRepository {
       .update(gateways)
       .set({
         registrationMode: to,
-        ...(to === 'gateway' ? { nodeId: null, registeredAt: null } : {}),
+        ...(to === 'gateway' ? { nodeId: null, registeredAt: null, ...NO_REGISTRATION } : {}),
       })
       .where(and(eq(gateways.id, id), eq(gateways.registrationMode, from)))
       .returning();
@@ -374,7 +392,7 @@ export class TelephonyRepository {
     if (to === 'port') {
       await executor
         .update(gatewayPorts)
-        .set({ nodeId: null, registeredAt: null })
+        .set({ nodeId: null, registeredAt: null, ...NO_REGISTRATION })
         .where(eq(gatewayPorts.gatewayId, id));
     }
     return row;
@@ -443,12 +461,47 @@ export class TelephonyRepository {
         registration_expires_at = r.expires_at,
         registration_address = r.address,
         registration_node_id = ${nodeId}::uuid
-      from unnest(
-        ${sql.param(registrations.map((entry) => entry.username))}::text[],
-        ${sql.param(registrations.map((entry) => entry.expiresAt.toISOString()))}::timestamptz[],
-        ${sql.param(registrations.map((entry) => entry.address))}::text[]
-      ) as r(username, expires_at, address)
+      from ${registrationRows(registrations)}
       where ${channels.sipUsername} = r.username and ${channels.status} = 'active'
+    `);
+    return result.rowCount ?? 0;
+  }
+
+  /**
+   * Регистрации шлюзов по опросу узла (ADR-0103, п. 1). Только устройства, которые регистрируются к нам: у транка
+   * регистрируемся мы, и в списке регистраций узла его нет. Списанный шлюз не отмечается.
+   */
+  async recordGatewayRegistrations(
+    registrations: readonly { username: string; expiresAt: Date; address: string }[],
+    seenAt: Date,
+  ): Promise<number> {
+    if (registrations.length === 0) return 0;
+    const result = await this.db.execute(sql`
+      update ${gateways} set
+        registration_seen_at = ${seenAt.toISOString()}::timestamptz,
+        registration_expires_at = r.expires_at,
+        registration_address = r.address
+      from ${registrationRows(registrations)}
+      where ${gateways.sipUsername} = r.username
+        and ${gateways.type} <> 'sip_trunk'
+        and ${gateways.status} <> 'retired'
+    `);
+    return result.rowCount ?? 0;
+  }
+
+  /** Регистрации линий GOIP со входом по линиям — так же, по имени входа линии (ADR-0054). */
+  async recordPortRegistrations(
+    registrations: readonly { username: string; expiresAt: Date; address: string }[],
+    seenAt: Date,
+  ): Promise<number> {
+    if (registrations.length === 0) return 0;
+    const result = await this.db.execute(sql`
+      update ${gatewayPorts} set
+        registration_seen_at = ${seenAt.toISOString()}::timestamptz,
+        registration_expires_at = r.expires_at,
+        registration_address = r.address
+      from ${registrationRows(registrations)}
+      where ${gatewayPorts.sipUsername} = r.username
     `);
     return result.rowCount ?? 0;
   }
@@ -615,7 +668,7 @@ export class TelephonyRepository {
     try {
       const [row] = await executor
         .update(gatewayPorts)
-        .set({ sipUsername, a1Hash, nodeId: null, registeredAt: null })
+        .set({ sipUsername, a1Hash, nodeId: null, registeredAt: null, ...NO_REGISTRATION })
         .where(eq(gatewayPorts.id, id))
         .returning();
       return row;

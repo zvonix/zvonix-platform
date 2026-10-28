@@ -17,7 +17,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
-import { moment } from '@/lib/format';
 import { GATEWAY_TYPE_NAME } from '@/lib/labels';
 import { PARTNER_RATES_KEY } from '@/lib/tariffs';
 import {
@@ -37,7 +36,8 @@ import {
   NewPassword,
   RegistrationMode,
 } from '../manage';
-import { PortHeader, PortRow, Presence } from '../ports';
+import { Presence } from '@/components/presence';
+import { PoorConnection, PortHeader, PortRow } from '../ports';
 
 export default function PartnerGatewayPage() {
   const params = useParams<{ id: string }>();
@@ -114,11 +114,13 @@ function GatewayCard({ id }: { id: string }) {
           </span>
         </div>
         <GatewayStatus gateway={gateway} />
-        <p>
-          <span className="text-muted-foreground">Связь с площадкой: </span>
-          <span className={gateway.on_node ? '' : 'text-warn'}>
-            {gateway.on_node ? `есть · ${moment(gateway.registered_at)}` : 'нет'}
-          </span>
+        <p className="flex flex-wrap items-center gap-x-2">
+          <span className="text-muted-foreground">Связь с площадкой:</span>
+          <Presence connection={gateway.connection} />
+          {gateway.connection.connected && gateway.connection.address !== null && (
+            <span className="num text-muted-foreground">{gateway.connection.address}</span>
+          )}
+          {gateway.poor_connection === true && <PoorConnection />}
         </p>
         <NextStep gateway={gateway} />
       </header>
@@ -193,10 +195,14 @@ function NextStep({ gateway }: { gateway: Gateway }) {
     (gateway.status === 'suspended' && gateway.suspended_by === 'partner');
   const step = off
     ? `Шлюз не включён — ${byLine ? 'линии не могут' : 'устройство не может'} подключиться к площадке даже с верными настройками. Введите настройки в устройство и нажмите «Включить шлюз».`
-    : gateway.status === 'active' && !gateway.on_node
-      ? byLine
-        ? 'Шлюз включён, но ни одна линия не на связи: проверьте в GOIP сервер, логины и пароли линий.'
-        : 'Шлюз включён, но не на связи: проверьте в устройстве сервер, логин и пароль ниже.'
+    : gateway.status === 'active' && !gateway.connection.connected
+      ? gateway.connection.rejected
+        ? byLine
+          ? 'Линии обращаются к площадке, но не входят: в GOIP неверный логин или пароль линии. Сверьте их с настройками линий ниже.'
+          : 'Устройство обращается к площадке, но не входит: в нём неверный логин или пароль. Сверьте их с настройками ниже.'
+        : byLine
+          ? 'Шлюз включён, но ни одна линия не на связи: проверьте в GOIP сервер, логины и пароли линий.'
+          : 'Шлюз включён, но не на связи: проверьте в устройстве сервер, логин и пароль ниже.'
       : sims.length === 0
         ? 'Вставьте SIM-карты в порты — без них вызовов не будет.'
         : !sims.some((sim) => sim.status === 'active')
@@ -387,10 +393,7 @@ function LineSettings({
                   )}
                 </TableCell>
                 <TableCell>
-                  <Presence
-                    online={port.on_node}
-                    title={port.on_node ? `отметка ${moment(port.registered_at)}` : undefined}
-                  />
+                  <Presence connection={port.connection} />
                 </TableCell>
               </TableRow>
             ))}

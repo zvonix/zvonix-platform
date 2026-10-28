@@ -111,13 +111,23 @@ export const gateways = pgTable(
     a1Hash: text(),
 
     /**
-     * Узел, на котором шлюз зарегистрирован сейчас. Пусто, пока не регистрировался.
-     * Обнуляется при выводе узла: шлюз перерегистрируется на другой.
+     * Узел, запросивший учётную запись шлюза последним, — по нему отбор SIM сужается узлом. Пусто, пока
+     * не обращался. Обнуляется при выводе узла: шлюз перерегистрируется на другой.
      */
     nodeId: idRef<'node'>().references(() => nodes.id, { onDelete: 'set null' }),
 
-    /** Момент последней успешной регистрации. По нему видно, живой ли шлюз. */
+    /**
+     * Когда узел запросил учётную запись последний раз. Узел спрашивает её у любого, кто стучится, и со старым
+     * паролем тоже, поэтому «на связи» по этой отметке не показывается
+     * ([ADR-0103](../../../../docs/adr/0103-shlyuz-na-svyazi-po-oprosu-i-trevoga-partnyoru.md)).
+     */
     registeredAt: timestamptz(),
+
+    /** Регистрация на узле по опросу (ADR-0103, п. 1) — есть только после верного пароля, как у канала. */
+    registrationSeenAt: timestamptz(),
+    registrationExpiresAt: timestamptz(),
+    /** Откуда устройство зарегистрировалось: `адрес:порт/транспорт`. */
+    registrationAddress: text(),
 
     /**
      * Способ подключения ([ADR-0054](../../../../docs/adr/0054-vhod-po-liniyam-goip.md)):
@@ -392,9 +402,14 @@ export const gatewayPorts = pgTable(
     sipUsername: text(),
     a1Hash: text(),
 
-    /** Где и когда линия регистрировалась последний раз — как у шлюза, но по линии. */
+    /** Какой узел и когда запросил учётную запись линии последний раз — как у шлюза, но по линии. */
     nodeId: idRef<'node'>().references(() => nodes.id, { onDelete: 'set null' }),
     registeredAt: timestamptz(),
+
+    /** Регистрация линии на узле по опросу (ADR-0103, п. 1), как у шлюза. */
+    registrationSeenAt: timestamptz(),
+    registrationExpiresAt: timestamptz(),
+    registrationAddress: text(),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),

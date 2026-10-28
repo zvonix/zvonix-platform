@@ -9,7 +9,11 @@ import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
-import { isChannelConnected } from './channel-registrations.service.js';
+import {
+  deviceConnection,
+  isRegistered,
+  type DeviceConnectionView,
+} from './registrations.service.js';
 import {
   addPortSchema,
   allowedOperatorsSchema,
@@ -87,8 +91,10 @@ interface GatewayView {
   readonly tariff_id: string | null;
   /** Вход шлюза. При `registration_mode = port` каталог его не отдаёт. */
   readonly sip_username: string;
+  /** Узел, запросивший учётную запись последним, — по нему отбор SIM сужается узлом. */
   readonly node_id: string | null;
-  readonly registered_at: string | null;
+  /** Подключён ли шлюз — по опросу узлов (ADR-0103); у транка не бывает: к провайдеру регистрируемся мы. */
+  readonly connection: DeviceConnectionView;
   readonly model: string | null;
   readonly port_count: number;
 }
@@ -145,7 +151,7 @@ interface PortView {
   /** Вход линии; пусто — не выдан. Пароль не отдаётся никогда (ADR-0054). */
   readonly sip_username: string | null;
   readonly node_id: string | null;
-  readonly registered_at: string | null;
+  readonly connection: DeviceConnectionView;
 }
 
 /** Кандидат на терминацию: что увидит поддержка, разбирая «почему не звонит». */
@@ -734,7 +740,7 @@ function toPortView(row: GatewayPortRow): PortView {
     state: row.state,
     sip_username: row.sipUsername,
     node_id: row.nodeId,
-    registered_at: row.registeredAt?.toISOString() ?? null,
+    connection: deviceConnection(row, new Date()),
   };
 }
 
@@ -764,7 +770,7 @@ function toGatewayView(row: GatewayRow): GatewayView {
     tariff_id: row.tariffId,
     sip_username: row.sipUsername,
     node_id: row.nodeId,
-    registered_at: row.registeredAt?.toISOString() ?? null,
+    connection: deviceConnection(row, new Date()),
     model: row.model,
     port_count: row.portCount,
   };
@@ -783,7 +789,7 @@ function toChannelView(row: ChannelRow): ChannelView {
     comment: row.comment,
     max_concurrent_calls: row.maxConcurrentCalls,
     connection: {
-      connected: isChannelConnected(row, new Date()),
+      connected: isRegistered(row, new Date()),
       seen_at: row.registrationSeenAt?.toISOString() ?? null,
       address: row.registrationAddress,
     },

@@ -20,7 +20,7 @@ import {
 } from '../../testing/harness.js';
 import { FakeEsl } from '../../testing/fake-esl.js';
 import { NodesService } from '../nodes/nodes.service.js';
-import { ChannelRegistrationsService } from './channel-registrations.service.js';
+import { RegistrationsService } from './registrations.service.js';
 
 prepareEnvironment();
 
@@ -1027,7 +1027,7 @@ describe('подключена ли линия — опрос регистрац
     await esl.stop();
   });
 
-  const poll = () => api().get(ChannelRegistrationsService).poll(new Date());
+  const poll = () => api().get(RegistrationsService).poll(new Date());
   const row = (username: string, realm: string) => ({
     reg_user: username,
     realm,
