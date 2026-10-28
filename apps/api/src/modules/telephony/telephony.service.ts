@@ -29,6 +29,8 @@ import {
   type SimStatus,
   type TerminationKind,
   type UserRole,
+  OWN_CHANNELS_MAX,
+  type ChannelSuspendedBy,
 } from '@zvonix/shared';
 import { decryptSecret, encryptSecret, SIP_TRUNK_SECRET_PURPOSE } from '../../infra/secret-box.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
@@ -42,6 +44,7 @@ import { directoryDocument, notFoundDocument, type DirectoryUser } from './direc
 import { MAX_GATEWAY_PORTS } from './schemas.js';
 import { sipHostProblem } from './sip-host.js';
 import { TestCallRepository } from './test-call.repository.js';
+import { ChannelRegistrationsService } from './channel-registrations.service.js';
 import {
   issueSipCredentials,
   issueSipUsername,
@@ -103,9 +106,6 @@ export interface PartnerCoverageView {
   readonly regionKey: string;
 }
 
-/** Сколько линий клиент заводит себе сам (ADR-0058). */
-const OWN_CHANNELS_MAX = 5;
-
 /** Учётная запись вместе с паролем. Пароль существует только здесь и только один раз. */
 export interface IssuedSipAccount {
   readonly username: string;
@@ -132,6 +132,7 @@ export class TelephonyService {
     private readonly tariffs: TariffService,
     private readonly nodes: NodesService,
     private readonly testCalls: TestCallRepository,
+    private readonly registrations: ChannelRegistrationsService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -643,7 +644,8 @@ export class TelephonyService {
     if (client.status !== 'active') {
       throw conflict('Клиент не работает — линию завести нельзя');
     }
-    const existing = await this.repository.listChannels(client.id);
+    // Удалённые не в счёт: иначе удаление не освобождало бы места (ADR-0101).
+    const existing = await this.repository.listOpenChannels(client.id);
     if (existing.length >= OWN_CHANNELS_MAX) {
       throw conflict(`Линий уже ${String(OWN_CHANNELS_MAX)} — больше завести нельзя`);
     }
@@ -687,12 +689,13 @@ export class TelephonyService {
    */
   async updateChannel(
     id: ChannelId,
-    changes: { name?: string; recordingRequired?: boolean; callerId?: string | null },
+    changes: ChannelChanges,
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<ChannelRow> {
     const existing = await this.repository.findChannel(id);
     if (existing === undefined) throw notFound('Канал не найден');
+    if (existing.status === 'closed') throw conflict('Линия удалена — менять в ней нечего');
 
     const updated = await this.repository.updateChannel(id, changes);
     if (updated === undefined) throw notFound('Канал не найден');
@@ -703,19 +706,24 @@ export class TelephonyService {
       entityId: id,
       actorUserId,
       actorRole,
-      before: {
-        name: existing.name,
-        recording_required: existing.recordingRequired,
-        caller_id: existing.callerId,
-      },
-      after: {
-        name: updated.name,
-        recording_required: updated.recordingRequired,
-        caller_id: updated.callerId,
-      },
+      before: channelAudit(existing),
+      after: channelAudit(updated),
     });
 
     return updated;
+  }
+
+  /**
+   * Правка своей линии клиентом (ADR-0101): название, комментарий, предел одновременных. Запись и номер для показа —
+   * решения площадки, их здесь нет. Чужая линия — `404`.
+   */
+  async updateOwnChannel(
+    id: ChannelId,
+    changes: Pick<ChannelChanges, 'name' | 'comment' | 'maxConcurrentCalls'>,
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<ChannelRow> {
+    await this.assertChannelAccess(id, requester);
+    return this.updateChannel(id, changes, requester.userId, requester.role);
   }
 
   /**
@@ -735,6 +743,7 @@ export class TelephonyService {
   ): Promise<IssuedSipAccount> {
     const existing = await this.repository.findChannel(id);
     if (existing === undefined) throw notFound('Канал не найден');
+    if (existing.status === 'closed') throw conflict('Линия удалена — доступ к ней не выдаётся');
 
     const credentials = issueSipCredentials('channel', this.realm);
     const updated = await this.repository.replaceChannelCredentials(
@@ -743,6 +752,8 @@ export class TelephonyService {
       credentials.a1Hash,
     );
     if (updated === undefined) throw notFound('Канал не найден');
+    // Программа со старым паролем не должна числиться подключённой до конца срока регистрации (ADR-0101, п. 3).
+    await this.registrations.flush(existing);
 
     await this.audit.record({
       action: 'channel.credentials_reset',
@@ -757,6 +768,7 @@ export class TelephonyService {
     return this.toAccount(credentials);
   }
 
+  /** Состояние линии решением администратора: выключенное им клиент не включит (ADR-0101). */
   async setChannelStatus(
     id: ChannelId,
     status: ChannelStatus,
@@ -765,21 +777,76 @@ export class TelephonyService {
   ): Promise<ChannelRow> {
     const existing = await this.repository.findChannel(id);
     if (existing === undefined) throw notFound('Канал не найден');
+    return this.changeChannelStatus(existing, status, 'admin', actorUserId, actorRole);
+  }
 
-    const updated = await this.repository.setChannelStatus(id, status);
-    if (updated === undefined) throw notFound('Канал не найден');
+  /**
+   * Клиент сам выключает, включает и удаляет свою линию (ADR-0101, п. 4). Выключенную площадкой и заведённую ею,
+   * но не включённую (`pending`), он не трогает: «удалил — получил новую» обошло бы решение площадки.
+   */
+  async setOwnChannelStatus(
+    id: ChannelId,
+    status: 'active' | 'suspended' | 'closed',
+    requester: { userId: Id<'user'>; role: UserRole },
+  ): Promise<ChannelRow> {
+    await this.assertChannelAccess(id, requester);
+    const existing = await this.repository.findChannel(id);
+    if (existing === undefined) throw notFound('Канал не найден');
+    const ownedByClient =
+      existing.status === 'active' ||
+      (existing.status === 'suspended' && existing.suspendedBy === 'client');
+    if (existing.status !== 'closed' && !ownedByClient) {
+      throw conflict('Линией распоряжается площадка — напишите в поддержку', {
+        details: { reason: 'channel_platform_managed' },
+      });
+    }
+    return this.changeChannelStatus(existing, status, 'client', requester.userId, requester.role);
+  }
+
+  private async changeChannelStatus(
+    existing: ChannelRow,
+    status: ChannelStatus,
+    by: ChannelSuspendedBy,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<ChannelRow> {
+    // Удаление необратимо: строка остаётся ради истории вызовов, но линии больше нет.
+    if (existing.status === 'closed') {
+      throw conflict('Линия удалена — вернуть её нельзя', {
+        details: { reason: 'channel_closed' },
+      });
+    }
+    if (existing.status === status && (status !== 'suspended' || existing.suspendedBy === by)) {
+      return existing;
+    }
+
+    const updated = await this.repository.setChannelStatus(
+      existing.id,
+      status,
+      by,
+      existing.status,
+    );
+    if (updated === undefined) {
+      throw conflict('Состояние линии только что изменилось — обновите страницу');
+    }
+    if (status !== 'active') await this.registrations.flush(updated);
 
     await this.audit.record({
       action: 'channel.status_changed',
       entityType: 'channel',
-      entityId: id,
+      entityId: existing.id,
       actorUserId,
       actorRole,
-      before: { status: existing.status },
-      after: { status },
+      before: { status: existing.status, suspended_by: existing.suspendedBy },
+      after: { status: updated.status, suspended_by: updated.suspendedBy },
     });
 
     return updated;
+  }
+
+  /** Линии клиента без удалённых (ADR-0101). */
+  async listOpenChannels(clientId: Id<'client'>): Promise<ChannelRow[]> {
+    return this.repository.listOpenChannels(clientId);
   }
 
   async listChannels(clientId?: Id<'client'>): Promise<ChannelRow[]> {
@@ -2141,5 +2208,24 @@ function toTrunkAudit(trunk: SipTrunkRow): Record<string, unknown> {
     outbound_username: trunk.outboundUsername,
     has_secret: trunk.outboundSecret !== null,
     max_concurrent_calls: trunk.maxConcurrentCalls,
+  };
+}
+
+/** Что меняется в линии правкой. Учётных данных и состояния здесь нет — у них свои пути. */
+export interface ChannelChanges {
+  name?: string;
+  recordingRequired?: boolean;
+  callerId?: string | null;
+  comment?: string | null;
+  maxConcurrentCalls?: number | null;
+}
+
+function channelAudit(row: ChannelRow): Record<string, unknown> {
+  return {
+    name: row.name,
+    recording_required: row.recordingRequired,
+    caller_id: row.callerId,
+    comment: row.comment,
+    max_concurrent_calls: row.maxConcurrentCalls,
   };
 }

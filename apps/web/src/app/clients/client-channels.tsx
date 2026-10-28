@@ -26,18 +26,26 @@ interface Channel {
   readonly id: string;
   readonly name: string;
   readonly status: ChannelStatus;
+  /** Кто выключил: клиент сам или площадка (ADR-0101). */
+  readonly suspended_by: 'client' | 'admin' | null;
   readonly sip_username: string;
   readonly recording_required: boolean;
   readonly caller_id: string | null;
+  /** Комментарий клиента (ADR-0101). */
+  readonly comment: string | null;
+  readonly connection: { readonly connected: boolean; readonly address: string | null };
 }
 
-const COLUMNS = 6;
+const COLUMNS = 7;
+
+/** Удаляет линию только клиент: у площадки для этого есть «Приостановить» (ADR-0101). */
+const ADMIN_STATUSES = CHANNEL_STATUSES.filter((status) => status !== 'closed');
 
 /**
  * Кнопка называет действие, а не состояние: «Приостановлен» рядом с плашкой текущего
  * состояния читалось как ещё одна плашка.
  */
-const CHANNEL_ACTION: Record<ChannelStatus, string> = {
+const CHANNEL_ACTION: Record<Exclude<ChannelStatus, 'closed'>, string> = {
   pending: 'Вернуть в «ждёт»',
   active: 'Разрешить звонить',
   suspended: 'Приостановить',
@@ -161,6 +169,7 @@ export function ClientChannels({
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Канал</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
+              <TableHead className="h-8">Подключение</TableHead>
               <TableHead className="h-8">Имя SIP</TableHead>
               <TableHead className="h-8">Запись</TableHead>
               <TableHead className="h-8">Номер для показа</TableHead>
@@ -178,13 +187,39 @@ export function ClientChannels({
 
             {channels.map((channel) => (
               <TableRow key={channel.id}>
-                <TableCell>{channel.name}</TableCell>
+                <TableCell className="max-w-72 whitespace-normal">
+                  {channel.name}
+                  {channel.comment !== null && (
+                    <span className="block truncate text-faint" title={channel.comment}>
+                      {channel.comment}
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell>
                   <span
                     className={`rounded-sm px-1.5 py-0.5 ${usableTone(channel.status === 'active')}`}
                   >
                     {CHANNEL_STATUS_NAME[channel.status]}
                   </span>
+                  {channel.suspended_by === 'client' && (
+                    <span className="block text-faint">выключил клиент</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {channel.status !== 'active' ? (
+                    <span className="text-faint">—</span>
+                  ) : channel.connection.connected ? (
+                    <span className="text-ok">
+                      есть
+                      {channel.connection.address !== null && (
+                        <span className="num block text-faint" translate="no">
+                          {channel.connection.address}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="text-warn">нет</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <span className="num" translate="no">
@@ -211,13 +246,13 @@ export function ClientChannels({
                     каналов помечены `@Roles('admin')`, и каждая из этих кнопок
                     ответила бы ей отказом (DESIGN.md).
                   */}
-                  {canChange && (
+                  {canChange && channel.status !== 'closed' && (
                     <div className="flex flex-wrap gap-1">
                       <StatusDialog
                         subject={`канал «${channel.name}»`}
                         current={CHANNEL_STATUS_NAME[channel.status]}
                         disabled={busy}
-                        options={CHANNEL_STATUSES.filter((status) => status !== channel.status).map(
+                        options={ADMIN_STATUSES.filter((status) => status !== channel.status).map(
                           (status) => ({
                             value: status,
                             action: CHANNEL_ACTION[status],

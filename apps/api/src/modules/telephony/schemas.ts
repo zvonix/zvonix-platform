@@ -5,11 +5,13 @@
 import {
   CALL_FAILURE_REASONS,
   CALL_STATUSES,
+  CHANNEL_COMMENT_MAX,
   CHANNEL_STATUSES,
   DEFAULT_TRUNK_CONCURRENT_CALLS,
   GATEWAY_REGISTRATION_MODES,
   GATEWAY_STATUSES,
   GATEWAY_TYPES,
+  MAX_CHANNEL_CONCURRENT_CALLS,
   MAX_CONCURRENT_CALLS_LIMIT,
   MAX_TRUNK_CONCURRENT_CALLS,
   dialledDigits,
@@ -113,6 +115,38 @@ export const createChannelSchema = z.object({
 
 /** Линия, которую клиент заводит сам (ADR-0058): название необязательно. */
 export const createOwnChannelSchema = z.object({ name: name.optional() });
+
+/** Комментарий к линии: пустая строка — убрать (ADR-0101). */
+const channelComment = z
+  .string()
+  .trim()
+  .max(CHANNEL_COMMENT_MAX, `не длиннее ${String(CHANNEL_COMMENT_MAX)} знаков`)
+  .transform((value) => (value === '' ? null : value))
+  .nullable();
+
+/** Предел одновременных разговоров линии; `null` — без предела. */
+const channelMaxConcurrentCalls = z
+  .number()
+  .int('должно быть целым')
+  .min(1, 'не меньше одного')
+  .max(MAX_CHANNEL_CONCURRENT_CALLS, `не больше ${String(MAX_CHANNEL_CONCURRENT_CALLS)}`)
+  .nullable();
+
+/** Правка своей линии клиентом (ADR-0101): «поля нет» — не трогать. */
+export const updateOwnChannelSchema = z
+  .object({
+    name: name.optional(),
+    comment: channelComment.optional(),
+    maxConcurrentCalls: channelMaxConcurrentCalls.optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: 'Нечего менять: не передано ни одного поля',
+  });
+
+/** Клиент включает, выключает и удаляет свою линию (ADR-0101). */
+export const ownChannelStatusSchema = z.object({
+  status: z.enum(['active', 'suspended', 'closed']),
+});
 
 export const channelStatusSchema = z.object({
   status: z.enum(CHANNEL_STATUSES),
@@ -324,6 +358,8 @@ export const updateChannelSchema = z
       .regex(/^\+?[0-9]{3,15}$/, 'должен быть номером')
       .nullable()
       .optional(),
+    comment: channelComment.optional(),
+    maxConcurrentCalls: channelMaxConcurrentCalls.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'Нечего менять: не передано ни одного поля',

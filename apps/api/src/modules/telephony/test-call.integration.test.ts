@@ -9,7 +9,6 @@
  * принимается вне биллинга.
  */
 
-import { createServer, type AddressInfo, type Server } from 'node:net';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -22,6 +21,7 @@ import {
   uniqueEmail,
   withDatabase,
 } from '../../testing/harness.js';
+import { FakeEsl } from '../../testing/fake-esl.js';
 import { NodesService } from '../nodes/nodes.service.js';
 import { parseOriginateReply } from './test-call.service.js';
 
@@ -143,51 +143,10 @@ async function simInPort(
 
 // --- Поддельный ESL -----------------------------------------------------------
 
-let esl: Server | undefined;
-let eslPort = 0;
 /** Что ответит поддельный узел на следующий `originate`. */
 let nextReply = '+OK 00000000-0000-4000-8000-000000000000';
-const commands: string[] = [];
-
-function frame(headers: Record<string, string>, body = ''): string {
-  const length = Buffer.byteLength(body, 'utf8');
-  const all = length > 0 ? { ...headers, 'Content-Length': String(length) } : headers;
-  return (
-    Object.entries(all)
-      .map(([k, v]) => `${k}: ${v}`)
-      .join('\n') + `\n\n${body}`
-  );
-}
-
-async function startFakeEsl(): Promise<void> {
-  esl = createServer((socket) => {
-    let received = '';
-    socket.write(frame({ 'Content-Type': 'auth/request' }));
-    socket.on('data', (chunk) => {
-      received += chunk.toString('utf8');
-      for (;;) {
-        const end = received.indexOf('\n\n');
-        if (end === -1) return;
-        const line = received.slice(0, end);
-        received = received.slice(end + 2);
-        if (line.startsWith('auth ')) {
-          const ok = line === `auth ${ESL_PASSWORD}`;
-          socket.write(
-            frame({ 'Content-Type': 'command/reply', 'Reply-Text': ok ? '+OK accepted' : '-ERR' }),
-          );
-        } else if (line.startsWith('api ')) {
-          commands.push(line.slice('api '.length));
-          socket.write(frame({ 'Content-Type': 'api/response' }, `${nextReply}\n`));
-        } else if (line === 'exit') {
-          socket.end();
-        }
-      }
-    });
-    socket.on('error', () => undefined);
-  });
-  await new Promise<void>((resolve) => esl?.listen(0, '127.0.0.1', resolve));
-  eslPort = (esl.address() as AddressInfo).port;
-}
+const esl = new FakeEsl(ESL_PASSWORD, () => nextReply);
+const commands = esl.commands;
 
 /** Ждём, пока проба выйдет из `dialing` — фон пишет итог сам. */
 async function settled(id: string, bearer: string, path: string) {
@@ -223,18 +182,12 @@ beforeAll(async () => {
     operator: { id: string };
   }>().operator.id;
 
-  await startFakeEsl();
+  await esl.start();
 }, 240_000);
 
 afterAll(async () => {
   vi.restoreAllMocks();
-  await new Promise<void>((resolve) => {
-    if (esl === undefined) resolve();
-    else
-      esl.close(() => {
-        resolve();
-      });
-  });
+  await esl.stop();
   await app?.close();
 });
 
@@ -310,7 +263,7 @@ describe('тестовый звонок с SIM', () => {
   beforeAll(async () => {
     // Узел отвечает поддельным ESL; настоящий `eslTargetOf` проверен выше.
     vi.spyOn(api().get(NodesService), 'eslTargetOf').mockImplementation(() =>
-      Promise.resolve({ host: '127.0.0.1', port: eslPort, password: ESL_PASSWORD }),
+      Promise.resolve({ host: '127.0.0.1', port: esl.port, password: ESL_PASSWORD }),
     );
     partner = await createPartner();
     neighbour = await createPartner();
@@ -549,7 +502,7 @@ describe('SIP-провайдер партнёра и включение посл
 
   beforeAll(async () => {
     vi.spyOn(api().get(NodesService), 'eslTargetOf').mockImplementation(() =>
-      Promise.resolve({ host: '127.0.0.1', port: eslPort, password: ESL_PASSWORD }),
+      Promise.resolve({ host: '127.0.0.1', port: esl.port, password: ESL_PASSWORD }),
     );
     partner = await createPartner();
     neighbour = await createPartner();

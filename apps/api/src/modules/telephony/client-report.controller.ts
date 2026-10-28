@@ -10,8 +10,8 @@
  * то есть право существовало, а воспользоваться им было нечем.
  */
 
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { Money, parseId } from '@zvonix/shared';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Money, OWN_CHANNELS_MAX, parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Cabinets } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
@@ -25,7 +25,12 @@ import {
   type ClientCallView,
   type ClientChannelView,
 } from './client-views.js';
-import { clientCallsQuerySchema, createOwnChannelSchema } from './schemas.js';
+import {
+  clientCallsQuerySchema,
+  createOwnChannelSchema,
+  ownChannelStatusSchema,
+  updateOwnChannelSchema,
+} from './schemas.js';
 import { TelephonyService } from './telephony.service.js';
 
 interface OwnSipAccount {
@@ -56,10 +61,67 @@ export class ClientReportController {
    */
   @Cabinets('client')
   @Get('client/channels')
-  async channels(@CurrentUser() actor: Principal): Promise<{ channels: ClientChannelView[] }> {
+  async channels(@CurrentUser() actor: Principal): Promise<{
+    channels: ClientChannelView[];
+    /** Куда подключать программу: адрес узла, а не SIP-домен (`TelephonyService.sipServer`). */
+    server: string;
+    /** Сколько линий можно держать; удалённые не в счёт (ADR-0101). */
+    max_channels: number;
+  }> {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    const rows = await this.telephony.listChannels(client.id);
-    return { channels: rows.map(toClientChannelView) };
+    const rows = await this.telephony.listOpenChannels(client.id);
+    const now = new Date();
+    const activity = await this.calls.channelActivity(
+      rows.map((row) => row.id),
+      now,
+    );
+    return {
+      channels: rows.map((row) => toClientChannelView(row, now, activity.get(row.id))),
+      server: await this.telephony.sipServer(),
+      max_channels: OWN_CHANNELS_MAX,
+    };
+  }
+
+  /** Правка своей линии: название, комментарий, предел одновременных (ADR-0101). Чужая — `404`. */
+  @Cabinets('client')
+  @Patch('client/channels/:id')
+  async updateChannel(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+    @Body(zodBody(updateOwnChannelSchema)) body: z.infer<typeof updateOwnChannelSchema>,
+  ): Promise<{ channel: ClientChannelView }> {
+    // Поштучно, а не разворотом: при `exactOptionalPropertyTypes` «поля нет» и «undefined» — разное.
+    const updated = await this.telephony.updateOwnChannel(
+      parseId(id, 'channel'),
+      {
+        ...(body.name === undefined ? {} : { name: body.name }),
+        ...(body.comment === undefined ? {} : { comment: body.comment }),
+        ...(body.maxConcurrentCalls === undefined
+          ? {}
+          : { maxConcurrentCalls: body.maxConcurrentCalls }),
+      },
+      actor,
+    );
+    return { channel: toClientChannelView(updated, new Date()) };
+  }
+
+  /**
+   * Включить, выключить или удалить свою линию (ADR-0101, п. 4). Выключенную площадкой — `409`
+   * `channel_platform_managed`, удалённую — `409` `channel_closed`.
+   */
+  @Cabinets('client')
+  @Post('client/channels/:id/status')
+  async setChannelStatus(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+    @Body(zodBody(ownChannelStatusSchema)) body: z.infer<typeof ownChannelStatusSchema>,
+  ): Promise<{ channel: ClientChannelView }> {
+    const updated = await this.telephony.setOwnChannelStatus(
+      parseId(id, 'channel'),
+      body.status,
+      actor,
+    );
+    return { channel: toClientChannelView(updated, new Date()) };
   }
 
   /**
@@ -74,7 +136,7 @@ export class ClientReportController {
   ): Promise<{ channel: ClientChannelView; account: OwnSipAccount }> {
     const created = await this.telephony.createOwnChannel(actor, body.name);
     return {
-      channel: toClientChannelView(created.channel),
+      channel: toClientChannelView(created.channel, new Date()),
       account: toOwnAccount(created.account, await this.telephony.sipServer()),
     };
   }

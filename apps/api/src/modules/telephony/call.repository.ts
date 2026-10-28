@@ -17,6 +17,23 @@ import {
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type CallId = Id<'call'>;
+
+/**
+ * Глубже открытый вызов не ищется: дольше `MAX_CALL_DURATION_SECONDS` (не больше четырёх часов) разговор не живёт,
+ * а зависший закрывает уборка. Граница держит подсчёт на индексе `(channel_id, started_at)` — без неё он прошёл бы
+ * по всей истории линии.
+ */
+const OPEN_CALL_HORIZON_MS = 86_400_000;
+
+const OPEN_STATUSES_SQL = sql.raw(
+  `(${OPEN_CALL_STATUSES.map((value) => `'${value}'`).join(', ')})`,
+);
+
+/** Что сейчас происходит на линии: разговоров идёт и когда был последний вызов. */
+export interface ChannelActivity {
+  readonly open: number;
+  readonly lastCallAt: Date | null;
+}
 export type CallRow = typeof calls.$inferSelect;
 
 /** Исполнитель запроса: подключение либо открытая транзакция. */
@@ -171,6 +188,59 @@ export class CallRepository {
     `);
     const row = result.rows[0];
     return row === undefined ? 0 : Number.parseInt(row.count, 10);
+  }
+
+  /** Сколько вызовов линии сейчас открыто — для её предела одновременных (ADR-0101, п. 6). */
+  async countOpenOnChannel(
+    channelId: Id<'channel'>,
+    now: Date,
+    executor: Executor = this.db,
+  ): Promise<number> {
+    const result = await executor.execute<{ count: string }>(sql`
+      select count(*)::text as count
+        from calls
+       where channel_id = ${channelId}
+         and started_at >= ${new Date(now.getTime() - OPEN_CALL_HORIZON_MS).toISOString()}::timestamptz
+         and status in ${OPEN_STATUSES_SQL}
+    `);
+    const row = result.rows[0];
+    return row === undefined ? 0 : Number.parseInt(row.count, 10);
+  }
+
+  /**
+   * Активность линий для списка: открытые разговоры и последний вызов. Последний — отдельным `limit 1` по индексу
+   * на каждую линию: `max` по группе прошёл бы всю историю.
+   */
+  async channelActivity(
+    channelIds: readonly Id<'channel'>[],
+    now: Date,
+  ): Promise<Map<Id<'channel'>, ChannelActivity>> {
+    const activity = new Map<Id<'channel'>, ChannelActivity>();
+    if (channelIds.length === 0) return activity;
+    const horizon = new Date(now.getTime() - OPEN_CALL_HORIZON_MS).toISOString();
+    const result = await this.db.execute<{
+      channel_id: string;
+      open: string;
+      last_call_at: string | Date | null;
+    }>(sql`
+      select ids.id as channel_id,
+             (select count(*) from calls o
+               where o.channel_id = ids.id
+                 and o.started_at >= ${horizon}::timestamptz
+                 and o.status in ${OPEN_STATUSES_SQL})::text as open,
+             (select l.started_at from calls l
+               where l.channel_id = ids.id
+               order by l.started_at desc
+               limit 1) as last_call_at
+        from unnest(${sql.param([...channelIds])}::uuid[]) as ids(id)
+    `);
+    for (const row of result.rows) {
+      activity.set(row.channel_id as Id<'channel'>, {
+        open: Number.parseInt(row.open, 10),
+        lastCallAt: row.last_call_at === null ? null : new Date(row.last_call_at),
+      });
+    }
+    return activity;
   }
 
   /**

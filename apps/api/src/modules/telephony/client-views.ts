@@ -11,24 +11,49 @@
  * значит контуры пора развести, а не править это на месте.
  */
 
-import { clientFailureReasonOf, type CallStatus, type ChannelStatus } from '@zvonix/shared';
+import {
+  clientFailureReasonOf,
+  type CallStatus,
+  type ChannelStatus,
+  type ChannelSuspendedBy,
+} from '@zvonix/shared';
 import type { ClientFailureReason } from '@zvonix/shared';
+import type { ChannelActivity } from './call.repository.js';
 import type { CallDetails } from './calls.service.js';
+import { isChannelConnected } from './channel-registrations.service.js';
 import type { ChannelRow } from './telephony.repository.js';
 
 /**
  * Канал в клиентском ответе.
  *
- * Учётных данных SIP здесь нет: пароль восстановить неоткуда, а имя пользователя клиент
- * и так держит в настройках своей АТС. Показывать его — лишняя копия того, что уже
- * настроено, и лишний повод считать её источником правды.
+ * Пароля здесь нет и не будет: в базе хеш. Имя учётной записи есть
+ * ([ADR-0101](../../../../../docs/adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)): без него клиент,
+ * потерявший листок с выдачей, не настроил бы программу, а секрета в имени нет.
+ *
+ * `caller_id` в кабинете больше не показывается, но из ответа не уходит — контракт `/v1` поля не теряет.
  */
 export interface ClientChannelView {
   readonly id: string;
   readonly name: string;
   readonly status: ChannelStatus;
+  /** Кто выключил: `client` — включит сам, `admin` — только площадка. */
+  readonly suspended_by: ChannelSuspendedBy | null;
   readonly recording_required: boolean;
   readonly caller_id: string | null;
+  readonly comment: string | null;
+  readonly max_concurrent_calls: number | null;
+  readonly sip_username: string;
+  /** Подключена ли программа — по регистрации на узле (ADR-0101, п. 1). */
+  readonly connection: {
+    readonly connected: boolean;
+    /** Когда опрос видел регистрацию последний раз. */
+    readonly seen_at: string | null;
+    /** Откуда программа зарегистрировалась: `адрес:порт/транспорт`. */
+    readonly address: string | null;
+  };
+  /** Разговоров идёт сейчас и последний вызов — только в списке. */
+  readonly open_calls?: number;
+  readonly last_call_at?: string | null;
 }
 
 /**
@@ -55,13 +80,30 @@ export interface ClientCallView {
   readonly operator: { id: string; name: string } | null;
 }
 
-export function toClientChannelView(row: ChannelRow): ClientChannelView {
+export function toClientChannelView(
+  row: ChannelRow,
+  now: Date,
+  activity?: ChannelActivity,
+): ClientChannelView {
+  const connected = isChannelConnected(row, now);
   return {
     id: row.id,
     name: row.name,
     status: row.status,
+    suspended_by: row.suspendedBy,
     recording_required: row.recordingRequired,
     caller_id: row.callerId,
+    comment: row.comment,
+    max_concurrent_calls: row.maxConcurrentCalls,
+    sip_username: row.sipUsername,
+    connection: {
+      connected,
+      seen_at: row.registrationSeenAt?.toISOString() ?? null,
+      address: row.registrationAddress,
+    },
+    ...(activity === undefined
+      ? {}
+      : { open_calls: activity.open, last_call_at: activity.lastCallAt?.toISOString() ?? null }),
   };
 }
 

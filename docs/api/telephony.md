@@ -221,7 +221,13 @@ FreeSWITCH принимает его в каталоге вместо парол
 
 ## `POST /channels/:id/status` · `GET /channels?clientId=…`
 
-Как у шлюзов: `admin` меняет состояние, `admin` и `support` смотрят.
+Как у шлюзов: `admin` меняет состояние, `admin` и `support` смотрят. Выключение администратором
+ставит `suspended_by = admin` — такую линию клиент сам не включит и не удалит
+([ADR-0101](../adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)). Удалённую клиентом (`closed`) не возвращает никто: `409`.
+
+В строке канала, кроме прежнего: `suspended_by` (`client` | `admin` | `null`), `comment` — комментарий клиента,
+`max_concurrent_calls` — предел одновременных разговоров (`null` — без предела), `connection` —
+`{ connected, seen_at, address }`: зарегистрирована ли программа клиента на узле сейчас.
 
 Канал звонит только в состоянии `active`, и **этого мало**: маршрутизация требует `active`
 и от самого клиента ([billing.md](billing.md), `PATCH /clients/:id/status`). Приостановленный
@@ -230,10 +236,14 @@ FreeSWITCH принимает его в каталоге вместо парол
 ## `PATCH /channels/:id` — роль `admin`
 
 ```json
-{ "name": "Диспетчерская", "recordingRequired": true, "callerId": "79005554433" }
+{ "name": "Диспетчерская", "recordingRequired": true, "callerId": "79005554433",
+  "comment": "Офис на Ленина", "maxConcurrentCalls": 10 }
 ```
 
 `200` → `{ "channel": { … } }`
+
+`comment` — до 500 знаков, пустая строка или `null` убирают; `maxConcurrentCalls` — 1–1000 или `null`
+([ADR-0101](../adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)). Удалённая линия — `409`.
 
 Все поля необязательны, но **хотя бы одно обязано быть**: пустая правка — `400`, а не
 тихий успех. До появления обработчика эти три величины задавались только при заведении,
@@ -249,7 +259,7 @@ FreeSWITCH принимает его в каталоге вместо парол
 Включение сужает выбор партнёров: канал с записью не уходит на шлюзы типа `android`,
 где она технически невозможна ([ADR-0012](../adr/0012-mobilnoe-prilozhenie.md)).
 
-Правка попадает в журнал (`channel.updated`) целиком — все три поля до и после.
+Правка попадает в журнал (`channel.updated`) целиком — все поля до и после.
 
 ## `POST /channels/:id/credentials` — роль `admin`
 

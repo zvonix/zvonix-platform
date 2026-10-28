@@ -9,6 +9,7 @@ import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
+import { isChannelConnected } from './channel-registrations.service.js';
 import {
   addPortSchema,
   allowedOperatorsSchema,
@@ -97,9 +98,19 @@ interface ChannelView {
   readonly client_id: string;
   readonly name: string;
   readonly status: string;
+  /** Кто выключил: клиент или площадка (ADR-0101). */
+  readonly suspended_by: string | null;
   readonly sip_username: string;
   readonly recording_required: boolean;
   readonly caller_id: string | null;
+  /** Комментарий клиента (ADR-0101). */
+  readonly comment: string | null;
+  readonly max_concurrent_calls: number | null;
+  readonly connection: {
+    readonly connected: boolean;
+    readonly seen_at: string | null;
+    readonly address: string | null;
+  };
 }
 
 /**
@@ -348,6 +359,10 @@ export class TelephonyController {
           ? {}
           : { recordingRequired: body.recordingRequired }),
         ...(body.callerId === undefined ? {} : { callerId: body.callerId }),
+        ...(body.comment === undefined ? {} : { comment: body.comment }),
+        ...(body.maxConcurrentCalls === undefined
+          ? {}
+          : { maxConcurrentCalls: body.maxConcurrentCalls }),
       },
       actor.userId,
       actor.role,
@@ -761,9 +776,17 @@ function toChannelView(row: ChannelRow): ChannelView {
     client_id: row.clientId,
     name: row.name,
     status: row.status,
+    suspended_by: row.suspendedBy,
     sip_username: row.sipUsername,
     recording_required: row.recordingRequired,
     caller_id: row.callerId,
+    comment: row.comment,
+    max_concurrent_calls: row.maxConcurrentCalls,
+    connection: {
+      connected: isChannelConnected(row, new Date()),
+      seen_at: row.registrationSeenAt?.toISOString() ?? null,
+      address: row.registrationAddress,
+    },
   };
 }
 

@@ -1539,6 +1539,40 @@ test.describe('кабинет клиента', () => {
     await expect(page.getByRole('row').filter({ hasText: /Линия \d/u })).toBeVisible();
   });
 
+  // ADR-0101: страница линии — подключение, правка с комментарием, выключение и удаление клиентом.
+  test('страница линии: подключение, комментарий, выключение и удаление', async ({ page }) => {
+    await signIn(page, PEOPLE.client);
+    await page.goto('/my/channels');
+
+    await page.getByRole('button', { name: 'Получить линию' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Название (необязательно)').fill('Ночная смена');
+    await dialog.getByRole('button', { name: 'Получить линию' }).click();
+    await closeSecret(page);
+
+    await page.getByRole('link', { name: 'Ночная смена' }).click();
+    await expect(page).toHaveURL(/\/my\/channels\/[0-9a-f-]+$/u);
+    await expect(page.getByRole('tab', { name: 'Подключение' })).toBeVisible();
+    await expect(page.getByText('Не подключена')).toBeVisible();
+    await expect(page.getByText(/^ch-[0-9a-z]{12}$/u)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Изменить' }).click();
+    await page.getByRole('dialog').getByLabel('Комментарий').fill('Резерв на ночь');
+    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+    await expect(page.getByText('Резерв на ночь')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Выключить' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Выключить' }).click();
+    await expect(page.getByText('Выключена', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Включить' }).click();
+    await expect(page.getByText('Работает', { exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Удалить' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Удалить навсегда' }).click();
+    await expect(page).toHaveURL(/\/my\/channels$/u);
+    await expect(page.getByRole('link', { name: 'Ночная смена' })).toHaveCount(0);
+  });
+
   test('обновление вызовов включается и помнится после перезагрузки', async ({ page }) => {
     await signIn(page, PEOPLE.client);
     await page.goto('/my/calls');

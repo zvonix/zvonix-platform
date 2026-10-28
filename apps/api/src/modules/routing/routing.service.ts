@@ -363,6 +363,14 @@ export class RoutingService {
         }
       }
     } catch (cause) {
+      if (cause instanceof ChannelAtCapacity) {
+        this.logger.info('Вызов отклонён пределом одновременных линии', {
+          channel_id: channel.id,
+          open: cause.open,
+          limit: channel.maxConcurrentCalls,
+        });
+        return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
+      }
       if (cause instanceof LimitBreach) {
         // Счётчик перешагнул предел уже внутри транзакции: две одновременные заявки
         // обе прошли проверку до неё. Транзакция откачена — ни вызова, ни счёта.
@@ -609,6 +617,13 @@ export class RoutingService {
   > {
     const channelId = channel.id;
     return this.callsRepository.db.transaction(async (tx) => {
+      // Предел одновременных разговоров линии (ADR-0101, п. 6): линия запирается до конца транзакции, иначе две заявки
+      // обе насчитали бы «есть место». Без предела запирать нечего — горячий путь не платит за чужую настройку.
+      if (channel.maxConcurrentCalls !== null) {
+        await this.telephony.lockChannel(channelId, tx);
+        const open = await this.callsRepository.countOpenOnChannel(channelId, limits.at, tx);
+        if (open >= channel.maxConcurrentCalls) throw new ChannelAtCapacity(open);
+      }
       for (const { candidate, rateId, tariffId } of candidates) {
         // Ёмкость у SIM и транка своя, но правило одно: блокировка строки, потом счёт
         // открытых вызовов. У SIM предел ставит оператор, у транка — договор
@@ -892,4 +907,13 @@ function compareCandidates(left: PricedCandidate, right: PricedCandidate): numbe
   const leftAt = left.candidate.lastRoutedAt?.getTime() ?? 0;
   const rightAt = right.candidate.lastRoutedAt?.getTime() ?? 0;
   return leftAt - rightAt;
+}
+
+/** Линия уже ведёт столько разговоров, сколько разрешил клиент (ADR-0101, п. 6). Откатывает транзакцию занятия SIM. */
+class ChannelAtCapacity extends Error {
+  override readonly name = 'ChannelAtCapacity';
+
+  constructor(readonly open: number) {
+    super(`Линия уже ведёт ${String(open)} разговоров`);
+  }
 }
