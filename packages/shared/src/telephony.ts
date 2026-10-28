@@ -151,10 +151,25 @@ export const REGISTRABLE_GATEWAY_STATUSES: readonly GatewayStatus[] = ['active']
  *
  * `pending`   — заведён, вызовы не принимает;
  * `active`    — работает;
- * `suspended` — отключён: нет денег, превышены лимиты, решение администратора.
+ * `suspended` — выключен: клиентом или администратором, кто — `CHANNEL_SUSPENDED_BY`;
+ * `closed`    — удалён клиентом, необратимо. Строка остаётся: на неё ссылаются вызовы и проводки
+ *               ([ADR-0101](../../docs/adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)).
  */
-export const CHANNEL_STATUSES = ['pending', 'active', 'suspended'] as const;
+export const CHANNEL_STATUSES = ['pending', 'active', 'suspended', 'closed'] as const;
 export type ChannelStatus = (typeof CHANNEL_STATUSES)[number];
+
+/** Кто выключил линию. Выключенную администратором клиент не включает и не удаляет (ADR-0101). */
+export const CHANNEL_SUSPENDED_BY = ['client', 'admin'] as const;
+export type ChannelSuspendedBy = (typeof CHANNEL_SUSPENDED_BY)[number];
+
+/** Потолок предела одновременных разговоров линии: больше — опечатка, а не намерение. */
+export const MAX_CHANNEL_CONCURRENT_CALLS = 1000;
+
+/** Сколько линий клиент держит у себя сам, удалённые не в счёт (ADR-0058, ADR-0101). */
+export const OWN_CHANNELS_MAX = 5;
+
+/** Длина комментария к линии. */
+export const CHANNEL_COMMENT_MAX = 500;
 
 export const ACTIVE_CHANNEL_STATUSES: readonly ChannelStatus[] = ['active'];
 

@@ -4,6 +4,7 @@
 - **Дата:** 2026-09-03
 - **Уточняет:** [ARCHITECTURE.md](../ARCHITECTURE.md), строка «Счётчики лимитов»
 - **Связано с:** [ADR-0020](0020-fonovye-zadachi.md), [ADR-0010](0010-model-billinga.md)
+- **Пересмотрено:** [ADR-0102](0102-chasovoy-poyas-akkaunta-i-limity.md) — п. 2: окна считаются в часовом поясе владельца (выпуск 4.136)
 
 ## Контекст
 

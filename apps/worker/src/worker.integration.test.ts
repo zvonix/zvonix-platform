@@ -84,6 +84,7 @@ describe('реестр фоновых задач', () => {
     ).toEqual([
       'reservations.release-expired',
       'calls.close-without-cdr',
+      'channels.poll-registrations',
       'nodes.retire-silent',
       'recordings.remove-expired',
       'sessions.purge-expired',

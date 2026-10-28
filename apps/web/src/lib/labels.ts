@@ -291,6 +291,7 @@ export const CHANNEL_STATUS_NAME: Record<ChannelStatus, string> = {
   pending: 'Ждёт',
   active: 'Работает',
   suspended: 'Приостановлен',
+  closed: 'Удалён клиентом',
 };
 
 /**
@@ -333,6 +334,7 @@ export const CHANNEL_STATUS_MEANING: Record<ChannelStatus, string> = {
   pending: 'Линия не звонит. Такой она создаётся до допуска.',
   active: 'Линия звонит, если работает и сам клиент.',
   suspended: 'Звонки по линии прекращаются сразу. Настройки и история сохраняются, вернуть можно.',
+  closed: 'Линию удалил клиент: вход не работает, вернуть нельзя. История вызовов сохраняется.',
 };
 
 /**

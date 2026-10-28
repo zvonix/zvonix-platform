@@ -37,6 +37,7 @@ import {
   USABLE_PORT_STATES,
   USABLE_SIM_STATUSES,
   type ChannelStatus,
+  type ChannelSuspendedBy,
   type GatewayPortState,
   type GatewayRegistrationMode,
   type GatewayState,
@@ -416,6 +417,54 @@ export class TelephonyRepository {
     return rows;
   }
 
+  /** Линии клиента без удалённых — то, что он видит и что идёт в предел пяти (ADR-0101). */
+  async listOpenChannels(clientId: Id<'client'>): Promise<ChannelRow[]> {
+    return this.db
+      .select()
+      .from(channels)
+      .where(and(eq(channels.clientId, clientId), ne(channels.status, 'closed')))
+      .orderBy(orderByText(channels.name));
+  }
+
+  /**
+   * Отметка опроса узла (ADR-0101, п. 1): линиям, чьи имена есть среди регистраций, — когда видели, срок, адрес, узел.
+   * Одним запросом на весь узел: опрос раз в минуту по всем линиям не должен становиться тысячей запросов.
+   * Только работающие линии — выключенной и удалённой подключённость не показывается.
+   */
+  async recordChannelRegistrations(
+    nodeId: Id<'node'>,
+    registrations: readonly { username: string; expiresAt: Date; address: string }[],
+    seenAt: Date,
+  ): Promise<number> {
+    if (registrations.length === 0) return 0;
+    const result = await this.db.execute(sql`
+      update ${channels} set
+        registration_seen_at = ${seenAt.toISOString()}::timestamptz,
+        registration_expires_at = r.expires_at,
+        registration_address = r.address,
+        registration_node_id = ${nodeId}::uuid
+      from unnest(
+        ${sql.param(registrations.map((entry) => entry.username))}::text[],
+        ${sql.param(registrations.map((entry) => entry.expiresAt.toISOString()))}::timestamptz[],
+        ${sql.param(registrations.map((entry) => entry.address))}::text[]
+      ) as r(username, expires_at, address)
+      where ${channels.sipUsername} = r.username and ${channels.status} = 'active'
+    `);
+    return result.rowCount ?? 0;
+  }
+
+  async clearChannelRegistration(id: ChannelId): Promise<void> {
+    await this.db
+      .update(channels)
+      .set({
+        registrationSeenAt: null,
+        registrationExpiresAt: null,
+        registrationAddress: null,
+        registrationNodeId: null,
+      })
+      .where(eq(channels.id, id));
+  }
+
   /**
    * Правит настройки канала: название, требование записи, номер для показа.
    *
@@ -424,7 +473,13 @@ export class TelephonyRepository {
    */
   async updateChannel(
     id: ChannelId,
-    changes: { name?: string; recordingRequired?: boolean; callerId?: string | null },
+    changes: {
+      name?: string;
+      recordingRequired?: boolean;
+      callerId?: string | null;
+      comment?: string | null;
+      maxConcurrentCalls?: number | null;
+    },
   ): Promise<ChannelRow | undefined> {
     try {
       const [row] = await this.db
@@ -455,13 +510,34 @@ export class TelephonyRepository {
     }
   }
 
-  async setChannelStatus(id: ChannelId, status: ChannelStatus): Promise<ChannelRow | undefined> {
+  /**
+   * Смена состояния линии с источником выключения (ADR-0101). `from` — состояние, которое видел вызывающий: две
+   * одновременные смены не перезапишут друг друга молча, вторая получит `undefined`.
+   */
+  async setChannelStatus(
+    id: ChannelId,
+    to: ChannelStatus,
+    suspendedBy: ChannelSuspendedBy | null,
+    from: ChannelStatus,
+  ): Promise<ChannelRow | undefined> {
     const [row] = await this.db
       .update(channels)
-      .set({ status })
-      .where(eq(channels.id, id))
+      .set({ status: to, suspendedBy: to === 'suspended' ? suspendedBy : null })
+      .where(and(eq(channels.id, id), eq(channels.status, from)))
       .returning();
     return row;
+  }
+
+  /**
+   * Запирает линию до конца транзакции — ради предела одновременных разговоров (ADR-0101, п. 6): две заявки иначе
+   * обе насчитали бы «есть место».
+   */
+  async lockChannel(id: ChannelId, executor: Executor): Promise<void> {
+    await executor
+      .select({ id: channels.id })
+      .from(channels)
+      .where(eq(channels.id, id))
+      .for('no key update');
   }
 
   // --- Поиск учётной записи для каталога --------------------------------------

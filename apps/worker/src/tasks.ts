@@ -22,6 +22,7 @@ import {
   ServersService,
   ApplicationsService,
   CdrService,
+  ChannelRegistrationsService,
   NumberingPlanService,
   EXPIRY_SWEEP_LIMIT,
   IdentityService,
@@ -220,11 +221,18 @@ const TICKET_AUTOCLOSE_SECONDS = 3600;
 /** Письмо партнёру об отключении оборудования — раз в 5 минут, как и остальные тревоги. */
 const SUSPENSION_NOTICE_SECONDS = 300;
 
+/**
+ * Опрос регистраций линий на узлах (ADR-0101): «подключена» гаснет через три пропущенных прохода, поэтому раз в минуту.
+ * Проход — одна команда ESL на узел и один запрос в базу.
+ */
+const CHANNEL_REGISTRATIONS_SECONDS = 60;
+
 @Injectable()
 export class BackgroundTasks {
   constructor(
     private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
+    private readonly channelRegistrations: ChannelRegistrationsService,
     private readonly nodes: NodesService,
     private readonly recordings: RecordingsService,
     private readonly identity: IdentityService,
@@ -259,6 +267,11 @@ export class BackgroundTasks {
         name: 'calls.close-without-cdr',
         everySeconds: ABANDONED_CALL_SWEEP_SECONDS,
         run: (now) => this.cdr.closeCallsWithoutCdr(now),
+      },
+      {
+        name: 'channels.poll-registrations',
+        everySeconds: CHANNEL_REGISTRATIONS_SECONDS,
+        run: (now) => this.channelRegistrations.poll(now),
       },
       {
         name: 'nodes.retire-silent',

@@ -323,11 +323,7 @@ function AllowedOperators({ channelId }: { channelId: string }) {
   return (
     <section className="flex flex-col gap-2">
       <h4 className="font-semibold">Разрешённые операторы</h4>
-      <p className="text-muted-foreground">
-        Ничего не отмечено — разрешены все, и это обычный режим. Отметки нужны, когда звонить надо
-        только в определённые сети: вызов на оператора вне списка отклоняется, и в вызовах это видно
-        отдельной причиной.
-      </p>
+      <p className="text-muted-foreground">Ничего не отмечено — разрешены все.</p>
 
       {loadError !== undefined && <ErrorNote error={loadError} />}
 

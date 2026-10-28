@@ -7,7 +7,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   prepareEnvironment,
@@ -18,6 +18,9 @@ import {
   uniqueEmail,
   withDatabase,
 } from '../../testing/harness.js';
+import { FakeEsl } from '../../testing/fake-esl.js';
+import { NodesService } from '../nodes/nodes.service.js';
+import { ChannelRegistrationsService } from './channel-registrations.service.js';
 
 prepareEnvironment();
 
@@ -653,6 +656,302 @@ describe('свои линии', () => {
     const response = await get(`/channels/${rich.channel}/allowed-operators`, as(poor.token));
     // `404`, а не `403`: по разнице ответов перебирались бы чужие идентификаторы.
     expect(response.statusCode).toBe(404);
+  }, 120_000);
+});
+
+interface OwnChannel {
+  id: string;
+  name: string;
+  status: string;
+  suspended_by: string | null;
+  comment: string | null;
+  max_concurrent_calls: number | null;
+  sip_username: string;
+  connection: { connected: boolean; seen_at: string | null; address: string | null };
+  open_calls?: number;
+  last_call_at?: string | null;
+}
+
+/** Работающий клиент со своей линией — каждому тесту свой, чтобы предел пяти линий не делился. */
+async function ownLine(): Promise<{
+  token: string;
+  clientId: string;
+  channel: OwnChannel;
+  realm: string;
+}> {
+  const owner = await createClientUser();
+  const clientId = (
+    await post('/clients', { ownerUserId: owner.userId, name: unique('Линии') })
+  ).json<{ client: { id: string } }>().client.id;
+  await patch(`/clients/${clientId}/status`, { status: 'active' });
+  const created = (await post('/client/channels', {}, as(owner.token))).json<{
+    channel: OwnChannel;
+    account: { realm: string };
+  }>();
+  return { token: owner.token, clientId, channel: created.channel, realm: created.account.realm };
+}
+
+async function ownChannels(bearer: string) {
+  return (await get('/client/channels', as(bearer))).json<{
+    channels: OwnChannel[];
+    server: string;
+    max_channels: number;
+  }>();
+}
+
+describe('линия глазами клиента (ADR-0101)', () => {
+  it('клиент правит название, комментарий и предел; видит имя входа и сервер, но не пароль', async () => {
+    const line = await ownLine();
+
+    const saved = await patch(
+      `/client/channels/${line.channel.id}`,
+      { name: 'Диспетчерская', comment: '  Офис на Ленина  ', maxConcurrentCalls: 3 },
+      as(line.token),
+    );
+    expect(saved.statusCode).toBe(200);
+
+    const listed = await ownChannels(line.token);
+    expect(listed.max_channels).toBe(5);
+    expect(listed.server.length).toBeGreaterThan(0);
+    expect(listed.channels[0]).toMatchObject({
+      name: 'Диспетчерская',
+      comment: 'Офис на Ленина',
+      max_concurrent_calls: 3,
+      sip_username: line.channel.sip_username,
+      connection: { connected: false, seen_at: null, address: null },
+      open_calls: 0,
+      last_call_at: null,
+    });
+
+    // Пустой комментарий и пустой предел — убрать.
+    await patch(
+      `/client/channels/${line.channel.id}`,
+      { comment: '', maxConcurrentCalls: null },
+      as(line.token),
+    );
+    expect((await ownChannels(line.token)).channels[0]).toMatchObject({
+      comment: null,
+      max_concurrent_calls: null,
+    });
+
+    // Комментарий видит и администратор.
+    await patch(`/client/channels/${line.channel.id}`, { comment: 'для площадки' }, as(line.token));
+    const admin = (await get(`/channels?clientId=${line.clientId}`)).json<{
+      channels: { id: string; comment: string | null }[];
+    }>().channels;
+    expect(admin.find((row) => row.id === line.channel.id)?.comment).toBe('для площадки');
+  }, 120_000);
+
+  it('негодные значения и чужая линия — отказы', async () => {
+    const line = await ownLine();
+    const long = await patch(
+      `/client/channels/${line.channel.id}`,
+      { comment: 'я'.repeat(501) },
+      as(line.token),
+    );
+    expect(long.statusCode).toBe(400);
+    const zero = await patch(
+      `/client/channels/${line.channel.id}`,
+      { maxConcurrentCalls: 0 },
+      as(line.token),
+    );
+    expect(zero.statusCode).toBe(400);
+    // Запись и номер для показа — решения площадки, у клиента их нет.
+    const recording = await patch(
+      `/client/channels/${line.channel.id}`,
+      { recordingRequired: true },
+      as(line.token),
+    );
+    expect(recording.statusCode).toBe(400);
+
+    const foreign = await patch(
+      `/client/channels/${rich.channel}`,
+      { name: 'Чужая' },
+      as(line.token),
+    );
+    expect(foreign.statusCode).toBe(404);
+    const foreignStatus = await post(
+      `/client/channels/${rich.channel}/status`,
+      { status: 'suspended' },
+      as(line.token),
+    );
+    expect(foreignStatus.statusCode).toBe(404);
+  }, 120_000);
+
+  it('клиент выключает и включает сам; выключенную площадкой — нет', async () => {
+    const line = await ownLine();
+    const url = `/client/channels/${line.channel.id}/status`;
+
+    const off = await post(url, { status: 'suspended' }, as(line.token));
+    expect(off.statusCode).toBe(201);
+    expect(off.json<{ channel: OwnChannel }>().channel).toMatchObject({
+      status: 'suspended',
+      suspended_by: 'client',
+    });
+    expect((await post(url, { status: 'active' }, as(line.token))).statusCode).toBe(201);
+
+    // Площадка выключила — клиент не включает и не удаляет: «удалил — получил новую» обошло бы решение.
+    await post(`/channels/${line.channel.id}/status`, { status: 'suspended' });
+    for (const status of ['active', 'closed'] as const) {
+      const refused = await post(url, { status }, as(line.token));
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json<{ error: { details: { reason: string } } }>().error.details.reason).toBe(
+        'channel_platform_managed',
+      );
+    }
+    expect((await ownChannels(line.token)).channels[0]).toMatchObject({
+      status: 'suspended',
+      suspended_by: 'admin',
+    });
+
+    // Клиент выключил, площадка выключила поверх — источник становится площадкой.
+    await post(`/channels/${line.channel.id}/status`, { status: 'active' });
+    await post(url, { status: 'suspended' }, as(line.token));
+    await post(`/channels/${line.channel.id}/status`, { status: 'suspended' });
+    expect((await post(url, { status: 'active' }, as(line.token))).statusCode).toBe(409);
+  }, 120_000);
+
+  it('удалённая линия пропадает из списка, не занимает места и не возвращается', async () => {
+    const line = await ownLine();
+    for (let count = 2; count <= 5; count += 1) {
+      await post('/client/channels', {}, as(line.token));
+    }
+    expect((await post('/client/channels', {}, as(line.token))).statusCode).toBe(409);
+
+    const closed = await post(
+      `/client/channels/${line.channel.id}/status`,
+      { status: 'closed' },
+      as(line.token),
+    );
+    expect(closed.statusCode).toBe(201);
+
+    const listed = await ownChannels(line.token);
+    expect(listed.channels.map((row) => row.id)).not.toContain(line.channel.id);
+    expect(listed.channels).toHaveLength(4);
+    expect((await post('/client/channels', {}, as(line.token))).statusCode).toBe(201);
+
+    for (const status of ['active', 'suspended'] as const) {
+      const back = await post(
+        `/client/channels/${line.channel.id}/status`,
+        { status },
+        as(line.token),
+      );
+      expect(back.statusCode).toBe(409);
+      expect(back.json<{ error: { details: { reason: string } } }>().error.details.reason).toBe(
+        'channel_closed',
+      );
+    }
+    expect(
+      (await post(`/client/channels/${line.channel.id}/credentials`, {}, as(line.token)))
+        .statusCode,
+    ).toBe(409);
+    expect(
+      (await patch(`/client/channels/${line.channel.id}`, { name: 'Снова' }, as(line.token)))
+        .statusCode,
+    ).toBe(409);
+
+    // Площадка удалённую видит — с пометкой, кто удалил, а история вызовов на неё ссылается.
+    const admin = (await get(`/channels?clientId=${line.clientId}`)).json<{
+      channels: { id: string; status: string }[];
+    }>().channels;
+    expect(admin.find((row) => row.id === line.channel.id)?.status).toBe('closed');
+  }, 120_000);
+});
+
+describe('подключена ли линия — опрос регистраций узла (ADR-0101)', () => {
+  const ESL_PASSWORD = 'b'.repeat(48);
+  let registrations: Record<string, string>[] = [];
+  const esl = new FakeEsl(ESL_PASSWORD, (command) =>
+    command.startsWith('show registrations')
+      ? JSON.stringify(
+          registrations.length === 0
+            ? { row_count: 0 }
+            : { row_count: registrations.length, rows: registrations },
+        )
+      : '+OK',
+  );
+
+  beforeAll(async () => {
+    await esl.start();
+    vi.spyOn(api().get(NodesService), 'eslTargetOf').mockImplementation(() =>
+      Promise.resolve({ host: '127.0.0.1', port: esl.port, password: ESL_PASSWORD }),
+    );
+  });
+
+  afterAll(async () => {
+    vi.restoreAllMocks();
+    await esl.stop();
+  });
+
+  const poll = () => api().get(ChannelRegistrationsService).poll(new Date());
+  const row = (username: string, realm: string) => ({
+    reg_user: username,
+    realm,
+    token: 'x',
+    url: `sofia/zvonix/sip:${username}@203.0.113.5:5060`,
+    expires: String(Math.floor(Date.now() / 1000) + 600),
+    network_ip: '203.0.113.5',
+    network_port: '5060',
+    network_proto: 'udp',
+    hostname: 'node',
+    metadata: '',
+  });
+
+  it('регистрация на узле — «подключена» с адресом программы; чужой домен не в счёт', async () => {
+    const line = await ownLine();
+    const other = await ownLine();
+    registrations = [
+      row(line.channel.sip_username, line.realm),
+      row(other.channel.sip_username, 'evil.example'),
+    ];
+
+    expect(await poll()).toBeGreaterThanOrEqual(1);
+
+    expect((await ownChannels(line.token)).channels[0]?.connection).toMatchObject({
+      connected: true,
+      address: '203.0.113.5:5060/udp',
+    });
+    expect((await ownChannels(other.token)).channels[0]?.connection.connected).toBe(false);
+  }, 120_000);
+
+  it('новый пароль сбрасывает регистрацию на узле и отметку', async () => {
+    const line = await ownLine();
+    registrations = [row(line.channel.sip_username, line.realm)];
+    await poll();
+    expect((await ownChannels(line.token)).channels[0]?.connection.connected).toBe(true);
+
+    const before = esl.commands.length;
+    await post(`/client/channels/${line.channel.id}/credentials`, {}, as(line.token));
+    const flushed = esl.commands.slice(before);
+    expect(flushed).toContain(
+      `sofia profile zvonix flush_inbound_reg ${line.channel.sip_username}@${line.realm}`,
+    );
+    expect((await ownChannels(line.token)).channels[0]?.connection).toMatchObject({
+      connected: false,
+      seen_at: null,
+    });
+  }, 120_000);
+
+  it('выключенная линия подключённой не отмечается', async () => {
+    const line = await ownLine();
+    await post(
+      `/client/channels/${line.channel.id}/status`,
+      { status: 'suspended' },
+      as(line.token),
+    );
+    registrations = [row(line.channel.sip_username, line.realm)];
+    await poll();
+    expect((await ownChannels(line.token)).channels[0]?.connection.connected).toBe(false);
+  }, 120_000);
+
+  it('узел ответил ошибкой — проход не падает', async () => {
+    const reply = esl.reply;
+    esl.reply = () => '-ERR no reply';
+    try {
+      await expect(poll()).resolves.toBe(0);
+    } finally {
+      esl.reply = reply;
+    }
   }, 120_000);
 });
 

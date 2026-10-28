@@ -1,9 +1,8 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ChannelStatus } from '@zvonix/shared';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useState } from 'react';
-import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import {
@@ -21,18 +20,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
-import { CHANNEL_STATUS_NAME, usableTone } from '@/lib/labels';
-import { ChannelSettings } from './channel-settings';
+import { CHANNELS_KEY, ConnectionState, StateBadge, useChannels, type Channel } from './channels';
 
-const COLUMNS = 5;
-
-interface Channel {
-  readonly id: string;
-  readonly name: string;
-  readonly status: ChannelStatus;
-  readonly recording_required: boolean;
-  readonly caller_id: string | null;
-}
+const COLUMNS = 4;
 
 export default function MyChannelsPage() {
   return (
@@ -43,20 +33,15 @@ export default function MyChannelsPage() {
 }
 
 /**
- * Свои линии клиента. «Настроить» открывает окно с порядком предложений и разрешёнными
- * операторами: у каждого списка своё сохранение, поэтому окно без общей кнопки действия.
+ * Свои линии: подключена ли программа, состояние, сколько разговоров идёт. Всё остальное — на странице линии
+ * ([ADR-0101](../../../../../../docs/adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)).
  */
 function MyChannels() {
   const queryClient = useQueryClient();
-  const list = useQuery({
-    queryKey: ['my', 'channels'],
-    queryFn: () => request<{ channels: Channel[] }>('/client/channels'),
-  });
+  const list = useChannels();
   // Пароль показывается один раз: хранится здесь, пока человек его не закроет.
   const [issued, setIssued] = useState<IssuedCredentials | undefined>();
   const [name, setName] = useState('');
-
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['my', 'channels'] });
 
   const create = useMutation({
     mutationFn: (title: string) =>
@@ -67,14 +52,23 @@ function MyChannels() {
     onSuccess: async (data) => {
       setIssued({ title: `Доступ SIP для линии «${data.channel.name}»`, account: data.account });
       setName('');
-      await refresh();
+      await queryClient.invalidateQueries({ queryKey: CHANNELS_KEY });
     },
   });
 
+  const channels = list.data?.channels ?? [];
+  const limit = list.data?.max_channels;
+  const full = limit !== undefined && channels.length >= limit;
+
   return (
     <div className="flex flex-col gap-3">
-      <div>
-        <FormDialog label="Получить линию" title="Новая линия" variant="outline">
+      <div className="flex flex-wrap items-center gap-3">
+        <FormDialog
+          label="Получить линию"
+          title="Новая линия"
+          variant="outline"
+          disabled={list.data === undefined || full}
+        >
           <DialogForm
             submitLabel="Получить линию"
             canSubmit
@@ -95,6 +89,11 @@ function MyChannels() {
             </DialogField>
           </DialogForm>
         </FormDialog>
+        {limit !== undefined && (
+          <span className="num text-muted-foreground">
+            {channels.length} из {limit}
+          </span>
+        )}
       </div>
 
       {issued !== undefined && (
@@ -112,15 +111,14 @@ function MyChannels() {
         </p>
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Линия</TableHead>
+              <TableHead className="h-8">Подключение</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Номер для показа</TableHead>
-              <TableHead className="h-8">Запись</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className="h-8 text-right">Разговоров сейчас</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -132,7 +130,7 @@ function MyChannels() {
               </TableRow>
             )}
 
-            {list.data?.channels.length === 0 && (
+            {list.data !== undefined && channels.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={COLUMNS} className="whitespace-normal text-muted-foreground">
                   Линий пока нет.
@@ -140,66 +138,32 @@ function MyChannels() {
               </TableRow>
             )}
 
-            {list.data?.channels.map((channel) => (
+            {channels.map((channel) => (
               <TableRow key={channel.id}>
-                <TableCell>{channel.name}</TableCell>
-
-                <TableCell>
-                  <span
-                    className={`rounded-md px-2 py-0.5 ${usableTone(channel.status === 'active')}`}
+                <TableCell className="max-w-72 whitespace-normal">
+                  <Link
+                    href={`/my/channels/${channel.id}`}
+                    className="font-medium text-primary underline-offset-4 hover:underline"
                   >
-                    {CHANNEL_STATUS_NAME[channel.status]}
-                  </span>
-                </TableCell>
-
-                <TableCell>
-                  {channel.caller_id === null ? (
-                    <span className="text-faint">номер SIM, с которой ушёл вызов</span>
-                  ) : (
-                    <span className="num">{channel.caller_id}</span>
+                    {channel.name}
+                  </Link>
+                  {channel.comment !== null && (
+                    <span className="block truncate text-faint" title={channel.comment}>
+                      {channel.comment}
+                    </span>
                   )}
                 </TableCell>
-
                 <TableCell>
-                  {channel.recording_required ? (
-                    'обязательна'
-                  ) : (
-                    <span className="text-faint">не требуется</span>
-                  )}
+                  <ConnectionState channel={channel} />
                 </TableCell>
-
                 <TableCell>
-                  <div className="flex flex-wrap gap-2">
-                    <ConfirmAction
-                      label="Новый пароль"
-                      title={`Новый пароль линии «${channel.name}»`}
-                      consequence={
-                        <p>Прежний пароль перестанет работать: АТС придётся настроить заново.</p>
-                      }
-                      confirmLabel="Выдать новый пароль"
-                      onConfirm={async () => {
-                        const data = await request<{ account: SipAccount }>(
-                          `/client/channels/${channel.id}/credentials`,
-                          { method: 'POST' },
-                        );
-                        setIssued({
-                          title: `Новый доступ SIP для линии «${channel.name}»`,
-                          account: data.account,
-                        });
-                      }}
-                    />
-                    <FormDialog
-                      label="Настроить"
-                      variant="outline"
-                      title={`Настройки линии «${channel.name}»`}
-                      description="Порядок предложений и разрешённые операторы сохраняются каждый своей кнопкой."
-                      wide
-                    >
-                      <div className="min-h-0 overflow-y-auto px-5 pb-5">
-                        <ChannelSettings channelId={channel.id} />
-                      </div>
-                    </FormDialog>
-                  </div>
+                  <StateBadge channel={channel} />
+                </TableCell>
+                <TableCell className="num text-right">
+                  {channel.open_calls ?? 0}
+                  {channel.max_concurrent_calls !== null && (
+                    <span className="text-faint"> из {channel.max_concurrent_calls}</span>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

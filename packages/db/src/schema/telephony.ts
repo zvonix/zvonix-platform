@@ -15,7 +15,10 @@ import { sql } from 'drizzle-orm';
 import { boolean, check, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import {
   DISTRIBUTION_RANK_MAX,
+  CHANNEL_COMMENT_MAX,
   CHANNEL_STATUSES,
+  CHANNEL_SUSPENDED_BY,
+  type ChannelSuspendedBy,
   CLIENT_PRIORITY_MAX,
   CLIENT_PRIORITY_OFFERS,
   DEFAULT_MAX_CONCURRENT_CALLS,
@@ -25,6 +28,7 @@ import {
   GATEWAY_SUSPENDED_BY,
   GATEWAY_TYPES,
   DEFAULT_TRUNK_CONCURRENT_CALLS,
+  MAX_CHANNEL_CONCURRENT_CALLS,
   MAX_CONCURRENT_CALLS_LIMIT,
   MAX_TRUNK_CONCURRENT_CALLS,
   SIM_NETWORK_SCOPES,
@@ -196,11 +200,47 @@ export const channels = pgTable(
     /** Номер, который увидит вызываемый. Пусто — номер SIM, с которой ушёл вызов. */
     callerId: text(),
 
+    /** Кто выключил: клиент или администратор ([ADR-0101](../../../../docs/adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)). */
+    suspendedBy: text().$type<ChannelSuspendedBy>(),
+
+    /** Комментарий клиента; видит и администратор, партнёр — никогда. */
+    comment: text(),
+
+    /** Не больше стольких разговоров линии одновременно; пусто — без предела. */
+    maxConcurrentCalls: integer(),
+
+    /**
+     * Регистрация программы клиента на узле — по опросу узлов (ADR-0101, п. 1). Есть только после верного пароля,
+     * в отличие от отметки запроса учётной записи. Подключена — регистрация не истекла и видели её недавно.
+     */
+    registrationSeenAt: timestamptz(),
+    registrationExpiresAt: timestamptz(),
+    /** Откуда программа зарегистрировалась: `адрес:порт/транспорт`. */
+    registrationAddress: text(),
+    registrationNodeId: idRef<'node'>().references(() => nodes.id, { onDelete: 'set null' }),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     check('channels_status_check', oneOf(t.status, CHANNEL_STATUSES)),
+    check(
+      'channels_suspended_by_check',
+      sql`${t.suspendedBy} is null or ${oneOf(t.suspendedBy, CHANNEL_SUSPENDED_BY)}`,
+    ),
+    // Как у шлюза: выключение без источника не сказало бы, кто вправе вернуть.
+    check(
+      'channels_suspended_by_matches_status',
+      sql`(${t.status} = 'suspended') = (${t.suspendedBy} is not null)`,
+    ),
+    check(
+      'channels_max_concurrent_calls_range',
+      sql`${t.maxConcurrentCalls} is null or ${t.maxConcurrentCalls} between 1 and ${sql.raw(String(MAX_CHANNEL_CONCURRENT_CALLS))}`,
+    ),
+    check(
+      'channels_comment_length',
+      sql`${t.comment} is null or char_length(${t.comment}) <= ${sql.raw(String(CHANNEL_COMMENT_MAX))}`,
+    ),
     uniqueIndex('channels_sip_username_key').on(t.sipUsername),
     index('channels_client_idx').on(t.clientId),
     index('channels_status_idx').on(t.status),

@@ -307,6 +307,59 @@ describe('лимит звонков', () => {
   }, 180_000);
 });
 
+describe('предел одновременных разговоров линии (ADR-0101)', () => {
+  it('сверх предела линия не звонит, соседняя линия и без предела звонит', async () => {
+    const env = await scenario();
+    // У SIM мест больше, чем разрешено линии: отказ должен прийти от линии, а не от карты.
+    await createPartner(env.operator, 4);
+    const second = (
+      await post('/channels', {
+        clientId: env.client,
+        name: unique('Линия'),
+        recordingRequired: false,
+      })
+    ).json<{ channel: { id: string } }>().channel.id;
+    await post(`/channels/${second}/status`, { status: 'active' });
+
+    const patched = await api().inject({
+      method: 'PATCH',
+      url: `/channels/${env.channel}`,
+      headers: auth(),
+      payload: { maxConcurrentCalls: 1 },
+    });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json<{ channel: { max_concurrent_calls: number } }>().channel).toMatchObject({
+      max_concurrent_calls: 1,
+    });
+
+    // Первый вызов остаётся открытым (`routing`) и занимает единственное место линии.
+    expect((await route(env.channel, env.destination)).outcome).toBe('routed');
+    const busy = await route(env.channel, env.destination);
+    expect(busy.outcome).toBe('rejected');
+    expect(busy.reason).toBe('limit_exceeded');
+    expect((await route(second, env.destination)).outcome).toBe('routed');
+  }, 180_000);
+
+  it('завершённый вызов место освобождает', async () => {
+    const env = await scenario();
+    await createPartner(env.operator, 4);
+    await api().inject({
+      method: 'PATCH',
+      url: `/channels/${env.channel}`,
+      headers: auth(),
+      payload: { maxConcurrentCalls: 1 },
+    });
+
+    expect((await route(env.channel, env.destination)).outcome).toBe('routed');
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update calls set status = 'failed', ended_at = now() where channel_id = ${env.channel}`,
+      );
+    });
+    expect((await route(env.channel, env.destination)).outcome).toBe('routed');
+  }, 180_000);
+});
+
 describe('лимит партнёра и SIM', () => {
   it('отсеивает кандидата, а не отклоняет вызов: рядом есть другой партнёр', async () => {
     // Лимит партнёра — защита его SIM, и он не должен мешать клиенту позвонить.

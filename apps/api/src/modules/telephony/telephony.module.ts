@@ -27,6 +27,7 @@ import { PartnerLimitsController } from './partner-limits.controller.js';
 import { TestCallController } from './test-call.controller.js';
 import { TestCallRepository } from './test-call.repository.js';
 import { TestCallService } from './test-call.service.js';
+import { ChannelRegistrationsService } from './channel-registrations.service.js';
 
 @Module({
   imports: [AuditModule, CatalogModule, BillingModule, LimitsModule, NodesModule],
@@ -56,10 +57,18 @@ import { TestCallService } from './test-call.service.js';
     PartnerReportService,
     TestCallService,
     TestCallRepository,
+    ChannelRegistrationsService,
   ],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.
   // `CdrService` — ради уборки вызовов без CDR: она нужна и маршрутизации на пути
   // отказа, и воркеру по расписанию (ADR-0020), и повторять её нельзя.
-  exports: [TelephonyService, TelephonyRepository, CallRepository, CdrService, QualityService],
+  exports: [
+    TelephonyService,
+    TelephonyRepository,
+    CallRepository,
+    CdrService,
+    QualityService,
+    ChannelRegistrationsService,
+  ],
 })
 export class TelephonyModule {}

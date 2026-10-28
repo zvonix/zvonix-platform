@@ -17,6 +17,7 @@ import { BillingService } from '../billing/billing.service.js';
 import { CatalogService } from '../catalog/catalog.service.js';
 import {
   CallRepository,
+  type ChannelActivity,
   type CallFilter,
   type CallRow,
   type CallSummaryFilter,
@@ -97,6 +98,14 @@ export class CallsService {
         };
       }),
     };
+  }
+
+  /** Разговоров идёт и последний вызов — по каждой линии (ADR-0101). */
+  async channelActivity(
+    channelIds: readonly Id<'channel'>[],
+    now: Date,
+  ): Promise<Map<Id<'channel'>, ChannelActivity>> {
+    return this.calls.channelActivity(channelIds, now);
   }
 
   async summary(filter: CallSummaryFilter): Promise<CallSummary> {
