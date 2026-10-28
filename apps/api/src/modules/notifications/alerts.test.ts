@@ -146,11 +146,12 @@ describe('тревоги администраторам', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it('качество: тревожит только работающий объект с достаточным числом вызовов и низкой долей', async () => {
+  it('качество: одна сводка на площадку — только работающие объекты с достаточным числом вызовов и низкой долей', async () => {
     const { service, enqueue } = build({
       admins: [confirmed],
       sims: [
-        quality({ subjectId: 'bad' }),
+        quality({ subjectId: 'bad', networkFailures: 15 }),
+        quality({ subjectId: 'cold', subjectName: '79990000002', networkFailures: 1 }),
         quality({ subjectId: 'few', attempts: 5 }),
         quality({ subjectId: 'fine', asrBasisPoints: 6000 }),
         quality({ subjectId: 'off', subjectStatus: 'throttled' }),
@@ -158,9 +159,29 @@ describe('тревоги администраторам', () => {
       gateways: [quality({ subjectId: 'gw', subjectName: 'GOIP-1' })],
     });
 
-    expect(await service.notify(NOW)).toBe(2);
-    const kinds = enqueue.mock.calls.map((call) => (call as unknown as [{ kind: string }])[0].kind);
-    expect(kinds).toEqual(['alert_quality:sim:bad', 'alert_quality:gateway:gw']);
+    expect(await service.notify(NOW)).toBe(1);
+    const mail = (
+      enqueue.mock.calls[0] as unknown as [{ kind: string; subject: string; body: string }]
+    )[0];
+    expect(mail.kind).toBe('alert_quality');
+    expect(mail.subject).toContain('SIM: 2, шлюзов: 1');
+    // Из двух SIM по сети одна: у второй несостоявшиеся — «не ответил», это база клиента.
+    expect(mail.body).toContain('SIM — 2, из них из-за отказов сети — 1');
+    // Худшие — по отказам сети первыми.
+    expect(mail.body.indexOf('79990000001')).toBeLessThan(mail.body.indexOf('79990000002'));
+  });
+
+  it('качество: в сводке не больше 20 объектов, остальные — числом', async () => {
+    const { service, enqueue } = build({
+      admins: [confirmed],
+      sims: Array.from({ length: 25 }, (_, index) =>
+        quality({ subjectId: `s${String(index)}`, subjectName: `7999000${String(1000 + index)}` }),
+      ),
+    });
+    await service.notify(NOW);
+    const mail = (enqueue.mock.calls[0] as unknown as [{ body: string }])[0];
+    expect(mail.body.match(/^— SIM /gmu)).toHaveLength(20);
+    expect(mail.body).toContain('…и ещё 5');
   });
 
   it('заявка на пополнение ждёт решения дольше пяти минут — письмо, свежая — нет', async () => {

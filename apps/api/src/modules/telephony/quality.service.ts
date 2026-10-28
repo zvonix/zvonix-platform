@@ -20,6 +20,34 @@ import {
 } from './quality.repository.js';
 import { TelephonyRepository } from './telephony.repository.js';
 
+/**
+ * «Почти не соединяет» ([ADR-0062](../../../../../docs/adr/0062-trevogi-administratoram.md), п. 2): за последний час
+ * не меньше 10 вызовов, состоялось меньше 30 %. Числа те же, что «мало вызовов» и красная доля на экране «Качество».
+ */
+export const POOR_CONNECTION_RULE = {
+  windowMinutes: 60,
+  enoughCalls: 10,
+  maxAsrBasisPoints: 3000,
+} as const;
+
+/** Объект в работе почти не соединяет. Отключённый не в счёт: он уже снят. */
+export function connectsPoorly(row: QualityView): boolean {
+  return (
+    row.subjectStatus === 'active' &&
+    row.attempts >= POOR_CONNECTION_RULE.enoughCalls &&
+    row.asrBasisPoints < POOR_CONNECTION_RULE.maxAsrBasisPoints
+  );
+}
+
+/**
+ * Почти не соединяет **по вине оборудования** ([ADR-0103](../../../../../docs/adr/0103-shlyuz-na-svyazi-po-oprosu-i-trevoga-partnyoru.md),
+ * п. 5): не меньше половины несостоявшихся — отказы сети. «Не ответил» и «занято» — про базу клиента: партнёру об этом
+ * писать нечего, он их не исправит.
+ */
+export function failsOnNetwork(row: QualityView): boolean {
+  return connectsPoorly(row) && row.networkFailures * 2 >= row.attempts - row.answered;
+}
+
 /** Качество объекта за окно — то, что видит человек. */
 export interface QualityView extends QualityRow {
   /** Доля отвеченных, в десятитысячных: 4210 значит 42,1%. */
@@ -57,6 +85,19 @@ export class QualityService {
 
   async gateways(since: Date, partnerId?: Id<'partner'>): Promise<QualityView[]> {
     return (await this.repository.gatewayQuality(since, partnerId)).map(withRatios);
+  }
+
+  /** Что почти не соединяет за окно правила — у всей площадки или у одного партнёра. */
+  async poorlyConnecting(
+    now: Date,
+    partnerId?: Id<'partner'>,
+  ): Promise<{ sims: QualityView[]; gateways: QualityView[] }> {
+    const since = new Date(now.getTime() - POOR_CONNECTION_RULE.windowMinutes * 60_000);
+    const [sims, gateways] = await Promise.all([
+      this.sims(since, partnerId),
+      this.gateways(since, partnerId),
+    ]);
+    return { sims: sims.filter(connectsPoorly), gateways: gateways.filter(connectsPoorly) };
   }
 
   /**

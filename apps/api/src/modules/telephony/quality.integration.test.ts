@@ -23,6 +23,7 @@ import {
   uniqueEmail,
   withDatabase,
 } from '../../testing/harness.js';
+import { failsOnNetwork, QualityService } from './quality.service.js';
 
 prepareEnvironment();
 
@@ -529,6 +530,35 @@ describe('качество для человека', () => {
       gateways: { subject_id: string; answered: number }[];
     }>().gateways;
     expect(rows.find((row) => row.subject_id === env.gateway)?.answered).toBe(1);
+  }, 120_000);
+});
+
+describe('«почти не соединяет» (ADR-0103, п. 5)', () => {
+  it('у партнёра — только своё; «по вине сети» отличается от холодной базы клиента', async () => {
+    const network = await environment();
+    const cold = await environment();
+    await api().inject({ method: 'DELETE', url: '/failure-thresholds/sim', headers: auth() });
+    await api().inject({ method: 'DELETE', url: '/failure-thresholds/gateway', headers: auth() });
+
+    // Девять отказов сети и одна состоявшаяся из двенадцати — сторона оборудования.
+    for (let i = 0; i < 9; i += 1) await recordCall(network, 'failed');
+    await recordCall(network, 'no_answer');
+    await recordCall(network, 'no_answer');
+    await recordCall(network, 'completed', { durationSeconds: 30 });
+    // Одиннадцать «не ответил» — база клиента; и вызов старше часа, который в окно не попадает.
+    for (let i = 0; i < 11; i += 1) await recordCall(cold, 'no_answer');
+    await recordCall(cold, 'completed', { durationSeconds: 30 });
+    await recordCall(cold, 'failed', { minutesAgo: 90 });
+
+    const quality = api().get(QualityService);
+    const mine = await quality.poorlyConnecting(new Date(), parseId(network.partner, 'partner'));
+    expect(mine.sims.map((row) => row.subjectId)).toEqual([network.sim]);
+    expect(mine.sims.every(failsOnNetwork)).toBe(true);
+    expect(mine.gateways.map((row) => row.subjectId)).toEqual([network.gateway]);
+
+    const theirs = await quality.poorlyConnecting(new Date(), parseId(cold.partner, 'partner'));
+    expect(theirs.sims.map((row) => row.subjectId)).toEqual([cold.sim]);
+    expect(theirs.sims.some(failsOnNetwork)).toBe(false);
   }, 120_000);
 });
 

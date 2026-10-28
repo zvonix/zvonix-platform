@@ -589,6 +589,13 @@
       "when": 1793174338982,
       "tag": "0083_chasovoy_poyas_limity",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1793193582655,
+      "tag": "0084_shlyuz_na_svyazi",
+      "breakpoints": true
     }
   ]
 }

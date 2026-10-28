@@ -11,7 +11,7 @@
 
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   holdTransaction,
@@ -24,6 +24,9 @@ import {
   waitUntilBlocked,
   withDatabase,
 } from '../../testing/harness.js';
+import { FakeEsl } from '../../testing/fake-esl.js';
+import { NodesService } from '../nodes/nodes.service.js';
+import { RegistrationsService } from './registrations.service.js';
 
 prepareEnvironment();
 
@@ -114,8 +117,7 @@ interface EquipmentResponse {
     type: string;
     status: string;
     suspended_by: string | null;
-    on_node: boolean;
-    registered_at: string | null;
+    connection: { connected: boolean; knocked_at: string | null; rejected: boolean };
     ports: {
       id: string;
       port_number: number;
@@ -433,10 +435,10 @@ describe('оборудование партнёра', () => {
     expect(gateway?.ports[0]?.sim?.operator_name).toBe(operatorName);
   });
 
-  it('регистрация на узле видна: без неё вызов на шлюз не уйдёт вовсе', async () => {
+  it('запрос учётной записи без регистрации — не «на связи», а «проверьте пароль» (ADR-0103)', async () => {
     const body = (await get('/partner/equipment', as(mine.token))).json<EquipmentResponse>();
-    expect(body.gateways[0]?.on_node).toBe(true);
-    expect(body.gateways[0]?.registered_at).not.toBeNull();
+    expect(body.gateways[0]?.connection).toMatchObject({ connected: false, rejected: true });
+    expect(body.gateways[0]?.connection.knocked_at).not.toBeNull();
   });
 
   it('карта без порта видна отдельно — иначе её не видно нигде', async () => {
@@ -1977,8 +1979,12 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
       gateways: {
         id: string;
         registration_mode: string;
-        on_node: boolean;
-        ports: { id: string; sip_username: string | null; on_node: boolean }[];
+        connection: { connected: boolean; knocked_at: string | null };
+        ports: {
+          id: string;
+          sip_username: string | null;
+          connection: { connected: boolean; knocked_at: string | null };
+        }[];
       }[];
     }>();
     const gateway = body.gateways.find((row) => row.id === gatewayId);
@@ -2003,7 +2009,7 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
     expect(shown.ports.map((port) => port.sip_username)).toEqual(
       created.port_accounts.map((account) => account.username),
     );
-    expect(shown.on_node).toBe(false);
+    expect(shown.connection.connected).toBe(false);
   });
 
   it('каталог отдаёт вход линии и не отдаёт вход шлюза; связь видна по линии', async () => {
@@ -2015,9 +2021,10 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
     expect(await accepted(created.account.username)).toBe(false);
     expect(await accepted(line.username)).toBe(true);
 
+    // Запрос записи видно по линии; «на связи» — только после регистрации, по опросу узла.
     const shown = await equipmentOf(created.gateway.id);
-    expect(shown.on_node).toBe(true);
-    expect(shown.ports.map((port) => port.on_node)).toEqual([true, false]);
+    expect(shown.connection.knocked_at).not.toBeNull();
+    expect(shown.ports.map((port) => port.connection.knocked_at !== null)).toEqual([true, false]);
   });
 
   it('у выключенного шлюза вход линии не действует', async () => {
@@ -2079,7 +2086,7 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
     expect(accounts.map((account) => account.port_number)).toEqual([1, 2, 3]);
     expect(await accepted(created.account.username)).toBe(false);
     // Давняя регистрация шлюза не делает его «на связи» по линиям.
-    expect((await equipmentOf(created.gateway.id)).on_node).toBe(false);
+    expect((await equipmentOf(created.gateway.id)).connection.connected).toBe(false);
 
     // Повтор — не событие: входы не перевыпускаются, журнал не пишется.
     const again = await post(
@@ -2217,4 +2224,150 @@ describe('вход по линиям GOIP (ADR-0054)', () => {
         .statusCode,
     ).toBe(404);
   });
+});
+
+describe('«на связи» по опросу узла (ADR-0103)', () => {
+  const ESL_PASSWORD = 'c'.repeat(48);
+  const REALM = 'sip.zvonix.test';
+  let owner: Awaited<ReturnType<typeof createPartner>>;
+  let registrations: Record<string, string>[] = [];
+  const esl = new FakeEsl(ESL_PASSWORD, (command) =>
+    command.startsWith('show registrations')
+      ? JSON.stringify(
+          registrations.length === 0
+            ? { row_count: 0 }
+            : { row_count: registrations.length, rows: registrations },
+        )
+      : '+OK',
+  );
+
+  beforeAll(async () => {
+    owner = await createPartner('Петров Пётр');
+    await esl.start();
+    vi.spyOn(api().get(NodesService), 'eslTargetOf').mockImplementation(() =>
+      Promise.resolve({ host: '127.0.0.1', port: esl.port, password: ESL_PASSWORD }),
+    );
+  });
+
+  afterAll(async () => {
+    vi.restoreAllMocks();
+    await esl.stop();
+  });
+
+  const poll = () => api().get(RegistrationsService).poll(new Date());
+  const row = (username: string) => ({
+    reg_user: username,
+    realm: REALM,
+    token: 'x',
+    url: `sofia/zvonix/sip:${username}@198.51.100.7:5060`,
+    expires: String(Math.floor(Date.now() / 1000) + 600),
+    network_ip: '198.51.100.7',
+    network_port: '5060',
+    network_proto: 'udp',
+    hostname: 'node',
+    metadata: '',
+  });
+
+  interface Shown {
+    id: string;
+    connection: { connected: boolean; address: string | null; seen_at: string | null };
+    ports: { id: string; connection: { connected: boolean; address: string | null } }[];
+  }
+
+  async function shown(gatewayId: string): Promise<Shown> {
+    const body = (await get('/partner/equipment', as(owner.token))).json<{ gateways: Shown[] }>();
+    const gateway = body.gateways.find((entry) => entry.id === gatewayId);
+    if (gateway === undefined) throw new Error('Шлюза нет в оборудовании');
+    return gateway;
+  }
+
+  async function activeGateway(registrationMode: 'gateway' | 'port') {
+    const created = (
+      await post(
+        '/partner/gateways',
+        { name: unique('Шлюз'), type: 'goip', portCount: 2, registrationMode },
+        as(owner.token),
+      )
+    ).json<{
+      gateway: { id: string };
+      account: { username: string };
+      port_accounts: { port_id: string; username: string }[];
+    }>();
+    await post(
+      `/partner/gateways/${created.gateway.id}/status`,
+      { status: 'active' },
+      as(owner.token),
+    );
+    return created;
+  }
+
+  it('регистрация шлюза на узле — «на связи» с адресом устройства; чужой домен не в счёт', async () => {
+    const gateway = await activeGateway('gateway');
+    const stranger = await activeGateway('gateway');
+    registrations = [
+      row(gateway.account.username),
+      { ...row(stranger.account.username), realm: 'evil.example' },
+    ];
+
+    await poll();
+
+    expect((await shown(gateway.gateway.id)).connection).toMatchObject({
+      connected: true,
+      address: '198.51.100.7:5060/udp',
+    });
+    expect((await shown(stranger.gateway.id)).connection.connected).toBe(false);
+  }, 120_000);
+
+  it('вход по линиям — на связи та линия, что зарегистрирована, и шлюз целиком', async () => {
+    const gateway = await activeGateway('port');
+    const [first] = gateway.port_accounts;
+    if (first === undefined) throw new Error('Входов нет');
+    registrations = [row(first.username)];
+
+    await poll();
+
+    const view = await shown(gateway.gateway.id);
+    expect(view.connection.connected).toBe(true);
+    expect(view.ports.map((port) => port.connection.connected)).toEqual([true, false]);
+  }, 120_000);
+
+  it('новый пароль шлюза сбрасывает регистрацию на узле и отметку', async () => {
+    const gateway = await activeGateway('gateway');
+    registrations = [row(gateway.account.username)];
+    await poll();
+    expect((await shown(gateway.gateway.id)).connection.connected).toBe(true);
+
+    const before = esl.commands.length;
+    registrations = [];
+    expect(
+      (await post(`/partner/gateways/${gateway.gateway.id}/credentials`, {}, as(owner.token)))
+        .statusCode,
+    ).toBe(201);
+    expect(esl.commands.slice(before)).toContain(
+      `sofia profile zvonix flush_inbound_reg ${gateway.account.username}@${REALM}`,
+    );
+    expect((await shown(gateway.gateway.id)).connection).toMatchObject({
+      connected: false,
+      seen_at: null,
+    });
+  }, 120_000);
+
+  it('новый пароль линии сбрасывает её регистрацию на узле', async () => {
+    const gateway = await activeGateway('port');
+    const [first] = gateway.port_accounts;
+    if (first === undefined) throw new Error('Входов нет');
+    registrations = [row(first.username)];
+    await poll();
+
+    const before = esl.commands.length;
+    registrations = [];
+    expect(
+      (await post(`/partner/gateway-ports/${first.port_id}/credentials`, {}, as(owner.token)))
+        .statusCode,
+    ).toBe(201);
+    expect(esl.commands.slice(before)).toContain(
+      `sofia profile zvonix flush_inbound_reg ${first.username}@${REALM}`,
+    );
+    expect((await shown(gateway.gateway.id)).ports[0]?.connection.connected).toBe(false);
+  }, 120_000);
 });

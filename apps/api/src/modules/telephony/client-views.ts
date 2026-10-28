@@ -20,7 +20,7 @@ import {
 import type { ClientFailureReason } from '@zvonix/shared';
 import type { ChannelActivity } from './call.repository.js';
 import type { CallDetails } from './calls.service.js';
-import { isChannelConnected } from './channel-registrations.service.js';
+import { isRegistered } from './registrations.service.js';
 import type { ChannelRow } from './telephony.repository.js';
 
 /**
@@ -85,7 +85,7 @@ export function toClientChannelView(
   now: Date,
   activity?: ChannelActivity,
 ): ClientChannelView {
-  const connected = isChannelConnected(row, now);
+  const connected = isRegistered(row, now);
   return {
     id: row.id,
     name: row.name,

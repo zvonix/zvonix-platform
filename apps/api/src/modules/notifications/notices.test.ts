@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../../infra/tokens.js';
 import { PaymentNoticeService } from './payment-notice.service.js';
-import { SuspensionNoticeService } from './suspension-notice.service.js';
+import { EquipmentNoticeService } from './equipment-notice.service.js';
 
 const NOW = new Date('2026-10-03T12:00:00Z');
 
@@ -23,12 +23,13 @@ const owner = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-function mailStub(alreadySent: (kind: string) => boolean = () => false) {
+function mailStub(alreadySent: (kind: string, since: Date) => boolean = () => false) {
   const enqueue = vi.fn(() => Promise.resolve(true));
   return {
     enqueue,
     mail: {
-      hasRecent: (kind: string) => Promise.resolve(alreadySent(kind)),
+      hasRecent: (kind: string, _recipient: string, since: Date) =>
+        Promise.resolve(alreadySent(kind, since)),
       enqueue,
     } as never,
   };
@@ -114,23 +115,35 @@ describe('письмо клиенту о решении по заявке', () =
   });
 });
 
-describe('письмо партнёру об отключении оборудования', () => {
+describe('письмо партнёру об оборудовании', () => {
   function build(options: {
     enabled?: boolean;
     gateways?: Record<string, unknown>[];
     sims?: Record<string, unknown>[];
+    poorSims?: Record<string, unknown>[];
+    poorGateways?: Record<string, unknown>[];
     partnerStatus?: string;
-    alreadySent?: (kind: string) => boolean;
+    alreadySent?: (kind: string, since: Date) => boolean;
     gatewaysFail?: boolean;
+    qualityFail?: boolean;
   }) {
     const { mail, enqueue } = mailStub(options.alreadySent);
-    const service = new SuspensionNoticeService(
+    const service = new EquipmentNoticeService(
       {
         listGateways: () =>
           options.gatewaysFail === true
             ? Promise.reject(new Error('база недоступна'))
             : Promise.resolve(options.gateways ?? []),
         listSims: () => Promise.resolve(options.sims ?? []),
+      } as never,
+      {
+        poorlyConnecting: () =>
+          options.qualityFail === true
+            ? Promise.reject(new Error('база недоступна'))
+            : Promise.resolve({
+                sims: options.poorSims ?? [],
+                gateways: options.poorGateways ?? [],
+              }),
       } as never,
       {
         partnerWithBalance: () =>
@@ -196,6 +209,60 @@ describe('письмо партнёру об отключении оборудо
 
   it('сбой чтения шлюзов не гасит письмо о SIM', async () => {
     const { service, enqueue } = build({ gatewaysFail: true, sims: [sim()] });
+    expect(await service.notify(NOW)).toBe(1);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  // Строка качества уже отобрана правилом «почти не соединяет»; здесь — только «по вине сети» (ADR-0103, п. 5).
+  const poor = (overrides: Record<string, unknown> = {}) => ({
+    subjectId: 's1',
+    subjectName: '79161000001',
+    subjectStatus: 'active',
+    partnerId: 'pt1',
+    attempts: 20,
+    answered: 2,
+    networkFailures: 12,
+    asrBasisPoints: 1000,
+    ...overrides,
+  });
+
+  it('почти не соединяет из-за сети — письмо партнёру; из-за «не ответил» — нет', async () => {
+    const { service, enqueue } = build({
+      poorSims: [poor(), poor({ subjectId: 's2', networkFailures: 3 })],
+      poorGateways: [poor({ subjectId: 'g1', subjectName: 'GOIP-гараж' })],
+    });
+
+    expect(await service.notify(NOW)).toBe(2);
+    const mails = enqueue.mock.calls.map(
+      (call) => (call as unknown as [{ kind: string; subject: string; body: string }])[0],
+    );
+    expect(mails.map((mail) => mail.kind)).toEqual([
+      'poor_connection:sim:s1',
+      'poor_connection:gateway:g1',
+    ]);
+    expect(mails[0]?.subject).toContain('SIM 79161000001 почти не соединяет');
+    expect(mails[1]?.subject).toContain('Шлюз «GOIP-гараж»');
+    // Партнёр не видит клиента: ни имени, ни номеров абонентов в письме нет.
+    expect(mails[0]?.body).not.toMatch(/клиент/iu);
+  });
+
+  it('о плохом соединении — не чаще раза в 12 часов, об отключении — раза в трое суток', async () => {
+    const asked = new Map<string, number>();
+    const { service } = build({
+      poorSims: [poor()],
+      sims: [sim()],
+      alreadySent: (kind, since) => {
+        asked.set(kind, (NOW.getTime() - since.getTime()) / 3_600_000);
+        return false;
+      },
+    });
+    await service.notify(NOW);
+    expect(asked.get('poor_connection:sim:s1')).toBe(12);
+    expect(asked.get('suspended:sim:s1')).toBe(72);
+  });
+
+  it('сбой чтения качества не гасит письмо об отключении', async () => {
+    const { service, enqueue } = build({ qualityFail: true, sims: [sim()] });
     expect(await service.notify(NOW)).toBe(1);
     expect(enqueue).toHaveBeenCalledTimes(1);
   });

@@ -5,7 +5,9 @@
  * Площадка ничего не скажет сама, пока на неё не посмотрят: узел замолчал ночью, SIM
  * перестала соединять — и об этом узнают по жалобам клиентов. Здесь два условия, оба по
  * текущему состоянию, а не по событию (ADR-0020: пропущенный проход ничего не теряет):
- * узел не на связи и объект, у которого почти не состоятся вызовы.
+ * узел не на связи и объект, у которого почти не состоятся вызовы. О втором — одна сводка на проход, а не письмо
+ * по каждой SIM: с сотнями партнёров это был бы поток, а исправляет причину партнёр, которому пишется отдельно
+ * ([ADR-0103](../../../../../docs/adr/0103-shlyuz-na-svyazi-po-oprosu-i-trevoga-partnyoru.md), п. 6).
  *
  * Повтор по одному и тому же объекту — не чаще `REPEAT_HOURS`, и считается по самой очереди
  * писем: схема базы не меняется (как у письма о низком балансе, ADR-0060).
@@ -25,21 +27,24 @@ import { PaymentsService } from '../payments/payments.service.js';
 import { ServersService } from '../servers/servers.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import type { ShortAnswerRow } from '../telephony/quality.repository.js';
-import { QualityService, type QualityView } from '../telephony/quality.service.js';
+import {
+  connectsPoorly,
+  failsOnNetwork,
+  POOR_CONNECTION_RULE,
+  QualityService,
+  type QualityView,
+} from '../telephony/quality.service.js';
 import { CertificateStatusService } from '../updates/certificate-status.service.js';
 import { GithubTokenStatusService } from '../updates/github-token-status.service.js';
 
 /** Не чаще раза в полсуток по одному объекту: напоминание, а не поток. */
 const REPEAT_HOURS = 12;
 
-/** Окно качества — час: за него успевает набраться картина, но не успевает остыть. */
+/** Окно коротких ответов транков — час: за него успевает набраться картина, но не успевает остыть. */
 const QUALITY_WINDOW_MINUTES = 60;
 
-/** Меньше вызовов — доля ни о чём не говорит (тот же порог, что «мало вызовов» на экране «Качество»). */
-const ENOUGH_CALLS = 10;
-
-/** Ниже этой доли состоявшихся, в десятитысячных, объект считается больным (30 %). */
-const LOW_ASR_BASIS_POINTS = 3000;
+/** Объектов в сводке «почти не соединяют»: худшие, остальное — на экране «Качество». */
+const QUALITY_DIGEST_ROWS = 20;
 
 /** Минут перегрузки процессора, о которых пишем (окно — в `ServersService`). */
 const OVERLOAD_MINUTES = 10;
@@ -151,13 +156,13 @@ export class AlertsService {
     }
 
     try {
-      const since = new Date(now.getTime() - QUALITY_WINDOW_MINUTES * 60_000);
-      for (const row of await this.quality.sims(since)) {
-        if (isSick(row)) alerts.push(qualityAlert('sim', 'SIM', row));
-      }
-      for (const row of await this.quality.gateways(since)) {
-        if (isSick(row)) alerts.push(qualityAlert('gateway', 'Шлюз', row));
-      }
+      const since = new Date(now.getTime() - POOR_CONNECTION_RULE.windowMinutes * 60_000);
+      const [sims, gateways] = await Promise.all([
+        this.quality.sims(since),
+        this.quality.gateways(since),
+      ]);
+      const digest = qualityDigest(sims.filter(connectsPoorly), gateways.filter(connectsPoorly));
+      if (digest !== undefined) alerts.push(digest);
     } catch (cause) {
       this.logger.error('Тревоги: качество не прочитано', cause);
     }
@@ -436,12 +441,6 @@ export class AlertsService {
   }
 }
 
-/** Работает, вызовов достаточно, а состоявшихся почти нет. Отключённый объект не тревожит: он уже снят. */
-const isSick = (row: QualityView): boolean =>
-  row.subjectStatus === 'active' &&
-  row.attempts >= ENOUGH_CALLS &&
-  row.asrBasisPoints < LOW_ASR_BASIS_POINTS;
-
 /**
  * Транк похож на ложный ответ (ADR-0100, п. 6): провайдер «снимает трубку» сам, чтобы взять плату за вызов. Это решение
  * о партнёре, а не поломка, — поэтому письмо, а не автомат.
@@ -459,15 +458,46 @@ function shortAnswerAlert(row: ShortAnswerRow): Alert {
   };
 }
 
-function qualityAlert(scope: 'sim' | 'gateway', label: string, row: QualityView): Alert {
-  const percent = (row.asrBasisPoints / 100).toFixed(1).replace('.', ',');
+/**
+ * Сводка «почти не соединяют» (ADR-0103, п. 6): сколько SIM и шлюзов, сколько из них по сети и худшие поимённо.
+ * Вид письма один на площадку — повтор не чаще `REPEAT_HOURS`, сколько бы объектов ни заболело.
+ */
+function qualityDigest(
+  sims: readonly QualityView[],
+  gateways: readonly QualityView[],
+): Alert | undefined {
+  const all = [
+    ...sims.map((row) => ({ label: 'SIM', row })),
+    ...gateways.map((row) => ({ label: 'Шлюз', row })),
+  ];
+  if (all.length === 0) return undefined;
+  const worst = all
+    .sort(
+      (a, b) =>
+        b.row.networkFailures - a.row.networkFailures ||
+        a.row.asrBasisPoints - b.row.asrBasisPoints,
+    )
+    .slice(0, QUALITY_DIGEST_ROWS);
+  const byNetwork = (rows: readonly QualityView[]) => rows.filter(failsOnNetwork).length;
   return {
-    kind: `alert_quality:${scope}:${row.subjectId}`,
-    subject: `Zvonix: ${label} ${row.subjectName} почти не соединяет`,
+    kind: 'alert_quality',
+    subject: `Zvonix: почти не соединяют — SIM: ${String(sims.length)}, шлюзов: ${String(gateways.length)}`,
     body: [
-      `${label} ${row.subjectName} (партнёр «${row.partnerName}») за последний час: вызовов ${String(row.attempts)}, состоялось ${String(row.answered)} (${percent} %).`,
+      `За последний час почти не соединяют (из ${String(POOR_CONNECTION_RULE.enoughCalls)} и больше вызовов состоялось меньше ${String(POOR_CONNECTION_RULE.maxAsrBasisPoints / 100)} %):`,
+      `SIM — ${String(sims.length)}, из них из-за отказов сети — ${String(byNetwork(sims))};`,
+      `шлюзов — ${String(gateways.length)}, из них из-за отказов сети — ${String(byNetwork(gateways))}.`,
       '',
-      `Отказов сети: ${String(row.networkFailures)}. Посмотрите раздел «Качество» и, если это неисправность, отключите объект.`,
+      'Хуже всех:',
+      ...worst.map(({ label, row }) => {
+        const percent = (row.asrBasisPoints / 100).toFixed(1).replace('.', ',');
+        return `— ${label} ${row.subjectName} (партнёр «${row.partnerName}»): вызовов ${String(row.attempts)}, состоялось ${String(row.answered)} (${percent} %), отказов сети ${String(row.networkFailures)}`;
+      }),
+      ...(all.length > worst.length
+        ? [`…и ещё ${String(all.length - worst.length)} — в разделе «Качество».`]
+        : []),
+      '',
+      'Отказы сети — сторона партнёра: ему уходит своё письмо, если включены письма партнёру об оборудовании.',
+      'Остальное — «не ответил» и «занято»: чаще это база номеров клиента, а не карта.',
     ].join('\n'),
   };
 }

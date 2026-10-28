@@ -16,6 +16,7 @@ import type {
   SimStatus,
 } from '@zvonix/shared';
 import { useQuery } from '@tanstack/react-query';
+import type { DeviceConnection } from '@/components/presence';
 import { request } from '@/lib/api';
 import { GATEWAY_STATUS_NAME, PARTNER_SUSPENSION_NAME } from '@/lib/labels';
 
@@ -30,6 +31,8 @@ export interface Sim {
   readonly operator_confirmed_at: string | null;
   /** Свой тариф карты; пусто — как у шлюза (ADR-0056). */
   readonly tariff_id: string | null;
+  /** Почти не соединяет за последний час из-за отказов сети (ADR-0103). */
+  readonly poor_connection?: boolean;
 }
 
 export interface Port {
@@ -39,9 +42,8 @@ export interface Port {
   readonly sim: Sim | null;
   /** Вход линии при входе по линиям (ADR-0054); пусто — не выдан. Пароль не отдаётся. */
   readonly sip_username: string | null;
-  /** Есть ли у линии регистрация. Значимо только при входе по линиям. */
-  readonly on_node: boolean;
-  readonly registered_at: string | null;
+  /** Подключена ли линия. Значимо только при входе по линиям. */
+  readonly connection: DeviceConnection;
 }
 
 export interface Gateway {
@@ -62,12 +64,12 @@ export interface Gateway {
   /** Имя SIP, под которым шлюз регистрируется. Пароль не отдаётся никогда. */
   readonly sip_username: string;
   /**
-   * Есть ли регистрация на узле. Без неё вызов не уйдёт вовсе: диалплан набирает шлюз
-   * как зарегистрированного пользователя, и отбор кандидатов сужается узлом.
-   * При входе по линиям — есть ли она хоть у одной линии.
+   * Подключён ли шлюз. Без регистрации вызов не уйдёт вовсе: диалплан набирает шлюз
+   * как зарегистрированного пользователя. При входе по линиям — хоть одна линия.
    */
-  readonly on_node: boolean;
-  readonly registered_at: string | null;
+  readonly connection: DeviceConnection;
+  /** Почти не соединяет за последний час из-за отказов сети (ADR-0103). */
+  readonly poor_connection?: boolean;
   readonly ports: readonly Port[];
 }
 

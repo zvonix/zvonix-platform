@@ -425,7 +425,7 @@ describe('каталог для узла', () => {
     expect(unknown.body).toBe(disabled.body);
   });
 
-  it('отметка о регистрации проставляется: видно, на каком узле шлюз', async () => {
+  it('запрос учётной записи отмечается: видно, какой узел спрашивал, — но «на связи» только по опросу (ADR-0103)', async () => {
     const partner = await createPartner();
     await verifyPartner(partner);
     const { id, account } = await createGateway(partner);
@@ -434,10 +434,18 @@ describe('каталог для узла', () => {
 
     const listed = await api().inject({ method: 'GET', url: '/gateways', headers: auth() });
     const gateway = listed
-      .json<{ gateways: { id: string; node_id: string | null; registered_at: string | null }[] }>()
+      .json<{
+        gateways: {
+          id: string;
+          node_id: string | null;
+          connection: { connected: boolean; knocked_at: string | null; rejected: boolean };
+        }[];
+      }>()
       .gateways.find((g) => g.id === id);
     expect(gateway?.node_id).not.toBeNull();
-    expect(gateway?.registered_at).not.toBeNull();
+    expect(gateway?.connection.knocked_at).not.toBeNull();
+    // Запрос записи бывает и у устройства с неверным паролем — на связи оно только после регистрации.
+    expect(gateway?.connection).toMatchObject({ connected: false, rejected: true });
   });
 });
 

@@ -18,11 +18,11 @@ import {
   PlatformHealthService,
   SupportService,
   PaymentNoticeService,
-  SuspensionNoticeService,
+  EquipmentNoticeService,
   ServersService,
   ApplicationsService,
   CdrService,
-  ChannelRegistrationsService,
+  RegistrationsService,
   NumberingPlanService,
   EXPIRY_SWEEP_LIMIT,
   IdentityService,
@@ -218,21 +218,22 @@ const HEARTBEAT_SECONDS = 60;
 /** Решённые обращения закрываются по сроку в сутки и больше: проход раз в час (ADR-0085). */
 const TICKET_AUTOCLOSE_SECONDS = 3600;
 
-/** Письмо партнёру об отключении оборудования — раз в 5 минут, как и остальные тревоги. */
-const SUSPENSION_NOTICE_SECONDS = 300;
+/** Письма партнёру об оборудовании (отключено, почти не соединяет) — раз в 5 минут, как и остальные тревоги. */
+const EQUIPMENT_NOTICE_SECONDS = 300;
 
 /**
- * Опрос регистраций линий на узлах (ADR-0101): «подключена» гаснет через три пропущенных прохода, поэтому раз в минуту.
- * Проход — одна команда ESL на узел и один запрос в базу.
+ * Опрос регистраций на узлах — линий клиентов, шлюзов и линий GOIP (ADR-0101, ADR-0103): «подключено» гаснет через три
+ * пропущенных прохода, поэтому раз в минуту.
+ * Проход — одна команда ESL на узел и по запросу в базу на вид устройства.
  */
-const CHANNEL_REGISTRATIONS_SECONDS = 60;
+const REGISTRATIONS_POLL_SECONDS = 60;
 
 @Injectable()
 export class BackgroundTasks {
   constructor(
     private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
-    private readonly channelRegistrations: ChannelRegistrationsService,
+    private readonly registrations: RegistrationsService,
     private readonly nodes: NodesService,
     private readonly recordings: RecordingsService,
     private readonly identity: IdentityService,
@@ -248,7 +249,7 @@ export class BackgroundTasks {
     private readonly support: SupportService,
     private readonly servers: ServersService,
     private readonly paymentNotice: PaymentNoticeService,
-    private readonly suspensionNotice: SuspensionNoticeService,
+    private readonly equipmentNotice: EquipmentNoticeService,
     private readonly messaging: MessagingService,
     private readonly messageService: MessagesService,
     private readonly bots: BotsService,
@@ -269,9 +270,9 @@ export class BackgroundTasks {
         run: (now) => this.cdr.closeCallsWithoutCdr(now),
       },
       {
-        name: 'channels.poll-registrations',
-        everySeconds: CHANNEL_REGISTRATIONS_SECONDS,
-        run: (now) => this.channelRegistrations.poll(now),
+        name: 'registrations.poll',
+        everySeconds: REGISTRATIONS_POLL_SECONDS,
+        run: (now) => this.registrations.poll(now),
       },
       {
         name: 'nodes.retire-silent',
@@ -358,9 +359,9 @@ export class BackgroundTasks {
         run: (now) => this.paymentNotice.notify(now),
       },
       {
-        name: 'notifications.partner-suspension',
-        everySeconds: SUSPENSION_NOTICE_SECONDS,
-        run: (now) => this.suspensionNotice.notify(now),
+        name: 'notifications.partner-equipment',
+        everySeconds: EQUIPMENT_NOTICE_SECONDS,
+        run: (now) => this.equipmentNotice.notify(now),
       },
       {
         name: 'messages.dispatch',

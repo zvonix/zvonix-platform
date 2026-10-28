@@ -40,7 +40,7 @@ import {
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
-import { moment } from '@/lib/format';
+import { Presence, type DeviceConnection } from '@/components/presence';
 import {
   GATEWAY_LOCK_MEANING,
   GATEWAY_STATUS_MEANING,
@@ -63,7 +63,8 @@ interface Gateway {
   /** `port` — у каждой линии свой вход, вход шлюза не действует (ADR-0054). */
   readonly registration_mode: GatewayRegistrationMode;
   readonly sip_username: string;
-  readonly registered_at: string | null;
+  /** По опросу узлов (ADR-0103); у транка не бывает — к провайдеру регистрируемся мы. */
+  readonly connection: DeviceConnection;
   readonly model: string | null;
   readonly port_count: number;
 }
@@ -75,7 +76,7 @@ interface Port {
   readonly state: GatewayPortState;
   /** Вход линии; пусто — не выдан. */
   readonly sip_username: string | null;
-  readonly registered_at: string | null;
+  readonly connection: DeviceConnection;
 }
 
 export interface SimOption {
@@ -217,7 +218,7 @@ export function PartnerGateways({
               <TableHead className="h-8">Состояние</TableHead>
               <TableHead className="h-8">Вход SIP</TableHead>
               <TableHead className="h-8 text-right">Портов</TableHead>
-              <TableHead className="h-8">Регистрация</TableHead>
+              <TableHead className="h-8">Связь</TableHead>
               <TableHead className="h-8"> </TableHead>
             </TableRow>
           </TableHeader>
@@ -443,10 +444,10 @@ function GatewayRow({
         {byLine ? (
           // Регистрация у каждой линии своя — в окне портов.
           <span className="text-muted-foreground">у линий — в окне портов</span>
-        ) : gateway.registered_at === null ? (
-          <span className="text-warn">не регистрировался</span>
+        ) : gateway.type === 'sip_trunk' ? (
+          <span className="text-faint">—</span>
         ) : (
-          <span className="num text-muted-foreground">{moment(gateway.registered_at)}</span>
+          <Connection connection={gateway.connection} />
         )}
       </TableCell>
       <TableCell>
@@ -697,7 +698,7 @@ function GatewayPorts({
               <TableHead className="h-8 text-right">Порт</TableHead>
               {goip && !byLine && <TableHead className="h-8">Префикс линии</TableHead>}
               {byLine && <TableHead className="h-8">Вход линии</TableHead>}
-              {byLine && <TableHead className="h-8">Регистрация</TableHead>}
+              {byLine && <TableHead className="h-8">Связь</TableHead>}
               <TableHead className="h-8">Состояние</TableHead>
               <TableHead className="h-8">SIM</TableHead>
               {canChange && (
@@ -761,11 +762,7 @@ function GatewayPorts({
                 )}
                 {byLine && (
                   <TableCell>
-                    {row.registered_at === null ? (
-                      <span className="text-warn">не регистрировалась</span>
-                    ) : (
-                      <span className="num text-muted-foreground">{moment(row.registered_at)}</span>
-                    )}
+                    <Connection connection={row.connection} />
                   </TableCell>
                 )}
                 <TableCell className="text-muted-foreground">
@@ -821,4 +818,16 @@ function GatewayPorts({
 function PortTestCall({ sim }: { sim: SimOption | undefined }) {
   if (sim === undefined || !TESTABLE_SIM_STATUSES.includes(sim.status)) return null;
   return <TestCallButton scope="admin" subject={{ kind: 'sim', id: sim.id, msisdn: sim.msisdn }} />;
+}
+
+/** Подключение и адрес устройства — поддержке адрес нужен в строке, а не в подсказке (ADR-0103). */
+function Connection({ connection }: { connection: DeviceConnection }) {
+  return (
+    <span className="flex flex-col">
+      <Presence connection={connection} />
+      {connection.address !== null && (
+        <span className="num text-muted-foreground">{connection.address}</span>
+      )}
+    </span>
+  );
 }

@@ -44,7 +44,7 @@ import { directoryDocument, notFoundDocument, type DirectoryUser } from './direc
 import { MAX_GATEWAY_PORTS } from './schemas.js';
 import { sipHostProblem } from './sip-host.js';
 import { TestCallRepository } from './test-call.repository.js';
-import { ChannelRegistrationsService } from './channel-registrations.service.js';
+import { RegistrationsService } from './registrations.service.js';
 import {
   issueSipCredentials,
   issueSipUsername,
@@ -132,7 +132,7 @@ export class TelephonyService {
     private readonly tariffs: TariffService,
     private readonly nodes: NodesService,
     private readonly testCalls: TestCallRepository,
-    private readonly registrations: ChannelRegistrationsService,
+    private readonly registrations: RegistrationsService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -358,6 +358,8 @@ export class TelephonyService {
         actorRole,
         after: { sip_username: account.username },
       });
+      // Линия со старым паролем не должна числиться на связи до конца срока регистрации (ADR-0103, п. 4).
+      await this.registrations.flushOnNodes([account.username]);
     }
     return account;
   }
@@ -402,7 +404,7 @@ export class TelephonyService {
 
   /**
    * Каждый вход — своей записью по порту: историю линии ищут по её порту.
-   * Ни пароля, ни хеша, только имя.
+   * Ни пароля, ни хеша, только имя. Регистрация прежним паролем сбрасывается на узлах (ADR-0103, п. 4).
    */
   private async recordPortAccounts(
     accounts: readonly IssuedPortAccount[],
@@ -420,6 +422,7 @@ export class TelephonyService {
         after: { sip_username: account.username },
       });
     }
+    await this.registrations.flushOnNodes(accounts.map((account) => account.username));
   }
 
   /**
@@ -445,6 +448,8 @@ export class TelephonyService {
       credentials.a1Hash,
     );
     if (updated === undefined) throw notFound('Шлюз не найден');
+    // Устройство со старым паролем не должно числиться подключённым до конца срока регистрации (ADR-0103, п. 4).
+    await this.registrations.flushOnNodes([updated.sipUsername]);
 
     await this.audit.record({
       action: 'gateway.credentials_reset',
