@@ -23,6 +23,24 @@ export function moment(value: string | null | undefined): string {
   return Number.isNaN(parsed.getTime()) ? '—' : FULL.format(parsed);
 }
 
+/**
+ * Момент по часам пояса, а не браузера: «обнулится 29.10, 00:00» у правила, чьи сутки считаются по Москве
+ * ([ADR-0102](../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md)). По часам браузера та же полночь читалась
+ * бы как «04:00» и не совпадала с подписью пояса рядом.
+ */
+export function momentInZone(value: string | null | undefined, timeZone: string): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone,
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(parsed);
+}
+
 /** Момент в прошлом? Нужно, чтобы не пугать истёкшей блокировкой. */
 export function isFuture(value: string | null | undefined): boolean {
   if (value === null || value === undefined || value === '') return false;

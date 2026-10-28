@@ -35,6 +35,8 @@ interface SelfView {
   readonly id: string;
   readonly name: string;
   readonly status: ClientStatus;
+  /** Часовой пояс лимитов (ADR-0102); пусто — не выбран, сутки по UTC. */
+  readonly timezone: string | null;
   readonly created_at: string;
 }
 
@@ -65,6 +67,7 @@ export class ClientSelfController {
         id: client.id,
         name: client.name,
         status: client.status,
+        timezone: client.timezone,
         created_at: client.createdAt.toISOString(),
       },
       funds: toFundsView(await this.reservations.available(client.id)),

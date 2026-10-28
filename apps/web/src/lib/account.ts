@@ -12,7 +12,14 @@ import { request } from './api';
  * (2026-09-30), поэтому запрос живёт здесь, а не в каждой странице.
  */
 export interface ClientAccount {
-  readonly client: { id: string; name: string; status: ClientStatus; created_at: string };
+  readonly client: {
+    id: string;
+    name: string;
+    status: ClientStatus;
+    /** Часовой пояс лимитов (ADR-0102); пусто — не выбран. */
+    timezone: string | null;
+    created_at: string;
+  };
   readonly funds: {
     readonly balance: string;
     readonly overdraft_limit: string;
@@ -29,6 +36,8 @@ export interface PartnerAccount {
     readonly display_name: string | null;
     readonly status: PartnerStatus;
     readonly listens_to_recordings: boolean;
+    /** Часовой пояс лимитов (ADR-0102); пусто — не выбран. */
+    readonly timezone: string | null;
     readonly created_at: string;
   };
   readonly funds: { readonly balance: string };

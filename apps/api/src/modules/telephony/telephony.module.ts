@@ -28,6 +28,9 @@ import { TestCallController } from './test-call.controller.js';
 import { TestCallRepository } from './test-call.repository.js';
 import { TestCallService } from './test-call.service.js';
 import { ChannelRegistrationsService } from './channel-registrations.service.js';
+import { ClientLimitsController } from './client-limits.controller.js';
+import { LimitController } from './limit.controller.js';
+import { LimitOwnersService } from './limit-owners.service.js';
 
 @Module({
   imports: [AuditModule, CatalogModule, BillingModule, LimitsModule, NodesModule],
@@ -44,6 +47,8 @@ import { ChannelRegistrationsService } from './channel-registrations.service.js'
     PartnerEquipmentController,
     TestCallController,
     PartnerLimitsController,
+    LimitController,
+    ClientLimitsController,
     PartnerCallDistributionController,
   ],
   providers: [
@@ -58,6 +63,7 @@ import { ChannelRegistrationsService } from './channel-registrations.service.js'
     TestCallService,
     TestCallRepository,
     ChannelRegistrationsService,
+    LimitOwnersService,
   ],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.
   // `CdrService` — ради уборки вызовов без CDR: она нужна и маршрутизации на пути

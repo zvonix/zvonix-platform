@@ -199,6 +199,37 @@ export class BillingRepository {
   }
 
   /**
+   * Часовой пояс клиента (ADR-0102). В транзакции вызывающего: пояс правил его лимитов меняется той же транзакцией,
+   * и расхождение «аккаунт в одном поясе, правила в другом» не должно пережить сбой.
+   */
+  async setClientTimezone(
+    id: ClientId,
+    timezone: string,
+    executor: Executor,
+  ): Promise<ClientRow | undefined> {
+    const [row] = await executor
+      .update(clients)
+      .set({ timezone, updatedAt: new Date() })
+      .where(eq(clients.id, id))
+      .returning();
+    return row;
+  }
+
+  /** Часовой пояс партнёра (ADR-0102) — как у клиента, в транзакции вызывающего. */
+  async setPartnerTimezone(
+    id: PartnerId,
+    timezone: string,
+    executor: Executor,
+  ): Promise<PartnerRow | undefined> {
+    const [row] = await executor
+      .update(partners)
+      .set({ timezone, updatedAt: new Date() })
+      .where(eq(partners.id, id))
+      .returning();
+    return row;
+  }
+
+  /**
    * Клиенты вместе с остатками — **одним запросом**.
    *
    * Раньше остаток спрашивался отдельно на каждого клиента: на четырёх незаметно,

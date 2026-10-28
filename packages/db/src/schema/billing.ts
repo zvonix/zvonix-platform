@@ -21,6 +21,7 @@ import {
 import {
   ACCOUNT_KINDS,
   CLIENT_STATUSES,
+  DEFAULT_ACCOUNT_TIMEZONE,
   PARTNER_STATUSES,
   TRANSACTION_KINDS,
   type AccountKind,
@@ -58,6 +59,13 @@ export const clients = pgTable(
     overdraftLimit: money()
       .notNull()
       .default(sql`0`),
+
+    /**
+     * Часовой пояс аккаунта, имя IANA ([ADR-0102](../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md)):
+     * в нём считаются сутки, недели и месяцы его лимитов. Пусто — «не выбран», окна по UTC, как до ADR-0102;
+     * новый аккаунт получает Москву.
+     */
+    timezone: text().default(DEFAULT_ACCOUNT_TIMEZONE),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -101,6 +109,13 @@ export const partners = pgTable(
      * Состав зависит от способа выплат и потому хранится структурой, а не колонками.
      */
     payoutDetails: jsonb(),
+
+    /**
+     * Часовой пояс аккаунта, имя IANA ([ADR-0102](../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md)):
+     * в нём считаются сутки, недели и месяцы его лимитов. Пусто — «не выбран», окна по UTC, как до ADR-0102;
+     * новый аккаунт получает Москву.
+     */
+    timezone: text().default(DEFAULT_ACCOUNT_TIMEZONE),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),

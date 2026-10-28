@@ -17,6 +17,7 @@ import {
   amountFor,
   bucketEnd,
   bucketStart,
+  isTimeZone,
   limitInStoredUnits,
   notFound,
   permissionDenied,
@@ -147,6 +148,8 @@ export class LimitService {
     metric: LimitMetric,
     call: {
       readonly seconds: number;
+      /** Стоимость вызова для клиента в микроединицах — для лимита денег (ADR-0102). */
+      readonly micros?: number;
       /** SIM вызова: по ней считаются правила «на каждую карту». У транка — пусто. */
       readonly simCardId: Id<'simCard'> | null;
     },
@@ -165,10 +168,10 @@ export class LimitService {
         key: {
           ruleId: rule.id,
           simCardId: rule.perSim ? call.simCardId : null,
-          bucketStart: bucketStart(rule.window, at, rule.periodStartDay),
+          bucketStart: bucketStart(rule.window, at, rule.periodStartDay, rule.timezone),
         },
         // Поминутный счёт округляет каждый разговор до минуты — у каждого правила свой.
-        delta: amountFor(metric, call.seconds, rule.rounding),
+        delta: amountFor(metric, call, rule.rounding),
       })),
       executor,
     );
@@ -201,6 +204,11 @@ export class LimitService {
       rounding?: LimitRounding;
       periodStartDay?: number | null;
       setBy?: LimitSetBy;
+      /**
+       * Пояс владельца субъекта (ADR-0102). Определяет вызывающий: модуль лимитов не знает, чей канал или карта,
+       * а спросить не может — он ниже телефонии и биллинга.
+       */
+      timezone: string;
     },
     actorUserId: Id<'user'>,
     actorRole: UserRole,
@@ -228,6 +236,7 @@ export class LimitService {
       periodStartDay: input.periodStartDay ?? null,
       setBy: input.setBy ?? 'platform',
     } as const;
+    if (!isTimeZone(draft.timezone)) throw validationFailed('Неизвестный часовой пояс');
     assertShape(draft);
 
     const row = await this.repository.insertRule(draft);
@@ -258,7 +267,7 @@ export class LimitService {
       periodStartDay?: number | null | undefined;
     },
     actor: Actor,
-    owner?: (rule: LimitRuleRow) => boolean,
+    owner?: RuleOwner,
   ): Promise<LimitRuleRow> {
     const before = await this.requireRule(id, owner);
     assertShape({
@@ -283,11 +292,7 @@ export class LimitService {
     return row;
   }
 
-  async remove(
-    id: LimitRuleId,
-    actor: Actor,
-    owner?: (rule: LimitRuleRow) => boolean,
-  ): Promise<LimitRuleRow> {
+  async remove(id: LimitRuleId, actor: Actor, owner?: RuleOwner): Promise<LimitRuleRow> {
     await this.requireRule(id, owner);
     const removed = await this.repository.deleteRule(id);
     if (removed === undefined) throw notFound('Лимит не найден');
@@ -303,19 +308,43 @@ export class LimitService {
     return removed;
   }
 
-  /** Правило — или отказ; партнёру — только своё и заданное им самим. */
-  private async requireRule(
-    id: LimitRuleId,
-    owner: ((rule: LimitRuleRow) => boolean) | undefined,
-  ): Promise<LimitRuleRow> {
+  /** Правило — или отказ; партнёру и клиенту — только своё и заданное им самим. */
+  private async requireRule(id: LimitRuleId, owner: RuleOwner | undefined): Promise<LimitRuleRow> {
     const rule = await this.repository.findRule(id);
-    if (rule === undefined || (owner !== undefined && !owner(rule))) {
+    if (rule === undefined || (owner !== undefined && !owner.owns(rule))) {
       throw notFound('Лимит не найден');
     }
-    if (owner !== undefined && rule.setBy !== 'partner') {
+    if (owner !== undefined && rule.setBy !== owner.setBy) {
       throw permissionDenied('Этот лимит задала площадка — изменить его может только она');
     }
     return rule;
+  }
+
+  /**
+   * Новый пояс аккаунта — правилам его субъектов, в переданной транзакции вместе со сменой пояса самого аккаунта
+   * ([ADR-0102](../../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md), п. 2–3). Набранное в текущем
+   * окне переносится в окно по новому поясу: смена пояса не обнуляет лимит. Минутные окна от пояса не зависят.
+   */
+  async moveToTimezone(
+    subjects: LimitSubjects,
+    timezone: string,
+    at: Date,
+    executor: Executor,
+  ): Promise<number> {
+    if (!isTimeZone(timezone)) throw validationFailed('Неизвестный часовой пояс');
+    const rules = await this.repository.listRules(subjects, executor);
+    let moved = 0;
+    for (const rule of rules) {
+      if (rule.timezone === timezone) continue;
+      const from = bucketStart(rule.window, at, rule.periodStartDay, rule.timezone);
+      const to = bucketStart(rule.window, at, rule.periodStartDay, timezone);
+      if (from.getTime() !== to.getTime()) {
+        await this.repository.carryCounters(rule.id, from, to, executor);
+      }
+      await this.repository.setRuleTimezone(rule.id, timezone, executor);
+      moved += 1;
+    }
+    return moved;
   }
 
   /** Лимиты субъекта вместе с израсходованным — для разбора «почему не звонит». */
@@ -337,8 +366,8 @@ export class LimitService {
     if (rules.length === 0) return [];
 
     const windowOf = (rule: LimitRuleRow) => ({
-      bucketStart: bucketStart(rule.window, at, rule.periodStartDay),
-      resetsAt: bucketEnd(rule.window, at, rule.periodStartDay),
+      bucketStart: bucketStart(rule.window, at, rule.periodStartDay, rule.timezone),
+      resetsAt: bucketEnd(rule.window, at, rule.periodStartDay, rule.timezone),
     });
     const counters = await this.repository.listUsage(
       rules.map((rule) => ({ ruleId: rule.id, bucketStart: windowOf(rule).bucketStart })),
@@ -379,6 +408,8 @@ export class LimitService {
  * обновления — только у месяца.
  */
 function assertShape(rule: {
+  clientId: Id<'client'> | null;
+  channelId: Id<'channel'> | null;
   partnerId: Id<'partner'> | null;
   tariffId: Id<'partnerTariff'> | null;
   window: LimitWindow;
@@ -387,6 +418,9 @@ function assertShape(rule: {
   rounding: LimitRounding;
   periodStartDay: number | null;
 }): void {
+  if (rule.metric === 'money' && rule.clientId === null && rule.channelId === null) {
+    throw validationFailed('Лимит денег бывает только у клиента и его линий');
+  }
   if (rule.perSim && rule.partnerId === null && rule.tariffId === null) {
     throw validationFailed('«На каждую карту» задаётся только партнёру или его тарифу');
   }
@@ -412,5 +446,15 @@ function subjectOf(row: LimitRuleRow): Record<string, unknown> {
     rounding: row.rounding,
     period_start_day: row.periodStartDay,
     set_by: row.setBy,
+    timezone: row.timezone,
   };
+}
+
+/**
+ * Кто меняет правило из своего кабинета: чьё оно и каким `set_by` его заводит этот кабинет. Правило площадки
+ * ему видно, но не меняется.
+ */
+export interface RuleOwner {
+  readonly owns: (rule: LimitRuleRow) => boolean;
+  readonly setBy: Exclude<LimitSetBy, 'platform'>;
 }

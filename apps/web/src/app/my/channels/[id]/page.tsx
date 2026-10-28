@@ -422,12 +422,17 @@ function SummaryTab({ channel }: { channel: Channel }) {
           </TableBody>
         </Table>
       </div>
-      <Link
-        href={`/my/calls?channelId=${channel.id}`}
-        className="self-start text-primary underline-offset-4 hover:underline"
-      >
-        Все вызовы линии
-      </Link>
+      <div className="flex flex-wrap gap-4">
+        <Link
+          href={`/my/calls?channelId=${channel.id}`}
+          className="text-primary underline-offset-4 hover:underline"
+        >
+          Все вызовы линии
+        </Link>
+        <Link href="/my/limits" className="text-primary underline-offset-4 hover:underline">
+          Лимиты
+        </Link>
+      </div>
     </div>
   );
 }

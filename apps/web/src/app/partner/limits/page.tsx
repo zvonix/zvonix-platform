@@ -22,7 +22,7 @@ import {
   type LimitRow,
   type PartnerLimits as Limits,
 } from '@/lib/limits';
-import { moment } from '@/lib/format';
+import { momentInZone } from '@/lib/format';
 import { LIMIT_WINDOW_NAME, limitRuleNote } from '@/lib/labels';
 
 export default function PartnerLimitsPage() {
@@ -225,7 +225,9 @@ function LimitGroup({
               amount(row.metric, row.limit - row.used)
             )}
           </TableCell>
-          <TableCell className="num text-muted-foreground">{moment(row.resets_at)}</TableCell>
+          <TableCell className="num text-muted-foreground">
+            {momentInZone(row.resets_at, row.timezone)}
+          </TableCell>
           {index === 0 && (
             <TableCell rowSpan={visible.length} className="align-top">
               <Actions row={row} />

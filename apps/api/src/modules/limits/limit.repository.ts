@@ -33,6 +33,8 @@ export type { Executor };
 export interface LimitSubjects {
   readonly clientId?: Id<'client'>;
   readonly channelId?: Id<'channel'>;
+  /** Линии клиента — все разом: смена пояса клиента переносит и их правила (ADR-0102). */
+  readonly channelIds?: readonly Id<'channel'>[];
   readonly partnerIds?: readonly Id<'partner'>[];
   readonly simCardIds?: readonly Id<'simCard'>[];
   /** Тарифы партнёров: их лимиты действуют на каждую карту с этим тарифом (ADR-0080). */
@@ -79,13 +81,16 @@ export class LimitRepository {
    * Пустой набор субъектов даёт пустой ответ **без обращения к базе**: у большинства
    * установок лимитов нет вовсе, и платить за это запросом на каждый вызов незачем.
    */
-  async listRules(subjects: LimitSubjects): Promise<LimitRuleRow[]> {
+  async listRules(subjects: LimitSubjects, executor: Executor = this.db): Promise<LimitRuleRow[]> {
     const conditions: SQL[] = [];
     if (subjects.clientId !== undefined) {
       conditions.push(eq(limitRules.clientId, subjects.clientId));
     }
     if (subjects.channelId !== undefined) {
       conditions.push(eq(limitRules.channelId, subjects.channelId));
+    }
+    if (subjects.channelIds !== undefined && subjects.channelIds.length > 0) {
+      conditions.push(inArray(limitRules.channelId, [...subjects.channelIds]));
     }
     if (subjects.partnerIds !== undefined && subjects.partnerIds.length > 0) {
       conditions.push(inArray(limitRules.partnerId, [...subjects.partnerIds]));
@@ -98,7 +103,7 @@ export class LimitRepository {
     }
     if (conditions.length === 0) return [];
 
-    return this.db
+    return executor
       .select()
       .from(limitRules)
       .where(or(...conditions))
@@ -198,6 +203,7 @@ export class LimitRepository {
     rounding: LimitRounding;
     periodStartDay: number | null;
     setBy: LimitSetBy;
+    timezone: string;
   }): Promise<LimitRuleRow> {
     try {
       const [row] = await this.db
@@ -242,6 +248,46 @@ export class LimitRepository {
     }
   }
 
+  /**
+   * Переносит набранное правила из окна по старому поясу в окно по новому — берётся большее из двух, у правила
+   * «на каждую карту» по каждой карте ([ADR-0102](../../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md), п. 3).
+   * Меньшее значило бы, что сменой пояса лимит обнуляется.
+   */
+  async carryCounters(
+    ruleId: LimitRuleId,
+    from: Date,
+    to: Date,
+    executor: Executor,
+  ): Promise<void> {
+    const old = await executor
+      .select({ simCardId: limitCounters.simCardId, amount: limitCounters.amount })
+      .from(limitCounters)
+      .where(and(eq(limitCounters.limitRuleId, ruleId), eq(limitCounters.bucketStart, from)));
+    for (const counter of old) {
+      if (counter.amount <= 0) continue;
+      await executor
+        .insert(limitCounters)
+        .values({
+          id: newId<'limitCounter'>(),
+          limitRuleId: ruleId,
+          simCardId: counter.simCardId,
+          bucketStart: to,
+          amount: counter.amount,
+        })
+        .onConflictDoUpdate({
+          target: [limitCounters.limitRuleId, limitCounters.simCardId, limitCounters.bucketStart],
+          set: {
+            amount: sql`greatest(${limitCounters.amount}, ${counter.amount})`,
+            updatedAt: new Date(),
+          },
+        });
+    }
+  }
+
+  async setRuleTimezone(id: LimitRuleId, timezone: string, executor: Executor): Promise<void> {
+    await executor.update(limitRules).set({ timezone }).where(eq(limitRules.id, id));
+  }
+
   async deleteRule(id: LimitRuleId): Promise<LimitRuleRow | undefined> {
     const [row] = await this.db.delete(limitRules).where(eq(limitRules.id, id)).returning();
     return row;
@@ -252,6 +298,7 @@ export class LimitRepository {
     const hasSubject =
       subject.clientId !== undefined ||
       subject.channelId !== undefined ||
+      (subject.channelIds?.length ?? 0) > 0 ||
       (subject.partnerIds?.length ?? 0) > 0 ||
       (subject.simCardIds?.length ?? 0) > 0 ||
       (subject.tariffIds?.length ?? 0) > 0;

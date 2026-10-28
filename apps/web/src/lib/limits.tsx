@@ -8,9 +8,9 @@
 
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import {
-  LIMIT_METRICS,
   LIMIT_PERIOD_START_DAY_MAX,
   LIMIT_WINDOWS,
+  PARTNER_LIMIT_METRICS,
   type LimitMetric,
   type LimitRounding,
   type LimitSetBy,
@@ -24,9 +24,11 @@ import { request } from './api';
 import { plural } from './format';
 import { LIMIT_WINDOW_NAME } from './labels';
 
-/** Строка `GET /partner/limits` — правило вместе с израсходованным (ADR-0057, ADR-0080). */
+/** Строка `GET /partner/limits` и `GET /client/limits` — правило вместе с израсходованным (ADR-0057, ADR-0102). */
 export interface LimitRow {
   readonly id: string;
+  readonly client_id: string | null;
+  readonly channel_id: string | null;
   readonly partner_id: string | null;
   readonly sim_card_id: string | null;
   /** Лимит в тарифе: действует на каждую карту этого тарифа. */
@@ -38,9 +40,11 @@ export interface LimitRow {
   readonly rounding: LimitRounding;
   readonly period_start_day: number | null;
   readonly set_by: LimitSetBy;
+  /** Пояс, в котором считаются окна (ADR-0102). */
+  readonly timezone: string;
   readonly usage_sim_card_id: string | null;
   readonly resets_at: string;
-  /** В единицах хранения: звонки — штуками, минуты — секундами. */
+  /** В единицах хранения: звонки — штуками, минуты — секундами, рубли — микроединицами. */
   readonly used: number;
   readonly limit: number;
   readonly exceeded: boolean;
@@ -70,6 +74,14 @@ export interface PartnerLimits {
 
 const LIMITS_KEY = ['partner', 'limits'] as const;
 
+/** Чьи лимиты правятся: адрес обработчиков и ключ запроса. Партнёр по умолчанию — так было до клиента. */
+export interface LimitsScope {
+  readonly path: string;
+  readonly key: readonly string[];
+}
+
+const PARTNER_SCOPE: LimitsScope = { path: '/partner/limits', key: LIMITS_KEY };
+
 export function usePartnerLimits(): UseQueryResult<PartnerLimits> {
   return useQuery({
     queryKey: LIMITS_KEY,
@@ -80,25 +92,44 @@ export function usePartnerLimits(): UseQueryResult<PartnerLimits> {
 const METRIC_FORMS: Record<LimitMetric, readonly [string, string, string]> = {
   calls: ['звонок', 'звонка', 'звонков'],
   minutes: ['минута', 'минуты', 'минут'],
+  money: ['рубль', 'рубля', 'рублей'],
 };
 
-/** «3 звонка», «500 минут» — число с единицей в нужной форме. */
+/** «3 звонка», «500 минут», «300 рублей» — предел с единицей в нужной форме. */
 export function counted(metric: LimitMetric, value: number): string {
   return `${String(value)} ${plural(value, METRIC_FORMS[metric])}`;
 }
 
-/** Звонки — штуками; минуты хранятся секундами и показываются минутами с секундами. */
+const RUBLES = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
+
+/**
+ * Израсходованное и остаток в единицах хранения: звонки — штуками; минуты хранятся секундами и показываются
+ * минутами с секундами; рубли хранятся микроединицами.
+ */
 export function amount(metric: LimitMetric, stored: number): string {
   const value = Math.max(0, stored);
   if (metric === 'calls') return String(value);
+  if (metric === 'money') return `${RUBLES.format(value / 1_000_000)} ₽`;
   const minutes = Math.floor(value / 60);
   const seconds = value % 60;
   return seconds === 0 ? `${String(minutes)} мин` : `${String(minutes)} мин ${String(seconds)} с`;
 }
 
-function useRefresh() {
+/** Подпись поля предела: в чём он задаётся. */
+export function limitValueLabel(metric: LimitMetric): string {
+  switch (metric) {
+    case 'calls':
+      return 'Звонков, не больше';
+    case 'minutes':
+      return 'Минут, не больше';
+    case 'money':
+      return 'Рублей, не больше';
+  }
+}
+
+function useRefresh(scope: LimitsScope = PARTNER_SCOPE) {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: LIMITS_KEY });
+  return () => queryClient.invalidateQueries({ queryKey: [...scope.key] });
 }
 
 const SELECT_CLASS = 'h-9 w-full rounded-md border border-input bg-transparent px-2';
@@ -145,7 +176,7 @@ export function NewTariffLimit({ tariffId }: { tariffId: string }) {
             }}
             className={SELECT_CLASS}
           >
-            {LIMIT_METRICS.map((item) => (
+            {PARTNER_LIMIT_METRICS.map((item) => (
               <option key={item} value={item}>
                 {item === 'calls' ? 'Звонки' : 'Минуты разговора'}
               </option>
@@ -169,10 +200,7 @@ export function NewTariffLimit({ tariffId }: { tariffId: string }) {
           </select>
         </DialogField>
 
-        <DialogField
-          label={metric === 'calls' ? 'Звонков, не больше' : 'Минут, не больше'}
-          hint="На каждую карту отдельно"
-        >
+        <DialogField label={limitValueLabel(metric)} hint="На каждую карту отдельно">
           <Input
             required
             type="number"
@@ -220,8 +248,14 @@ export function NewTariffLimit({ tariffId }: { tariffId: string }) {
   );
 }
 
-export function ChangeLimit({ row }: { row: TariffLimit }) {
-  const refresh = useRefresh();
+export function ChangeLimit({
+  row,
+  scope = PARTNER_SCOPE,
+}: {
+  row: Pick<TariffLimit, 'id' | 'metric' | 'value'>;
+  scope?: LimitsScope;
+}) {
+  const refresh = useRefresh(scope);
   const [value, setValue] = useState(String(row.value));
   const number = Number(value);
   return (
@@ -230,17 +264,14 @@ export function ChangeLimit({ row }: { row: TariffLimit }) {
         submitLabel="Сохранить"
         canSubmit={Number.isInteger(number) && number >= 1 && number !== row.value}
         onSubmit={async () => {
-          await request<unknown>(`/partner/limits/${row.id}`, {
+          await request<unknown>(`${scope.path}/${row.id}`, {
             method: 'PATCH',
             body: { value: number },
           });
           await refresh();
         }}
       >
-        <DialogField
-          label={row.metric === 'calls' ? 'Звонков, не больше' : 'Минут, не больше'}
-          hint="Израсходованное не обнуляется"
-        >
+        <DialogField label={limitValueLabel(row.metric)} hint="Израсходованное не обнуляется">
           <Input
             required
             autoFocus
@@ -258,8 +289,14 @@ export function ChangeLimit({ row }: { row: TariffLimit }) {
   );
 }
 
-export function RemoveLimit({ row }: { row: TariffLimit }) {
-  const refresh = useRefresh();
+export function RemoveLimit({
+  row,
+  scope = PARTNER_SCOPE,
+}: {
+  row: Pick<TariffLimit, 'id' | 'metric' | 'value' | 'window'>;
+  scope?: LimitsScope;
+}) {
+  const refresh = useRefresh(scope);
   return (
     <ConfirmAction
       label="Удалить"
@@ -272,7 +309,7 @@ export function RemoveLimit({ row }: { row: TariffLimit }) {
       }
       confirmLabel="Удалить лимит"
       onConfirm={async () => {
-        await request<unknown>(`/partner/limits/${row.id}`, { method: 'DELETE' });
+        await request<unknown>(`${scope.path}/${row.id}`, { method: 'DELETE' });
         await refresh();
       }}
     />
