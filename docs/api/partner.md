@@ -373,6 +373,14 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 `GET /partner/account` (`partner.timezone`; `null` — не выбран, окна по UTC). У лимитов партнёра метрики `money` нет —
 `400`: денег на звонки партнёр не тратит.
 
+### `GET` · `PUT /partner/notifications` — какие письма получать
+
+([ADR-0104](../adr/0104-pisma-nastraivaet-sam-poluchatel.md)) `GET` →
+`{ "equipment_suspended": { "enabled": true, "platform_enabled": true }, "poor_connection": { … } }`:
+«SIM или шлюз отключились из-за отказов» и «почти не соединяют по вине сети» ([ADR-0103](../adr/0103-shlyuz-na-svyazi-po-oprosu-i-trevoga-partnyoru.md)).
+`enabled` — выбор партнёра, по умолчанию `true`; `platform_enabled: false` — площадка такие письма не рассылает.
+`PUT` — любые из `{ "equipmentSuspended": false, "poorConnection": false }`, непереданное не меняется; чужое поле — `400`.
+
 ## `GET /partner/calls?from=…&to=…&status=…&limit=…&offset=…`
 
 `200` → `{ "calls": [ … ], "total": 342 }`

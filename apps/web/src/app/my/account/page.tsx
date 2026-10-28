@@ -2,10 +2,11 @@
 
 import { AccountView } from '@/components/account-view';
 import { ConsoleShell } from '@/components/console-shell';
+import { ClientNotificationSettings } from '@/components/notification-settings';
 import { TimezoneSetting } from '@/components/timezone-setting';
 import { useClientAccount } from '@/lib/account';
 
-/** Аккаунт клиента: пароль, входы, второй фактор и часовой пояс лимитов. */
+/** Аккаунт клиента: пароль, входы, второй фактор, часовой пояс лимитов и какие письма получать. */
 export default function MyAccountPage() {
   return (
     <ConsoleShell title="Аккаунт" cabinet="client">
@@ -29,6 +30,7 @@ function MyAccount() {
           ]}
         />
       )}
+      <ClientNotificationSettings />
     </div>
   );
 }

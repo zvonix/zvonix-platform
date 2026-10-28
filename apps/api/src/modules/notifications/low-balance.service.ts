@@ -8,6 +8,9 @@
  * Догоняющая задача ([ADR-0020](../../../../../docs/adr/0020-fonovye-zadachi.md)): решение
  * принимается по текущему состоянию счёта и по очереди писем, а не по «сделанному с прошлого
  * запуска». Повтор — не чаще `REPEAT_DAYS`, по самой очереди писем: схема базы не меняется.
+ *
+ * Клиент сам выключает письмо и задаёт свой порог ([ADR-0104](../../../../../docs/adr/0104-pisma-nastraivaet-sam-poluchatel.md));
+ * настройка площадки — главный переключатель и порог для тех, кто своего не задал.
  */
 
 import { Inject, Injectable } from '@nestjs/common';
@@ -18,6 +21,7 @@ import { IdentityService } from '../identity/identity.service.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { MailService } from '../mail/mail.service.js';
 import { SettingsService } from '../settings/settings.service.js';
+import { NotificationPreferencesService } from './notification-preferences.service.js';
 
 /** Вид письма в очереди: по нему же считается, что письмо уже отправляли. */
 const LOW_BALANCE_KIND = 'low_balance';
@@ -46,6 +50,7 @@ export class LowBalanceService {
     private readonly identity: IdentityService,
     private readonly mail: MailService,
     private readonly settings: SettingsService,
+    private readonly preferences: NotificationPreferencesService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('low-balance');
@@ -63,8 +68,12 @@ export class LowBalanceService {
 
     for (;;) {
       const batch = await this.billing.listActiveClientOwners(after, LOW_BALANCE_BATCH);
+      const choices = await this.preferences.ofMany(batch.map((client) => client.ownerUserId));
       for (const client of batch) {
-        if (await this.notifyOne(client, threshold, since)) queued += 1;
+        const choice = choices.get(client.ownerUserId);
+        if (choice?.lowBalance === false) continue;
+        const own = choice?.lowBalanceThreshold ?? null;
+        if (await this.notifyOne(client, own ?? threshold, since)) queued += 1;
       }
       if (batch.length < LOW_BALANCE_BATCH) break;
       after = batch.at(-1)?.id;

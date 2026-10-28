@@ -2371,3 +2371,35 @@ describe('«на связи» по опросу узла (ADR-0103)', () => {
     expect((await shown(gateway.gateway.id)).ports[0]?.connection.connected).toBe(false);
   }, 120_000);
 });
+
+describe('партнёр сам выбирает письма (ADR-0104)', () => {
+  it('по умолчанию включены; выключенное остаётся выключенным, второе не трогается', async () => {
+    const owner = await createPartner('Письмов Пётр');
+    const initial = (await get('/partner/notifications', as(owner.token))).json<{
+      equipment_suspended: { enabled: boolean };
+      poor_connection: { enabled: boolean };
+    }>();
+    expect(initial.equipment_suspended.enabled).toBe(true);
+    expect(initial.poor_connection.enabled).toBe(true);
+
+    const changed = await api().inject({
+      method: 'PUT',
+      url: '/partner/notifications',
+      headers: as(owner.token),
+      payload: { poorConnection: false },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({
+      equipment_suspended: { enabled: true },
+      poor_connection: { enabled: false },
+    });
+    // Клиентское письмо у партнёра не выбирается.
+    const foreign = await api().inject({
+      method: 'PUT',
+      url: '/partner/notifications',
+      headers: as(owner.token),
+      payload: { lowBalance: false },
+    });
+    expect(foreign.statusCode).toBe(400);
+  });
+});

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../../infra/tokens.js';
 import { PaymentNoticeService } from './payment-notice.service.js';
 import { EquipmentNoticeService } from './equipment-notice.service.js';
+import { DEFAULT_CHOICE, type NotificationChoice } from './notification-preferences.service.js';
 
 const NOW = new Date('2026-10-03T12:00:00Z');
 
@@ -16,7 +17,12 @@ const logger = (): Logger => {
   return stub;
 };
 
+/** Выбор писем владельца (ADR-0104): по умолчанию всё включено. */
+const preferences = (choice: Partial<NotificationChoice> = {}) =>
+  ({ of: () => Promise.resolve({ ...DEFAULT_CHOICE, ...choice }) }) as never;
+
 const owner = (overrides: Record<string, unknown> = {}) => ({
+  id: 'u1',
   email: 'owner@example.test',
   status: 'active',
   emailConfirmedAt: new Date('2026-01-01'),
@@ -51,6 +57,7 @@ describe('письмо клиенту о решении по заявке', () =
     payments?: Record<string, unknown>[];
     owner?: Record<string, unknown>;
     alreadySent?: (kind: string) => boolean;
+    choice?: Partial<NotificationChoice>;
   }) {
     const { mail, enqueue } = mailStub(options.alreadySent);
     const service = new PaymentNoticeService(
@@ -63,6 +70,7 @@ describe('письмо клиенту о решении по заявке', () =
       {
         notifications: () => Promise.resolve({ paymentDecisionEnabled: options.enabled ?? true }),
       } as never,
+      preferences(options.choice),
       logger(),
     );
     return { service, enqueue };
@@ -70,6 +78,15 @@ describe('письмо клиенту о решении по заявке', () =
 
   const sent = (enqueue: ReturnType<typeof vi.fn>) =>
     (enqueue.mock.calls[0] as unknown as [{ kind: string; subject: string; body: string }])[0];
+
+  it('клиент выключил это письмо у себя — не пишет (ADR-0104)', async () => {
+    const { service, enqueue } = build({
+      payments: [payment()],
+      choice: { paymentDecision: false },
+    });
+    expect(await service.notify(NOW)).toBe(0);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
 
   it('выключено — ничего не делает', async () => {
     const { service, enqueue } = build({ enabled: false, payments: [payment()] });
@@ -126,6 +143,7 @@ describe('письмо партнёру об оборудовании', () => {
     alreadySent?: (kind: string, since: Date) => boolean;
     gatewaysFail?: boolean;
     qualityFail?: boolean;
+    choice?: Partial<NotificationChoice>;
   }) {
     const { mail, enqueue } = mailStub(options.alreadySent);
     const service = new EquipmentNoticeService(
@@ -154,6 +172,7 @@ describe('письмо партнёру об оборудовании', () => {
       {
         notifications: () => Promise.resolve({ partnerSuspensionEnabled: options.enabled ?? true }),
       } as never,
+      preferences(options.choice),
       logger(),
     );
     return { service, enqueue };
@@ -259,6 +278,25 @@ describe('письмо партнёру об оборудовании', () => {
     await service.notify(NOW);
     expect(asked.get('poor_connection:sim:s1')).toBe(12);
     expect(asked.get('suspended:sim:s1')).toBe(72);
+  });
+
+  it('партнёр выключил одно письмо — второе уходит (ADR-0104)', async () => {
+    const quiet = build({
+      sims: [sim()],
+      poorSims: [poor({ subjectId: 's9' })],
+      choice: { poorConnection: false },
+    });
+    expect(await quiet.service.notify(NOW)).toBe(1);
+    expect(
+      quiet.enqueue.mock.calls.map((call) => (call as unknown as [{ kind: string }])[0].kind),
+    ).toEqual(['suspended:sim:s1']);
+
+    const none = build({
+      sims: [sim()],
+      poorSims: [poor({ subjectId: 's9' })],
+      choice: { poorConnection: false, equipmentSuspended: false },
+    });
+    expect(await none.service.notify(NOW)).toBe(0);
   });
 
   it('сбой чтения качества не гасит письмо об отключении', async () => {

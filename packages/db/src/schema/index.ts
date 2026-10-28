@@ -67,3 +67,4 @@ export {
   smppAccounts,
   smppEvents,
 } from './messenger.js';
+export { notificationPreferences } from './notifications.js';

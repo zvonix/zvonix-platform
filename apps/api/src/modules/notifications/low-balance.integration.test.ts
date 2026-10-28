@@ -185,3 +185,70 @@ describe('письмо о низком балансе', () => {
     expect(await lowBalanceMessages(poor.email)).toEqual([]);
   }, 120_000);
 });
+
+describe('клиент сам выбирает письма (ADR-0104)', () => {
+  async function tokenOf(email: string): Promise<Record<string, string>> {
+    const login = await api().inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email, password: TEST_PASSWORD },
+    });
+    return { authorization: `Bearer ${login.json<{ token: string }>().token}` };
+  }
+
+  async function choose(headers: Record<string, string>, payload: Record<string, unknown>) {
+    return api().inject({ method: 'PUT', url: '/client/notifications', headers, payload });
+  }
+
+  it('выключил — не получает; свой порог выше площадки — получает раньше', async () => {
+    await setSettings({
+      'notifications.low_balance_enabled': true,
+      'notifications.low_balance_amount': 100,
+    });
+    const quiet = await createClient({ deposit: '50' });
+    const careful = await createClient({ deposit: '500' });
+
+    const off = await choose(await tokenOf(quiet.email), { lowBalance: false });
+    expect(off.statusCode).toBe(200);
+    expect(
+      off.json<{ low_balance: { enabled: boolean; platform_enabled: boolean } }>(),
+    ).toMatchObject({
+      low_balance: { enabled: false, platform_enabled: true },
+    });
+    const own = await choose(await tokenOf(careful.email), { lowBalanceThreshold: 1000 });
+    expect(
+      own.json<{ low_balance: { threshold: number | null; platform_threshold: number } }>(),
+    ).toMatchObject({
+      low_balance: { threshold: 1000, platform_threshold: 100 },
+    });
+
+    await (await service()).notify(new Date());
+
+    expect(await lowBalanceMessages(quiet.email)).toEqual([]);
+    expect(await lowBalanceMessages(careful.email)).toHaveLength(1);
+  }, 120_000);
+
+  it('изменение одного письма не трогает другие; порог снимается пустым значением', async () => {
+    const client = await createClient({ deposit: '5000' });
+    const headers = await tokenOf(client.email);
+    await choose(headers, { lowBalanceThreshold: 300 });
+    const changed = await choose(headers, { paymentDecision: false });
+    expect(changed.json()).toMatchObject({
+      low_balance: { enabled: true, threshold: 300 },
+      payment_decision: { enabled: false },
+    });
+    const cleared = await choose(headers, { lowBalanceThreshold: null });
+    expect(cleared.json()).toMatchObject({ low_balance: { threshold: null } });
+  }, 120_000);
+
+  it('негодный порог и чужое поле — 400; кабинет партнёра клиенту закрыт', async () => {
+    const client = await createClient({ deposit: '0' });
+    const headers = await tokenOf(client.email);
+    expect((await choose(headers, { lowBalanceThreshold: 0 })).statusCode).toBe(400);
+    expect((await choose(headers, { lowBalanceThreshold: 10.5 })).statusCode).toBe(400);
+    expect((await choose(headers, { poorConnection: false })).statusCode).toBe(400);
+    expect(
+      (await api().inject({ method: 'GET', url: '/partner/notifications', headers })).statusCode,
+    ).toBe(403);
+  }, 120_000);
+});

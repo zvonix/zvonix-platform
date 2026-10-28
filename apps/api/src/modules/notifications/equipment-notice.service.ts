@@ -12,7 +12,8 @@
  * когда несостоявшиеся в основном отказы сети: «не ответил» и «занято» говорят о базе клиента, а не о карте.
  *
  * Догоняющая задача (ADR-0020): по текущему состоянию и по очереди писем. Напоминание об отключении — не чаще раза
- * в трое суток, о плохом соединении — раза в 12 часов по объекту.
+ * в трое суток, о плохом соединении — раза в 12 часов по объекту. Каждое из двух писем партнёр может выключить у себя
+ * ([ADR-0104](../../../../../docs/adr/0104-pisma-nastraivaet-sam-poluchatel.md)).
  */
 
 import { Inject, Injectable } from '@nestjs/common';
@@ -24,6 +25,7 @@ import { MailService } from '../mail/mail.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { failsOnNetwork, QualityService } from '../telephony/quality.service.js';
 import { TelephonyService } from '../telephony/telephony.service.js';
+import { NotificationPreferencesService } from './notification-preferences.service.js';
 
 const HOUR_MS = 3_600_000;
 const SUSPENDED_REPEAT_HOURS = 72;
@@ -35,6 +37,8 @@ interface Notice {
   readonly subject: string;
   readonly body: string;
   readonly repeatHours: number;
+  /** Какой выбор партнёра это письмо выключает. */
+  readonly preference: 'equipmentSuspended' | 'poorConnection';
 }
 
 @Injectable()
@@ -48,6 +52,7 @@ export class EquipmentNoticeService {
     private readonly identity: IdentityService,
     private readonly mail: MailService,
     private readonly settings: SettingsService,
+    private readonly preferences: NotificationPreferencesService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('equipment-notice');
@@ -115,6 +120,7 @@ export class EquipmentNoticeService {
           `Напоминание — не чаще раза в ${String(POOR_REPEAT_HOURS)} часов, пока неполадка остаётся.`,
         ].join('\n'),
         repeatHours: POOR_REPEAT_HOURS,
+        preference: 'poorConnection' as const,
       }));
     } catch (cause) {
       this.logger.error('Качество оборудования не прочитано', cause);
@@ -128,6 +134,7 @@ export class EquipmentNoticeService {
       if (partner.status !== 'verified') return false;
       const owner = await this.identity.findPublicUser(partner.ownerUserId);
       if (owner.emailConfirmedAt === null || owner.status !== 'active') return false;
+      if (!(await this.preferences.of(owner.id))[notice.preference]) return false;
 
       const since = new Date(now.getTime() - notice.repeatHours * HOUR_MS);
       if (await this.mail.hasRecent(notice.kind, owner.email, since)) return false;
@@ -167,5 +174,6 @@ function suspendedNotice(
       `Напоминание — не чаще раза в ${String(SUSPENDED_REPEAT_HOURS / 24)} дня, пока оборудование отключено.`,
     ].join('\n'),
     repeatHours: SUSPENDED_REPEAT_HOURS,
+    preference: 'equipmentSuspended',
   };
 }

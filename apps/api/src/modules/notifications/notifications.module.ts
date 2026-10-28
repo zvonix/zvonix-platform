@@ -16,8 +16,11 @@ import { PlatformHealthController } from './platform-health.controller.js';
 import { PlatformHealthService } from './platform-health.service.js';
 import { PaymentNoticeService } from './payment-notice.service.js';
 import { EquipmentNoticeService } from './equipment-notice.service.js';
+import { NotificationPreferencesController } from './notification-preferences.controller.js';
+import { NotificationPreferencesRepository } from './notification-preferences.repository.js';
+import { NotificationPreferencesService } from './notification-preferences.service.js';
 
-/** Уведомления по условию: «на счёте мало» (ADR-0060) и тревоги администраторам (ADR-0062). */
+/** Уведомления по условию: «на счёте мало» (ADR-0060), тревоги администраторам (ADR-0062) и выбор писем (ADR-0104). */
 @Module({
   imports: [
     BillingModule,
@@ -31,8 +34,10 @@ import { EquipmentNoticeService } from './equipment-notice.service.js';
     SettingsModule,
     TelephonyModule,
   ],
-  controllers: [PlatformHealthController],
+  controllers: [PlatformHealthController, NotificationPreferencesController],
   providers: [
+    NotificationPreferencesRepository,
+    NotificationPreferencesService,
     LowBalanceService,
     AlertsService,
     PaymentNoticeService,
