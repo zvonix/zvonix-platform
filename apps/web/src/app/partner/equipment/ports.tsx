@@ -1,6 +1,7 @@
 'use client';
 
 import { goipLinePrefix, TESTABLE_SIM_STATUSES } from '@zvonix/shared';
+import { NumberPace } from '@/components/number-pace';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { PORT_STATE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
 import { TestCallButton } from '@/components/test-call';
@@ -67,6 +68,7 @@ export function PortRow({
             */}
             {SIM_STATUS_NAME[port.sim.status]}
             {port.sim.poor_connection === true && <PoorConnection block />}
+            <NumberPace pace={port.sim.pace} block />
           </>
         )}
         {/*

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
+import { NumberPace } from '@/components/number-pace';
 import { TariffSelect, useTariffName } from '@/components/tariff-select';
 import { TestCallButton } from '@/components/test-call';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
@@ -67,6 +68,7 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
               <TableHead className="h-8">Адрес</TableHead>
               <TableHead className="h-8">Доступ</TableHead>
               <TableHead className="h-8 text-right">Каналов</TableHead>
+              <TableHead className="h-8 text-right">Номеров</TableHead>
               <TableHead className="h-8">Тариф</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
               <TableHead className="h-8"> </TableHead>
@@ -90,6 +92,7 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
                   )}
                 </TableCell>
                 <TableCell className="num text-right">{trunk.max_concurrent_calls}</TableCell>
+                <TableCell className="num text-right">{trunk.numbers_count}</TableCell>
                 <TableCell>
                   <TariffSelect
                     value={trunk.tariff_id}
@@ -103,6 +106,7 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
                 </TableCell>
                 <TableCell className="whitespace-normal">
                   <TrunkStatus trunk={trunk} />
+                  <NumberPace pace={trunk.pace} block />
                 </TableCell>
                 <TableCell>
                   <TrunkActions trunk={trunk} />

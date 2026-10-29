@@ -34,6 +34,7 @@ import { CallRequirementsService } from '../priorities/call-requirements.service
 import { arrangeByDistribution } from './call-distribution.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
+import { CallPaceService, pacedNumberOf } from '../telephony/call-pace.service.js';
 import { CallRepository, type CallRow, type Executor } from '../telephony/call.repository.js';
 import { CdrService } from '../telephony/cdr.service.js';
 import {
@@ -94,6 +95,7 @@ export class RoutingService {
     private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
     private readonly callRequirements: CallRequirementsService,
+    private readonly pace: CallPaceService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -291,10 +293,18 @@ export class RoutingService {
       exhausted.map((usage) => usage.simCardId ?? usage.rule.simCardId).filter((id) => id !== null),
     );
     // Фильтр сохраняет порядок, выстроенный ценой.
-    const ordered = priced.filter(
+    const withinLimits = priced.filter(
       ({ candidate }) =>
         !exhaustedPartners.has(candidate.gateway.partnerId) &&
         (candidate.kind !== 'sim' || !exhaustedSims.has(candidate.sim.id)),
+    );
+    // Прогрев и рекомендованная работа номера (ADR-0105): номер, исчерпавший предел, отдаёт вызов соседу.
+    const pacedOut = await this.pace.exhausted(
+      withinLimits.map(({ candidate }) => candidate),
+      at,
+    );
+    const ordered = withinLimits.filter(
+      ({ candidate }) => !pacedOut.has(pacedNumberOf(candidate).id),
     );
     if (ordered.length === 0) {
       // Отдельная причина: «все исчерпали лимит» и «SIM нет вовсе» — разные разговоры
@@ -633,6 +643,8 @@ export class RoutingService {
             ? await this.claimSlotOnSim(candidate, tx)
             : await this.claimSlotOnTrunk(candidate, tx);
         if (!claimed) continue;
+        // После блокировки строки номера: предел пересчитывается заново, иначе две заявки прошли бы вдвоём (ADR-0105).
+        if (!(await this.pace.admit(candidate, limits.at, tx))) continue;
 
         const call = await this.callsRepository.insert(
           {

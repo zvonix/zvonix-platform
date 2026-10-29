@@ -1304,6 +1304,7 @@ export class TelephonyService {
       outboundUsername: string | null;
       outboundSecret: string | null;
       maxConcurrentCalls: number;
+      numbersCount: number;
     },
     actorUserId: Id<'user'>,
     actorRole: UserRole,
@@ -1321,6 +1322,7 @@ export class TelephonyService {
         outboundUsername: draft.outboundUsername,
         outboundSecret: this.sealSecret(draft.outboundSecret),
         maxConcurrentCalls: draft.maxConcurrentCalls,
+        numbersCount: draft.numbersCount,
       },
     );
 
@@ -1338,6 +1340,7 @@ export class TelephonyService {
         proxy_host: draft.proxyHost,
         registers_outbound: draft.registersOutbound,
         max_concurrent_calls: draft.maxConcurrentCalls,
+        numbers_count: draft.numbersCount,
         has_secret: draft.outboundSecret !== null,
       },
     });
@@ -1358,6 +1361,7 @@ export class TelephonyService {
       outboundUsername: string | null;
       outboundSecret: string | null;
       maxConcurrentCalls: number;
+      numbersCount: number;
     },
     actorUserId: Id<'user'>,
     actorRole: UserRole,
@@ -1426,6 +1430,7 @@ export class TelephonyService {
       outboundUsername?: string | null;
       outboundSecret?: string | null;
       maxConcurrentCalls?: number;
+      numbersCount?: number;
     },
     actorUserId: Id<'user'>,
     actorRole: UserRole,
@@ -1447,6 +1452,7 @@ export class TelephonyService {
       ...(changes.maxConcurrentCalls === undefined
         ? {}
         : { maxConcurrentCalls: changes.maxConcurrentCalls }),
+      ...(changes.numbersCount === undefined ? {} : { numbersCount: changes.numbersCount }),
     });
     if (updated === undefined) throw notFound('Транк не найден');
 
@@ -2213,6 +2219,7 @@ function toTrunkAudit(trunk: SipTrunkRow): Record<string, unknown> {
     outbound_username: trunk.outboundUsername,
     has_secret: trunk.outboundSecret !== null,
     max_concurrent_calls: trunk.maxConcurrentCalls,
+    numbers_count: trunk.numbersCount,
   };
 }
 

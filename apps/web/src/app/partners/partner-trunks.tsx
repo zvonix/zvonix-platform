@@ -12,6 +12,7 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
 import { TestCallButton } from '@/components/test-call';
+import { NumberPace, type NumberPaceView } from '@/components/number-pace';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,7 +28,7 @@ import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
 import { GATEWAY_STATUS_NAME, GATEWAY_SUSPENDED_BY_NAME, usableTone } from '@/lib/labels';
 
-const COLUMNS = 6;
+const COLUMNS = 7;
 
 interface Trunk {
   readonly id: string;
@@ -42,6 +43,9 @@ interface Trunk {
   readonly outbound_username: string | null;
   readonly has_secret: boolean;
   readonly max_concurrent_calls: number;
+  /** Номеров у провайдера (ADR-0105). */
+  readonly numbers_count: number;
+  readonly pace?: NumberPaceView;
 }
 
 interface Node {
@@ -174,6 +178,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
               <TableHead className="h-8">Провайдер</TableHead>
               <TableHead className="h-8">Доступ</TableHead>
               <TableHead className="h-8 text-right">Каналов</TableHead>
+              <TableHead className="h-8 text-right">Номеров</TableHead>
               <TableHead className="h-8"> </TableHead>
             </TableRow>
           </TableHeader>
@@ -217,6 +222,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                         {GATEWAY_SUSPENDED_BY_NAME[trunk.suspended_by]}
                       </span>
                     )}
+                    <NumberPace pace={trunk.pace} block />
                     {canChange && (
                       <TrunkStatus
                         // Новый выбор после смены состояния: прежний мог совпасть с новым.
@@ -254,6 +260,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                 </TableCell>
 
                 <TableCell className="num text-right">{trunk.max_concurrent_calls}</TableCell>
+                <TableCell className="num text-right">{trunk.numbers_count}</TableCell>
 
                 <TableCell>
                   {canChange && (

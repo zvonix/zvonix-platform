@@ -31,6 +31,7 @@ import {
   MAX_CHANNEL_CONCURRENT_CALLS,
   MAX_CONCURRENT_CALLS_LIMIT,
   MAX_TRUNK_CONCURRENT_CALLS,
+  TRUNK_NUMBERS_MAX,
   SIM_NETWORK_SCOPES,
   SIM_STATUSES,
   TERMINATION_KINDS,
@@ -329,6 +330,12 @@ export const simCards = pgTable(
     distributionWeight: integer().notNull().default(1),
     distributionPriority: integer().notNull().default(1),
 
+    /**
+     * Начало прогрева номера ([ADR-0105](../../../../docs/adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)): первый
+     * вызов после 14 суток молчания или снятие за отказы. Пусто у звонившей карты — прогрета.
+     */
+    warmupStartedAt: timestamptz(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -623,10 +630,23 @@ export const sipTrunks = pgTable(
      */
     maxConcurrentCalls: integer().notNull().default(DEFAULT_TRUNK_CONCURRENT_CALLS),
 
+    /**
+     * Сколько номеров у партнёра у этого провайдера: рекомендованная работа и прогрев считаются на номер
+     * ([ADR-0105](../../../../docs/adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)) и умножаются на это число.
+     */
+    numbersCount: integer().notNull().default(1),
+
+    /** Начало прогрева транка — как у SIM (ADR-0105). */
+    warmupStartedAt: timestamptz(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    check(
+      'sip_trunks_numbers_range',
+      sql`${t.numbersCount} between 1 and ${sql.raw(String(TRUNK_NUMBERS_MAX))}`,
+    ),
     check(
       'sip_trunks_concurrency_range',
       sql`${t.maxConcurrentCalls} between 1 and ${sql.raw(String(MAX_TRUNK_CONCURRENT_CALLS))}`,

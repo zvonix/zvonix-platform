@@ -249,6 +249,14 @@ describe('за что отключают', () => {
 
     expect(await sweep()).toBeGreaterThan(0);
     expect(await simStatus(env.sim)).toBe('throttled');
+    // Оператор, похоже, начал резать номер: после возврата он прогревается заново (ADR-0105).
+    const warmup = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select warmup_started_at from sim_cards where id = ${env.sim}`,
+      );
+      return (result.rows[0] as { warmup_started_at: unknown }).warmup_started_at;
+    });
+    expect(warmup).not.toBeNull();
   }, 120_000);
 
   it('не отключает за поведение абонентов', async () => {

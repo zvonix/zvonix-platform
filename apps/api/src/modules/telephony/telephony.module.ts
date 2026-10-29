@@ -4,6 +4,7 @@ import { CatalogModule } from '../catalog/catalog.module.js';
 import { BillingModule } from '../billing/billing.module.js';
 import { LimitsModule } from '../limits/limits.module.js';
 import { NodesModule } from '../nodes/nodes.module.js';
+import { CallPaceService } from './call-pace.service.js';
 import { CallRepository } from './call.repository.js';
 import { CallsController } from './calls.controller.js';
 import { CallsService } from './calls.service.js';
@@ -64,6 +65,7 @@ import { LimitOwnersService } from './limit-owners.service.js';
     TestCallRepository,
     RegistrationsService,
     LimitOwnersService,
+    CallPaceService,
   ],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.
   // `CdrService` — ради уборки вызовов без CDR: она нужна и маршрутизации на пути
@@ -75,6 +77,7 @@ import { LimitOwnersService } from './limit-owners.service.js';
     CdrService,
     QualityService,
     RegistrationsService,
+    CallPaceService,
   ],
 })
 export class TelephonyModule {}

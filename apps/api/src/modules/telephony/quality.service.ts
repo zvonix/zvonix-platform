@@ -195,6 +195,9 @@ export class QualityService {
           { status: 'suspended', suspendedBy: 'failure_threshold' },
         );
         if (updated === undefined) continue;
+        // Транк снят за отказы — оператор, похоже, начал резать его номера: прогрев заново (ADR-0105). У GOIP строки
+        // транка нет, и запись ничего не меняет.
+        await this.telephony.startWarmup({ trunk: found.subjectId as Id<'gateway'> }, now);
         suspensions.push({
           scope: 'gateway',
           subjectId: found.subjectId,
@@ -213,6 +216,7 @@ export class QualityService {
           'throttled',
         );
         if (updated === undefined) continue;
+        await this.telephony.startWarmup({ sim: found.subjectId as Id<'simCard'> }, now);
         suspensions.push({ scope: 'sim', subjectId: found.subjectId, failures: found.failures });
       }
     }

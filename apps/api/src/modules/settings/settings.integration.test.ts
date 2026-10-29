@@ -67,6 +67,10 @@ async function login(email: string): Promise<string> {
 
 beforeAll(async () => {
   await resetDatabase();
+  // Здесь проверяется свежая установка: фон наборов без предела номера (`resetDatabase`) убирается.
+  await withDatabase(async (execute) => {
+    await execute(sql`delete from platform_settings`);
+  });
   app = await startApi();
 
   const { IdentityService } = await import('../identity/identity.service.js');

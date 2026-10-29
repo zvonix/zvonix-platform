@@ -14,6 +14,7 @@ export * from './machine.js';
 export * from './nodes.js';
 export * from './telephony.js';
 export * from './call.js';
+export * from './call-pace.js';
 export * from './tariff.js';
 export * from './messaging.js';
 export * from './payments.js';
