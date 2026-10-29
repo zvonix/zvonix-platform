@@ -17,6 +17,7 @@ import type {
 } from '@zvonix/shared';
 import { useQuery } from '@tanstack/react-query';
 import type { DeviceConnection } from '@/components/presence';
+import type { NumberPaceView } from '@/components/number-pace';
 import { request } from '@/lib/api';
 import { GATEWAY_STATUS_NAME, PARTNER_SUSPENSION_NAME } from '@/lib/labels';
 
@@ -33,6 +34,8 @@ export interface Sim {
   readonly tariff_id: string | null;
   /** Почти не соединяет за последний час из-за отказов сети (ADR-0103). */
   readonly poor_connection?: boolean;
+  /** Прогрев и рекомендованная работа номера (ADR-0105). */
+  readonly pace?: NumberPaceView;
 }
 
 export interface Port {
@@ -87,7 +90,10 @@ export interface Trunk {
   readonly outbound_username: string | null;
   readonly has_secret: boolean;
   readonly max_concurrent_calls: number;
+  /** Номеров у провайдера: на них делится рекомендованная работа (ADR-0105). */
+  readonly numbers_count: number;
   readonly on_node: boolean;
+  readonly pace?: NumberPaceView;
 }
 
 /** Куда регистрировать шлюз — одно на всех. */

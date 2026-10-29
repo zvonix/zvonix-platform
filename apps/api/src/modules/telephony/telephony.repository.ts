@@ -698,6 +698,7 @@ export class TelephonyRepository {
       outboundUsername: string | null;
       outboundSecret: string | null;
       maxConcurrentCalls: number;
+      numbersCount: number;
     },
   ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
     try {
@@ -761,6 +762,7 @@ export class TelephonyRepository {
       outboundUsername: string | null;
       outboundSecret: string | null;
       maxConcurrentCalls: number;
+      numbersCount: number;
     }>,
   ): Promise<SipTrunkRow | undefined> {
     try {
@@ -1496,6 +1498,28 @@ export class TelephonyRepository {
    */
   async markSimRouted(simCardId: SimCardId, at: Date, executor: Executor = this.db): Promise<void> {
     await executor.update(simCards).set({ lastRoutedAt: at }).where(eq(simCards.id, simCardId));
+  }
+
+  /**
+   * Начинает прогрев номера заново ([ADR-0105](../../../../../docs/adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)):
+   * первый вызов после молчания или снятие за отказы. У шлюза без транка (GOIP) строки нет — запись ничего не меняет.
+   */
+  async startWarmup(
+    number: { readonly sim: SimCardId } | { readonly trunk: GatewayId },
+    at: Date,
+    executor: Executor = this.db,
+  ): Promise<void> {
+    if ('sim' in number) {
+      await executor
+        .update(simCards)
+        .set({ warmupStartedAt: at })
+        .where(eq(simCards.id, number.sim));
+    } else {
+      await executor
+        .update(sipTrunks)
+        .set({ warmupStartedAt: at })
+        .where(eq(sipTrunks.gatewayId, number.trunk));
+    }
   }
 
   /** Список партнёров канала в порядке приоритета. */

@@ -154,7 +154,12 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 
 Транк в `gateways` не попадает, хотя в базе это тоже шлюз: портов и SIM у него нет,
 а есть адрес провайдера. У транка в `trunks`: `id`, `name`, `status`, `suspended_by` (как у шлюза), `tariff_id`,
-`proxy_host`, `registers_outbound`, `outbound_username`, `has_secret`, `max_concurrent_calls`, `on_node`.
+`proxy_host`, `registers_outbound`, `outbound_username`, `has_secret`, `max_concurrent_calls`, `numbers_count`, `on_node`, `pace`.
+
+**`pace` — прогрев и рекомендованная работа номера** (у SIM и у транка, только в этом списке;
+[ADR-0105](../adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)): `{ "warmup_day", "per_hour", "per_day",
+"used_hour", "used_day" }`. Новый номер звонит понемногу и каждые сутки больше, чтобы оператор не заблокировал его за
+массовые звонки; исчерпавший предел номер отдаёт вызов другим. Подробно — в [telephony.md](telephony.md).
 
 **Приговора «почему через меня не идут вызовы» здесь нет.** Отдаются факты; вывод
 складывается из них вместе с состоянием партнёра (`GET /partner/account`) и наличием
@@ -205,7 +210,8 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 ### `POST /partner/sip-trunks`
 
 Тело: `name`, `proxyHost` (`sip.provider.ru` или `sip.provider.ru:5070`), `registersOutbound` (по умолчанию `true`),
-`outboundUsername` и `outboundSecret` (обязательны при регистрации), `maxConcurrentCalls` (по умолчанию 10).
+`outboundUsername` и `outboundSecret` (обязательны при регистрации), `maxConcurrentCalls` (по умолчанию 10),
+`numbersCount` — сколько номеров у провайдера (1–1000, по умолчанию 1; предел звонков с номера умножается на него).
 `201` → `{ "trunk": { … } }` в состоянии `pending`; включает его партнёр — `POST /partner/gateways/:id/status`.
 Пароль провайдера в ответах не бывает никогда, только `has_secret`.
 

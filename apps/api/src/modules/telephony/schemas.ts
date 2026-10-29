@@ -14,6 +14,7 @@ import {
   MAX_CHANNEL_CONCURRENT_CALLS,
   MAX_CONCURRENT_CALLS_LIMIT,
   MAX_TRUNK_CONCURRENT_CALLS,
+  TRUNK_NUMBERS_MAX,
   dialledDigits,
   normalizeMsisdn,
   SIM_STATUSES,
@@ -490,6 +491,12 @@ export const partnerCallsQuerySchema = z.object({
 });
 
 /** Поля транка — общие у администратора и партнёра. */
+const trunkNumbersCount = z.coerce
+  .number()
+  .int('должно быть целым числом')
+  .min(1, 'хотя бы один номер')
+  .max(TRUNK_NUMBERS_MAX, 'неправдоподобно много');
+
 const sipTrunkFields = {
   name,
 
@@ -516,6 +523,9 @@ const sipTrunkFields = {
     .min(1, 'ноль каналов означал бы, что звонить нельзя вовсе')
     .max(MAX_TRUNK_CONCURRENT_CALLS, 'неправдоподобно много')
     .default(DEFAULT_TRUNK_CONCURRENT_CALLS),
+
+  /** Номеров у провайдера: рекомендованная работа и прогрев считаются на номер (ADR-0105). */
+  numbersCount: trunkNumbersCount.default(1),
 };
 
 const trunkCredentials = {
@@ -578,6 +588,7 @@ export const updateSipTrunkSchema = z
       .min(1, 'ноль каналов означал бы, что звонить нельзя вовсе')
       .max(MAX_TRUNK_CONCURRENT_CALLS, 'неправдоподобно много')
       .optional(),
+    numbersCount: trunkNumbersCount.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'Нечего менять: не передано ни одного поля',

@@ -33,6 +33,9 @@ const SUBGROUPS: Record<string, string> = {
   'notifications.partner_suspension_enabled': 'Партнёру',
   'notifications.alerts_enabled': 'Администраторам',
   'notifications.support_staff_enabled': 'Администраторам',
+  'calls.warmup_enabled': 'Прогрев',
+  'calls.recommended_per_hour': 'Рекомендованная работа номера',
+  'calls.recommended_per_day': 'Рекомендованная работа номера',
   'messaging.enabled': 'Продукт',
   'messaging.provider_partner_url': 'Провайдер',
   'messaging.provider_partner_token': 'Провайдер',
@@ -110,6 +113,7 @@ const SECTIONS: readonly {
     key: 'calls',
     title: 'Звонки',
     parts: [
+      { title: 'Номера SIM и SIP-провайдеров', prefixes: ['calls.'] },
       { title: 'Узлы', prefixes: ['nodes.'] },
       { title: 'Записи разговоров', prefixes: ['recordings.'] },
     ],

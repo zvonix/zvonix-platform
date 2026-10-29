@@ -34,6 +34,12 @@ export interface ChannelActivity {
   readonly open: number;
   readonly lastCallAt: Date | null;
 }
+/** Попытки номера за скользящие час и сутки и последняя (ADR-0105). */
+export interface NumberAttempts {
+  readonly hour: number;
+  readonly day: number;
+  readonly lastAt: Date | null;
+}
 export type CallRow = typeof calls.$inferSelect;
 
 /** Исполнитель запроса: подключение либо открытая транзакция. */
@@ -241,6 +247,49 @@ export class CallRepository {
       });
     }
     return activity;
+  }
+
+  /**
+   * Попытки номеров — SIM или транков — за скользящие час и сутки и последняя попытка
+   * ([ADR-0105](../../../../../docs/adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)). Считаются все попытки, а не
+   * отвеченные: оператор видит попытку. Последняя — `limit 1` по индексу, счёт — только за сутки.
+   */
+  async numberAttempts(
+    by: 'sim' | 'gateway',
+    ids: readonly string[],
+    now: Date,
+    executor: Executor = this.db,
+  ): Promise<Map<string, NumberAttempts>> {
+    const attempts = new Map<string, NumberAttempts>();
+    if (ids.length === 0) return attempts;
+    const column = sql.raw(by === 'sim' ? 'sim_card_id' : 'gateway_id');
+    const hour = new Date(now.getTime() - 3_600_000).toISOString();
+    const day = new Date(now.getTime() - 86_400_000).toISOString();
+    const result = await executor.execute<{
+      id: string;
+      hour: string;
+      day: string;
+      last_at: string | Date | null;
+    }>(sql`
+      select ids.id,
+             (select count(*) from calls h
+               where h.${column} = ids.id and h.started_at > ${hour}::timestamptz)::text as hour,
+             (select count(*) from calls d
+               where d.${column} = ids.id and d.started_at > ${day}::timestamptz)::text as day,
+             (select l.started_at from calls l
+               where l.${column} = ids.id
+               order by l.started_at desc
+               limit 1) as last_at
+        from unnest(${sql.param([...new Set(ids)])}::uuid[]) as ids(id)
+    `);
+    for (const row of result.rows) {
+      attempts.set(row.id, {
+        hour: Number.parseInt(row.hour, 10),
+        day: Number.parseInt(row.day, 10),
+        lastAt: row.last_at === null ? null : new Date(row.last_at),
+      });
+    }
+    return attempts;
   }
 
   /**

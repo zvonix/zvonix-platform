@@ -130,6 +130,9 @@ export const calls = pgTable(
     // Горячий путь: сколько вызовов сейчас открыто на этой SIM.
     index('calls_sim_status_idx').on(t.simCardId, t.status),
     index('calls_channel_started_idx').on(t.channelId, t.startedAt),
+    // Прогрев и рекомендованная работа номера (ADR-0105): попытки SIM и транка за скользящие час и сутки.
+    index('calls_sim_started_idx').on(t.simCardId, t.startedAt),
+    index('calls_gateway_started_idx').on(t.gatewayId, t.startedAt),
     index('calls_status_started_idx').on(t.status, t.startedAt),
     // Разбор «почему не звонит»: свежие вызовы по всей площадке, без отбора по статусу.
     // Составной индекс выше для такого порядка не годится — он начинается со статуса,

@@ -11,6 +11,7 @@ import {
   parseId,
   TICKET_AUTOCLOSE_DAYS,
   validationFailed,
+  type CallPaceSettings,
   type MoneyAmount,
 } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
@@ -128,6 +129,16 @@ export class SettingsService {
   async pricing(): Promise<{ readonly priceBandsEnabled: boolean }> {
     const values = await this.values();
     return { priceBandsEnabled: this.flag(values, 'pricing.price_bands_enabled') };
+  }
+
+  /** Прогрев и рекомендованная работа номера SIM и транка (ADR-0105). */
+  async callPace(): Promise<CallPaceSettings> {
+    const values = await this.values();
+    return {
+      warmupEnabled: this.flag(values, 'calls.warmup_enabled'),
+      perHour: this.number(values, 'calls.recommended_per_hour'),
+      perDay: this.number(values, 'calls.recommended_per_day'),
+    };
   }
 
   /**

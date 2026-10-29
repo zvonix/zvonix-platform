@@ -10,6 +10,7 @@ import {
 import { useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { NumberPace, type NumberPaceView } from '@/components/number-pace';
 import { StatusDialog } from '@/components/status-dialog';
 import { Input } from '@/components/ui/input';
 import {
@@ -36,6 +37,8 @@ export interface Sim {
   readonly status: SimStatus;
   readonly max_concurrent_calls: number;
   readonly operator_confirmed_at: string | null;
+  /** Прогрев и рекомендованная работа номера (ADR-0105). */
+  readonly pace?: NumberPaceView;
 }
 
 const COLUMNS = 7;
@@ -169,6 +172,7 @@ export function PartnerSims({
                   >
                     {SIM_STATUS_NAME[sim.status]}
                   </span>
+                  <NumberPace pace={sim.pace} block />
                 </TableCell>
                 <TableCell className="text-right">
                   {canChange ? (

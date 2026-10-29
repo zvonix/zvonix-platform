@@ -46,6 +46,8 @@ interface SipTrunkView {
   readonly outbound_username: string | null;
   readonly has_secret: boolean;
   readonly max_concurrent_calls: number;
+  /** Номеров у провайдера: на них делится рекомендованная работа (ADR-0105). */
+  readonly numbers_count: number;
   readonly created_at: string;
 }
 
@@ -72,6 +74,7 @@ export class SipTrunkController {
         outboundUsername: body.outboundUsername ?? null,
         outboundSecret: body.outboundSecret ?? null,
         maxConcurrentCalls: body.maxConcurrentCalls,
+        numbersCount: body.numbersCount,
       },
       parseId(actor.userId, 'user'),
       actor.role,
@@ -128,6 +131,7 @@ export class SipTrunkController {
         outboundUsername: body.outboundUsername ?? null,
         outboundSecret: body.outboundSecret ?? null,
         maxConcurrentCalls: body.maxConcurrentCalls,
+        numbersCount: body.numbersCount,
       },
       actor.userId,
       actor.role,
@@ -166,6 +170,7 @@ function trunkChanges(
     ...(body.maxConcurrentCalls === undefined
       ? {}
       : { maxConcurrentCalls: body.maxConcurrentCalls }),
+    ...(body.numbersCount === undefined ? {} : { numbersCount: body.numbersCount }),
   };
 }
 
@@ -183,6 +188,7 @@ function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): SipTrunk
     outbound_username: row.trunk.outboundUsername,
     has_secret: row.trunk.outboundSecret !== null,
     max_concurrent_calls: row.trunk.maxConcurrentCalls,
+    numbers_count: row.trunk.numbersCount,
     created_at: row.gateway.createdAt.toISOString(),
   };
 }

@@ -9,6 +9,7 @@ import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
+import { CallPaceService, pacedSim, toPaceView, type NumberPaceView } from './call-pace.service.js';
 import {
   deviceConnection,
   isRegistered,
@@ -140,6 +141,8 @@ interface SimView {
   readonly activated_at: string | null;
   /** Свой тариф; пусто — как у шлюза (ADR-0056). */
   readonly tariff_id: string | null;
+  /** Прогрев и рекомендованная работа номера (ADR-0105) — в списке SIM одного партнёра. */
+  readonly pace?: NumberPaceView;
 }
 
 interface PortView {
@@ -167,7 +170,10 @@ interface CandidateView {
 
 @Controller()
 export class TelephonyController {
-  constructor(private readonly telephony: TelephonyService) {}
+  constructor(
+    private readonly telephony: TelephonyService,
+    private readonly pace: CallPaceService,
+  ) {}
 
   /** Входы линий с адресом узла — один запрос адреса на весь ответ. */
   private async portViews(accounts: readonly IssuedPortAccount[]): Promise<PortAccountView[]> {
@@ -557,7 +563,15 @@ export class TelephonyController {
     const rows = await this.telephony.listSims(
       partnerId === undefined ? undefined : parseId(partnerId, 'partner'),
     );
-    return { sim_cards: rows.map(toSimView) };
+    // Пределы — только у карт одного партнёра: по всей площадке это три подзапроса на каждую карту.
+    if (partnerId === undefined) return { sim_cards: rows.map(toSimView) };
+    const paces = await this.pace.paces(rows.map(pacedSim), new Date());
+    return {
+      sim_cards: rows.map((row) => {
+        const pace = paces.get(row.id);
+        return pace === undefined ? toSimView(row) : { ...toSimView(row), pace: toPaceView(pace) };
+      }),
+    };
   }
 
   @Roles('admin')

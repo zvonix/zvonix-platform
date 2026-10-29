@@ -101,6 +101,14 @@ export async function resetDatabase(url = TEST_DATABASE_URL): Promise<void> {
     await handle.db.execute(sql`create schema public`);
     await handle.db.execute(sql`drop schema if exists drizzle cascade`);
     await applyMigrations(handle.db);
+    // Фон наборов — без прогрева и рекомендованной работы номера (ADR-0105): новый номер пропускает два вызова в час,
+    // и любой набор, где карта звонит чаще, проверял бы прогрев, а не своё. Сам предел проверяет `call-pace`.
+    await handle.db.execute(sql`
+      insert into platform_settings (id, key, value)
+      values (gen_random_uuid(), 'calls.warmup_enabled', 'false'),
+             (gen_random_uuid(), 'calls.recommended_per_hour', '0'),
+             (gen_random_uuid(), 'calls.recommended_per_day', '0')
+    `);
   } finally {
     await handle.close();
   }

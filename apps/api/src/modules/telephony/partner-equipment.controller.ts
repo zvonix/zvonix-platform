@@ -48,6 +48,13 @@ import {
   tariffChoiceSchema,
 } from './schemas.js';
 import { firstAndAll, toPortAccountView, type PortAccountView } from './telephony.controller.js';
+import {
+  CallPaceService,
+  pacedSim,
+  pacedTrunk,
+  toPaceView,
+  type NumberPaceView,
+} from './call-pace.service.js';
 import { failsOnNetwork, QualityService } from './quality.service.js';
 import { deviceConnection, type DeviceConnectionView } from './registrations.service.js';
 import { TelephonyService, type IssuedPortAccount } from './telephony.service.js';
@@ -81,6 +88,8 @@ interface SimView {
    * «Не ответил» и «занято» сюда не входят: это база клиента, а не карта.
    */
   readonly poor_connection?: boolean;
+  /** Прогрев и рекомендованная работа номера (ADR-0105) — только в списке оборудования. */
+  readonly pace?: NumberPaceView;
 }
 
 /**
@@ -169,7 +178,10 @@ interface TrunkView {
   /** Задан ли пароль провайдера. Сам пароль не отдаётся никому, кроме узла. */
   readonly has_secret: boolean;
   readonly max_concurrent_calls: number;
+  /** Номеров у провайдера (ADR-0105). */
+  readonly numbers_count: number;
   readonly on_node: boolean;
+  readonly pace?: NumberPaceView;
 }
 
 @Controller()
@@ -179,6 +191,7 @@ export class PartnerEquipmentController {
     private readonly billing: BillingService,
     private readonly catalog: CatalogService,
     private readonly quality: QualityService,
+    private readonly pace: CallPaceService,
   ) {}
 
   /** Входы линий с адресом узла — один запрос адреса на весь ответ. */
@@ -218,11 +231,19 @@ export class PartnerEquipmentController {
     const poorSims = new Set(poor.sims.filter(failsOnNetwork).map((row) => row.subjectId));
     const poorGateways = new Set(poor.gateways.filter(failsOnNetwork).map((row) => row.subjectId));
 
-    const operators = await this.catalog.operatorNamesOf(sims.map((sim) => sim.operatorId));
+    const [operators, paces] = await Promise.all([
+      this.catalog.operatorNamesOf(sims.map((sim) => sim.operatorId)),
+      this.pace.paces([...sims.map(pacedSim), ...trunks.map(pacedTrunk)], now),
+    ]);
+    const paceOf = (id: string): NumberPaceView | undefined => {
+      const pace = paces.get(id);
+      return pace === undefined ? undefined : toPaceView(pace);
+    };
     const simById = new Map(sims.map((sim) => [sim.id, sim]));
     const listed = (sim: SimCardRow): SimView => ({
       ...toSimView(sim, operators),
       poor_connection: poorSims.has(sim.id),
+      ...withPace(paceOf(sim.id)),
     });
 
     const portsByGateway = new Map<string, GatewayPortRow[]>();
@@ -259,7 +280,7 @@ export class PartnerEquipmentController {
       gateways: gatewayViews,
       trunks: trunks
         .filter(({ gateway }) => gateway.status !== 'retired')
-        .map((row) => toTrunkView(row)),
+        .map((row) => ({ ...toTrunkView(row), ...withPace(paceOf(row.gateway.id)) })),
       spare_sims: sims
         .filter((sim) => !occupied.has(sim.id) && sim.status !== 'retired')
         .map(listed),
@@ -654,6 +675,12 @@ function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): TrunkVie
     outbound_username: row.trunk.outboundUsername,
     has_secret: row.trunk.outboundSecret !== null,
     max_concurrent_calls: row.trunk.maxConcurrentCalls,
+    numbers_count: row.trunk.numbersCount,
     on_node: row.gateway.nodeId !== null,
   };
+}
+
+/** Поле `pace` только там, где оно посчитано: `exactOptionalPropertyTypes` не пускает `undefined`. */
+function withPace(pace: NumberPaceView | undefined): { pace?: NumberPaceView } {
+  return pace === undefined ? {} : { pace };
 }

@@ -1,6 +1,10 @@
 'use client';
 
-import { DEFAULT_TRUNK_CONCURRENT_CALLS, MAX_TRUNK_CONCURRENT_CALLS } from '@zvonix/shared';
+import {
+  DEFAULT_TRUNK_CONCURRENT_CALLS,
+  MAX_TRUNK_CONCURRENT_CALLS,
+  TRUNK_NUMBERS_MAX,
+} from '@zvonix/shared';
 import { useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm } from '@/components/form-dialog';
@@ -36,15 +40,19 @@ export function NewTrunkForm({
   const [username, setUsername] = useState('');
   const [secret, setSecret] = useState('');
   const [channels, setChannels] = useState(String(DEFAULT_TRUNK_CONCURRENT_CALLS));
+  const [numbers, setNumbers] = useState('1');
 
   const channelCount = integerFromInput(channels);
   const channelsValid =
     channelCount !== undefined && channelCount >= 1 && channelCount <= MAX_TRUNK_CONCURRENT_CALLS;
+  const numberCount = integerFromInput(numbers);
+  const numbersValid = validNumbers(numberCount);
   const ready =
     name.trim().length >= 2 &&
     (nodes === undefined || nodeId !== '') &&
     proxyHost.trim() !== '' &&
     channelsValid &&
+    numbersValid &&
     (!registers || (username.trim() !== '' && secret !== ''));
 
   return (
@@ -59,6 +67,7 @@ export function NewTrunkForm({
           registersOutbound: registers,
           ...(registers ? { outboundUsername: username.trim(), outboundSecret: secret } : {}),
           maxConcurrentCalls: channelCount,
+          numbersCount: numberCount,
         })
       }
     >
@@ -130,6 +139,8 @@ export function NewTrunkForm({
         />
       </DialogField>
 
+      <NumbersField value={numbers} valid={numbersValid} onChange={setNumbers} />
+
       <label className="flex items-center gap-2 sm:col-span-2">
         <input
           type="checkbox"
@@ -192,11 +203,16 @@ export function EditTrunkForm({
   trunk,
   onSave,
 }: {
-  trunk: { readonly proxy_host: string; readonly max_concurrent_calls: number };
+  trunk: {
+    readonly proxy_host: string;
+    readonly max_concurrent_calls: number;
+    readonly numbers_count: number;
+  };
   onSave: (changes: Record<string, unknown>) => Promise<unknown>;
 }) {
   const [proxyHost, setProxyHost] = useState(trunk.proxy_host);
   const [channels, setChannels] = useState(String(trunk.max_concurrent_calls));
+  const [numbers, setNumbers] = useState(String(trunk.numbers_count));
   const [secret, setSecret] = useState('');
 
   const channelCount = integerFromInput(channels);
@@ -208,13 +224,16 @@ export function EditTrunkForm({
   if (channelsValid && channelCount !== trunk.max_concurrent_calls) {
     changes.maxConcurrentCalls = channelCount;
   }
+  const numberCount = integerFromInput(numbers);
+  const numbersValid = validNumbers(numberCount);
+  if (numbersValid && numberCount !== trunk.numbers_count) changes.numbersCount = numberCount;
   if (secret !== '') changes.outboundSecret = secret;
   const dirty = Object.keys(changes).length > 0;
 
   return (
     <DialogForm
       submitLabel="Сохранить"
-      canSubmit={dirty && channelsValid}
+      canSubmit={dirty && channelsValid && numbersValid}
       onSubmit={() => onSave(changes)}
     >
       <DialogField label="Адрес провайдера">
@@ -247,6 +266,8 @@ export function EditTrunkForm({
         />
       </DialogField>
 
+      <NumbersField value={numbers} valid={numbersValid} onChange={setNumbers} />
+
       <DialogField label="Новый пароль провайдера" hint="Пусто — пароль остаётся прежним." wide>
         <Input
           className="num"
@@ -259,5 +280,41 @@ export function EditTrunkForm({
         />
       </DialogField>
     </DialogForm>
+  );
+}
+
+function validNumbers(count: number | undefined): count is number {
+  return count !== undefined && count >= 1 && count <= TRUNK_NUMBERS_MAX;
+}
+
+/** Номеров у провайдера: рекомендованная работа и прогрев считаются на номер (ADR-0105). */
+function NumbersField({
+  value,
+  valid,
+  onChange,
+}: {
+  value: string;
+  valid: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <DialogField
+      label="Номеров у провайдера"
+      hint={
+        valid
+          ? 'Предел звонков с одного номера умножится на это число.'
+          : `Целое число от 1 до ${String(TRUNK_NUMBERS_MAX)}.`
+      }
+    >
+      <Input
+        className="num"
+        inputMode="numeric"
+        autoComplete="off"
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      />
+    </DialogField>
   );
 }
