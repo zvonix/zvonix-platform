@@ -10,7 +10,7 @@ import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { FailureThresholdRow } from './quality.repository.js';
-import { QualityService, type QualityView } from './quality.service.js';
+import { QualityService, type BlocksRow, type QualityView } from './quality.service.js';
 import { failureThresholdSchema } from './schemas.js';
 
 /** Окно наблюдения по умолчанию: сутки. Меньше — шум, больше — поздно. */
@@ -59,6 +59,27 @@ export class QualityController {
       partnerId === undefined ? undefined : parseId(partnerId, 'partner'),
     );
     return { sims: rows.map(toQualityView) };
+  }
+
+  /**
+   * Отчёт блокировок за `days` суток (1–90, по умолчанию 7; ADR-0107): по нему поднимают или снижают пределы номеров.
+   * Снятий на 1000 попыток — при 100 попытках и больше: на меньшем числе доля ничего не говорит.
+   */
+  @Roles('admin', 'support')
+  @Get('quality/blocks')
+  async blocks(
+    @Query('days') days?: string,
+  ): Promise<{ days: number; partners: BlocksView[]; operators: BlocksView[] }> {
+    const period = days === undefined ? DEFAULT_BLOCKS_DAYS : Number(days);
+    if (!Number.isInteger(period) || period < 1 || period > MAX_BLOCKS_DAYS) {
+      throw validationFailed('Период отчёта — целое число суток от 1 до 90');
+    }
+    const report = await this.quality.blocks(new Date(Date.now() - period * 86_400_000));
+    return {
+      days: period,
+      partners: report.partners.map(toBlocksView),
+      operators: report.operators.map(toBlocksView),
+    };
   }
 
   @Roles('admin', 'support')
@@ -149,4 +170,40 @@ function toQualityView(row: QualityView): QualityResponse {
 
 function toThresholdView(row: FailureThresholdRow): ThresholdResponse {
   return { scope: row.scope, failures: row.failures, window_minutes: row.windowMinutes };
+}
+
+/** Период отчёта блокировок, суток. */
+const DEFAULT_BLOCKS_DAYS = 7;
+const MAX_BLOCKS_DAYS = 90;
+
+/** Меньше стольких попыток — доля снятий ничего не говорит. */
+const BLOCKS_MIN_ATTEMPTS = 100;
+
+interface BlocksView {
+  readonly id: string;
+  readonly name: string;
+  readonly attempts: number;
+  readonly real_answered: number;
+  readonly short_answered: number;
+  readonly sims_suspended: number;
+  readonly gateways_suspended: number;
+  /** Снятий SIM и шлюзов на 1000 попыток; пусто — попыток меньше 100. */
+  readonly per_thousand: number | null;
+}
+
+function toBlocksView(row: BlocksRow): BlocksView {
+  const suspended = row.simsSuspended + row.gatewaysSuspended;
+  return {
+    id: row.id,
+    name: row.name,
+    attempts: row.attempts,
+    real_answered: row.realAnswered,
+    short_answered: row.shortAnswered,
+    sims_suspended: row.simsSuspended,
+    gateways_suspended: row.gatewaysSuspended,
+    per_thousand:
+      row.attempts < BLOCKS_MIN_ATTEMPTS
+        ? null
+        : Math.round((suspended * 10_000) / row.attempts) / 10,
+  };
 }

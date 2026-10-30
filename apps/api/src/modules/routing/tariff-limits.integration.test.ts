@@ -251,7 +251,7 @@ describe('лимиты в тарифе звонков (ADR-0080)', () => {
       outcome: string;
       reason?: string;
     }>();
-    expect(third).toMatchObject({ outcome: 'rejected', reason: 'limit_exceeded' });
+    expect(third).toMatchObject({ outcome: 'rejected', reason: 'numbers_exhausted' });
   }, 120_000);
 
   it('карта с другим тарифом лимитом не задета', async () => {

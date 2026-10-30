@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jitteredPauseMs, type Id } from '@zvonix/shared';
+import { jitteredPauseMs, sleepUntil, type Id } from '@zvonix/shared';
 import type { AccountLoad } from './messages.repository.js';
 import { accountReadyAt, effectiveLimits, isIdle, restOf, withRecommended } from './warmup.js';
 
@@ -123,7 +123,7 @@ describe('прогрев и молчание аккаунта (ADR-0078, рев�
 });
 
 describe('рекомендованная работа (ADR-0088)', () => {
-  const profile = { paceSeconds: 20, perMinute: 2, perHour: 15, perDay: 80 };
+  const profile = { paceSeconds: 20, perMinute: 2, perHour: 15, perDay: 80, sleepHours: 0 };
   const own = (overrides: Record<string, unknown> = {}) => ({
     recommended: true,
     limitPerMinute: null as number | null,
@@ -151,9 +151,10 @@ describe('рекомендованная работа (ADR-0088)', () => {
         perMinute: 0,
         perHour: 0,
         perDay: 0,
+        sleepHours: 0,
       }),
     ).toMatchObject({ limitPerMinute: null, limitPerHour: null, limitPerDay: null });
-    const zeros = { paceSeconds: 0, perMinute: 0, perHour: 0, perDay: 0 };
+    const zeros = { paceSeconds: 0, perMinute: 0, perHour: 0, perDay: 0, sleepHours: 0 };
     const tariffOnly = own({ limitPerMinute: 1 });
     expect(withRecommended(tariffOnly, zeros)).toBe(tariffOnly);
     const off = own({ recommended: false, limitPerMinute: 50 });
@@ -228,5 +229,24 @@ describe('почему аккаунт на паузе — для таблиц п
     expect(restOf(account({ limitPerDay: 50 }), load({ day: 50 }), NOW, none)).toMatchObject({
       reason: 'day',
     });
+  });
+});
+
+describe('сон аккаунта (ADR-0107)', () => {
+  it('спящий аккаунт ждёт до пробуждения; сон у всех аккаунтов, даже без галочки', () => {
+    const profile = { paceSeconds: 0, perMinute: 0, perHour: 0, perDay: 0, sleepHours: 12 };
+    const base = { ...account(), recommended: false };
+    const sleepy = withRecommended(base, profile);
+    // Полсуток сна в полосе 20:00–08:00 МСК: в 02:00 МСК (23:00 UTC) спит любой аккаунт.
+    const night = new Date('2026-10-14T23:00:00Z');
+    const until = sleepUntil(base.id, 12, night);
+    expect(until).not.toBeNull();
+    expect(accountReadyAt(sleepy, load({}), night, options)).toEqual(until);
+    expect(restOf(sleepy, load({}), night, { reservePercent: 0, quietEnd: undefined })).toEqual({
+      reason: 'sleep',
+      until,
+    });
+    const awake = withRecommended(base, { ...profile, sleepHours: 0 });
+    expect(accountReadyAt(awake, load({}), night, options)).toBeUndefined();
   });
 });

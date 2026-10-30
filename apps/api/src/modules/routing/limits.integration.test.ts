@@ -392,8 +392,9 @@ describe('лимит партнёра и SIM', () => {
 
     const blocked = await route(env.channel, env.destination);
     expect(blocked.outcome).toBe('rejected');
-    // «Все исчерпали лимит» и «SIM нет вовсе» — разные разговоры с партнёром.
-    expect(blocked.reason).toBe('limit_exceeded');
+    // «Все исчерпали лимит» и «SIM нет вовсе» — разные разговоры с партнёром. И не лимит клиента: квоту исчерпал
+    // партнёр, клиенту это `platform` (ADR-0107).
+    expect(blocked.reason).toBe('numbers_exhausted');
   }, 180_000);
 });
 
@@ -685,7 +686,7 @@ describe('лимит «на каждую карту» (ADR-0057)', () => {
     );
 
     const blocked = await route(env.channel, env.destination);
-    expect(blocked.reason).toBe('limit_exceeded');
+    expect(blocked.reason).toBe('numbers_exhausted');
 
     const rows = await usage(`partnerId=${partner.id}`);
     expect(rows.map((row) => row.usage_sim_card_id).sort()).toEqual([partner.simId, second].sort());
@@ -744,6 +745,6 @@ describe('лимит «на каждую карту» (ADR-0057)', () => {
     await limit({ simCardId: partner.simId, window: 'minute', metric: 'calls', value: 1 });
 
     expect((await route(env.channel, env.destination)).outcome).toBe('routed');
-    expect((await route(env.channel, env.destination)).reason).toBe('limit_exceeded');
+    expect((await route(env.channel, env.destination)).reason).toBe('numbers_exhausted');
   }, 180_000);
 });

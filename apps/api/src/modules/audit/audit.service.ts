@@ -21,6 +21,7 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
+import { and, gte, inArray } from 'drizzle-orm';
 import { currentCorrelationId } from '@zvonix/logger';
 import { newId, type Id, type UserRole } from '@zvonix/shared';
 import { auditLog } from '@zvonix/db/schema';
@@ -73,6 +74,18 @@ export class AuditService {
         entity_type: event.entityType,
       });
     }
+  }
+
+  /** Объекты, с которыми с `since` случились действия `actions`, — по строке на событие (отчёты по журналу). */
+  async occurrences(
+    actions: readonly string[],
+    since: Date,
+  ): Promise<{ action: string; entityId: string | null }[]> {
+    if (actions.length === 0) return [];
+    return this.database.db
+      .select({ action: auditLog.action, entityId: auditLog.entityId })
+      .from(auditLog)
+      .where(and(inArray(auditLog.action, [...actions]), gte(auditLog.occurredAt, since)));
   }
 
   private async insert(event: AuditEvent, executor: Executor): Promise<void> {

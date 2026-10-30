@@ -23,7 +23,7 @@
 | 5а | …а если канал требует запись — не только на шлюзах без записи | `recording_required` |
 | 5б | …и её партнёр принимает вызовы в регион номера | `no_coverage` |
 | 5б′ | …и подходит под требования клиента: способ, «не слушает записи», предел цены по направлению ([ADR-0095](../adr/0095-trebovaniya-klienta-k-partnyoram-zvonkov.md)); без требований кандидат нашёлся бы | `requirements_unmet` |
-| 5в | …и ни партнёр, ни SIM не исчерпали свою квоту, а номер — прогрев, рекомендованную работу, паузу и разных абонентов ([ADR-0105](../adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md), [ADR-0106](../adr/0106-rovnyy-temp-nomera-i-abonenty.md)) | `limit_exceeded` |
+| 5в | …и ни партнёр, ни SIM не исчерпали свою квоту, а номер — прогрев, рекомендованную работу, паузу, сон и разных абонентов ([ADR-0105](../adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md), [ADR-0106](../adr/0106-rovnyy-temp-nomera-i-abonenty.md), [ADR-0107](../adr/0107-son-nomera-plokhoy-nomer-i-otchyot-blokirovok.md)) | `numbers_exhausted` |
 | 6 | На SIM или транке есть место по `max_concurrent_calls` | `no_sim_available` |
 | 8 | Есть правило наценки и хватает средств на резерв | `no_tariff`, `insufficient_funds` |
 

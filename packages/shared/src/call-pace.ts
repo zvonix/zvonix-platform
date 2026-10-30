@@ -18,7 +18,16 @@ export const CALL_WARMUP_DAYS = 14;
 export const CALL_WARMUP_IDLE_DAYS = 14;
 
 /** Куда растёт прогрев, когда рекомендованное «в сутки» не задано (0 — не ограничивать). */
-export const CALL_WARMUP_FALLBACK_CEILING = 150;
+export const CALL_WARMUP_FALLBACK_CEILING = 100;
+
+/**
+ * «Плохой» номер ([ADR-0107](../../../docs/adr/0107-son-nomera-plokhoy-nomer-i-otchyot-blokirovok.md)): меньше этого
+ * попыток за сутки — о доле ответов судить рано.
+ */
+export const CALL_POOR_MIN_ATTEMPTS = 20;
+
+/** Настоящий ответ — разговор не короче стольких секунд: сброс в первые секунды оператор видит как недозвон. */
+export const CALL_REAL_ANSWER_SECONDS = 5;
 
 /** Сколько номеров бывает у одного SIP-транка. */
 export const TRUNK_NUMBERS_MAX = 1000;
@@ -80,6 +89,10 @@ export interface CallPaceSettings {
   /** Разных абонентов на номер за скользящие час и сутки. */
   readonly distinctPerHour: number;
   readonly distinctPerDay: number;
+  /** Часов сна номера в сутки (ADR-0107); 0 — не спит. */
+  readonly sleepHours: number;
+  /** Доля настоящих ответов, ниже которой номер замедляется, %; 0 — не замедлять. */
+  readonly poorAnswerPercent: number;
 }
 
 /** Пределы номера сейчас: `null` — без предела. */
@@ -94,6 +107,17 @@ export interface CallPace {
   readonly numbers: number;
   readonly distinctPerHour: number | null;
   readonly distinctPerDay: number | null;
+  /** «Плохой» номер: пределы в час, в сутки и по абонентам — вдвое ниже (ADR-0107). */
+  readonly poor: boolean;
+}
+
+/**
+ * «Плохой» номер: за сутки не меньше {@link CALL_POOR_MIN_ATTEMPTS} попыток, а настоящих ответов меньше `percent` %.
+ */
+export function isPoorNumber(attempts: number, realAnswers: number, percent: number): boolean {
+  return (
+    percent > 0 && attempts >= CALL_POOR_MIN_ATTEMPTS && realAnswers * 100 < attempts * percent
+  );
 }
 
 const positive = (value: number): number | null => (value > 0 ? value : null);
@@ -101,18 +125,21 @@ const positive = (value: number): number | null => (value > 0 ? value : null);
 /**
  * Пределы номера: при прогреве — сутки по кривой и тройная часовая доля (не меньше 2 и не больше рекомендованного
  * «в час»: вызовы идут волнами) и пауза прогрева, после — рекомендованные. Всё, кроме паузы, умножается на число
- * номеров транка: пауза у каждого номера своя, а их число задаёт `numbers`.
+ * номеров транка: пауза у каждого номера своя, а их число задаёт `numbers`. У «плохого» номера пределы вдвое ниже.
  */
 export function callPace(
   settings: CallPaceSettings,
   warmupDay: number | null,
   numbers = 1,
+  poor = false,
 ): CallPace {
-  const scale = (value: number | null): number | null => (value === null ? null : value * numbers);
+  const scale = (value: number | null): number | null =>
+    value === null ? null : poor ? Math.max(1, Math.ceil((value * numbers) / 2)) : value * numbers;
   const perHour = positive(settings.perHour);
   const perDay = positive(settings.perDay);
   const common = {
     numbers,
+    poor,
     distinctPerHour: scale(positive(settings.distinctPerHour)),
     distinctPerDay: scale(positive(settings.distinctPerDay)),
   };

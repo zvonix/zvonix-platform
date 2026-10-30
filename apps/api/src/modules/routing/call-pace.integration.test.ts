@@ -7,6 +7,7 @@
 
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { clientFailureReasonOf } from '@zvonix/shared';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
   prepareEnvironment,
@@ -263,6 +264,8 @@ const PACE_OFF = {
   'calls.distinct_per_day': 0,
   'calls.recipient_per_hour': 0,
   'calls.recipient_per_day': 0,
+  'calls.sleep_hours': 0,
+  'calls.poor_answer_percent': 0,
 };
 
 async function settings(values: Record<string, unknown>) {
@@ -284,6 +287,7 @@ interface SimPace {
   distinct_per_hour?: number | null;
   distinct_used_hour?: number;
   resting_until?: string | null;
+  poor?: boolean;
 }
 
 async function paceOf(partnerId: string, simId: string): Promise<SimPace | undefined> {
@@ -332,10 +336,10 @@ describe('прогрев и рекомендованная работа номе
     expect(await warmupStartedAt(fresh.simId)).not.toBeNull();
     expect((await route(channel, destination)).outcome).toBe('routed');
 
-    // Единственный номер исчерпал час — отказ называется лимитом, а не «нет SIM».
+    // Единственный номер исчерпал час — отказ «номера исчерпаны», а не «нет SIM» и не лимит клиента (ADR-0107).
     const third = await route(channel, destination);
     expect(third.outcome).toBe('rejected');
-    expect(third.reason).toBe('limit_exceeded');
+    expect(third.reason).toBe('numbers_exhausted');
 
     const pace = await paceOf(fresh.id, fresh.simId);
     expect(pace).toMatchObject({
@@ -366,7 +370,7 @@ describe('прогрев и рекомендованная работа номе
     for (let index = 0; index < 3; index += 1) {
       expect((await route(channel, destination)).outcome).toBe('routed');
     }
-    expect((await route(channel, destination)).reason).toBe('limit_exceeded');
+    expect((await route(channel, destination)).reason).toBe('numbers_exhausted');
     expect(await paceOf(warmed.id, warmed.simId)).toMatchObject({
       warmup_day: null,
       per_hour: 3,
@@ -412,6 +416,8 @@ describe('прогрев и рекомендованная работа номе
       distinct_used_hour: 1,
       distinct_used_day: 1,
       resting_until: null,
+      asleep_until: null,
+      poor: false,
     });
   });
 });
@@ -436,7 +442,7 @@ describe('ровный темп номера и абоненты (ADR-0106)', ()
 
     const third = await route(channel, destination);
     expect(third.outcome).toBe('rejected');
-    expect(third.reason).toBe('limit_exceeded');
+    expect(third.reason).toBe('numbers_exhausted');
     const resting = await paceOf(firstSim === one.simId ? one.id : two.id, firstSim);
     expect(resting?.resting_until).not.toBeNull();
 
@@ -456,7 +462,7 @@ describe('ровный темп номера и абоненты (ADR-0106)', ()
 
     expect((await route(channel, destination)).outcome).toBe('routed');
     expect((await route(channel, second)).outcome).toBe('routed');
-    expect((await route(channel, third)).reason).toBe('limit_exceeded');
+    expect((await route(channel, third)).reason).toBe('numbers_exhausted');
     // Перезвон знакомому нового абонента не добавляет.
     expect((await route(channel, destination)).outcome).toBe('routed');
     expect(await paceOf(only.id, only.simId)).toMatchObject({
@@ -509,7 +515,7 @@ describe('ровный темп номера и абоненты (ADR-0106)', ()
       `);
     });
     expect((await route(channel, destination)).outcome).toBe('routed');
-    expect((await route(channel, await subscriber(operator))).reason).toBe('limit_exceeded');
+    expect((await route(channel, await subscriber(operator))).reason).toBe('numbers_exhausted');
   });
 
   it('тревога: у партнёра за час порог снял две SIM', async () => {
@@ -530,5 +536,90 @@ describe('ровный темп номера и абоненты (ADR-0106)', ()
       sims: 2,
       gateways: 0,
     });
+  });
+});
+
+describe('«плохой» номер, честная причина и отчёт блокировок (ADR-0107)', () => {
+  /** Попытки номера два часа назад: `answered` из них — разговор 30 секунд. */
+  async function pastAttempts(channel: string, simId: string, total: number, answered: number) {
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        insert into calls (id, external_id, channel_id, node_id, operator_id, destination, sim_card_id, gateway_id,
+                           status, started_at, answered_at, ended_at, duration_seconds)
+        select gen_random_uuid(), ${unique('past')} || '-' || n, ${channel}, ${nodeId}, s.operator_id, '79000000000',
+               s.id, p.gateway_id,
+               case when n <= ${answered} then 'completed' else 'no_answer' end,
+               now() - interval '2 hours',
+               case when n <= ${answered} then now() - interval '2 hours' end,
+               now() - interval '2 hours' + interval '30 seconds',
+               case when n <= ${answered} then 30 else 0 end
+          from sim_cards s join gateway_ports p on p.sim_card_id = s.id, generate_series(1, ${total}) n
+         where s.id = ${simId}
+      `);
+    });
+  }
+
+  it('мало настоящих ответов — пределы номера вдвое, ответов достаточно — как обычно', async () => {
+    await settings({
+      'calls.recommended_per_hour': 40,
+      'calls.recommended_per_day': 100,
+      'calls.poor_answer_percent': 20,
+    });
+    const { operator, channel } = await scenario();
+    const poor = await createPartner(operator);
+    const good = await createPartner(operator);
+    await pastAttempts(channel, poor.simId, 20, 2);
+    await pastAttempts(channel, good.simId, 20, 10);
+
+    expect(await paceOf(poor.id, poor.simId)).toMatchObject({
+      poor: true,
+      per_hour: 20,
+      per_day: 50,
+    });
+    expect(await paceOf(good.id, good.simId)).toMatchObject({
+      poor: false,
+      per_hour: 40,
+      per_day: 100,
+    });
+  });
+
+  it('все номера исчерпаны — numbers_exhausted, клиент видит platform', async () => {
+    await settings({ 'calls.recommended_per_hour': 1 });
+    const { operator, channel, destination } = await scenario();
+    await createPartner(operator);
+    expect((await route(channel, destination)).outcome).toBe('routed');
+    const refused = await route(channel, destination);
+    expect(refused.reason).toBe('numbers_exhausted');
+    expect(refused.sip_response).toBe('503 Service Unavailable');
+    expect(clientFailureReasonOf('numbers_exhausted')).toBe('platform');
+  });
+
+  it('отчёт блокировок: попытки, ответы и снятые SIM по партнёру и оператору', async () => {
+    const { operator, channel } = await scenario();
+    const partner = await createPartner(operator);
+    await pastAttempts(channel, partner.simId, 120, 30);
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        insert into audit_log (id, action, entity_type, entity_id, occurred_at)
+        values (gen_random_uuid(), 'sim.suspended_by_failures', 'sim_card', ${partner.simId}, now())
+      `);
+    });
+
+    const response = await get('/quality/blocks?days=7');
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{
+      days: number;
+      partners: { id: string }[];
+      operators: { id: string }[];
+    }>();
+    expect(body.days).toBe(7);
+    expect(body.partners.find((row) => row.id === partner.id)).toMatchObject({
+      attempts: 120,
+      real_answered: 30,
+      sims_suspended: 1,
+      per_thousand: 8.3,
+    });
+    expect(body.operators.find((row) => row.id === operator)).toMatchObject({ sims_suspended: 1 });
+    expect((await get('/quality/blocks?days=0')).statusCode).toBe(400);
   });
 });

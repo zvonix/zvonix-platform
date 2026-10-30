@@ -10,7 +10,7 @@ import { Injectable } from '@nestjs/common';
 import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import { toDatabaseError, type Database } from '@zvonix/db';
 import { calls, failureThresholds, gateways, partners, simCards } from '@zvonix/db/schema';
-import { newId, type FailureScope, type Id } from '@zvonix/shared';
+import { CALL_REAL_ANSWER_SECONDS, newId, type FailureScope, type Id } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type FailureThresholdRow = typeof failureThresholds.$inferSelect;
@@ -22,6 +22,18 @@ export interface SuspensionBurst {
   readonly sims: number;
   readonly gateways: number;
 }
+
+/** Попытки группы за окно для отчёта блокировок (ADR-0107). */
+// Тип, а не интерфейс: строка результата `execute` обязана быть записью с индексной сигнатурой.
+export type BlockAttemptsRow = {
+  readonly id: string;
+  readonly name: string;
+  readonly attempts: number;
+  /** Разговор от 5 секунд. */
+  readonly realAnswered: number;
+  /** Отвечено, но короче 5 секунд. */
+  readonly shortAnswered: number;
+};
 
 /** Качество одного объекта за окно. */
 export interface QualityRow {
@@ -266,6 +278,70 @@ export class QualityRepository {
       sims: row.sims,
       gateways: row.gateways,
     }));
+  }
+
+  /**
+   * Попытки, ушедшие в сеть с `since`, по партнёрам и по операторам SIM (ADR-0107). Отказы площадки (`failure_reason`
+   * заполнен) в сеть не уходили и не считаются. Транки в разрезе операторов не участвуют: оператора у них нет.
+   */
+  async blockAttempts(
+    since: Date,
+  ): Promise<{ partners: BlockAttemptsRow[]; operators: BlockAttemptsRow[] }> {
+    const real = sql`count(*) filter (where c.answered_at is not null and coalesce(c.duration_seconds, ${CALL_REAL_ANSWER_SECONDS}) >= ${CALL_REAL_ANSWER_SECONDS})::int`;
+    const short = sql`count(*) filter (where c.answered_at is not null and c.duration_seconds < ${CALL_REAL_ANSWER_SECONDS})::int`;
+    const at = since.toISOString();
+    const [partners, operators] = await Promise.all([
+      this.db.execute<BlockAttemptsRow>(sql`
+        select p.id, p.name, count(*)::int as attempts, ${real} as "realAnswered", ${short} as "shortAnswered"
+          from calls c
+          join gateways g on g.id = c.gateway_id
+          join partners p on p.id = g.partner_id
+         where c.started_at >= ${at}::timestamptz and c.failure_reason is null
+         group by p.id, p.name`),
+      this.db.execute<BlockAttemptsRow>(sql`
+        select o.id, o.name, count(*)::int as attempts, ${real} as "realAnswered", ${short} as "shortAnswered"
+          from calls c
+          join sim_cards s on s.id = c.sim_card_id
+          join operators o on o.id = s.operator_id
+         where c.started_at >= ${at}::timestamptz and c.failure_reason is null
+         group by o.id, o.name`),
+    ]);
+    return { partners: partners.rows, operators: operators.rows };
+  }
+
+  /** Чьи это SIM и шлюзы: партнёр и оператор (у шлюза оператора нет) — для отчёта блокировок. */
+  async ownersOf(
+    simIds: readonly string[],
+    gatewayIds: readonly string[],
+  ): Promise<
+    {
+      id: string;
+      partnerId: string;
+      partnerName: string;
+      operatorId: string | null;
+      operatorName: string | null;
+    }[]
+  > {
+    if (simIds.length === 0 && gatewayIds.length === 0) return [];
+    const result = await this.db.execute<{
+      id: string;
+      partnerId: string;
+      partnerName: string;
+      operatorId: string | null;
+      operatorName: string | null;
+    }>(sql`
+      select s.id::text as id, p.id::text as "partnerId", p.name as "partnerName",
+             o.id::text as "operatorId", o.name as "operatorName"
+        from sim_cards s
+        join partners p on p.id = s.partner_id
+        join operators o on o.id = s.operator_id
+       where s.id::text = any(${sql.param([...simIds])}::text[])
+      union all
+      select g.id::text, p.id::text, p.name, null, null
+        from gateways g
+        join partners p on p.id = g.partner_id
+       where g.id::text = any(${sql.param([...gatewayIds])}::text[])`);
+    return result.rows;
   }
 
   // --- Пороги ---------------------------------------------------------------------

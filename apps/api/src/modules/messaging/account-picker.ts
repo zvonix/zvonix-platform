@@ -299,7 +299,11 @@ export class AccountPicker {
       return undefined;
     }
     const load = (await this.messages.loadOf([previous.id], now)).get(previous.id) ?? EMPTY_LOAD;
-    if (!isFree({ account: previous, load }, own, now, paceSeconds)) return undefined;
+    // С профилем площадки и сном, как у остальных кандидатов: иначе прежний аккаунт обходил бы их (ADR-0107).
+    const profile = (await this.settings.messaging()).recommended;
+    if (!isFree({ account: withRecommended(previous, profile), load }, own, now, paceSeconds)) {
+      return undefined;
+    }
     this.logger.debug('Получателю подобран прежний аккаунт', { account_id: previous.id });
     return previous;
   }

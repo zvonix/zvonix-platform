@@ -6,6 +6,8 @@
  * не берётся из `Math.random`: отбор кандидатов и проверка в транзакции обязаны прийти к одному ответу.
  */
 
+import { minuteOfDay } from './distribution.js';
+
 /** На какую долю пауза удлиняется самое большее: 30 с → 30–45 с. */
 export const PACE_JITTER_SHARE = 0.5;
 
@@ -30,4 +32,27 @@ export function paceJitter(key: string): number {
 /** Пауза в миллисекундах с разбросом по ключу: от `seconds` до `seconds × (1 + PACE_JITTER_SHARE)`. */
 export function jitteredPauseMs(seconds: number, key: string): number {
   return Math.round(seconds * 1000 * (1 + PACE_JITTER_SHARE * paceJitter(key)));
+}
+
+/**
+ * Сон номера и аккаунта ([ADR-0107](../../../docs/adr/0107-son-nomera-plokhoy-nomer-i-otchyot-blokirovok.md)): живой
+ * человек ночью не звонит и не пишет. Начало сна своё у каждого ключа и разнесено по полосе 20:00–08:00 по Москве —
+ * ночью спит около половины номеров, и площадка работает круглые сутки.
+ */
+export const SLEEP_TIMEZONE = 'Europe/Moscow';
+const SLEEP_BAND_START_MINUTE = 20 * 60;
+const SLEEP_BAND_MINUTES = 12 * 60;
+const DAY_MINUTES = 24 * 60;
+
+/** Когда ключ проснётся; `null` — не спит или сон выключен (`hours` ≤ 0). */
+export function sleepUntil(key: string, hours: number, now: Date): Date | null {
+  if (hours <= 0) return null;
+  const length = Math.round(Math.min(hours, 24) * 60);
+  const start =
+    (SLEEP_BAND_START_MINUTE + Math.floor(paceJitter(`${key}:sleep`) * SLEEP_BAND_MINUTES)) %
+    DAY_MINUTES;
+  const into = (minuteOfDay(now, SLEEP_TIMEZONE) - start + DAY_MINUTES) % DAY_MINUTES;
+  if (into >= length) return null;
+  const minuteStart = now.getTime() - (now.getTime() % 60_000);
+  return new Date(minuteStart + (length - into) * 60_000);
 }

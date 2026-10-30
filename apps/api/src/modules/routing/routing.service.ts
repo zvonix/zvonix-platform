@@ -315,9 +315,9 @@ export class RoutingService {
       ({ candidate }) => !screen.exhausted.has(pacedNumberOf(candidate).id),
     );
     if (ordered.length === 0) {
-      // Отдельная причина: «все исчерпали лимит» и «SIM нет вовсе» — разные разговоры
-      // с партнёром.
-      return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
+      // Отдельная причина: «все номера исчерпали квоты» и «SIM нет вовсе» — разные разговоры с партнёром. И не
+      // `limit_exceeded`: лимиты клиента не исчерпаны, исчерпана ёмкость площадки — клиент видит `platform` (ADR-0107).
+      return this.reject(request, destination, channel.id, operatorId, region, 'numbers_exhausted');
     }
 
     // 6. Распределение партнёра (ADR-0080): внутри одинакового приоритета, цены и партнёра карты переставляются

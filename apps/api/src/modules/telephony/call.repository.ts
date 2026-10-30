@@ -7,6 +7,7 @@ import { and, count, desc, eq, gte, inArray, lt, lte, sql, type SQL } from 'driz
 import { toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import { calls, channels, gateways, simCards, sipTrunks } from '@zvonix/db/schema';
 import {
+  CALL_REAL_ANSWER_SECONDS,
   newId,
   OPEN_CALL_STATUSES,
   type CallFailureReason,
@@ -41,6 +42,8 @@ export interface NumberAttempts {
   /** Разных абонентов за час и сутки (ADR-0106). */
   readonly distinctHour: number;
   readonly distinctDay: number;
+  /** Настоящих ответов за сутки — разговор от 5 секунд (ADR-0107). */
+  readonly realAnsweredDay: number;
   /** Звонил ли номер спрошенному абоненту за час и сутки. */
   readonly calledHour: boolean;
   readonly calledDay: boolean;
@@ -287,6 +290,7 @@ export class CallRepository {
       day: string;
       distinct_hour: string;
       distinct_day: string;
+      real_answered_day: string;
       called_hour: boolean | null;
       called_day: boolean | null;
       last_at: string | Date | null;
@@ -296,6 +300,7 @@ export class CallRepository {
              coalesce(w.day, 0)::text as day,
              coalesce(w.distinct_hour, 0)::text as distinct_hour,
              coalesce(w.distinct_day, 0)::text as distinct_day,
+             coalesce(w.real_answered_day, 0)::text as real_answered_day,
              w.called_hour,
              w.called_day,
              (select l.started_at from calls l
@@ -308,6 +313,10 @@ export class CallRepository {
                  count(*) as day,
                  count(distinct c.destination) filter (where c.started_at > ${hour}::timestamptz) as distinct_hour,
                  count(distinct c.destination) as distinct_day,
+                 count(*) filter (
+                   where c.answered_at is not null
+                     and coalesce(c.duration_seconds, ${CALL_REAL_ANSWER_SECONDS}) >= ${CALL_REAL_ANSWER_SECONDS}
+                 ) as real_answered_day,
                  bool_or(c.destination = ${destination}::text and c.started_at > ${hour}::timestamptz) as called_hour,
                  bool_or(c.destination = ${destination}::text) as called_day
             from calls c
@@ -343,6 +352,7 @@ export class CallRepository {
         day: Number.parseInt(row.day, 10),
         distinctHour: Number.parseInt(row.distinct_hour, 10),
         distinctDay: Number.parseInt(row.distinct_day, 10),
+        realAnsweredDay: Number.parseInt(row.real_answered_day, 10),
         calledHour: row.called_hour === true,
         calledDay: row.called_day === true,
         lastAt: row.last_at === null ? null : new Date(row.last_at),
