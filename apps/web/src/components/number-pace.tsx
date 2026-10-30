@@ -11,6 +11,11 @@ export interface NumberPaceView {
   readonly per_day: number | null;
   readonly used_hour: number;
   readonly used_day: number;
+  /** Разных абонентов: предел и израсходованное ([ADR-0106](../../../../docs/adr/0106-rovnyy-temp-nomera-i-abonenty.md)). */
+  readonly distinct_per_hour: number | null;
+  readonly distinct_per_day: number | null;
+  readonly distinct_used_hour: number;
+  readonly distinct_used_day: number;
 }
 
 const WARMUP_DAYS = 14;
@@ -25,6 +30,10 @@ export function NumberPace({
   if (pace === undefined) return null;
   const dayFull = pace.per_day !== null && pace.used_day >= pace.per_day;
   const hourFull = pace.per_hour !== null && pace.used_hour >= pace.per_hour;
+  // Исчерпаны новые абоненты: перезванивать знакомым номер ещё может, новым — нет.
+  const distinctFull =
+    (pace.distinct_per_day !== null && pace.distinct_used_day >= pace.distinct_per_day) ||
+    (pace.distinct_per_hour !== null && pace.distinct_used_hour >= pace.distinct_per_hour);
   const limits = [
     pace.per_hour === null ? null : `в час до ${String(pace.per_hour)}`,
     pace.per_day === null ? null : `в сутки до ${String(pace.per_day)}`,
@@ -42,6 +51,17 @@ export function NumberPace({
       <span className={`${className} text-warn`} title={title}>
         {block ? '' : ' · '}
         {dayFull ? 'предел суток' : 'предел часа'}
+      </span>
+    );
+  }
+  if (distinctFull) {
+    return (
+      <span
+        className={`${className} text-warn`}
+        title="Номер обзвонил столько разных абонентов, сколько разрешено: новым звонят другие номера, знакомым он перезванивает"
+      >
+        {block ? '' : ' · '}
+        предел абонентов
       </span>
     );
   }

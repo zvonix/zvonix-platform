@@ -87,6 +87,7 @@ const SIP_RESPONSE: Readonly<Record<CallFailureReason, string>> = {
   no_tariff: '503 Service Unavailable',
   insufficient_funds: '402 Payment Required',
   limit_exceeded: '503 Service Unavailable',
+  recipient_limit: '503 Service Unavailable',
   no_sim_available: '503 Service Unavailable',
   gateway_unregistered: '503 Service Unavailable',
   recording_required: '503 Service Unavailable',

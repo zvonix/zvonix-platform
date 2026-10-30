@@ -15,6 +15,14 @@ import { DatabaseService } from '../../infra/database.service.js';
 
 export type FailureThresholdRow = typeof failureThresholds.$inferSelect;
 
+/** Партнёр, у которого порог отказов за окно снял несколько объектов (ADR-0106). */
+export interface SuspensionBurst {
+  readonly partnerId: Id<'partner'>;
+  readonly partnerName: string;
+  readonly sims: number;
+  readonly gateways: number;
+}
+
 /** Качество одного объекта за окно. */
 export interface QualityRow {
   readonly subjectId: string;
@@ -223,6 +231,41 @@ export class QualityRepository {
           sql`${shortCalls} * 10000 >= count(*) * ${rule.minShareBasisPoints}`,
         ),
       );
+  }
+
+  /**
+   * Партнёры, у которых порог отказов с `since` снял две SIM или два шлюза и больше (ADR-0106): признак, что оператор
+   * режет партнёра целиком. По текущему состоянию — снятое и уже включённое обратно не считается.
+   */
+  async suspensionBursts(since: Date): Promise<SuspensionBurst[]> {
+    const result = await this.db.execute<{
+      partner_id: Id<'partner'>;
+      partner_name: string;
+      sims: number;
+      gateways: number;
+    }>(sql`
+      select p.id as partner_id, p.name as partner_name,
+             count(*) filter (where s.kind = 'sim')::int as sims,
+             count(*) filter (where s.kind = 'gateway')::int as gateways
+        from (
+          select partner_id, 'sim' as kind from sim_cards
+           where status = 'throttled' and status_changed_at >= ${since.toISOString()}::timestamptz
+          union all
+          select partner_id, 'gateway' as kind from gateways
+           where status = 'suspended' and suspended_by = 'failure_threshold'
+             and status_changed_at >= ${since.toISOString()}::timestamptz
+        ) s
+        join partners p on p.id = s.partner_id
+       group by p.id, p.name
+      having count(*) >= 2
+       order by count(*) desc
+    `);
+    return result.rows.map((row) => ({
+      partnerId: row.partner_id,
+      partnerName: row.partner_name,
+      sims: row.sims,
+      gateways: row.gateways,
+    }));
   }
 
   // --- Пороги ---------------------------------------------------------------------

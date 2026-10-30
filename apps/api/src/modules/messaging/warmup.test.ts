@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { jitteredPauseMs, type Id } from '@zvonix/shared';
 import type { AccountLoad } from './messages.repository.js';
 import { accountReadyAt, effectiveLimits, isIdle, restOf, withRecommended } from './warmup.js';
 
@@ -11,6 +12,7 @@ const load = (overrides: Partial<AccountLoad>): AccountLoad => ({
   ...overrides,
 });
 const account = (overrides: Record<string, unknown> = {}) => ({
+  id: 'a1b2c3d4-0000-4000-8000-000000000001' as Id<'messengerAccount'>,
   warmupEnabled: false,
   warmupStartedAt: null,
   limitPerMinute: null,
@@ -162,12 +164,23 @@ describe('рекомендованная работа (ADR-0088)', () => {
     const last = new Date(NOW.getTime() - 10_000);
     const base = account({ lastUsedAt: last });
     const limited = withRecommended({ ...base, recommended: true }, profile);
+    const key = `${limited.id}:${last.toISOString()}`;
     expect(accountReadyAt(limited, load({}), NOW, options)?.getTime()).toBe(
-      last.getTime() + 20_000,
+      last.getTime() + jitteredPauseMs(20, key),
     );
     expect(
       accountReadyAt(limited, load({}), NOW, { paceSeconds: 60, withBacklog: false })?.getTime(),
-    ).toBe(last.getTime() + 60_000);
+    ).toBe(last.getTime() + jitteredPauseMs(60, key));
+  });
+
+  it('пауза с разбросом до половины, одна и та же при повторном расчёте (ADR-0106)', () => {
+    const last = new Date(NOW.getTime() - 1000);
+    const sender = account({ lastUsedAt: last });
+    const options60 = { paceSeconds: 60, withBacklog: false };
+    const ready = accountReadyAt(sender, load({}), NOW, options60)?.getTime() ?? 0;
+    expect(ready - last.getTime()).toBeGreaterThanOrEqual(60_000);
+    expect(ready - last.getTime()).toBeLessThanOrEqual(90_000);
+    expect(accountReadyAt(sender, load({}), NOW, options60)?.getTime()).toBe(ready);
   });
 });
 

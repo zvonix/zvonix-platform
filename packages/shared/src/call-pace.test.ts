@@ -3,9 +3,12 @@ import {
   CALL_WARMUP_DAYS,
   CALL_WARMUP_IDLE_DAYS,
   callPace,
+  callRestingUntil,
+  callRestWindowMs,
   callWarmupDailyLimit,
   callWarmupDay,
 } from './call-pace.js';
+import { jitteredPauseMs, paceJitter } from './pace-jitter.js';
 
 const DAY = 86_400_000;
 const now = new Date('2026-10-29T12:00:00Z');
@@ -37,26 +40,128 @@ describe('прогрев номера', () => {
   });
 
   it('пределы: рекомендованные после прогрева, тройная доля при прогреве, × число номеров транка', () => {
-    const settings = { warmupEnabled: true, perHour: 20, perDay: 150 };
-    expect(callPace(settings, null)).toEqual({ perHour: 20, perDay: 150, warmupDay: null });
-    expect(callPace(settings, 0)).toEqual({ perHour: 2, perDay: 10, warmupDay: 0 });
-    expect(callPace(settings, 6)).toEqual({ perHour: 8, perDay: 60, warmupDay: 6 });
-    expect(callPace(settings, 0, 5)).toEqual({ perHour: 10, perDay: 50, warmupDay: 0 });
-    expect(callPace({ ...settings, warmupEnabled: false }, 0)).toEqual({
+    const settings = {
+      warmupEnabled: true,
+      perHour: 20,
+      perDay: 150,
+      pauseSeconds: 30,
+      warmupPauseSeconds: 90,
+      distinctPerHour: 15,
+      distinctPerDay: 100,
+    };
+    const common = { numbers: 1, distinctPerHour: 15, distinctPerDay: 100 };
+    expect(callPace(settings, null)).toEqual({
+      ...common,
       perHour: 20,
       perDay: 150,
       warmupDay: null,
+      pauseSeconds: 30,
     });
-    expect(callPace({ warmupEnabled: false, perHour: 0, perDay: 0 }, null)).toEqual({
-      perHour: null,
-      perDay: null,
-      warmupDay: null,
-    });
-    // Без рекомендованного «в сутки» прогрев растёт к запасному потолку, час — по доле.
-    expect(callPace({ warmupEnabled: true, perHour: 0, perDay: 0 }, 0)).toEqual({
+    expect(callPace(settings, 0)).toEqual({
+      ...common,
       perHour: 2,
       perDay: 10,
       warmupDay: 0,
+      pauseSeconds: 90,
     });
+    expect(callPace(settings, 6)).toMatchObject({ perHour: 8, perDay: 60, warmupDay: 6 });
+    expect(callPace(settings, 0, 5)).toEqual({
+      numbers: 5,
+      distinctPerHour: 75,
+      distinctPerDay: 500,
+      perHour: 10,
+      perDay: 50,
+      warmupDay: 0,
+      pauseSeconds: 90,
+    });
+    expect(callPace({ ...settings, warmupEnabled: false }, 0)).toMatchObject({
+      perHour: 20,
+      perDay: 150,
+      warmupDay: null,
+      pauseSeconds: 30,
+    });
+    const off = {
+      warmupEnabled: false,
+      perHour: 0,
+      perDay: 0,
+      pauseSeconds: 0,
+      warmupPauseSeconds: 0,
+      distinctPerHour: 0,
+      distinctPerDay: 0,
+    };
+    expect(callPace(off, null)).toEqual({
+      numbers: 1,
+      perHour: null,
+      perDay: null,
+      warmupDay: null,
+      pauseSeconds: null,
+      distinctPerHour: null,
+      distinctPerDay: null,
+    });
+    // Без рекомендованного «в сутки» прогрев растёт к запасному потолку, час — по доле; пауза прогрева — своя.
+    expect(callPace({ ...off, warmupEnabled: true, warmupPauseSeconds: 90 }, 0)).toMatchObject({
+      perHour: 2,
+      perDay: 10,
+      warmupDay: 0,
+      pauseSeconds: 90,
+    });
+    // Пауза прогрева не короче обычной.
+    expect(callPace({ ...settings, warmupPauseSeconds: 10 }, 0).pauseSeconds).toBe(30);
+  });
+});
+
+describe('пауза номера после вызова (ADR-0106)', () => {
+  const at = new Date('2026-10-30T12:00:00Z');
+  const ended = (id: string, secondsAgo: number) => ({
+    id,
+    endedAt: new Date(at.getTime() - secondsAgo * 1000),
+  });
+
+  it('разброс — до половины паузы и один и тот же для одного ключа', () => {
+    const keys = Array.from({ length: 200 }, (_, index) => `call-${String(index)}`);
+    const shares = keys.map(paceJitter);
+    expect(Math.min(...shares)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...shares)).toBeLessThan(1);
+    // Не одна точка: промежутки должны различаться.
+    expect(new Set(shares.map((share) => Math.round(share * 10))).size).toBeGreaterThan(5);
+    expect(paceJitter('call-7')).toBe(paceJitter('call-7'));
+    for (const key of keys) {
+      const pause = jitteredPauseMs(30, key);
+      expect(pause).toBeGreaterThanOrEqual(30_000);
+      expect(pause).toBeLessThanOrEqual(45_000);
+    }
+  });
+
+  it('SIM отдыхает после конца вызова, транк — когда отдыхают все его номера', () => {
+    const sim = { pauseSeconds: 30, numbers: 1 };
+    expect(callRestingUntil(sim, [ended('a', 5)], at)).not.toBeNull();
+    // Пауза кончилась даже с самым большим разбросом.
+    expect(callRestingUntil(sim, [ended('a', 46)], at)).toBeNull();
+    expect(callRestingUntil({ ...sim, pauseSeconds: null }, [ended('a', 1)], at)).toBeNull();
+
+    const trunk = { pauseSeconds: 30, numbers: 2 };
+    expect(callRestingUntil(trunk, [ended('a', 5)], at)).toBeNull();
+    const until = callRestingUntil(trunk, [ended('a', 5), ended('b', 10)], at);
+    // Отдых до освобождения первого из мест — с учётом разброса каждого вызова.
+    expect(until?.getTime()).toBe(
+      Math.min(
+        at.getTime() - 5_000 + jitteredPauseMs(30, 'a'),
+        at.getTime() - 10_000 + jitteredPauseMs(30, 'b'),
+      ),
+    );
+  });
+
+  it('окно поиска прошлых вызовов покрывает самую длинную паузу с разбросом', () => {
+    expect(
+      callRestWindowMs({
+        warmupEnabled: true,
+        perHour: 0,
+        perDay: 0,
+        pauseSeconds: 30,
+        warmupPauseSeconds: 90,
+        distinctPerHour: 0,
+        distinctPerDay: 0,
+      }),
+    ).toBe(135_000);
   });
 });

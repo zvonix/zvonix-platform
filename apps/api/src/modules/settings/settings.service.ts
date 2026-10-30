@@ -138,6 +138,19 @@ export class SettingsService {
       warmupEnabled: this.flag(values, 'calls.warmup_enabled'),
       perHour: this.number(values, 'calls.recommended_per_hour'),
       perDay: this.number(values, 'calls.recommended_per_day'),
+      pauseSeconds: this.number(values, 'calls.pause_seconds'),
+      warmupPauseSeconds: this.number(values, 'calls.warmup_pause_seconds'),
+      distinctPerHour: this.number(values, 'calls.distinct_per_hour'),
+      distinctPerDay: this.number(values, 'calls.distinct_per_day'),
+    };
+  }
+
+  /** Предел звонков клиента одному абоненту (ADR-0106); 0 — без предела. */
+  async callRecipientLimits(): Promise<{ readonly perHour: number; readonly perDay: number }> {
+    const values = await this.values();
+    return {
+      perHour: this.number(values, 'calls.recipient_per_hour'),
+      perDay: this.number(values, 'calls.recipient_per_day'),
     };
   }
 

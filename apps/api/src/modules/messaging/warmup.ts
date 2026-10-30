@@ -1,4 +1,5 @@
 import {
+  jitteredPauseMs,
   spreadHourlyLimit,
   WARMUP_IDLE_DAYS,
   WARMUP_DAYS,
@@ -115,13 +116,14 @@ const RETRY_MS = { minute: 10_000, hour: 120_000, day: 300_000 } as const;
 
 /**
  * Когда аккаунт сможет отправить следующее сообщение; `undefined` — может сейчас. Проверяются по порядку: пауза
- * здоровья, пауза между сообщениями, лимит в минуту (тариф), в час и в сутки (прогрев, ADR-0078).
+ * здоровья, пауза между сообщениями (с разбросом до половины), лимит в минуту (тариф), в час и в сутки (прогрев, ADR-0078).
  * `backlog` — сколько сообщений уже стоит за аккаунтом: при приёме они считаются отправленными (запас под новое),
  * при отправке — нет, ведь ждущее сообщение само одно из них.
  */
 export function accountReadyAt(
   account: Pick<
     MessengerAccountRow,
+    | 'id'
     | 'warmupEnabled'
     | 'warmupStartedAt'
     | 'limitPerDay'
@@ -139,7 +141,11 @@ export function accountReadyAt(
     return account.pausedUntil;
   const pace = Math.max(options.paceSeconds, account.recommendedPaceSeconds ?? 0);
   if (pace > 0 && account.lastUsedAt !== null) {
-    const ready = account.lastUsedAt.getTime() + pace * 1000;
+    // Пауза с разбросом до половины (ADR-0106): одинаковые промежутки — признак программы. Доля своя у каждой отправки,
+    // но одна и та же при приёме и при отправке — она выводится из аккаунта и времени последней отправки.
+    const ready =
+      account.lastUsedAt.getTime() +
+      jitteredPauseMs(pace, `${account.id}:${account.lastUsedAt.toISOString()}`);
     if (ready > at) return new Date(ready);
   }
   const queue = options.withBacklog ? load.backlog : 0;

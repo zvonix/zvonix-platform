@@ -244,6 +244,12 @@ export class AlertsService {
     }
 
     try {
+      alerts.push(...(await this.suspensionBurstAlerts(now)));
+    } catch (cause) {
+      this.logger.error('Тревоги: снятые за отказы SIM партнёров не прочитаны', cause);
+    }
+
+    try {
       alerts.push(...(await this.certificateAlerts(now)));
     } catch (cause) {
       this.logger.error('Тревоги: сертификат не прочитан', cause);
@@ -384,6 +390,29 @@ export class AlertsService {
         'Ограниченный аккаунт не может писать тем, у кого он не в контактах, — площадка не отдаёт ему сообщения, пока MAX не снимет ограничение. Сразу несколько — признак, что аккаунты связаны (один телефон, одна сеть) или поток для них слишком большой. Не переподключайте их; проверьте раздел «Сообщения MAX».',
       ].join('\n'),
     }));
+  }
+
+  /**
+   * У партнёра за час порог отказов снял две SIM или два шлюза и больше (ADR-0106): оператор, похоже, режет его номера
+   * целиком — как пачка ограничений аккаунтов MAX.
+   */
+  private async suspensionBurstAlerts(now: Date): Promise<Alert[]> {
+    const bursts = await this.quality.suspensionBursts(new Date(now.getTime() - HOUR_MS));
+    return bursts.map((burst) => {
+      const parts = [
+        burst.sims > 0 ? `SIM: ${String(burst.sims)}` : undefined,
+        burst.gateways > 0 ? `шлюзов и SIP-провайдеров: ${String(burst.gateways)}` : undefined,
+      ].filter((part) => part !== undefined);
+      return {
+        kind: `alert_sims_suspended:${burst.partnerId}`,
+        subject: `Zvonix: у партнёра ${burst.partnerName} за час сняты за отказы ${String(burst.sims + burst.gateways)} номера`,
+        body: [
+          `За последний час порог отказов снял у партнёра ${burst.partnerName}: ${parts.join(', ')}.`,
+          '',
+          'Сразу несколько — признак, что оператор начал блокировать его номера: поток с них слишком частый или номера новые. Снятые начнут прогрев заново. Проверьте раздел «Качество» и пределы в «Настройки площадки» → «Звонки»; включайте номера обратно после разговора с партнёром.',
+        ].join('\n'),
+      };
+    });
   }
 
   /** Заявки на пополнение, которые ждут решения администратора дольше `PAYMENT_WAIT_MINUTES`. */

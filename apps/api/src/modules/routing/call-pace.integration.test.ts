@@ -1,5 +1,5 @@
 /**
- * Прогрев и рекомендованная работа номера (ADR-0105).
+ * Прогрев и рекомендованная работа номера (ADR-0105), пауза, разные абоненты, перезвон и предел абоненту (ADR-0106).
  *
  * На реальной базе: попытки считаются по таблице вызовов, и предел пересчитывается в той же транзакции, что
  * занимает номер. Фон остальных наборов — без предела (`resetDatabase`), здесь он включается настройками.
@@ -67,6 +67,7 @@ async function createUser(role: 'client' | 'partner' | 'support'): Promise<strin
 interface Partner {
   readonly id: string;
   readonly simId: string;
+  readonly gatewayId: string;
 }
 
 /** Подтверждённый партнёр со шлюзом, портом, активной SIM и ценой. */
@@ -109,7 +110,44 @@ async function createPartner(operatorId: string, concurrency = 4): Promise<Partn
     effectiveFrom: '2020-01-01T00:00:00.000Z',
   });
 
-  return { id: partner, simId: sim };
+  return { id: partner, simId: sim, gatewayId: gateway };
+}
+
+/** Ещё одна SIM того же партнёра в том же шлюзе: та же цена, тот же партнёр — одна группа перебора. */
+async function addSim(partner: Partner, operatorId: string, portNumber: number): Promise<string> {
+  const port = (await post(`/gateways/${partner.gatewayId}/ports`, { portNumber })).json<{
+    port: { id: string };
+  }>().port.id;
+  const sim = (
+    await post('/sim-cards', { partnerId: partner.id, operatorId, msisdn: nextMsisdn() })
+  ).json<{ sim: { id: string } }>().sim.id;
+  await post(`/sim-cards/${sim}/status`, { status: 'active' });
+  await post(`/sim-cards/${sim}/concurrency`, { maxConcurrentCalls: 4 });
+  await post(`/gateway-ports/${port}/sim`, { simCardId: sim });
+  return sim;
+}
+
+/** Ещё один абонент того же оператора. */
+async function subscriber(operator: string): Promise<string> {
+  const destination = nextMsisdn();
+  await withDatabase(async (execute) => {
+    await execute(sql`
+      insert into number_resolutions (id, msisdn, operator_id, source, resolved_at, expires_at)
+      values (gen_random_uuid()::text::uuid, ${destination}, ${operator}, 'manual', now(), now() + interval '30 days')
+    `);
+  });
+  return destination;
+}
+
+/** Вызов закончился `secondsAgo` секунд назад: так проверяется пауза после конца. */
+async function endCall(callId: string, secondsAgo = 0) {
+  await withDatabase(async (execute) => {
+    await execute(sql`
+      update calls set status = 'completed', answered_at = started_at,
+                       ended_at = now() - make_interval(secs => ${secondsAgo}), duration_seconds = 0
+       where external_id = ${callId}
+    `);
+  });
 }
 
 interface Scenario {
@@ -214,12 +252,25 @@ afterAll(async () => {
   await app?.close();
 });
 
+/** Всё про номер выключено — каждый тест включает только своё. */
+const PACE_OFF = {
+  'calls.warmup_enabled': false,
+  'calls.recommended_per_hour': 0,
+  'calls.recommended_per_day': 0,
+  'calls.pause_seconds': 0,
+  'calls.warmup_pause_seconds': 0,
+  'calls.distinct_per_hour': 0,
+  'calls.distinct_per_day': 0,
+  'calls.recipient_per_hour': 0,
+  'calls.recipient_per_day': 0,
+};
+
 async function settings(values: Record<string, unknown>) {
   const response = await api().inject({
     method: 'PUT',
     url: '/settings',
     headers: auth(),
-    payload: { settings: values },
+    payload: { settings: { ...PACE_OFF, ...values } },
   });
   expect(response.statusCode).toBe(200);
 }
@@ -230,6 +281,9 @@ interface SimPace {
   per_day: number | null;
   used_hour: number;
   used_day: number;
+  distinct_per_hour?: number | null;
+  distinct_used_hour?: number;
+  resting_until?: string | null;
 }
 
 async function paceOf(partnerId: string, simId: string): Promise<SimPace | undefined> {
@@ -284,7 +338,13 @@ describe('прогрев и рекомендованная работа номе
     expect(third.reason).toBe('limit_exceeded');
 
     const pace = await paceOf(fresh.id, fresh.simId);
-    expect(pace).toEqual({ warmup_day: 1, per_hour: 2, per_day: 10, used_hour: 2, used_day: 2 });
+    expect(pace).toMatchObject({
+      warmup_day: 1,
+      per_hour: 2,
+      per_day: 10,
+      used_hour: 2,
+      used_day: 2,
+    });
 
     // Появился сосед — вызов уходит к нему, а не отказывается.
     const neighbour = await createPartner(operator);
@@ -347,6 +407,128 @@ describe('прогрев и рекомендованная работа номе
       per_day: null,
       used_hour: 4,
       used_day: 4,
+      distinct_per_hour: null,
+      distinct_per_day: null,
+      distinct_used_hour: 1,
+      distinct_used_day: 1,
+      resting_until: null,
+    });
+  });
+});
+
+describe('ровный темп номера и абоненты (ADR-0106)', () => {
+  it('пауза после конца: вызов уходит на соседа, отдыхают все — отказ, пауза прошла — номер звонит', async () => {
+    await settings({ 'calls.pause_seconds': 30 });
+    const { operator, channel, destination } = await scenario();
+    const one = await createPartner(operator);
+    const two = await createPartner(operator);
+
+    const first = await route(channel, destination);
+    expect(first.outcome).toBe('routed');
+    const firstSim = first.candidates[0]?.sim_card_id ?? '';
+    expect([one.simId, two.simId]).toContain(firstSim);
+    await endCall(first.callId);
+
+    const second = await route(channel, destination);
+    expect(second.outcome).toBe('routed');
+    expect(second.candidates.map((candidate) => candidate.sim_card_id)).not.toContain(firstSim);
+    await endCall(second.callId);
+
+    const third = await route(channel, destination);
+    expect(third.outcome).toBe('rejected');
+    expect(third.reason).toBe('limit_exceeded');
+    const resting = await paceOf(firstSim === one.simId ? one.id : two.id, firstSim);
+    expect(resting?.resting_until).not.toBeNull();
+
+    // Пауза с самым большим разбросом — 45 с: через 50 с номер свободен.
+    await endCall(first.callId, 50);
+    const fourth = await route(channel, destination);
+    expect(fourth.outcome).toBe('routed');
+    expect(fourth.candidates[0]?.sim_card_id).toBe(firstSim);
+  });
+
+  it('разные абоненты: новый сверх предела — отказ, знакомому номер звонит', async () => {
+    await settings({ 'calls.distinct_per_hour': 2 });
+    const { operator, channel, destination } = await scenario();
+    const only = await createPartner(operator);
+    const second = await subscriber(operator);
+    const third = await subscriber(operator);
+
+    expect((await route(channel, destination)).outcome).toBe('routed');
+    expect((await route(channel, second)).outcome).toBe('routed');
+    expect((await route(channel, third)).reason).toBe('limit_exceeded');
+    // Перезвон знакомому нового абонента не добавляет.
+    expect((await route(channel, destination)).outcome).toBe('routed');
+    expect(await paceOf(only.id, only.simId)).toMatchObject({
+      distinct_per_hour: 2,
+      distinct_used_hour: 2,
+      used_hour: 3,
+    });
+  });
+
+  it('перезвон — с того же номера, хотя по очереди был бы другой', async () => {
+    await settings({});
+    const { operator, channel, destination } = await scenario();
+    const partner = await createPartner(operator);
+    const otherSim = await addSim(partner, operator, 2);
+
+    const first = await route(channel, destination);
+    const used = first.candidates[0]?.sim_card_id;
+    expect([partner.simId, otherSim]).toContain(used);
+    // По давности следующим шёл бы другой номер — перезвон возвращает того, кто уже звонил.
+    const again = await route(channel, destination);
+    expect(again.candidates[0]?.sim_card_id).toBe(used);
+    // Новому абоненту — обычный порядок: давность отдаёт его другому номеру.
+    const fresh = await route(channel, await subscriber(operator));
+    expect(fresh.candidates[0]?.sim_card_id).not.toBe(used);
+  });
+
+  it('предел звонков клиента одному абоненту: сверх — recipient_limit, другому можно', async () => {
+    await settings({ 'calls.recipient_per_hour': 2, 'calls.recipient_per_day': 12 });
+    const { operator, channel, destination } = await scenario();
+    await createPartner(operator);
+
+    expect((await route(channel, destination)).outcome).toBe('routed');
+    expect((await route(channel, destination)).outcome).toBe('routed');
+    const third = await route(channel, destination);
+    expect(third.outcome).toBe('rejected');
+    expect(third.reason).toBe('recipient_limit');
+    expect(third.sip_response).toBe('503 Service Unavailable');
+    expect((await route(channel, await subscriber(operator))).outcome).toBe('routed');
+  });
+
+  it('отказ площадки после занятия номера попыткой не считается', async () => {
+    await settings({ 'calls.recipient_per_hour': 1, 'calls.distinct_per_hour': 1 });
+    const { operator, channel, destination } = await scenario();
+    await createPartner(operator);
+    const first = await route(channel, destination);
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        update calls set status = 'failed', failure_reason = 'insufficient_funds', ended_at = now()
+         where external_id = ${first.callId}
+      `);
+    });
+    expect((await route(channel, destination)).outcome).toBe('routed');
+    expect((await route(channel, await subscriber(operator))).reason).toBe('limit_exceeded');
+  });
+
+  it('тревога: у партнёра за час порог снял две SIM', async () => {
+    const { QualityService } = await import('../telephony/quality.service.js');
+    const { operator } = await scenario();
+    const partner = await createPartner(operator);
+    const another = await addSim(partner, operator, 2);
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        update sim_cards set status = 'throttled', status_changed_at = now()
+         where id in (${partner.simId}, ${another})
+      `);
+    });
+    const bursts = await api()
+      .get(QualityService)
+      .suspensionBursts(new Date(Date.now() - 3_600_000));
+    expect(bursts.find((burst) => burst.partnerId === partner.id)).toMatchObject({
+      sims: 2,
+      gateways: 0,
     });
   });
 });

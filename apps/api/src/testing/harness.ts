@@ -107,7 +107,13 @@ export async function resetDatabase(url = TEST_DATABASE_URL): Promise<void> {
       insert into platform_settings (id, key, value)
       values (gen_random_uuid(), 'calls.warmup_enabled', 'false'),
              (gen_random_uuid(), 'calls.recommended_per_hour', '0'),
-             (gen_random_uuid(), 'calls.recommended_per_day', '0')
+             (gen_random_uuid(), 'calls.recommended_per_day', '0'),
+             (gen_random_uuid(), 'calls.pause_seconds', '0'),
+             (gen_random_uuid(), 'calls.warmup_pause_seconds', '0'),
+             (gen_random_uuid(), 'calls.distinct_per_hour', '0'),
+             (gen_random_uuid(), 'calls.distinct_per_day', '0'),
+             (gen_random_uuid(), 'calls.recipient_per_hour', '0'),
+             (gen_random_uuid(), 'calls.recipient_per_day', '0')
     `);
   } finally {
     await handle.close();

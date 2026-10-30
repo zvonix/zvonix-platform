@@ -250,6 +250,7 @@ Basic поверх TLS: имя — идентификатор ключа, пар
 | `operator_not_allowed` — оператор номера не разрешён каналом | `respond 403 Forbidden` | 403 |
 | `insufficient_funds` — овердрафт исчерпан | `respond 402 Payment Required` | 402 |
 | `limit_exceeded` — окно лимита исчерпано | `respond 503 Service Unavailable` | 503 |
+| `recipient_limit` — клиент слишком часто звонит этому абоненту ([ADR-0106](../adr/0106-rovnyy-temp-nomera-i-abonenty.md)) | `respond 503 Service Unavailable` | 503 |
 | `no_sim_available` — нет свободной SIM нужного оператора | `respond 503 Service Unavailable` | 503 |
 | `recording_required` — подходят только шлюзы без записи | `respond 503 Service Unavailable` | 503 |
 | `no_coverage` — регион номера не покрыт ни одним партнёром | `respond 503 Service Unavailable` | 503 |

@@ -393,6 +393,7 @@ export const FAILURE_REASON_NAME: Record<CallFailureReason, string> = {
   no_tariff: 'Нет цены или правила наценки',
   insufficient_funds: 'Не хватает денег',
   limit_exceeded: 'Исчерпан лимит',
+  recipient_limit: 'Слишком часто одному абоненту',
   no_sim_available: 'Нет свободной SIM нужного оператора',
   gateway_unregistered: 'Шлюз не на связи с узлом',
   recording_required: 'Нужна запись, а подходят только шлюзы без неё',
@@ -417,6 +418,8 @@ export const FAILURE_REASON_FIX: Record<CallFailureReason, string> = {
   insufficient_funds:
     'Остатка и разрешённого минуса не хватает даже на резерв под предельную длительность. Пополнить счёт или увеличить разрешённый минус.',
   limit_exceeded: 'Исчерпано окно лимита клиента или канала. Ждать конца окна либо поднять предел.',
+  recipient_limit:
+    'Клиент звонил этому абоненту чаще, чем разрешено за час или сутки: частые звонки абонент помечает спамом, и номера блокируют. Предел — «Настройки площадки» → «Звонки».',
   no_sim_available:
     'Годных SIM этого оператора нет: все заняты, отключены или порог неудач снял их с маршрутизации. Проверить SIM партнёров и качество терминации.',
   gateway_unregistered:
@@ -537,6 +540,7 @@ export const CLIENT_FAILURE_REASON_NAME: Record<ClientFailureReason, string> = {
   operator_not_allowed: 'Оператор не разрешён линией',
   insufficient_funds: 'Не хватает денег',
   limit_exceeded: 'Исчерпан лимит',
+  recipient_limit: 'Слишком часто одному абоненту',
   requirements_unmet: 'Никто не подошёл под ваши требования',
   platform: 'Отказ на нашей стороне',
 };
@@ -553,6 +557,8 @@ export const CLIENT_FAILURE_REASON_FIX: Record<ClientFailureReason, string> = {
   insufficient_funds:
     'Остатка и разрешённого минуса не хватило даже на резерв под вызов. Пополните счёт.',
   limit_exceeded: 'Исчерпано окно лимита. Счётчик обнулится в начале следующего окна.',
+  recipient_limit:
+    'Этому абоненту уже звонили слишком часто за последний час или сутки. Частые звонки абонент помечает спамом — повторите позже.',
   requirements_unmet:
     'На это направление нет партнёра, подходящего под ваши требования (способ, записи, предел цены). Смягчите их в разделе «Приоритеты».',
   platform:
