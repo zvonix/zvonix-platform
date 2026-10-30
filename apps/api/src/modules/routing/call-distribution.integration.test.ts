@@ -136,6 +136,14 @@ async function createChannel(
     idempotencyKey: unique('deposit'),
     description: 'Пополнение под проверку',
   });
+  return { channel, destination: await subscriber(operatorId) };
+}
+
+/**
+ * Новый абонент оператора. Распределение проверяется на разных абонентах: повторный вызов тому же уходит на карту,
+ * которая ему уже звонила (перезвон, ADR-0106), — в обход круга.
+ */
+async function subscriber(operatorId: string): Promise<string> {
   const destination = nextMsisdn();
   await withDatabase(async (execute) => {
     await execute(sql`
@@ -143,7 +151,7 @@ async function createChannel(
       values (gen_random_uuid()::text::uuid, ${destination}, ${operatorId}, 'manual', now(), now() + interval '30 days')
     `);
   });
-  return { channel, destination };
+  return destination;
 }
 
 async function route(channel: string, destination: string): Promise<string> {
@@ -244,13 +252,15 @@ describe('распределение звонков между картами п
 
     const chosen = [
       await route(channel, destination),
-      await route(channel, destination),
-      await route(channel, destination),
+      await route(channel, await subscriber(operator)),
+      await route(channel, await subscriber(operator)),
     ];
     expect(new Set(chosen).size).toBe(3);
     // Четвёртый вызов — снова на самую давнюю карту.
-    expect(await route(channel, destination)).toBe(chosen[0]);
+    expect(await route(channel, await subscriber(operator))).toBe(chosen[0]);
     expect(partner.sims).toEqual(expect.arrayContaining(chosen));
+    // Перезвон первому абоненту — с карты, которая ему уже звонила, хотя по кругу очередь другой (ADR-0106).
+    expect(await route(channel, destination)).toBe(chosen[0]);
   });
 
   it('«по очереди»: вызовы идут на карту с наименьшим номером в списке, пока она принимает', async () => {
@@ -286,7 +296,7 @@ describe('распределение звонков между картами п
 
     await setSim(heavy, { routedSecondsAgo: 30 });
     await setSim(light, { routedSecondsAgo: 300 });
-    expect(await route(channel, destination)).toBe(light); // 90 против 300
+    expect(await route(channel, await subscriber(operator))).toBe(light); // 90 против 300
   });
 
   it('вызов отмечает карту: у выбранной last_routed_at заполнено, у остальных нет', async () => {

@@ -6,6 +6,8 @@
  * не публикуются, поэтому числа — осторожная оценка; площадка меняет их в настройках.
  */
 
+import { jitteredPauseMs, PACE_JITTER_SHARE } from './pace-jitter.js';
+
 /** Первая неделя по суткам (с нуля): столько попыток за скользящие сутки разрешено новому номеру. */
 export const CALL_WARMUP_FIRST_WEEK = [10, 15, 20, 30, 40, 50, 60] as const;
 
@@ -71,6 +73,13 @@ export interface CallPaceSettings {
   readonly warmupEnabled: boolean;
   readonly perHour: number;
   readonly perDay: number;
+  /** Пауза номера после конца вызова, секунд ([ADR-0106](../../../docs/adr/0106-rovnyy-temp-nomera-i-abonenty.md)). */
+  readonly pauseSeconds: number;
+  /** То же, пока номер на прогреве. */
+  readonly warmupPauseSeconds: number;
+  /** Разных абонентов на номер за скользящие час и сутки. */
+  readonly distinctPerHour: number;
+  readonly distinctPerDay: number;
 }
 
 /** Пределы номера сейчас: `null` — без предела. */
@@ -79,11 +88,20 @@ export interface CallPace {
   readonly perDay: number | null;
   /** Сутки прогрева (с нуля) или `null` — прогрет либо прогрев выключен. */
   readonly warmupDay: number | null;
+  /** Пауза после конца вызова, секунд, без разброса; `null` — без паузы. */
+  readonly pauseSeconds: number | null;
+  /** Сколько вызовов номера может «отдыхать» одновременно: у SIM один, у транка — число его номеров. */
+  readonly numbers: number;
+  readonly distinctPerHour: number | null;
+  readonly distinctPerDay: number | null;
 }
+
+const positive = (value: number): number | null => (value > 0 ? value : null);
 
 /**
  * Пределы номера: при прогреве — сутки по кривой и тройная часовая доля (не меньше 2 и не больше рекомендованного
- * «в час»: вызовы такси идут волнами), после — рекомендованные. Всё умножается на число номеров транка.
+ * «в час»: вызовы идут волнами) и пауза прогрева, после — рекомендованные. Всё, кроме паузы, умножается на число
+ * номеров транка: пауза у каждого номера своя, а их число задаёт `numbers`.
  */
 export function callPace(
   settings: CallPaceSettings,
@@ -91,16 +109,59 @@ export function callPace(
   numbers = 1,
 ): CallPace {
   const scale = (value: number | null): number | null => (value === null ? null : value * numbers);
-  const perHour = settings.perHour > 0 ? settings.perHour : null;
-  const perDay = settings.perDay > 0 ? settings.perDay : null;
+  const perHour = positive(settings.perHour);
+  const perDay = positive(settings.perDay);
+  const common = {
+    numbers,
+    distinctPerHour: scale(positive(settings.distinctPerHour)),
+    distinctPerDay: scale(positive(settings.distinctPerDay)),
+  };
   if (!settings.warmupEnabled || warmupDay === null) {
-    return { perHour: scale(perHour), perDay: scale(perDay), warmupDay: null };
+    return {
+      ...common,
+      perHour: scale(perHour),
+      perDay: scale(perDay),
+      warmupDay: null,
+      pauseSeconds: positive(settings.pauseSeconds),
+    };
   }
   const daily = callWarmupDailyLimit(warmupDay, perDay ?? CALL_WARMUP_FALLBACK_CEILING);
   const spread = Math.max(2, Math.ceil((daily * 3) / 24));
   return {
+    ...common,
     perHour: scale(perHour === null ? spread : Math.min(perHour, spread)),
     perDay: scale(daily),
     warmupDay,
+    // Пауза прогрева не короче обычной: выключенная обычная прогрев не отменяет.
+    pauseSeconds: positive(Math.max(settings.warmupPauseSeconds, settings.pauseSeconds)),
   };
+}
+
+/** Самая длинная пауза с разбросом — глубже прошлые вызовы для паузы не ищутся. */
+export function callRestWindowMs(settings: CallPaceSettings): number {
+  return Math.ceil(
+    Math.max(settings.pauseSeconds, settings.warmupPauseSeconds, 0) *
+      1000 *
+      (1 + PACE_JITTER_SHARE),
+  );
+}
+
+/**
+ * До какого времени номер отдыхает после прошлых вызовов: каждый закончившийся вызов держит одно место на свою паузу
+ * с разбросом по идентификатору вызова. Мест у номера `pace.numbers`; заняты все — номер отдыхает до освобождения
+ * первого. `null` — свободен.
+ */
+export function callRestingUntil(
+  pace: Pick<CallPace, 'pauseSeconds' | 'numbers'>,
+  ended: readonly { readonly id: string; readonly endedAt: Date }[],
+  now: Date,
+): Date | null {
+  if (pace.pauseSeconds === null) return null;
+  const pauseSeconds = pace.pauseSeconds;
+  const resting = ended
+    .map((call) => call.endedAt.getTime() + jitteredPauseMs(pauseSeconds, call.id))
+    .filter((until) => until > now.getTime())
+    .sort((left, right) => left - right);
+  if (resting.length < pace.numbers) return null;
+  return new Date(resting[resting.length - pace.numbers] ?? now.getTime());
 }

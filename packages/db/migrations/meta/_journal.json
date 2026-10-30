@@ -610,6 +610,13 @@
       "when": 1793289806436,
       "tag": "0086_progrev_nomerov",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1793344790656,
+      "tag": "0087_rovnyy_temp_nomera",
+      "breakpoints": true
     }
   ]
 }

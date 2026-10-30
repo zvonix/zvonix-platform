@@ -38,7 +38,15 @@ export interface ChannelActivity {
 export interface NumberAttempts {
   readonly hour: number;
   readonly day: number;
+  /** Разных абонентов за час и сутки (ADR-0106). */
+  readonly distinctHour: number;
+  readonly distinctDay: number;
+  /** Звонил ли номер спрошенному абоненту за час и сутки. */
+  readonly calledHour: boolean;
+  readonly calledDay: boolean;
   readonly lastAt: Date | null;
+  /** Вызовы, закончившиеся в окне паузы. */
+  readonly ended: readonly { readonly id: string; readonly endedAt: Date }[];
 }
 export type CallRow = typeof calls.$inferSelect;
 
@@ -250,46 +258,142 @@ export class CallRepository {
   }
 
   /**
-   * Попытки номеров — SIM или транков — за скользящие час и сутки и последняя попытка
-   * ([ADR-0105](../../../../../docs/adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)). Считаются все попытки, а не
-   * отвеченные: оператор видит попытку. Последняя — `limit 1` по индексу, счёт — только за сутки.
+   * Попытки номеров — SIM или транков — за скользящие час и сутки
+   * ([ADR-0105](../../../../../docs/adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md),
+   * [ADR-0106](../../../../../docs/adr/0106-rovnyy-temp-nomera-i-abonenty.md)): сколько попыток и разных абонентов,
+   * звонил ли номер абоненту `destination`, последняя попытка и вызовы, закончившиеся позже `restSince` (пауза).
+   *
+   * Считаются все попытки, ушедшие в сеть, а не отвеченные: оператор видит попытку. Вызов, отклонённый площадкой уже
+   * после занятия номера (`failure_reason` заполнен), в сеть не уходил и не считается. Последняя — `limit 1` по
+   * индексу, счёт — только за сутки.
    */
   async numberAttempts(
     by: 'sim' | 'gateway',
     ids: readonly string[],
     now: Date,
+    options: { readonly destination?: string | undefined; readonly restSince?: Date | undefined },
     executor: Executor = this.db,
   ): Promise<Map<string, NumberAttempts>> {
     const attempts = new Map<string, NumberAttempts>();
     if (ids.length === 0) return attempts;
+    const unique = [...new Set(ids)];
     const column = sql.raw(by === 'sim' ? 'sim_card_id' : 'gateway_id');
     const hour = new Date(now.getTime() - 3_600_000).toISOString();
     const day = new Date(now.getTime() - 86_400_000).toISOString();
+    const destination = options.destination ?? null;
     const result = await executor.execute<{
       id: string;
       hour: string;
       day: string;
+      distinct_hour: string;
+      distinct_day: string;
+      called_hour: boolean | null;
+      called_day: boolean | null;
       last_at: string | Date | null;
     }>(sql`
       select ids.id,
-             (select count(*) from calls h
-               where h.${column} = ids.id and h.started_at > ${hour}::timestamptz)::text as hour,
-             (select count(*) from calls d
-               where d.${column} = ids.id and d.started_at > ${day}::timestamptz)::text as day,
+             coalesce(w.hour, 0)::text as hour,
+             coalesce(w.day, 0)::text as day,
+             coalesce(w.distinct_hour, 0)::text as distinct_hour,
+             coalesce(w.distinct_day, 0)::text as distinct_day,
+             w.called_hour,
+             w.called_day,
              (select l.started_at from calls l
-               where l.${column} = ids.id
+               where l.${column} = ids.id and l.failure_reason is null
                order by l.started_at desc
                limit 1) as last_at
-        from unnest(${sql.param([...new Set(ids)])}::uuid[]) as ids(id)
+        from unnest(${sql.param(unique)}::uuid[]) as ids(id)
+        left join lateral (
+          select count(*) filter (where c.started_at > ${hour}::timestamptz) as hour,
+                 count(*) as day,
+                 count(distinct c.destination) filter (where c.started_at > ${hour}::timestamptz) as distinct_hour,
+                 count(distinct c.destination) as distinct_day,
+                 bool_or(c.destination = ${destination}::text and c.started_at > ${hour}::timestamptz) as called_hour,
+                 bool_or(c.destination = ${destination}::text) as called_day
+            from calls c
+           where c.${column} = ids.id and c.started_at > ${day}::timestamptz and c.failure_reason is null
+        ) w on true
     `);
+    const ended = new Map<string, { id: string; endedAt: Date }[]>();
+    if (options.restSince !== undefined) {
+      // Окончание позже начала: граница по началу держит счёт на индексе (номер, начало). Дольше суток вызов не живёт.
+      const since = options.restSince.toISOString();
+      const startedSince = new Date(options.restSince.getTime() - 86_400_000).toISOString();
+      const rest = await executor.execute<{
+        number_id: string;
+        id: string;
+        ended_at: string | Date;
+      }>(sql`
+        select c.${column} as number_id, c.id, c.ended_at
+          from calls c
+         where c.${column} = any(${sql.param(unique)}::uuid[])
+           and c.started_at > ${startedSince}::timestamptz
+           and c.ended_at > ${since}::timestamptz
+           and c.failure_reason is null
+      `);
+      for (const row of rest.rows) {
+        const list = ended.get(row.number_id) ?? [];
+        list.push({ id: row.id, endedAt: new Date(row.ended_at) });
+        ended.set(row.number_id, list);
+      }
+    }
     for (const row of result.rows) {
       attempts.set(row.id, {
         hour: Number.parseInt(row.hour, 10),
         day: Number.parseInt(row.day, 10),
+        distinctHour: Number.parseInt(row.distinct_hour, 10),
+        distinctDay: Number.parseInt(row.distinct_day, 10),
+        calledHour: row.called_hour === true,
+        calledDay: row.called_day === true,
         lastAt: row.last_at === null ? null : new Date(row.last_at),
+        ended: ended.get(row.id) ?? [],
       });
     }
     return attempts;
+  }
+
+  /**
+   * Сколько раз клиент звонил абоненту за скользящие час и сутки — со всех линий, только ушедшие в сеть
+   * ([ADR-0106](../../../../../docs/adr/0106-rovnyy-temp-nomera-i-abonenty.md)). Счёт по индексу (абонент, начало).
+   */
+  async recipientCalls(
+    clientId: Id<'client'>,
+    destination: string,
+    now: Date,
+    executor: Executor = this.db,
+  ): Promise<{ hour: number; day: number }> {
+    const hour = new Date(now.getTime() - 3_600_000).toISOString();
+    const day = new Date(now.getTime() - 86_400_000).toISOString();
+    const result = await executor.execute<{ hour: string; day: string }>(sql`
+      select (count(*) filter (where c.started_at > ${hour}::timestamptz))::text as hour,
+             count(*)::text as day
+        from calls c
+        join channels ch on ch.id = c.channel_id
+       where c.destination = ${destination}
+         and c.started_at > ${day}::timestamptz
+         and ch.client_id = ${clientId}
+         and c.gateway_id is not null
+         and c.failure_reason is null
+    `);
+    const row = result.rows[0];
+    return {
+      hour: row === undefined ? 0 : Number.parseInt(row.hour, 10),
+      day: row === undefined ? 0 : Number.parseInt(row.day, 10),
+    };
+  }
+
+  /**
+   * Запирает пару «клиент, абонент» до конца транзакции: две одновременные заявки одному абоненту иначе насчитали бы
+   * одно и то же и прошли обе (ADR-0106).
+   */
+  async lockRecipient(
+    clientId: Id<'client'>,
+    destination: string,
+    executor: Executor,
+  ): Promise<void> {
+    await executor.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`recipient:${clientId}:${destination}`}, 0))`,
+    );
   }
 
   /**

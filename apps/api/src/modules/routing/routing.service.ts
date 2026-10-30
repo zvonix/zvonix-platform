@@ -209,6 +209,12 @@ export class RoutingService {
       });
       return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
     }
+    // 4а. Предел звонков клиента одному абоненту (ADR-0106): частые звонки абонент помечает спамом, и номера
+    //    блокируют. Отказ до отбора номеров — от смены партнёра абонент не перестанет получать звонки.
+    if (await this.pace.recipientExceeded(routable.clientId, destination, at)) {
+      this.logger.info('Вызов отклонён пределом звонков абоненту', { channel_id: channel.id });
+      return this.reject(request, destination, channel.id, operatorId, region, 'recipient_limit');
+    }
 
     // 5. Кандидаты. Требование записи отсекает шлюзы, где она невозможна (ADR-0012),
     //    регион — партнёров, которые в него не звонят (ADR-0022), требования клиента — способ
@@ -298,13 +304,15 @@ export class RoutingService {
         !exhaustedPartners.has(candidate.gateway.partnerId) &&
         (candidate.kind !== 'sim' || !exhaustedSims.has(candidate.sim.id)),
     );
-    // Прогрев и рекомендованная работа номера (ADR-0105): номер, исчерпавший предел, отдаёт вызов соседу.
-    const pacedOut = await this.pace.exhausted(
+    // Прогрев, рекомендованная работа, пауза и разные абоненты номера (ADR-0105, ADR-0106): номер, которому сейчас
+    // звонить нельзя, отдаёт вызов соседу — своему же партнёру или следующему в приоритетах клиента.
+    const screen = await this.pace.screen(
       withinLimits.map(({ candidate }) => candidate),
       at,
+      destination,
     );
     const ordered = withinLimits.filter(
-      ({ candidate }) => !pacedOut.has(pacedNumberOf(candidate).id),
+      ({ candidate }) => !screen.exhausted.has(pacedNumberOf(candidate).id),
     );
     if (ordered.length === 0) {
       // Отдельная причина: «все исчерпали лимит» и «SIM нет вовсе» — разные разговоры
@@ -319,7 +327,7 @@ export class RoutingService {
       'call',
     );
     const remaining = remainingOfSims(candidateLimits);
-    const arranged = arrangeByDistribution(
+    const distributed = arrangeByDistribution(
       ordered,
       ({ candidate, price }) => ({
         partnerId: candidate.gateway.partnerId,
@@ -332,6 +340,10 @@ export class RoutingService {
       }),
       (partnerId) => settings.get(partnerId as Id<'partner'>) ?? DEFAULT_DISTRIBUTION,
       at,
+    );
+    // Перезвон — с того же номера (ADR-0106): внутри равных приоритета, цены и партнёра.
+    const arranged = preferCalledBefore(distributed, (entry) =>
+      screen.calledBefore.has(pacedNumberOf(entry.candidate).id),
     );
 
     // По одному разу каждое правило: у правила «на каждую карту» строк израсходованного
@@ -350,6 +362,7 @@ export class RoutingService {
       claimed = await this.claimSim(request, destination, channel, operatorId, region, arranged, {
         rules: applicableLimits,
         at,
+        clientId: routable.clientId,
       });
       if (claimed === undefined) {
         // Прежде чем отказать, убираем вызовы, по которым узел не прислал CDR: они
@@ -368,6 +381,7 @@ export class RoutingService {
             {
               rules: applicableLimits,
               at,
+              clientId: routable.clientId,
             },
           );
         }
@@ -380,6 +394,10 @@ export class RoutingService {
           limit: channel.maxConcurrentCalls,
         });
         return this.reject(request, destination, channel.id, operatorId, region, 'limit_exceeded');
+      }
+      if (cause instanceof RecipientLimitBreach) {
+        // Одновременная заявка тому же абоненту прошла раньше: предел пересчитан под блокировкой (ADR-0106).
+        return this.reject(request, destination, channel.id, operatorId, region, 'recipient_limit');
       }
       if (cause instanceof LimitBreach) {
         // Счётчик перешагнул предел уже внутри транзакции: две одновременные заявки
@@ -621,7 +639,7 @@ export class RoutingService {
     operatorId: Id<'operator'>,
     region: string | null,
     candidates: readonly PricedCandidate[],
-    limits: { rules: readonly LimitRuleRow[]; at: Date },
+    limits: { rules: readonly LimitRuleRow[]; at: Date; clientId: Id<'client'> },
   ): Promise<
     { call: CallRow; candidate: TerminationCandidate; rateId: Id<'partnerRate'> } | undefined
   > {
@@ -634,6 +652,10 @@ export class RoutingService {
         const open = await this.callsRepository.countOpenOnChannel(channelId, limits.at, tx);
         if (open >= channel.maxConcurrentCalls) throw new ChannelAtCapacity(open);
       }
+      // Предел абоненту — под блокировкой пары «клиент, абонент»: проверка до транзакции её не держит (ADR-0106).
+      if (await this.pace.recipientExceeded(limits.clientId, destination, limits.at, tx)) {
+        throw new RecipientLimitBreach();
+      }
       for (const { candidate, rateId, tariffId } of candidates) {
         // Ёмкость у SIM и транка своя, но правило одно: блокировка строки, потом счёт
         // открытых вызовов. У SIM предел ставит оператор, у транка — договор
@@ -644,7 +666,7 @@ export class RoutingService {
             : await this.claimSlotOnTrunk(candidate, tx);
         if (!claimed) continue;
         // После блокировки строки номера: предел пересчитывается заново, иначе две заявки прошли бы вдвоём (ADR-0105).
-        if (!(await this.pace.admit(candidate, limits.at, tx))) continue;
+        if (!(await this.pace.admit(candidate, destination, limits.at, tx))) continue;
 
         const call = await this.callsRepository.insert(
           {
@@ -919,6 +941,41 @@ function compareCandidates(left: PricedCandidate, right: PricedCandidate): numbe
   const leftAt = left.candidate.lastRoutedAt?.getTime() ?? 0;
   const rightAt = right.candidate.lastRoutedAt?.getTime() ?? 0;
   return leftAt - rightAt;
+}
+
+/**
+ * Перезвон — с того же номера (ADR-0106): внутри подряд идущих кандидатов одного партнёра с равными приоритетом и ценой
+ * (те же группы, что у распределения партнёра) номер, звонивший абоненту за сутки, встаёт первым. Порядок групп не
+ * меняется: приоритет, цена и очередь между партнёрами выше перезвона.
+ */
+function preferCalledBefore(
+  entries: readonly PricedCandidate[],
+  calledBefore: (entry: PricedCandidate) => boolean,
+): PricedCandidate[] {
+  const groupOf = (entry: PricedCandidate): string =>
+    `${String(entry.candidate.priority ?? '-')}|${String(entry.price)}|${entry.candidate.gateway.partnerId}`;
+  const result: PricedCandidate[] = [];
+  let run: PricedCandidate[] = [];
+  const flush = () => {
+    result.push(...run.filter(calledBefore), ...run.filter((entry) => !calledBefore(entry)));
+    run = [];
+  };
+  for (const entry of entries) {
+    const last = run[run.length - 1];
+    if (last !== undefined && groupOf(last) !== groupOf(entry)) flush();
+    run.push(entry);
+  }
+  flush();
+  return result;
+}
+
+/** Клиент уже звонил абоненту сколько разрешено: заметила проверка в транзакции (ADR-0106). Откатывает её. */
+class RecipientLimitBreach extends Error {
+  override readonly name = 'RecipientLimitBreach';
+
+  constructor() {
+    super('Предел звонков клиента одному абоненту');
+  }
 }
 
 /** Линия уже ведёт столько разговоров, сколько разрешил клиент (ADR-0101, п. 6). Откатывает транзакцию занятия SIM. */

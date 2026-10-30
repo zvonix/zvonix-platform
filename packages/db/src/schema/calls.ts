@@ -133,6 +133,8 @@ export const calls = pgTable(
     // Прогрев и рекомендованная работа номера (ADR-0105): попытки SIM и транка за скользящие час и сутки.
     index('calls_sim_started_idx').on(t.simCardId, t.startedAt),
     index('calls_gateway_started_idx').on(t.gatewayId, t.startedAt),
+    // Звонки абоненту за час и сутки (ADR-0106): предел клиента одному абоненту и перезвон с того же номера.
+    index('calls_destination_started_idx').on(t.destination, t.startedAt),
     index('calls_status_started_idx').on(t.status, t.startedAt),
     // Разбор «почему не звонит»: свежие вызовы по всей площадке, без отбора по статусу.
     // Составной индекс выше для такого порядка не годится — он начинается со статуса,

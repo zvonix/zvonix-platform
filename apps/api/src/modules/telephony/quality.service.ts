@@ -17,6 +17,7 @@ import {
   type FailureThresholdRow,
   type QualityRow,
   type ShortAnswerRow,
+  type SuspensionBurst,
 } from './quality.repository.js';
 import { TelephonyRepository } from './telephony.repository.js';
 
@@ -106,6 +107,11 @@ export class QualityService {
    */
   async shortAnswerTrunks(since: Date): Promise<ShortAnswerRow[]> {
     return this.repository.shortAnswerTrunks(since, SHORT_ANSWER_RULE);
+  }
+
+  /** Партнёры, у которых порог отказов с `since` снял два объекта и больше — для тревоги администраторам (ADR-0106). */
+  async suspensionBursts(since: Date): Promise<SuspensionBurst[]> {
+    return this.repository.suspensionBursts(since);
   }
 
   // --- Пороги ---------------------------------------------------------------------

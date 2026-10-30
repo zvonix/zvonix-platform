@@ -39,7 +39,7 @@
 
 | Внутренняя причина | Что видит клиент |
 |---|---|
-| `destination_blocked`, `destination_invalid`, `operator_unconfirmed`, `operator_not_allowed`, `insufficient_funds`, `limit_exceeded`, `requirements_unmet` | как есть — это про него |
+| `destination_blocked`, `destination_invalid`, `operator_unconfirmed`, `operator_not_allowed`, `insufficient_funds`, `limit_exceeded`, `recipient_limit`, `requirements_unmet` | как есть — это про него |
 | `no_sim_available`, `no_coverage`, `no_tariff`, `recording_required`, `node_lost`, `internal_error`, `channel_unknown` | `platform` |
 
 Причины первой строки клиент может исправить сам: пополнить счёт, поправить список

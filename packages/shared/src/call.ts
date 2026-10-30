@@ -99,6 +99,12 @@ export const CALL_FAILURE_REASONS = [
   'insufficient_funds',
   /** Исчерпано окно лимита. */
   'limit_exceeded',
+  /**
+   * Клиент уже звонил этому абоненту столько, сколько площадка разрешает за час или сутки
+   * ([ADR-0106](../../../docs/adr/0106-rovnyy-temp-nomera-i-abonenty.md)): частые звонки с незнакомых номеров абонент
+   * помечает спамом, и номера блокируют. Про поток самого клиента — видна ему как есть.
+   */
+  'recipient_limit',
   /** Нет свободной SIM нужного оператора. */
   'no_sim_available',
   /**
@@ -158,6 +164,8 @@ export const CLIENT_FAILURE_REASONS = [
   'insufficient_funds',
   /** Исчерпано окно лимита клиента или канала. */
   'limit_exceeded',
+  /** Слишком часто одному абоненту (ADR-0106). */
+  'recipient_limit',
   /** Никто не подошёл под требования клиента к партнёрам (ADR-0095). */
   'requirements_unmet',
   /** Отказ на нашей стороне. Подробности — у поддержки, а не в ответе API. */
@@ -173,6 +181,7 @@ const CLIENT_VISIBLE_REASONS: readonly CallFailureReason[] = [
   'operator_not_allowed',
   'insufficient_funds',
   'limit_exceeded',
+  'recipient_limit',
   'requirements_unmet',
 ];
 

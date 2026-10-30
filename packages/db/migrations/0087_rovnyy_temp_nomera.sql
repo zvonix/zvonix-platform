@@ -1,0 +1,3 @@
+ALTER TABLE "calls" DROP CONSTRAINT "calls_failure_reason_check";--> statement-breakpoint
+CREATE INDEX "calls_destination_started_idx" ON "calls" USING btree ("destination","started_at");--> statement-breakpoint
+ALTER TABLE "calls" ADD CONSTRAINT "calls_failure_reason_check" CHECK ("calls"."failure_reason" is null or "calls"."failure_reason" in ('channel_unknown', 'destination_invalid', 'operator_unconfirmed', 'destination_blocked', 'operator_not_allowed', 'no_tariff', 'insufficient_funds', 'limit_exceeded', 'recipient_limit', 'no_sim_available', 'gateway_unregistered', 'recording_required', 'no_coverage', 'requirements_unmet', 'node_lost', 'internal_error'));
