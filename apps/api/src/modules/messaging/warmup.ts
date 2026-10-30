@@ -1,5 +1,6 @@
 import {
   jitteredPauseMs,
+  sleepUntil,
   spreadHourlyLimit,
   WARMUP_IDLE_DAYS,
   WARMUP_DAYS,
@@ -25,10 +26,18 @@ export interface RecommendedProfile {
   readonly perMinute: number;
   readonly perHour: number;
   readonly perDay: number;
+  /**
+   * Часов сна аккаунта в сутки ([ADR-0107](../../../../../docs/adr/0107-son-nomera-plokhoy-nomer-i-otchyot-blokirovok.md));
+   * в отличие от остального профиля действует у **всех** аккаунтов, а не только с галочкой. 0 — не спит.
+   */
+  readonly sleepHours: number;
 }
 
-/** Аккаунт с наложенным профилем: к лимитам добавлена минимальная пауза, которую нужно выдержать. */
-export type WithRecommended<T> = T & { readonly recommendedPaceSeconds?: number };
+/** Аккаунт с наложенным профилем: к лимитам добавлена минимальная пауза, которую нужно выдержать, и часы сна. */
+export type WithRecommended<T> = T & {
+  readonly recommendedPaceSeconds?: number;
+  readonly sleepHours?: number;
+};
 
 /** Предел профиля; 0 — без ограничения. Лимит тарифа при этом не действует (ADR-0090). */
 const profileLimit = (recommended: number): number | null =>
@@ -44,7 +53,10 @@ export function withRecommended<
     'recommended' | 'limitPerMinute' | 'limitPerHour' | 'limitPerDay'
   >,
 >(account: T, profile: RecommendedProfile): WithRecommended<T> {
-  if (!account.recommended) return account;
+  // Сон — у всех аккаунтов: защита репутации площадки не зависит от галочки партнёра (ADR-0107).
+  const sleeping: WithRecommended<T> =
+    profile.sleepHours > 0 ? { ...account, sleepHours: profile.sleepHours } : account;
+  if (!account.recommended) return sleeping;
   // Профиль из одних нулей — режим выключен на площадке: действуют лимиты тарифа, как без галочки.
   if (
     profile.paceSeconds <= 0 &&
@@ -52,10 +64,10 @@ export function withRecommended<
     profile.perHour <= 0 &&
     profile.perDay <= 0
   ) {
-    return account;
+    return sleeping;
   }
   return {
-    ...account,
+    ...sleeping,
     limitPerMinute: profileLimit(profile.perMinute),
     limitPerHour: profileLimit(profile.perHour),
     limitPerDay: profileLimit(profile.perDay),
@@ -131,7 +143,7 @@ export function accountReadyAt(
     | 'limitPerMinute'
     | 'lastUsedAt'
     | 'pausedUntil'
-  > & { readonly recommendedPaceSeconds?: number },
+  > & { readonly recommendedPaceSeconds?: number; readonly sleepHours?: number },
   load: AccountLoad,
   now: Date,
   options: { paceSeconds: number; withBacklog: boolean; reservePercent?: number },
@@ -139,6 +151,9 @@ export function accountReadyAt(
   const at = now.getTime();
   if (account.pausedUntil !== null && account.pausedUntil.getTime() > at)
     return account.pausedUntil;
+  // Сон аккаунта (ADR-0107): живой человек ночью не пишет; сообщение ждёт или уходит соседу.
+  const asleep = sleepUntil(account.id, account.sleepHours ?? 0, now);
+  if (asleep !== null) return asleep;
   const pace = Math.max(options.paceSeconds, account.recommendedPaceSeconds ?? 0);
   if (pace > 0 && account.lastUsedAt !== null) {
     // Пауза с разбросом до половины (ADR-0106): одинаковые промежутки — признак программы. Доля своя у каждой отправки,
@@ -167,8 +182,8 @@ export function accountReadyAt(
   return undefined;
 }
 
-/** Почему аккаунт сейчас не берёт сообщения: пауза здоровья, тихие часы партнёра, лимит в минуту, час или сутки. */
-export type RestReason = 'health' | 'quiet' | 'minute' | 'hour' | 'day' | 'warmup';
+/** Почему аккаунт сейчас не берёт сообщения: пауза здоровья, тихие часы партнёра, сон, лимит в минуту, час или сутки. */
+export type RestReason = 'health' | 'quiet' | 'sleep' | 'minute' | 'hour' | 'day' | 'warmup';
 
 /** Длина скользящего окна лимита и сколько сообщений в нём можно (с запасом партнёра). */
 export interface RestWindow {
@@ -184,6 +199,7 @@ export interface RestWindow {
 export function restOf(
   account: Pick<
     MessengerAccountRow,
+    | 'id'
     | 'warmupEnabled'
     | 'warmupStartedAt'
     | 'limitPerDay'
@@ -191,7 +207,7 @@ export function restOf(
     | 'limitPerMinute'
     | 'lastUsedAt'
     | 'pausedUntil'
-  >,
+  > & { readonly sleepHours?: number },
   load: AccountLoad,
   now: Date,
   options: { reservePercent: number; quietEnd: Date | undefined },
@@ -200,6 +216,8 @@ export function restOf(
     return { reason: 'health', until: account.pausedUntil };
   }
   if (options.quietEnd !== undefined) return { reason: 'quiet', until: options.quietEnd };
+  const asleep = sleepUntil(account.id, account.sleepHours ?? 0, now);
+  if (asleep !== null) return { reason: 'sleep', until: asleep };
   const keep = (limit: number): number =>
     Math.max(1, Math.floor((limit * (100 - options.reservePercent)) / 100));
   if (account.limitPerMinute !== null && load.minute >= keep(account.limitPerMinute)) {

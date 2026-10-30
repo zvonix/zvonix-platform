@@ -16,6 +16,7 @@ import { request } from '@/lib/api';
 import { duration } from '@/lib/format';
 import { GATEWAY_STATUS_NAME, SIM_STATUS_NAME } from '@/lib/labels';
 import { useLiveInterval } from '@/lib/live';
+import { Blocks } from './blocks';
 import { Thresholds } from './thresholds';
 
 interface QualityRow {
@@ -211,6 +212,8 @@ function Quality() {
           </TableBody>
         </Table>
       </div>
+
+      <Blocks />
 
       <Thresholds />
     </div>

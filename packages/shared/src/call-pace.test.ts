@@ -7,8 +7,9 @@ import {
   callRestWindowMs,
   callWarmupDailyLimit,
   callWarmupDay,
+  isPoorNumber,
 } from './call-pace.js';
-import { jitteredPauseMs, paceJitter } from './pace-jitter.js';
+import { jitteredPauseMs, paceJitter, sleepUntil } from './pace-jitter.js';
 
 const DAY = 86_400_000;
 const now = new Date('2026-10-29T12:00:00Z');
@@ -48,8 +49,10 @@ describe('прогрев номера', () => {
       warmupPauseSeconds: 90,
       distinctPerHour: 15,
       distinctPerDay: 100,
+      sleepHours: 0,
+      poorAnswerPercent: 0,
     };
-    const common = { numbers: 1, distinctPerHour: 15, distinctPerDay: 100 };
+    const common = { numbers: 1, poor: false, distinctPerHour: 15, distinctPerDay: 100 };
     expect(callPace(settings, null)).toEqual({
       ...common,
       perHour: 20,
@@ -67,6 +70,7 @@ describe('прогрев номера', () => {
     expect(callPace(settings, 6)).toMatchObject({ perHour: 8, perDay: 60, warmupDay: 6 });
     expect(callPace(settings, 0, 5)).toEqual({
       numbers: 5,
+      poor: false,
       distinctPerHour: 75,
       distinctPerDay: 500,
       perHour: 10,
@@ -88,9 +92,12 @@ describe('прогрев номера', () => {
       warmupPauseSeconds: 0,
       distinctPerHour: 0,
       distinctPerDay: 0,
+      sleepHours: 0,
+      poorAnswerPercent: 0,
     };
     expect(callPace(off, null)).toEqual({
       numbers: 1,
+      poor: false,
       perHour: null,
       perDay: null,
       warmupDay: null,
@@ -161,7 +168,60 @@ describe('пауза номера после вызова (ADR-0106)', () => {
         warmupPauseSeconds: 90,
         distinctPerHour: 0,
         distinctPerDay: 0,
+        sleepHours: 0,
+        poorAnswerPercent: 0,
       }),
     ).toBe(135_000);
+  });
+});
+
+describe('сон номера и «плохой» номер (ADR-0107)', () => {
+  const keys = Array.from(
+    { length: 400 },
+    (_, index) => `0190aaaa-0000-7000-8000-${String(index).padStart(12, '0')}`,
+  );
+  const asleepShare = (iso: string): number =>
+    keys.filter((key) => sleepUntil(key, 6, new Date(iso)) !== null).length / keys.length;
+
+  it('ночью спит около половины номеров, днём — никто; пробуждение — не позже чем через 6 часов', () => {
+    // 02:00 МСК = 23:00 UTC накануне; 15:00 МСК = 12:00 UTC.
+    expect(asleepShare('2026-10-29T23:00:00Z')).toBeGreaterThan(0.35);
+    expect(asleepShare('2026-10-29T23:00:00Z')).toBeLessThan(0.65);
+    expect(asleepShare('2026-10-30T12:00:00Z')).toBe(0);
+    const now = new Date('2026-10-29T23:00:30Z');
+    for (const key of keys) {
+      const until = sleepUntil(key, 6, now);
+      if (until === null) continue;
+      expect(until.getTime()).toBeGreaterThan(now.getTime());
+      expect(until.getTime() - now.getTime()).toBeLessThanOrEqual(6 * 3_600_000);
+      expect(sleepUntil(key, 6, now)).toEqual(until);
+    }
+    expect(sleepUntil(keys[0] ?? '', 0, now)).toBeNull();
+  });
+
+  it('«плохой» номер: от 20 попыток и ответов меньше доли — пределы вдвое', () => {
+    expect(isPoorNumber(19, 0, 20)).toBe(false);
+    expect(isPoorNumber(20, 3, 20)).toBe(true);
+    expect(isPoorNumber(20, 4, 20)).toBe(false);
+    expect(isPoorNumber(100, 0, 0)).toBe(false);
+    const settings = {
+      warmupEnabled: false,
+      perHour: 15,
+      perDay: 100,
+      pauseSeconds: 30,
+      warmupPauseSeconds: 90,
+      distinctPerHour: 15,
+      distinctPerDay: 100,
+      sleepHours: 6,
+      poorAnswerPercent: 20,
+    };
+    expect(callPace(settings, null, 1, true)).toMatchObject({
+      poor: true,
+      perHour: 8,
+      perDay: 50,
+      distinctPerHour: 8,
+      distinctPerDay: 50,
+      pauseSeconds: 30,
+    });
   });
 });

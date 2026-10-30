@@ -13,6 +13,8 @@ import {
   callRestWindowMs,
   callWarmupDay,
   isIdleNumber,
+  isPoorNumber,
+  sleepUntil,
   type CallPace,
   type CallPaceSettings,
   type Id,
@@ -51,6 +53,9 @@ export interface NumberPace extends CallPace {
   readonly restingUntil: Date | null;
   /** Без попыток за 14 суток: этот вызов начнёт прогрев (ADR-0105). */
   readonly idle: boolean;
+  /** Сон номера (ADR-0107): до какого времени спит; `null` — не спит. */
+  readonly asleepUntil: Date | null;
+  readonly realAnsweredDay: number;
 }
 
 const NO_ATTEMPTS: NumberAttempts = {
@@ -58,6 +63,7 @@ const NO_ATTEMPTS: NumberAttempts = {
   day: 0,
   distinctHour: 0,
   distinctDay: 0,
+  realAnsweredDay: 0,
   calledHour: false,
   calledDay: false,
   lastAt: null,
@@ -102,6 +108,10 @@ export interface NumberPaceView {
   readonly distinct_used_day: number;
   /** Пауза после прошлого вызова: до какого времени номер отдыхает; пусто — свободен. */
   readonly resting_until: string | null;
+  /** Сон номера (ADR-0107): до какого времени спит; пусто — не спит. */
+  readonly asleep_until: string | null;
+  /** «Плохой» номер: мало настоящих ответов, пределы вдвое ниже. */
+  readonly poor: boolean;
 }
 
 export function toPaceView(pace: NumberPace): NumberPaceView {
@@ -116,6 +126,8 @@ export function toPaceView(pace: NumberPace): NumberPaceView {
     distinct_used_hour: pace.distinctUsedHour,
     distinct_used_day: pace.distinctUsedDay,
     resting_until: pace.restingUntil?.toISOString() ?? null,
+    asleep_until: pace.asleepUntil?.toISOString() ?? null,
+    poor: pace.poor,
   };
 }
 
@@ -129,6 +141,7 @@ function paceOf(
     settings,
     callWarmupDay(number.warmupStartedAt, attempts.lastAt, now),
     number.numbers,
+    isPoorNumber(attempts.day, attempts.realAnsweredDay, settings.poorAnswerPercent),
   );
   return {
     ...pace,
@@ -140,18 +153,22 @@ function paceOf(
     calledDay: attempts.calledDay,
     restingUntil: callRestingUntil(pace, attempts.ended, now),
     idle: isIdleNumber(attempts.lastAt, now),
+    // Транк с несколькими номерами не спит: каким номером звонит провайдер, площадка не выбирает (ADR-0107).
+    asleepUntil: number.numbers === 1 ? sleepUntil(number.id, settings.sleepHours, now) : null,
+    realAnsweredDay: attempts.realAnsweredDay,
   };
 }
 
 /**
- * Номеру сейчас звонить нельзя: исчерпаны попытки, номер отдыхает после прошлого вызова или исчерпал разных абонентов —
- * кроме абонента, которому он уже звонил в этом окне (ADR-0106).
+ * Номеру сейчас звонить нельзя: исчерпаны попытки, номер отдыхает после прошлого вызова, спит (ADR-0107) или исчерпал
+ * разных абонентов — кроме абонента, которому он уже звонил в этом окне (ADR-0106).
  */
 function exhausted(pace: NumberPace): boolean {
   return (
     (pace.perHour !== null && pace.usedHour >= pace.perHour) ||
     (pace.perDay !== null && pace.usedDay >= pace.perDay) ||
     pace.restingUntil !== null ||
+    pace.asleepUntil !== null ||
     (pace.distinctPerHour !== null &&
       !pace.calledHour &&
       pace.distinctUsedHour >= pace.distinctPerHour) ||

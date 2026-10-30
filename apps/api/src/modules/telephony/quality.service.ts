@@ -67,6 +67,25 @@ interface Suspension {
 /** Признак ложного ответа: сколько отвеченных достаточно, что считать коротким и какая доля коротких подозрительна. */
 const SHORT_ANSWER_RULE = { minAnswered: 30, maxSeconds: 3, minShareBasisPoints: 8000 } as const;
 
+/** Действия журнала, которыми автомат снимает объект за отказы сети (`suspendOverThreshold`). */
+const SUSPENSION_ACTIONS = ['sim.suspended_by_failures', 'gateway.suspended_by_failures'] as const;
+
+/** Строка отчёта блокировок: партнёр или оператор (ADR-0107). */
+export interface BlocksRow {
+  readonly id: string;
+  readonly name: string;
+  attempts: number;
+  realAnswered: number;
+  shortAnswered: number;
+  simsSuspended: number;
+  gatewaysSuspended: number;
+}
+
+export interface BlocksReport {
+  readonly partners: BlocksRow[];
+  readonly operators: BlocksRow[];
+}
+
 @Injectable()
 export class QualityService {
   private readonly logger: Logger;
@@ -107,6 +126,72 @@ export class QualityService {
    */
   async shortAnswerTrunks(since: Date): Promise<ShortAnswerRow[]> {
     return this.repository.shortAnswerTrunks(since, SHORT_ANSWER_RULE);
+  }
+
+  /**
+   * Отчёт блокировок (ADR-0107): по партнёрам и по операторам SIM — попытки, настоящие и короткие ответы, сколько SIM и
+   * шлюзов снял порог отказов и снятий на 1000 попыток. Снятия — по журналу действий: состояние объекта хранит только
+   * последнее, а журнал — каждое снятие.
+   */
+  async blocks(since: Date): Promise<BlocksReport> {
+    const [attempts, events] = await Promise.all([
+      this.repository.blockAttempts(since),
+      this.audit.occurrences(SUSPENSION_ACTIONS, since),
+    ]);
+    const simIds = events
+      .filter((event) => event.action === 'sim.suspended_by_failures')
+      .flatMap((event) => (event.entityId === null ? [] : [event.entityId]));
+    const gatewayIds = events
+      .filter((event) => event.action === 'gateway.suspended_by_failures')
+      .flatMap((event) => (event.entityId === null ? [] : [event.entityId]));
+    const owners = new Map(
+      (await this.repository.ownersOf([...new Set(simIds)], [...new Set(gatewayIds)])).map(
+        (owner) => [owner.id, owner],
+      ),
+    );
+
+    const byPartner = new Map<string, BlocksRow>();
+    const byOperator = new Map<string, BlocksRow>();
+    const row = (map: Map<string, BlocksRow>, id: string, name: string): BlocksRow => {
+      const known = map.get(id);
+      if (known !== undefined) return known;
+      const created: BlocksRow = {
+        id,
+        name,
+        attempts: 0,
+        realAnswered: 0,
+        shortAnswered: 0,
+        simsSuspended: 0,
+        gatewaysSuspended: 0,
+      };
+      map.set(id, created);
+      return created;
+    };
+    for (const entry of attempts.partners)
+      Object.assign(row(byPartner, entry.id, entry.name), entry);
+    for (const entry of attempts.operators)
+      Object.assign(row(byOperator, entry.id, entry.name), entry);
+    for (const id of simIds) {
+      const owner = owners.get(id);
+      if (owner === undefined) continue;
+      row(byPartner, owner.partnerId, owner.partnerName).simsSuspended += 1;
+      if (owner.operatorId !== null && owner.operatorName !== null) {
+        row(byOperator, owner.operatorId, owner.operatorName).simsSuspended += 1;
+      }
+    }
+    for (const id of gatewayIds) {
+      const owner = owners.get(id);
+      if (owner !== undefined)
+        row(byPartner, owner.partnerId, owner.partnerName).gatewaysSuspended += 1;
+    }
+    const sorted = (map: Map<string, BlocksRow>): BlocksRow[] =>
+      [...map.values()].sort(
+        (left, right) =>
+          right.simsSuspended +
+            right.gatewaysSuspended -
+            (left.simsSuspended + left.gatewaysSuspended) || right.attempts - left.attempts,
+      );
+    return { partners: sorted(byPartner), operators: sorted(byOperator) };
   }
 
   /** Партнёры, у которых порог отказов с `since` снял два объекта и больше — для тревоги администраторам (ADR-0106). */

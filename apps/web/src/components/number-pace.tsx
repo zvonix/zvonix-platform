@@ -16,6 +16,10 @@ export interface NumberPaceView {
   readonly distinct_per_day: number | null;
   readonly distinct_used_hour: number;
   readonly distinct_used_day: number;
+  /** Сон номера (ADR-0107): до какого времени спит; пусто — не спит. */
+  readonly asleep_until: string | null;
+  /** «Плохой» номер: мало настоящих ответов, пределы вдвое ниже. */
+  readonly poor: boolean;
 }
 
 const WARMUP_DAYS = 14;
@@ -51,6 +55,17 @@ export function NumberPace({
       <span className={`${className} text-warn`} title={title}>
         {block ? '' : ' · '}
         {dayFull ? 'предел суток' : 'предел часа'}
+      </span>
+    );
+  }
+  if (pace.poor) {
+    return (
+      <span
+        className={`${className} text-warn`}
+        title="За сутки на этот номер почти не отвечают или сбрасывают в первые секунды — так оператор видит обзвон. Пределы номера вдвое ниже, пока ответов не станет больше"
+      >
+        {block ? '' : ' · '}
+        мало ответов
       </span>
     );
   }

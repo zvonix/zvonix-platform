@@ -101,8 +101,8 @@ export async function resetDatabase(url = TEST_DATABASE_URL): Promise<void> {
     await handle.db.execute(sql`create schema public`);
     await handle.db.execute(sql`drop schema if exists drizzle cascade`);
     await applyMigrations(handle.db);
-    // Фон наборов — без прогрева и рекомендованной работы номера (ADR-0105): новый номер пропускает два вызова в час,
-    // и любой набор, где карта звонит чаще, проверял бы прогрев, а не своё. Сам предел проверяет `call-pace`.
+    // Фон наборов — без прогрева, рекомендованной работы и сна номера и аккаунта (ADR-0105–0107): новый номер пропускает
+    // два вызова в час, спящий — ни одного, и любой набор проверял бы их, а не своё. Сами пределы проверяет `call-pace`.
     await handle.db.execute(sql`
       insert into platform_settings (id, key, value)
       values (gen_random_uuid(), 'calls.warmup_enabled', 'false'),
@@ -113,7 +113,10 @@ export async function resetDatabase(url = TEST_DATABASE_URL): Promise<void> {
              (gen_random_uuid(), 'calls.distinct_per_hour', '0'),
              (gen_random_uuid(), 'calls.distinct_per_day', '0'),
              (gen_random_uuid(), 'calls.recipient_per_hour', '0'),
-             (gen_random_uuid(), 'calls.recipient_per_day', '0')
+             (gen_random_uuid(), 'calls.recipient_per_day', '0'),
+             (gen_random_uuid(), 'calls.sleep_hours', '0'),
+             (gen_random_uuid(), 'calls.poor_answer_percent', '0'),
+             (gen_random_uuid(), 'messages.sleep_hours', '0')
     `);
   } finally {
     await handle.close();

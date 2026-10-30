@@ -51,6 +51,7 @@ export function MessengerAccountStatus({
 const REST_NAME = {
   health: 'много «нет MAX» после отправки',
   quiet: 'тихие часы',
+  sleep: 'спит',
   minute: 'лимит в минуту',
   hour: 'лимит в час',
   day: 'лимит в сутки',
