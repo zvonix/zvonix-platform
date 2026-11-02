@@ -20,6 +20,8 @@ export interface NumberPaceView {
   readonly asleep_until: string | null;
   /** «Плохой» номер: мало настоящих ответов, пределы вдвое ниже. */
   readonly poor: boolean;
+  /** Оператор номера тормозит (ADR-0108): у него недавно сняли SIM, пределы ниже. */
+  readonly braked: boolean;
 }
 
 const WARMUP_DAYS = 14;
@@ -66,6 +68,17 @@ export function NumberPace({
       >
         {block ? '' : ' · '}
         мало ответов
+      </span>
+    );
+  }
+  if (pace.braked) {
+    return (
+      <span
+        className={`${className} text-warn`}
+        title="За последние 7 суток у этого оператора сняли несколько SIM — оператор начал резать номера. Все его номера звонят реже, торможение снимется само"
+      >
+        {block ? '' : ' · '}
+        оператор тормозит
       </span>
     );
   }

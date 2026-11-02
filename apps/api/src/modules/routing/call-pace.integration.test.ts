@@ -1,5 +1,6 @@
 /**
- * Прогрев и рекомендованная работа номера (ADR-0105), пауза, разные абоненты, перезвон и предел абоненту (ADR-0106).
+ * Прогрев и рекомендованная работа номера (ADR-0105), пауза, разные абоненты, перезвон и предел абоненту (ADR-0106),
+ * сон, «плохой» номер и отчёт блокировок (ADR-0107), автоторможение, шаг SIP и номер клиента (ADR-0108).
  *
  * На реальной базе: попытки считаются по таблице вызовов, и предел пересчитывается в той же транзакции, что
  * занимает номер. Фон остальных наборов — без предела (`resetDatabase`), здесь он включается настройками.
@@ -266,6 +267,10 @@ const PACE_OFF = {
   'calls.recipient_per_day': 0,
   'calls.sleep_hours': 0,
   'calls.poor_answer_percent': 0,
+  'calls.brake_suspensions': 0,
+  'calls.trunk_calls_per_second': 0,
+  'calls.caller_id_per_hour': 0,
+  'calls.caller_id_per_day': 0,
 };
 
 async function settings(values: Record<string, unknown>) {
@@ -288,6 +293,7 @@ interface SimPace {
   distinct_used_hour?: number;
   resting_until?: string | null;
   poor?: boolean;
+  braked?: boolean;
 }
 
 async function paceOf(partnerId: string, simId: string): Promise<SimPace | undefined> {
@@ -418,6 +424,7 @@ describe('прогрев и рекомендованная работа номе
       resting_until: null,
       asleep_until: null,
       poor: false,
+      braked: false,
     });
   });
 });
@@ -621,5 +628,127 @@ describe('«плохой» номер, честная причина и отчё
     });
     expect(body.operators.find((row) => row.id === operator)).toMatchObject({ sims_suspended: 1 });
     expect((await get('/quality/blocks?days=0')).statusCode).toBe(400);
+  });
+});
+
+describe('автоторможение оператора, шаг SIP-провайдера и номер клиента (ADR-0108)', () => {
+  /** Партнёр с одним SIP-транком и ценой способа `sip`. */
+  async function createTrunkPartner(operatorId: string, price = '0.5'): Promise<string> {
+    const partner = (
+      await post('/partners', {
+        ownerUserId: await createUser('partner'),
+        name: 'Транзит',
+        displayName: unique('Провайдер'),
+      })
+    ).json<{ partner: { id: string } }>().partner.id;
+    await withDatabase(async (execute) => {
+      await execute(sql`update partners set status = 'verified' where id = ${partner}`);
+    });
+    await post('/partner-rates', {
+      partnerId: partner,
+      operatorId,
+      terminationKind: 'sip',
+      pricePerMinute: price,
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+    });
+    const created = await post('/sip-trunks', {
+      partnerId: partner,
+      nodeId,
+      name: unique('Транк'),
+      proxyHost: 'sip.provider.test',
+      registersOutbound: false,
+      maxConcurrentCalls: 5,
+    });
+    expect(created.statusCode).toBe(201);
+    const trunk = created.json<{ trunk: { id: string } }>().trunk.id;
+    await post(`/gateways/${trunk}/status`, { status: 'active' });
+    return trunk;
+  }
+
+  async function gatewayOf(callId: string): Promise<string | undefined> {
+    return withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select gateway_id::text as gateway_id from calls where external_id = ${callId}`,
+      );
+      return (result.rows[0] as { gateway_id: string } | undefined)?.gateway_id;
+    });
+  }
+
+  it('у оператора сняли две SIM за 7 суток — все его номера звонят вдвое реже, другие как обычно', async () => {
+    await settings({
+      'calls.recommended_per_hour': 40,
+      'calls.brake_suspensions': 2,
+      'calls.brake_percent': 50,
+    });
+    const { operator } = await scenario();
+    const other = (await scenario()).operator;
+    const partner = await createPartner(operator);
+    const second = await addSim(partner, operator, 2);
+    const third = await addSim(partner, operator, 3);
+    const elsewhere = await createPartner(other);
+    const suspend = async (simId: string, ago: string) => {
+      await withDatabase(async (execute) => {
+        await execute(sql`
+          insert into audit_log (id, action, entity_type, entity_id, occurred_at)
+          values (gen_random_uuid(), 'sim.suspended_by_failures', 'sim_card', ${simId},
+                  now() - ${ago}::interval)
+        `);
+      });
+    };
+    // Одно снятие — ещё не торможение; снятие старше 7 суток не в счёт.
+    await suspend(partner.simId, '1 hour');
+    await suspend(second, '8 days');
+    expect(await paceOf(partner.id, third)).toMatchObject({ braked: false, per_hour: 40 });
+
+    await suspend(second, '2 hours');
+    expect(await paceOf(partner.id, third)).toMatchObject({ braked: true, per_hour: 20 });
+    expect(await paceOf(elsewhere.id, elsewhere.simId)).toMatchObject({
+      braked: false,
+      per_hour: 40,
+    });
+    const report = (await get('/quality/blocks')).json<{ braked_operators: string[] }>();
+    expect(report.braked_operators).toContain(operator);
+    expect(report.braked_operators).not.toContain(other);
+
+    await settings({ 'calls.recommended_per_hour': 40, 'calls.brake_suspensions': 0 });
+    expect(await paceOf(partner.id, third)).toMatchObject({ braked: false, per_hour: 40 });
+  });
+
+  it('SIP-провайдер звонит ровным шагом: второй вызов в ту же секунду не идёт, через секунду — идёт', async () => {
+    await settings({ 'calls.trunk_calls_per_second': 1 });
+    const { operator, channel, destination } = await scenario();
+    await createTrunkPartner(operator);
+    expect((await route(channel, destination)).outcome).toBe('routed');
+    expect((await route(channel, destination)).reason).toBe('numbers_exhausted');
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        update calls set started_at = started_at - interval '2 seconds'
+         where channel_id = ${channel}
+      `);
+    });
+    expect((await route(channel, destination)).outcome).toBe('routed');
+  });
+
+  it('номер клиента исчерпал предел — вызов идёт через SIM, без номера клиента предела нет', async () => {
+    await settings({ 'calls.caller_id_per_hour': 1 });
+    const { operator, channel, destination } = await scenario();
+    const trunk = await createTrunkPartner(operator);
+    const sims = await createPartner(operator);
+    await withDatabase(async (execute) => {
+      await execute(sql`update channels set caller_id = '74950001122' where id = ${channel}`);
+    });
+
+    const first = await route(channel, destination);
+    expect(first.outcome).toBe('routed');
+    // Транк дешевле — первым идёт он, с номером клиента.
+    expect(await gatewayOf(first.callId)).toBe(trunk);
+    const second = await route(channel, destination);
+    expect(second.outcome).toBe('routed');
+    expect(await gatewayOf(second.callId)).toBe(sims.gatewayId);
+
+    await withDatabase(async (execute) => {
+      await execute(sql`update channels set caller_id = null where id = ${channel}`);
+    });
+    expect(await gatewayOf((await route(channel, destination)).callId)).toBe(trunk);
   });
 });

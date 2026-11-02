@@ -44,6 +44,31 @@ const SLEEP_BAND_START_MINUTE = 20 * 60;
 const SLEEP_BAND_MINUTES = 12 * 60;
 const DAY_MINUTES = 24 * 60;
 
+/**
+ * Сколько номеров из `numbers` сейчас не спит: у каждого номера транка свои часы сна, как у отдельной SIM
+ * ([ADR-0108](../../../docs/adr/0108-avtotormozhenie-operatora-i-sip.md)) — ночью транк звонит меньшим числом номеров, как люди. Один номер спит под самим
+ * ключом. Не спит ни один — `wakesAt`: когда проснётся первый.
+ */
+export function awakeNumbers(
+  key: string,
+  numbers: number,
+  hours: number,
+  now: Date,
+): { readonly awake: number; readonly wakesAt: Date | null } {
+  if (numbers <= 1) {
+    const until = sleepUntil(key, hours, now);
+    return { awake: until === null ? 1 : 0, wakesAt: until };
+  }
+  let awake = 0;
+  let wakesAt: Date | null = null;
+  for (let index = 0; index < numbers; index += 1) {
+    const until = sleepUntil(`${key}:${String(index)}`, hours, now);
+    if (until === null) awake += 1;
+    else if (wakesAt === null || until < wakesAt) wakesAt = until;
+  }
+  return { awake, wakesAt: awake > 0 ? null : wakesAt };
+}
+
 /** Когда ключ проснётся; `null` — не спит или сон выключен (`hours` ≤ 0). */
 export function sleepUntil(key: string, hours: number, now: Date): Date | null {
   if (hours <= 0) return null;

@@ -93,7 +93,19 @@ export interface CallPaceSettings {
   readonly sleepHours: number;
   /** Доля настоящих ответов, ниже которой номер замедляется, %; 0 — не замедлять. */
   readonly poorAnswerPercent: number;
+  /**
+   * Автоторможение оператора ([ADR-0108](../../../docs/adr/0108-avtotormozhenie-operatora-i-sip.md)): столько SIM оператора, снятых порогом
+   * отказов за {@link CALL_BRAKE_DAYS} суток, тормозят все его номера; 0 — выключено.
+   */
+  readonly brakeSuspensions: number;
+  /** Сколько от пределов остаётся заторможенному номеру, %. */
+  readonly brakePercent: number;
+  /** Вызовов в секунду у SIP-провайдера: вызовы транка идут ровным шагом, а не пачкой; 0 — без предела. */
+  readonly trunkCallsPerSecond: number;
 }
+
+/** Окно автоторможения: снятия старше этого номера оператора уже не тормозят. */
+export const CALL_BRAKE_DAYS = 7;
 
 /** Пределы номера сейчас: `null` — без предела. */
 export interface CallPace {
@@ -109,6 +121,8 @@ export interface CallPace {
   readonly distinctPerDay: number | null;
   /** «Плохой» номер: пределы в час, в сутки и по абонентам — вдвое ниже (ADR-0107). */
   readonly poor: boolean;
+  /** Оператор номера тормозит (ADR-0108): пределы — `brakePercent` от обычных. */
+  readonly braked: boolean;
 }
 
 /**
@@ -125,21 +139,31 @@ const positive = (value: number): number | null => (value > 0 ? value : null);
 /**
  * Пределы номера: при прогреве — сутки по кривой и тройная часовая доля (не меньше 2 и не больше рекомендованного
  * «в час»: вызовы идут волнами) и пауза прогрева, после — рекомендованные. Всё, кроме паузы, умножается на число
- * номеров транка: пауза у каждого номера своя, а их число задаёт `numbers`. У «плохого» номера пределы вдвое ниже.
+ * номеров транка: пауза у каждого номера своя, а их число задаёт `numbers`. У «плохого» номера пределы вдвое ниже,
+ * у заторможенного — `brakePercent` от обычных; оба вместе перемножаются. Ниже единицы предел не падает.
  */
 export function callPace(
   settings: CallPaceSettings,
   warmupDay: number | null,
   numbers = 1,
   poor = false,
+  braked = false,
 ): CallPace {
+  // Целые проценты в десятитысячных: дробей с плавающей точкой в пределе нет.
+  const share =
+    (poor ? 50 : 100) * (braked ? Math.min(100, Math.max(1, settings.brakePercent)) : 100);
   const scale = (value: number | null): number | null =>
-    value === null ? null : poor ? Math.max(1, Math.ceil((value * numbers) / 2)) : value * numbers;
+    value === null
+      ? null
+      : share === 10_000
+        ? value * numbers
+        : Math.max(1, Math.ceil((value * numbers * share) / 10_000));
   const perHour = positive(settings.perHour);
   const perDay = positive(settings.perDay);
   const common = {
     numbers,
     poor,
+    braked,
     distinctPerHour: scale(positive(settings.distinctPerHour)),
     distinctPerDay: scale(positive(settings.distinctPerDay)),
   };
@@ -162,6 +186,16 @@ export function callPace(
     // Пауза прогрева не короче обычной: выключенная обычная прогрев не отменяет.
     pauseSeconds: positive(Math.max(settings.warmupPauseSeconds, settings.pauseSeconds)),
   };
+}
+
+/**
+ * Ровный шаг транка ([ADR-0108](../../../docs/adr/0108-avtotormozhenie-operatora-i-sip.md)): следующий вызов — не раньше `1000 / perSecond` мс после
+ * прошлого начала. `null` — можно звонить сейчас или предел выключен.
+ */
+export function trunkSpacedUntil(lastAt: Date | null, perSecond: number, now: Date): Date | null {
+  if (perSecond <= 0 || lastAt === null) return null;
+  const next = lastAt.getTime() + Math.ceil(1000 / perSecond);
+  return next > now.getTime() ? new Date(next) : null;
 }
 
 /** Самая длинная пауза с разбросом — глубже прошлые вызовы для паузы не ищутся. */

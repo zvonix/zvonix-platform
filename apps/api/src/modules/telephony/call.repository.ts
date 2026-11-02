@@ -393,6 +393,32 @@ export class CallRepository {
   }
 
   /**
+   * Сколько вызовов ушло в сеть с номером клиента `callerId` через SIP-провайдеров за скользящие час и сутки — со
+   * всех линий с этим номером ([ADR-0108](../../../../../docs/adr/0108-avtotormozhenie-operatora-i-sip.md)). Через SIM абонент видит номер
+   * SIM, поэтому они не в счёт. Линий с одним номером немного: счёт идёт от линий по индексу (линия, начало).
+   */
+  async callerIdCalls(callerId: string, now: Date): Promise<{ hour: number; day: number }> {
+    const hour = new Date(now.getTime() - 3_600_000).toISOString();
+    const day = new Date(now.getTime() - 86_400_000).toISOString();
+    const result = await this.db.execute<{ hour: string; day: string }>(sql`
+      select (count(*) filter (where c.started_at > ${hour}::timestamptz))::text as hour,
+             count(*)::text as day
+        from channels ch
+        join calls c on c.channel_id = ch.id
+        join gateways g on g.id = c.gateway_id
+       where ch.caller_id = ${callerId}
+         and c.started_at > ${day}::timestamptz
+         and g.type = 'sip_trunk'
+         and c.failure_reason is null
+    `);
+    const row = result.rows[0];
+    return {
+      hour: row === undefined ? 0 : Number.parseInt(row.hour, 10),
+      day: row === undefined ? 0 : Number.parseInt(row.day, 10),
+    };
+  }
+
+  /**
    * Запирает пару «клиент, абонент» до конца транзакции: две одновременные заявки одному абоненту иначе насчитали бы
    * одно и то же и прошли обе (ADR-0106).
    */
