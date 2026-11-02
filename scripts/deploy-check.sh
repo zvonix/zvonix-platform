@@ -45,9 +45,11 @@ printf 'Defaults env_reset\nDefaults always_set_home\nDefaults env_keep -= "HOME
   >/etc/sudoers.d/zz-deploy-check
 chmod 0440 /etc/sudoers.d/zz-deploy-check
 visudo -cqf /etc/sudoers.d/zz-deploy-check
+# Образ CI пишет XDG_CONFIG_HOME ещё и в /etc/environment, откуда sudo берёт его через PAM.
+sed -i '/^XDG_/d' /etc/environment
 useradd --system --create-home --shell /usr/sbin/nologin zvonix
-[ "$(sudo -u zvonix -H sh -c 'echo "$HOME"')" = /home/zvonix ] \
-  || { sudo -u zvonix -H env >&2; fail "sudo не задаёт HOME"; }
+[ "$(sudo -u zvonix -H sh -c 'echo "$HOME:${XDG_CONFIG_HOME:-}"')" = /home/zvonix: ] \
+  || { sudo -u zvonix -H env >&2; fail "sudo не задаёт окружение как на сервере"; }
 # Те же пути, что ставит server-setup.sh: sudo и systemd не видят node и pnpm из каталога инструментов CI.
 ln -sf "$(command -v node)" /usr/bin/node
 ln -sf "$(command -v node)" /usr/local/bin/node
