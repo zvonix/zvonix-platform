@@ -60,7 +60,10 @@ const nextConfig: NextConfig = {
   // `cpus` — число рабочих процессов сборки. По умолчанию их по числу ядер (27 на
   // рабочей машине), и на Windows сборка падала с кодом 0xC0000409 при сборе данных
   // страниц: процессы гибли от нехватки памяти. Четырёх хватает, сборка лишь на секунды дольше.
-  experimental: { proxyTimeout: 45_000, cpus: 4 },
+  // `isrFlushToDisk: false` — обновлённые раз в минуту страницы сайта (`revalidate`) живут в памяти процесса, а не
+  // пишутся в `.next/server` сборки: каталог выпуска принадлежит root, и кабинет в него не пишет (ADR-0109). Страниц
+  // сайта десяток, а после перезапуска они снова берутся из сборки.
+  experimental: { proxyTimeout: 45_000, cpus: 4, isrFlushToDisk: false },
 
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];

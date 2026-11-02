@@ -146,8 +146,16 @@ describe('проверка копии', () => {
     expect(item?.check?.detail).toBe('таблиц 14, пользователей 3, клиентов 0, партнёров 0');
     const log = calls();
     expect(log.at(-1)).toBe('dropdb --if-exists zvonix_verify');
-    // Рабочая база не названа ни одной командой.
-    expect(log.some((line) => line.split(' ').includes('zvonix'))).toBe(false);
+    // Рабочая база не названа ни одной командой: `zvonix` — только владелец временной базы (`-O zvonix`).
+    expect(
+      log.some((line) =>
+        line
+          .split(' ')
+          .some((word, index, words) => word === 'zvonix' && words[index - 1] !== '-O'),
+      ),
+    ).toBe(false);
+    // Копия разворачивается от роли владельца базы, а не суперпользователя (ADR-0109).
+    expect(log.find((line) => line.startsWith('pg_restore --no-owner'))).toContain('--role=zvonix');
   });
 
   it('копия не разворачивается — провал записан, временная база всё равно убрана', () => {

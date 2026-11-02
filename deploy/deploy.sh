@@ -2,9 +2,14 @@
 # Выкладка площадки на сервер (ADR-0049). Запускается от root на самом сервере.
 #
 #   zvonix-deploy <метка>           скачать выпуск из GitHub Releases и перейти на него
-#   zvonix-deploy --archive <файл>  выложить архив, привезённый руками
+#   zvonix-deploy --archive <файл>  выложить архив, привезённый руками (рядом — .sha256 и .sha256.sig)
 #   zvonix-deploy --rollback        вернуться на предыдущий выпуск
 #   zvonix-deploy --allow-risky …   то же, но разрешить миграции, которые меняют или удаляют данные (ADR-0086)
+#   zvonix-deploy --archive <файл> --unsigned   архив без подписи — только руками по SSH (ADR-0109)
+#
+# Выпуск ставится, только если его сумма подписана ключом выпусков (ADR-0109): ключ проверки
+# зашит ниже, а не берётся из выпуска. Каталог выпуска принадлежит root: службы его читают, но
+# писать в него не могут — root исполняет из него сценарии выкладки и юниты.
 #
 # Новый выпуск ставится рядом с работающим. Перед миграциями снимается копия базы
 # (/var/backups/zvonix, пять последних); без неё миграции не идут. Миграции применяются
@@ -31,6 +36,14 @@ API_BASE=http://127.0.0.1:8000
 API_READY="${API_BASE}/health/ready"
 WEB_READY=http://127.0.0.1:3000/login
 TAG_PATTERN='^v?[0-9A-Za-z][0-9A-Za-z._-]*$'
+# Ключ проверки подписи выпусков (ADR-0109). Закрытая половина — секрет RELEASE_SIGNING_KEY в GitHub;
+# смена ключа — новым выпуском, подписанным прежним, где эта строка уже новая.
+RELEASE_SIGNER='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHL4yWbxDHAN1Xfgs1IAzHlNo3s767HjdpXYjtSFkOeD'
+RELEASE_NAMESPACE=zvonix-release
+# Кэш Next вне каталога выпуска: каталог принадлежит root, а кабинет пишет кэш (ADR-0109).
+WEB_CACHE=/var/cache/zvonix-web
+# Архив без подписи: только ключом командной строки с --archive; служба обновления его не передаёт.
+UNSIGNED=0
 
 die() {
   echo "Ошибка: $*" >&2
@@ -39,7 +52,7 @@ die() {
 step() { printf '\n=== %s\n' "$*"; }
 
 [ "$(id -u)" -eq 0 ] || die "нужны права root"
-for command in curl tar sha256sum node pnpm python3 systemctl sudo find pg_dump flock; do
+for command in curl tar sha256sum ssh-keygen node pnpm python3 systemctl sudo find pg_dump flock; do
   command -v "$command" >/dev/null 2>&1 \
     || die "не найдена команда ${command} — сначала deploy/server-setup.sh"
 done
@@ -77,6 +90,7 @@ point() {
 # Переход на выпуск: службы той же версии, ссылка, перезапуск, ожидание ответа.
 activate() {
   local release="$1"
+  harden_release "$release"
   if [ -d "${release}/deploy/systemd" ]; then
     install -m 0644 "${release}"/deploy/systemd/zvonix-*.service "${release}"/deploy/systemd/zvonix-*.timer       "${release}"/deploy/systemd/zvonix-*.path /etc/systemd/system/
     install -m 0755 "${release}/deploy/deploy.sh" /usr/local/sbin/zvonix-deploy
@@ -119,6 +133,12 @@ prune() {
     rm -rf -- "$release"
     echo "удалён старый выпуск ${release}"
   done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-)
+  # Кэш кабинета удалённых выпусков.
+  local cache
+  [ -d "$WEB_CACHE" ] || return 0
+  while IFS= read -r cache; do
+    [ -d "${RELEASES}/$(basename "$cache")" ] || rm -rf -- "$cache"
+  done < <(find "$WEB_CACHE" -mindepth 1 -maxdepth 1 -type d)
 }
 
 # Записи о подготовленных выпусках живут двое суток: дольше подготовка всё равно считается устаревшей.
@@ -169,15 +189,17 @@ first_run_hint() {
 
 # Узел АТС на этой же машине получает набор нового выпуска: конфигурацию FreeSWITCH,
 # правила fail2ban, пульс (ADR-0051, ревизия 2026-09-29). Признак узла — его ключ
-# в /etc/zvonix-node. Скрипт берётся у только что поднятого API: это набор ровно этого
-# выпуска. Сбой выкладку не отменяет — площадка уже работает, а узел обновляется
-# отдельно той же командой (zvonix-node-update).
+# в /etc/zvonix-node. Скрипт собирается из кода выпуска (каталог root, подпись проверена), а не
+# берётся у API: исполняет его root, и взломанный API иначе получил бы root (ADR-0109). Сбой
+# выкладку не отменяет — площадка уже работает, а узел обновляется отдельно (zvonix-node-update).
 update_local_node() {
-  local script
+  local release="$1" script
   [ -f /etc/zvonix-node/node.env ] || [ -f /etc/zvonix-node/heartbeat.curl ] || return 0
   step "Узел АТС на этой машине"
   script="${WORK}/node-install.sh"
-  if curl -fsS --max-time 30 -o "$script" "${API_BASE}/install.sh" && bash "$script" --update; then
+  # Сборка — от zvonix: ей нужно только окружение площадки, а права root на чтение конфигурации не нужны.
+  if sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; cd "$0/apps/api" && exec node dist/modules/nodes/node-script.js' \
+      "$release" >"$script" && [ -s "$script" ] && bash "$script" --update; then
     return 0
   fi
   echo "ВНИМАНИЕ: узел АТС не обновлён — площадка работает; повторите zvonix-node-update" >&2
@@ -243,6 +265,17 @@ run_with_heartbeat() {
   watch_progress "$!" 15 describe_elapsed
 }
 
+# Подпись суммы архива (ADR-0109): сумма доказывает, что архив скачался целым, подпись — что его собрал наш CI.
+# Ключ проверки — константа этого сценария, а не файл выпуска: выпуск не может поручиться сам за себя.
+verify_signature() {
+  local sums="$1" signers="${WORK}/release-signers"
+  [ -s "${sums}.sig" ] || die "у выпуска нет подписи ${sums##*/}.sig — установка остановлена (ADR-0109)"
+  printf '%s namespaces="%s" %s\n' "$RELEASE_NAMESPACE" "$RELEASE_NAMESPACE" "$RELEASE_SIGNER" >"$signers"
+  ssh-keygen -Y verify -f "$signers" -I "$RELEASE_NAMESPACE" -n "$RELEASE_NAMESPACE" -s "${sums}.sig" <"$sums" >/dev/null \
+    || die "подпись выпуска не совпала — архив собран не нашим CI или подменён; установка остановлена"
+  echo "подпись выпуска проверена"
+}
+
 # Скачивание выпуска по токену только на чтение (ADR-0049).
 download() {
   local tag="$1" env_file="${ETC}/github.env" headers api name id size release_id
@@ -273,7 +306,7 @@ download() {
     -o "${WORK}/assets.json" "${api}/releases/${release_id}/assets?per_page=100" \
     || die "не удалось получить список файлов выпуска ${tag}"
 
-  for name in "zvonix-${tag}.tgz" "zvonix-${tag}.tgz.sha256"; do
+  for name in "zvonix-${tag}.tgz" "zvonix-${tag}.tgz.sha256" "zvonix-${tag}.tgz.sha256.sig"; do
     # «идентификатор размер» файла в выпуске; размер нужен для процента скачивания.
     id="$(python3 - "$name" "${WORK}/assets.json" <<'PY'
 import json, sys
@@ -293,6 +326,7 @@ PY
       || die "не удалось скачать ${name}"
   done
 
+  verify_signature "${WORK}/zvonix-${tag}.tgz.sha256"
   (cd "$WORK" && sha256sum -c --quiet "zvonix-${tag}.tgz.sha256") \
     || die "контрольная сумма zvonix-${tag}.tgz не совпала"
 }
@@ -303,17 +337,49 @@ unpack_release() {
   release="${RELEASES}/${label}-$(date +%Y%m%d%H%M%S)"
 
   step "Распаковка в ${release}"
-  install -d -o zvonix -g zvonix -m 0750 "$RELEASES" "$release"
-  run_with_heartbeat tar -xzf "$archive" -C "$release" --strip-components=1
+  # Каталог выпуска принадлежит root (ADR-0109): службы от zvonix его читают, но не пишут.
+  install -d -o root -g root -m 0755 "$RELEASES" "$release"
+  # Каталог выпусков прежних установок принадлежал zvonix: `install -d` существующий каталог не перевладевает.
+  chown root:root "$RELEASES"
+  chmod 0755 "$RELEASES"
+  run_with_heartbeat tar -xzf "$archive" -C "$release" --strip-components=1 --no-same-owner --no-same-permissions
   [ -f "${release}/RELEASE" ] || die "в архиве нет файла RELEASE — это не выпуск площадки"
-  chown -R zvonix:zvonix "$release"
+  chown -R root:root "$release"
+  chmod -R u+rwX,go+rX,go-w "$release"
 
   step "Зависимости API и воркера"
+  # zvonix пишет только в node_modules пространств и только на время установки: скрипты пакетов не дотянутся
+  # до сценариев выкладки, которые потом исполняет root. После установки и они отдаются root.
+  local modules=()
+  mapfile -t modules < <(find "$release" -maxdepth 3 -name package.json -not -path '*/node_modules/*' -printf '%h/node_modules\n')
+  install -d -o zvonix -g zvonix -m 0755 "${modules[@]}"
   # Версию pnpm берёт corepack из `packageManager` выпуска.
   run_with_heartbeat sudo -u zvonix -H env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true \
     sh -c 'cd "$0" && pnpm install --frozen-lockfile --prod --filter "@zvonix/api..." --filter "@zvonix/worker..."' \
     "$release"
+  chown -R root:root "${modules[@]}"
+  chmod -R go-w "${modules[@]}"
+  web_cache "$release"
   RELEASE_DIR="$release"
+}
+
+# Кэш кабинета: `.next/cache` сборки — ссылка на каталог выпуска в ${WEB_CACHE}, его единственное место для записи.
+web_cache() {
+  local release="$1" cache
+  cache="${WEB_CACHE}/$(basename "$release")"
+  install -d -o root -g root -m 0755 "$WEB_CACHE"
+  install -d -o zvonix -g zvonix -m 0750 "$cache"
+  rm -rf -- "${release}/apps/web/.next/standalone/apps/web/.next/cache"
+  ln -sfn "$cache" "${release}/apps/web/.next/standalone/apps/web/.next/cache"
+}
+
+# Выпуск, распакованный прежним сценарием, принадлежит zvonix. Перед тем как root исполнит из него что-либо или
+# перейдёт на него, права отбираются (ADR-0109): иначе откат на старый выпуск вернул бы дыру.
+harden_release() {
+  local release="$1"
+  chown -R root:root "$release"
+  chmod -R go-w "$release"
+  [ -L "${release}/apps/web/.next/standalone/apps/web/.next/cache" ] || web_cache "$release"
 }
 
 # Подготовленный выпуск (ADR-0074, этап 2): скачан, распакован и проверен заранее. Запись о нём —
@@ -522,6 +588,8 @@ install_release() {
   if [ -n "$prepared" ]; then
     step "Выпуск уже подготовлен и проверен: ${prepared}"
     release="$prepared"
+    # Подготовлен прежним сценарием — каталог мог остаться у zvonix; root дальше исполняет из него разбор миграций.
+    harden_release "$release"
   else
     unpack_release "$archive" "$label"
     release="$RELEASE_DIR"
@@ -556,7 +624,7 @@ install_release() {
     fi
     prune
     prune_prepared
-    update_local_node
+    update_local_node "$release"
     first_run_hint "$release"
     echo "DEPLOY_OK $(head -1 "${release}/RELEASE")"
     return 0
@@ -578,7 +646,7 @@ rollback() {
   step "Откат на ${target}"
   activate "$target" || die "предыдущий выпуск не поднялся — journalctl -u zvonix-api -u zvonix-web"
   point "$PREVIOUS" "$current"
-  update_local_node
+  update_local_node "$target"
   echo "ROLLBACK_OK ${target}"
 }
 
@@ -587,6 +655,8 @@ ARGS=()
 for argument in "$@"; do
   if [ "$argument" = "--allow-risky" ]; then
     ALLOW_RISKY=1
+  elif [ "$argument" = "--unsigned" ]; then
+    UNSIGNED=1
   else
     ARGS+=("$argument")
   fi
@@ -615,6 +685,14 @@ case "${1:-}" in
     [ -f "$archive" ] || die "укажите файл архива: zvonix-deploy --archive <файл>"
     label="$(basename "$archive" .tgz)"
     [[ "$label" =~ $TAG_PATTERN ]] || die "имя архива ${label} недопустимо"
+    if [ "$UNSIGNED" = 1 ]; then
+      # Только руками: служба обновления этого ключа не передаёт, а без терминала его не принимаем.
+      [ -t 0 ] || die "--unsigned — только в терминале по SSH"
+      echo "ВНИМАНИЕ: архив ставится без проверки подписи" >&2
+    else
+      [ -f "${archive}.sha256" ] || die "рядом с архивом нет ${archive}.sha256 и подписи — или --unsigned руками"
+      verify_signature "${archive}.sha256"
+    fi
     if [ -f "${archive}.sha256" ]; then
       (cd "$(dirname "$archive")" && sha256sum -c --quiet "$(basename "$archive").sha256") \
         || die "контрольная сумма ${archive} не совпала"
@@ -622,7 +700,7 @@ case "${1:-}" in
     install_release "$archive" "$label"
     ;;
   "" | -h | --help)
-    sed -n '4,6p' "$0"
+    sed -n '4,8p' "$0"
     exit 1
     ;;
   -*)

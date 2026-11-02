@@ -273,7 +273,23 @@ node scripts/migration-risk.mjs <база>        # что в новых миг�
 git tag v0.1.0 && git push origin v0.1.0     # на машине разработчика
 ```
 
-GitHub Actions («Release») прогоняет полную проверку и кладёт архив в GitHub Releases.
+GitHub Actions («Release») прогоняет полную проверку, кладёт архив в GitHub Releases и **подписывает**
+его сумму ключом выпусков ([ADR-0109](../docs/adr/0109-podlinnost-vypuska-i-prava-na-kod.md)). Сервер ставит
+выпуск, только если подпись сходится с ключом, зашитым в `deploy.sh`; нет подписи или не сошлась — установка
+останавливается, работает прежний выпуск.
+
+**Ключ подписи.** Закрытый ключ — секрет репозитория `RELEASE_SIGNING_KEY` (Settings → Secrets and variables →
+Actions) и копия у владельца вне репозитория; открытый — строка `RELEASE_SIGNER` в [deploy.sh](deploy.sh). Без
+секрета CI останавливается на шаге «Подпись выпуска». Положить секрет:
+
+```bash
+gh secret set RELEASE_SIGNING_KEY < ~/.zvonix/release-signing/zvonix-release
+```
+
+Ключ потерян — новые выпуски сервер не примет: выпустить с новым ключом и на сервере один раз руками
+`sudo zvonix-deploy --archive zvonix-<метка>.tgz --unsigned`. Смена ключа без потери — выпуском, подписанным
+прежним ключом, где `RELEASE_SIGNER` уже новый.
+
 Затем на сервере:
 
 ```bash
@@ -299,7 +315,9 @@ sudo -u postgres pg_restore --clean --if-exists -d zvonix /var/backups/zvonix/<�
 ```bash
 pnpm install --frozen-lockfile && pnpm build && pnpm web:build
 node scripts/release-pack.mjs v0.1.0         # release/zvonix-v0.1.0.tgz и .sha256
-sudo zvonix-deploy --archive zvonix-v0.1.0.tgz
+ssh-keygen -Y sign -f ~/.zvonix/release-signing/zvonix-release -n zvonix-release release/zvonix-v0.1.0.tgz.sha256
+sudo zvonix-deploy --archive zvonix-v0.1.0.tgz   # рядом .sha256 и .sha256.sig
+# без ключа подписи — только руками в терминале: sudo zvonix-deploy --archive zvonix-v0.1.0.tgz --unsigned
 ```
 
 ## Обновление из кабинета
@@ -414,7 +432,8 @@ FreeSWITCH уже стоит — репозиторий пакетов не ну
 навык `node-live` и [node/README.md](../node/README.md).
 
 **Узел обновляется вместе с площадкой.** `zvonix-deploy` после перехода на выпуск
-приводит узел на этой машине к набору выпуска: конфигурация FreeSWITCH, правила
+приводит узел на этой машине к набору выпуска — скрипт собирается из кода выпуска, а не берётся
+у API ([ADR-0109](../docs/adr/0109-podlinnost-vypuska-i-prava-na-kod.md)): конфигурация FreeSWITCH, правила
 fail2ban, пульс, пароль ESL площадке. FreeSWITCH перезапускается, только если набор
 изменился, и только когда на узле нет звонков. Подробно — [node/README.md](../node/README.md),
 «Обновление узла». Отдельно, без выкладки: `zvonix-node-update`.

@@ -58,6 +58,23 @@ jobs:
       - name: Архив выпуска
         run: node scripts/release-pack.mjs "$TAG" release
 
+      # Подпись суммы архива (ADR-0109): сервер ставит выпуск, только если подпись сходится с ключом, зашитым
+      # в deploy/deploy.sh. Ключ — секретом и во временном файле, который удаляется сразу после подписи.
+      - name: Подпись выпуска
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "нет секрета RELEASE_SIGNING_KEY — выпуск без подписи сервер не примет"; exit 1; }
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
+          chmod 600 "$key"
+          ssh-keygen -q -Y sign -f "$key" -n zvonix-release "release/zvonix-${TAG}.tgz.sha256"
+          signer="$(sed -n "s/^RELEASE_SIGNER='\(.*\)'$/\1/p" deploy/deploy.sh)"
+          printf 'zvonix-release namespaces="zvonix-release" %s\n' "$signer" > "$RUNNER_TEMP/signers"
+          ssh-keygen -Y verify -f "$RUNNER_TEMP/signers" -I zvonix-release -n zvonix-release \
+            -s "release/zvonix-${TAG}.tgz.sha256.sig" < "release/zvonix-${TAG}.tgz.sha256"
+
       # Что вошло: заголовки коммитов с прошлой метки. Их показывает раздел «Обновления» в кабинете
       # (ADR-0074), поэтому первая строка — главное изменение, а не служебная фраза.
       - name: Описание выпуска
@@ -76,6 +93,7 @@ jobs:
           gh release create "$TAG" \
             "release/zvonix-${TAG}.tgz" \
             "release/zvonix-${TAG}.tgz.sha256" \
+            "release/zvonix-${TAG}.tgz.sha256.sig" \
             --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file release/notes.md
