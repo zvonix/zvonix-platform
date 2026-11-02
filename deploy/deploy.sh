@@ -37,6 +37,13 @@ NGINX_SLOT=/etc/nginx/conf.d/zvonix-slot.conf
 LEGACY_SERVICES=(zvonix-api zvonix-web)
 # Сколько секунд после переключения выкладка наблюдает за новым экземпляром, прежде чем остановить прежний.
 WATCH_SECONDS="${ZVONIX_WATCH_SECONDS:-90}"
+# Столько отказов nginx «не достучался» (502, 504) от нового экземпляра в окне — повод вернуть прежний. API сам этих
+# кодов не отдаёт: они значат, что процесс не отвечает, а не что запрос неудачный.
+WATCH_MAX_BAD=3
+SLOT_LOG=/var/log/nginx/zvonix-slot.log
+# Сколько секунд прежний экземпляр может дорабатывать открытые соединения перед остановкой: самые долгие запросы —
+# выгрузка записей разговоров, предел у nginx 300 с.
+DRAIN_SECONDS="${ZVONIX_DRAIN_SECONDS:-300}"
 # Миграции, которые меняют или удаляют данные, без явного разрешения не идут (ADR-0086, часть 3).
 ALLOW_RISKY=0
 # Сколько секунд службы должны проработать после «готов», прежде чем выпуск признан поднявшимся.
@@ -61,7 +68,7 @@ die() {
 step() { printf '\n=== %s\n' "$*"; }
 
 [ "$(id -u)" -eq 0 ] || die "нужны права root"
-for command in curl tar sha256sum ssh-keygen node pnpm python3 systemctl sudo find pg_dump flock nginx; do
+for command in curl tar sha256sum ssh-keygen node pnpm python3 systemctl sudo find pg_dump flock nginx ss; do
   command -v "$command" >/dev/null 2>&1 \
     || die "не найдена команда ${command} — сначала deploy/server-setup.sh"
 done
@@ -168,6 +175,8 @@ point_nginx() {
   cat >"$draft" <<NGINX
   # Порождается zvonix-deploy (ADR-0110): постоянные адреса площадки ведут на активный экземпляр «${slot}».
   # Не править — перезапишется следующей выкладкой.
+  # Журнал постоянных адресов: код ответа и экземпляр — по нему окно наблюдения ловит 502 и 504.
+  log_format zvonix_slot '\$status \$upstream_addr';
   map \$http_x_forwarded_proto \$zvonix_forwarded_proto {
       default \$http_x_forwarded_proto;
       ""      \$scheme;
@@ -178,6 +187,7 @@ point_nginx() {
   server {
       listen 127.0.0.1:8000;
       server_tokens off;
+      access_log ${SLOT_LOG} zvonix_slot;
       client_max_body_size 200m;
       proxy_request_buffering off;
       proxy_buffering off;
@@ -195,6 +205,7 @@ point_nginx() {
   server {
       listen 127.0.0.1:3000;
       server_tokens off;
+      access_log ${SLOT_LOG} zvonix_slot;
       proxy_read_timeout 60s;
       location / {
           proxy_pass http://127.0.0.1:$(web_port "$slot");
@@ -221,9 +232,11 @@ NGINX
   wait_ready "$API_READY" && wait_ready "$WEB_READY"
 }
 
-# Окно наблюдения: новый экземпляр отвечает через постоянные адреса и жив. Код 1 — сбой в окне.
+# Окно наблюдения: новый экземпляр жив, отвечает через постоянные адреса, и на настоящих запросах nginx до него
+# достучивается — 502 и 504 от его портов считаются по журналу постоянных адресов. Код 1 — сбой в окне.
 watch_slot() {
-  local slot="$1" left="$WATCH_SECONDS" name
+  local slot="$1" left="$WATCH_SECONDS" name offset size bad
+  offset="$(stat -c %s "$SLOT_LOG" 2>/dev/null || echo 0)"
   echo "наблюдение за новым выпуском: ${WATCH_SECONDS} с"
   while [ "$left" -gt 0 ]; do
     sleep 5
@@ -233,7 +246,31 @@ watch_slot() {
     done
     curl -fs --max-time 5 -o /dev/null "$API_READY" || { echo "API не ответил в окне наблюдения" >&2; return 1; }
     curl -fs --max-time 5 -o /dev/null "$WEB_READY" || { echo "кабинет не ответил в окне наблюдения" >&2; return 1; }
+    size="$(stat -c %s "$SLOT_LOG" 2>/dev/null || echo 0)"
+    # Журнал повернули посреди окна — считаем с начала нового.
+    [ "$size" -ge "$offset" ] || offset=0
+    bad="$(tail -c +"$((offset + 1))" "$SLOT_LOG" 2>/dev/null \
+      | awk -v api="127.0.0.1:$(api_port "$slot")" -v web="127.0.0.1:$(web_port "$slot")" \
+          '($1 == 502 || $1 == 504) && (index($2, api) || index($2, web)) { n++ } END { print n + 0 }')"
+    if [ "$bad" -ge "$WATCH_MAX_BAD" ]; then
+      echo "nginx не достучался до нового выпуска ${bad} раз (502/504) в окне наблюдения" >&2
+      return 1
+    fi
   done
+}
+
+# Прежний экземпляр дорабатывает открытые соединения: nginx после переключения новых не шлёт, а начатые — например,
+# выгрузка записи разговора — доходят до конца. Не дождались за DRAIN_SECONDS — остановка их оборвёт; узел повторит.
+drain_slot() {
+  local slot="$1" left="$DRAIN_SECONDS" open
+  while [ "$left" -gt 0 ]; do
+    open="$(ss -Htn state established "( sport = :$(api_port "$slot") or sport = :$(web_port "$slot") )" | wc -l)"
+    [ "$open" -gt 0 ] || return 0
+    [ $((left % 15)) -ne 0 ] || echo "прежний выпуск дорабатывает соединений: ${open}"
+    sleep 1
+    left=$((left - 1))
+  done
+  echo "ВНИМАНИЕ: ${open} соединений не доработали за ${DRAIN_SECONDS} с — обрываются" >&2
 }
 
 # Площадка до экземпляров: службы zvonix-api/zvonix-web. Останавливаются и убираются — их порты 8000 и 3000 займёт
@@ -296,7 +333,10 @@ activate() {
     revert "$active" "$target" "$before"
     return 1
   fi
-  [ -z "$active" ] || stop_slot "$active"
+  if [ -n "$active" ]; then
+    drain_slot "$active"
+    stop_slot "$active"
+  fi
   systemctl is-active --quiet zvonix-worker || { echo "воркер не работает" >&2; return 1; }
 }
 
