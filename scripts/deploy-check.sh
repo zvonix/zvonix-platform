@@ -38,6 +38,8 @@ fail() {
 }
 
 step "Окружение как на сервере"
+# Переменные сборщика CI: sudo там их не сбрасывает, и pnpm от zvonix полез бы в настройки /home/runner.
+unset XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME XDG_STATE_HOME PNPM_HOME
 useradd --system --create-home --shell /usr/sbin/nologin zvonix
 # Те же пути, что ставит server-setup.sh: sudo и systemd не видят node и pnpm из каталога инструментов CI.
 ln -sf "$(command -v node)" /usr/bin/node
