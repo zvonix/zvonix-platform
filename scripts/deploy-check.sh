@@ -38,9 +38,16 @@ fail() {
 }
 
 step "Окружение как на сервере"
-# Переменные сборщика CI: sudo там их не сбрасывает, и pnpm от zvonix полез бы в настройки /home/runner.
+# Сборщик CI настроил sudo не как обычная Ubuntu: HOME и XDG_* проходят насквозь, и pnpm от zvonix полез бы в
+# настройки /home/runner. Здесь sudo приводится к виду сервера.
 unset XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME XDG_STATE_HOME PNPM_HOME
+printf 'Defaults env_reset\nDefaults always_set_home\nDefaults env_keep -= "HOME XDG_CONFIG_HOME"\n' \
+  >/etc/sudoers.d/zz-deploy-check
+chmod 0440 /etc/sudoers.d/zz-deploy-check
+visudo -cqf /etc/sudoers.d/zz-deploy-check
 useradd --system --create-home --shell /usr/sbin/nologin zvonix
+[ "$(sudo -u zvonix -H sh -c 'echo "$HOME"')" = /home/zvonix ] \
+  || { sudo -u zvonix -H env >&2; fail "sudo не задаёт HOME"; }
 # Те же пути, что ставит server-setup.sh: sudo и systemd не видят node и pnpm из каталога инструментов CI.
 ln -sf "$(command -v node)" /usr/bin/node
 ln -sf "$(command -v node)" /usr/local/bin/node
