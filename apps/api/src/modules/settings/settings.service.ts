@@ -144,6 +144,18 @@ export class SettingsService {
       distinctPerDay: this.number(values, 'calls.distinct_per_day'),
       sleepHours: this.number(values, 'calls.sleep_hours'),
       poorAnswerPercent: this.number(values, 'calls.poor_answer_percent'),
+      brakeSuspensions: this.number(values, 'calls.brake_suspensions'),
+      brakePercent: this.number(values, 'calls.brake_percent'),
+      trunkCallsPerSecond: this.number(values, 'calls.trunk_calls_per_second'),
+    };
+  }
+
+  /** Предел звонков с номером клиента через SIP-провайдеров (ADR-0108); 0 — без предела. */
+  async callerIdLimits(): Promise<{ readonly perHour: number; readonly perDay: number }> {
+    const values = await this.values();
+    return {
+      perHour: this.number(values, 'calls.caller_id_per_hour'),
+      perDay: this.number(values, 'calls.caller_id_per_day'),
     };
   }
 

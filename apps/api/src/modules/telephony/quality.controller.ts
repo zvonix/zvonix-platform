@@ -67,18 +67,27 @@ export class QualityController {
    */
   @Roles('admin', 'support')
   @Get('quality/blocks')
-  async blocks(
-    @Query('days') days?: string,
-  ): Promise<{ days: number; partners: BlocksView[]; operators: BlocksView[] }> {
+  async blocks(@Query('days') days?: string): Promise<{
+    days: number;
+    partners: BlocksView[];
+    operators: BlocksView[];
+    braked_operators: string[];
+  }> {
     const period = days === undefined ? DEFAULT_BLOCKS_DAYS : Number(days);
     if (!Number.isInteger(period) || period < 1 || period > MAX_BLOCKS_DAYS) {
       throw validationFailed('Период отчёта — целое число суток от 1 до 90');
     }
-    const report = await this.quality.blocks(new Date(Date.now() - period * 86_400_000));
+    const now = new Date();
+    const [report, braked] = await Promise.all([
+      this.quality.blocks(new Date(now.getTime() - period * 86_400_000)),
+      this.quality.brakedOperators(now),
+    ]);
     return {
       days: period,
       partners: report.partners.map(toBlocksView),
       operators: report.operators.map(toBlocksView),
+      // Операторы, чьи номера сейчас тормозят (ADR-0108) — независимо от периода отчёта: окно торможения своё.
+      braked_operators: [...braked].sort(),
     };
   }
 

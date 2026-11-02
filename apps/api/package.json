@@ -34,7 +34,7 @@
     "@zvonix/logger": "workspace:*",
     "@zvonix/shared": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.12.5",
+    "fastify": "^5.12.7",
     "ioredis": "^5.9.0",
     "nodemailer": "^10.1.4",
     "reflect-metadata": "^0.2.2",

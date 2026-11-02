@@ -8,19 +8,21 @@
 
 import { Injectable } from '@nestjs/common';
 import {
+  awakeNumbers,
   callPace,
   callRestingUntil,
   callRestWindowMs,
   callWarmupDay,
   isIdleNumber,
   isPoorNumber,
-  sleepUntil,
+  trunkSpacedUntil,
   type CallPace,
   type CallPaceSettings,
   type Id,
 } from '@zvonix/shared';
 import { SettingsService } from '../settings/settings.service.js';
 import { CallRepository, type Executor, type NumberAttempts } from './call.repository.js';
+import { QualityService } from './quality.service.js';
 import {
   TelephonyRepository,
   type GatewayRow,
@@ -37,6 +39,8 @@ export interface PacedNumber {
   readonly warmupStartedAt: Date | null;
   /** Номеров у транка; у SIM — один. */
   readonly numbers: number;
+  /** Оператор SIM — по нему автоторможение (ADR-0108); у транка оператора нет. */
+  readonly operatorId: string | null;
 }
 
 /** Пределы номера и израсходованное за скользящие час и сутки. */
@@ -77,7 +81,13 @@ export interface PaceScreen {
 }
 
 export function pacedSim(sim: SimCardRow): PacedNumber {
-  return { kind: 'sim', id: sim.id, warmupStartedAt: sim.warmupStartedAt, numbers: 1 };
+  return {
+    kind: 'sim',
+    id: sim.id,
+    warmupStartedAt: sim.warmupStartedAt,
+    numbers: 1,
+    operatorId: sim.operatorId,
+  };
 }
 
 export function pacedTrunk(row: { gateway: GatewayRow; trunk: SipTrunkRow }): PacedNumber {
@@ -86,6 +96,7 @@ export function pacedTrunk(row: { gateway: GatewayRow; trunk: SipTrunkRow }): Pa
     id: row.gateway.id,
     warmupStartedAt: row.trunk.warmupStartedAt,
     numbers: row.trunk.numbersCount,
+    operatorId: null,
   };
 }
 
@@ -112,6 +123,8 @@ export interface NumberPaceView {
   readonly asleep_until: string | null;
   /** «Плохой» номер: мало настоящих ответов, пределы вдвое ниже. */
   readonly poor: boolean;
+  /** Оператор номера тормозит (ADR-0108): пределы ниже обычных. */
+  readonly braked: boolean;
 }
 
 export function toPaceView(pace: NumberPace): NumberPaceView {
@@ -128,6 +141,7 @@ export function toPaceView(pace: NumberPace): NumberPaceView {
     resting_until: pace.restingUntil?.toISOString() ?? null,
     asleep_until: pace.asleepUntil?.toISOString() ?? null,
     poor: pace.poor,
+    braked: pace.braked,
   };
 }
 
@@ -136,13 +150,28 @@ function paceOf(
   number: PacedNumber,
   attempts: NumberAttempts,
   now: Date,
+  braked: boolean,
 ): NumberPace {
-  const pace = callPace(
-    settings,
-    callWarmupDay(number.warmupStartedAt, attempts.lastAt, now),
-    number.numbers,
-    isPoorNumber(attempts.day, attempts.realAnsweredDay, settings.poorAnswerPercent),
-  );
+  const warmupDay = callWarmupDay(number.warmupStartedAt, attempts.lastAt, now);
+  const poor = isPoorNumber(attempts.day, attempts.realAnsweredDay, settings.poorAnswerPercent);
+  // Сон (ADR-0107, ADR-0108): у каждого номера свои часы, и у транка — у каждого его номера. Сутки считаются на все
+  // номера: звонки, сделанные днём, не должны запирать транк ночью. Час, абоненты за час и места паузы — на тех,
+  // кто сейчас не спит.
+  const sleep = awakeNumbers(number.id, number.numbers, settings.sleepHours, now);
+  const full = callPace(settings, warmupDay, number.numbers, poor, braked);
+  const awake = callPace(settings, warmupDay, Math.max(1, sleep.awake), poor, braked);
+  const pace: CallPace = {
+    ...full,
+    perHour: awake.perHour,
+    distinctPerHour: awake.distinctPerHour,
+    numbers: awake.numbers,
+  };
+  const resting = callRestingUntil(pace, attempts.ended, now);
+  // Ровный шаг SIP-провайдера (ADR-0108): вызовы транка не пачкой.
+  const spaced =
+    number.kind === 'sip'
+      ? trunkSpacedUntil(attempts.lastAt, settings.trunkCallsPerSecond, now)
+      : null;
   return {
     ...pace,
     usedHour: attempts.hour,
@@ -151,10 +180,10 @@ function paceOf(
     distinctUsedDay: attempts.distinctDay,
     calledHour: attempts.calledHour,
     calledDay: attempts.calledDay,
-    restingUntil: callRestingUntil(pace, attempts.ended, now),
+    restingUntil:
+      resting === null ? spaced : spaced === null || spaced < resting ? resting : spaced,
     idle: isIdleNumber(attempts.lastAt, now),
-    // Транк с несколькими номерами не спит: каким номером звонит провайдер, площадка не выбирает (ADR-0107).
-    asleepUntil: number.numbers === 1 ? sleepUntil(number.id, settings.sleepHours, now) : null,
+    asleepUntil: sleep.wakesAt,
     realAnsweredDay: attempts.realAnsweredDay,
   };
 }
@@ -182,6 +211,7 @@ export class CallPaceService {
     private readonly calls: CallRepository,
     private readonly telephony: TelephonyRepository,
     private readonly settings: SettingsService,
+    private readonly quality: QualityService,
   ) {}
 
   /**
@@ -194,7 +224,10 @@ export class CallPaceService {
     destination?: string,
     executor?: Executor,
   ): Promise<Map<string, NumberPace>> {
-    const settings = await this.settings.callPace();
+    const [settings, braked] = await Promise.all([
+      this.settings.callPace(),
+      this.quality.brakedOperators(now),
+    ]);
     const window = callRestWindowMs(settings);
     const options = {
       destination,
@@ -219,7 +252,16 @@ export class CallPaceService {
     const result = new Map<string, NumberPace>();
     for (const number of numbers) {
       const attempts = (number.kind === 'sim' ? sims : trunks).get(number.id) ?? NO_ATTEMPTS;
-      result.set(number.id, paceOf(settings, number, attempts, now));
+      result.set(
+        number.id,
+        paceOf(
+          settings,
+          number,
+          attempts,
+          now,
+          number.operatorId !== null && braked.has(number.operatorId),
+        ),
+      );
     }
     return result;
   }
@@ -273,6 +315,22 @@ export class CallPaceService {
     if (limits.perHour <= 0 && limits.perDay <= 0) return false;
     if (tx !== undefined) await this.calls.lockRecipient(clientId, destination, tx);
     const used = await this.calls.recipientCalls(clientId, destination, now, tx);
+    return (
+      (limits.perHour > 0 && used.hour >= limits.perHour) ||
+      (limits.perDay > 0 && used.day >= limits.perDay)
+    );
+  }
+
+  /**
+   * Номер клиента, который видит абонент, звонил через SIP-провайдеров столько, сколько разрешено за час или сутки
+   * (ADR-0108): дальше вызовы этой линии идут только через SIM, где абонент видит номер SIM. Без блокировки: предел
+   * мягкий, одновременные заявки перешагнут его на единицы, а запирать каждый вызов клиента ради этого дорого.
+   */
+  async callerIdExceeded(callerId: string | null, now: Date): Promise<boolean> {
+    if (callerId === null) return false;
+    const limits = await this.settings.callerIdLimits();
+    if (limits.perHour <= 0 && limits.perDay <= 0) return false;
+    const used = await this.calls.callerIdCalls(callerId, now);
     return (
       (limits.perHour > 0 && used.hour >= limits.perHour) ||
       (limits.perDay > 0 && used.day >= limits.perDay)

@@ -33,6 +33,8 @@ interface BlocksResponse {
   readonly days: number;
   readonly partners: BlocksRow[];
   readonly operators: BlocksRow[];
+  /** Операторы, чьи номера сейчас тормозят (ADR-0108). */
+  readonly braked_operators: string[];
 }
 
 const PERIODS = [
@@ -61,6 +63,7 @@ export function Blocks() {
   });
   const rows = report.data?.[group] ?? [];
   const label = GROUPS.find((entry) => entry.key === group)?.one ?? '';
+  const braked = new Set(report.data?.braked_operators ?? []);
 
   return (
     <section className="flex flex-col gap-3" aria-labelledby="blocks-title">
@@ -156,7 +159,17 @@ export function Blocks() {
             )}
             {rows.map((row) => (
               <TableRow key={row.id}>
-                <TableCell>{row.name}</TableCell>
+                <TableCell>
+                  {row.name}
+                  {group === 'operators' && braked.has(row.id) && (
+                    <span
+                      className="text-warn"
+                      title="За 7 суток сняли несколько SIM этого оператора: все его номера звонят реже, пока снятия не уйдут за 7 суток"
+                    >
+                      {' · '}тормозит
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell className="num text-right">{row.attempts}</TableCell>
                 <TableCell className="num text-right">
                   {share(row.real_answered, row.attempts)}

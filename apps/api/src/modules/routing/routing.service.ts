@@ -311,8 +311,13 @@ export class RoutingService {
       at,
       destination,
     );
+    // Номер клиента, который видит абонент (ADR-0108): исчерпал предел — SIP-провайдеры с ним больше не звонят,
+    // вызов идёт через SIM, где абонент видит номер SIM.
+    const callerIdSpent = await this.pace.callerIdExceeded(channel.callerId, at);
     const ordered = withinLimits.filter(
-      ({ candidate }) => !screen.exhausted.has(pacedNumberOf(candidate).id),
+      ({ candidate }) =>
+        !screen.exhausted.has(pacedNumberOf(candidate).id) &&
+        !(callerIdSpent && candidate.kind === 'sip'),
     );
     if (ordered.length === 0) {
       // Отдельная причина: «все номера исчерпали квоты» и «SIM нет вовсе» — разные разговоры с партнёром. И не

@@ -8,8 +8,9 @@ import {
   callWarmupDailyLimit,
   callWarmupDay,
   isPoorNumber,
+  trunkSpacedUntil,
 } from './call-pace.js';
-import { jitteredPauseMs, paceJitter, sleepUntil } from './pace-jitter.js';
+import { awakeNumbers, jitteredPauseMs, paceJitter, sleepUntil } from './pace-jitter.js';
 
 const DAY = 86_400_000;
 const now = new Date('2026-10-29T12:00:00Z');
@@ -51,8 +52,17 @@ describe('прогрев номера', () => {
       distinctPerDay: 100,
       sleepHours: 0,
       poorAnswerPercent: 0,
+      brakeSuspensions: 0,
+      brakePercent: 50,
+      trunkCallsPerSecond: 0,
     };
-    const common = { numbers: 1, poor: false, distinctPerHour: 15, distinctPerDay: 100 };
+    const common = {
+      numbers: 1,
+      poor: false,
+      braked: false,
+      distinctPerHour: 15,
+      distinctPerDay: 100,
+    };
     expect(callPace(settings, null)).toEqual({
       ...common,
       perHour: 20,
@@ -71,6 +81,7 @@ describe('прогрев номера', () => {
     expect(callPace(settings, 0, 5)).toEqual({
       numbers: 5,
       poor: false,
+      braked: false,
       distinctPerHour: 75,
       distinctPerDay: 500,
       perHour: 10,
@@ -94,10 +105,14 @@ describe('прогрев номера', () => {
       distinctPerDay: 0,
       sleepHours: 0,
       poorAnswerPercent: 0,
+      brakeSuspensions: 0,
+      brakePercent: 50,
+      trunkCallsPerSecond: 0,
     };
     expect(callPace(off, null)).toEqual({
       numbers: 1,
       poor: false,
+      braked: false,
       perHour: null,
       perDay: null,
       warmupDay: null,
@@ -170,6 +185,9 @@ describe('пауза номера после вызова (ADR-0106)', () => {
         distinctPerDay: 0,
         sleepHours: 0,
         poorAnswerPercent: 0,
+        brakeSuspensions: 0,
+        brakePercent: 50,
+        trunkCallsPerSecond: 0,
       }),
     ).toBe(135_000);
   });
@@ -214,6 +232,9 @@ describe('сон номера и «плохой» номер (ADR-0107)', () => 
       distinctPerDay: 100,
       sleepHours: 6,
       poorAnswerPercent: 20,
+      brakeSuspensions: 2,
+      brakePercent: 50,
+      trunkCallsPerSecond: 1,
     };
     expect(callPace(settings, null, 1, true)).toMatchObject({
       poor: true,
@@ -223,5 +244,66 @@ describe('сон номера и «плохой» номер (ADR-0107)', () => 
       distinctPerDay: 50,
       pauseSeconds: 30,
     });
+  });
+});
+
+describe('автоторможение, сон номеров транка, ровный шаг (ADR-0108)', () => {
+  const settings = {
+    warmupEnabled: false,
+    perHour: 15,
+    perDay: 100,
+    pauseSeconds: 30,
+    warmupPauseSeconds: 90,
+    distinctPerHour: 15,
+    distinctPerDay: 100,
+    sleepHours: 6,
+    poorAnswerPercent: 20,
+    brakeSuspensions: 2,
+    brakePercent: 50,
+    trunkCallsPerSecond: 1,
+  };
+
+  it('заторможенный номер — половина пределов; вместе с «плохим» — четверть, не ниже единицы', () => {
+    expect(callPace(settings, null, 1, false, true)).toMatchObject({
+      braked: true,
+      perHour: 8,
+      perDay: 50,
+      distinctPerHour: 8,
+    });
+    expect(callPace(settings, null, 1, true, true)).toMatchObject({ perHour: 4, perDay: 25 });
+    expect(callPace({ ...settings, perHour: 1 }, null, 1, true, true).perHour).toBe(1);
+    expect(callPace({ ...settings, brakePercent: 100 }, null, 3, false, true).perDay).toBe(300);
+  });
+
+  it('номера транка спят в свои часы: ночью не спит примерно половина, днём — все', () => {
+    const night = awakeNumbers('trunk-a', 200, 6, new Date('2026-10-30T23:00:00Z'));
+    const day = awakeNumbers('trunk-a', 200, 6, new Date('2026-10-30T12:00:00Z'));
+    expect(day).toEqual({ awake: 200, wakesAt: null });
+    expect(night.awake).toBeGreaterThan(60);
+    expect(night.awake).toBeLessThan(140);
+    expect(night.wakesAt).toBeNull();
+    expect(awakeNumbers('trunk-a', 200, 0, new Date('2026-10-30T23:00:00Z')).awake).toBe(200);
+  });
+
+  it('один номер спит под самим ключом — как SIM', () => {
+    const at = new Date('2026-10-30T23:00:00Z');
+    const until = sleepUntil('sim-x', 12, at);
+    expect(awakeNumbers('sim-x', 1, 12, at)).toEqual({
+      awake: until === null ? 1 : 0,
+      wakesAt: until,
+    });
+  });
+
+  it('ровный шаг транка: не раньше секунды после прошлого начала', () => {
+    const now = new Date('2026-10-30T12:00:00.000Z');
+    expect(trunkSpacedUntil(new Date('2026-10-30T11:59:59.400Z'), 1, now)).toEqual(
+      new Date('2026-10-30T12:00:00.400Z'),
+    );
+    expect(trunkSpacedUntil(new Date('2026-10-30T11:59:59.000Z'), 1, now)).toBeNull();
+    expect(trunkSpacedUntil(new Date('2026-10-30T11:59:59.600Z'), 2, now)).toEqual(
+      new Date('2026-10-30T12:00:00.100Z'),
+    );
+    expect(trunkSpacedUntil(now, 0, now)).toBeNull();
+    expect(trunkSpacedUntil(null, 1, now)).toBeNull();
   });
 });

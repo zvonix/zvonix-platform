@@ -9,9 +9,16 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { notFound, type FailureScope, type Id, type UserRole } from '@zvonix/shared';
+import {
+  CALL_BRAKE_DAYS,
+  notFound,
+  type FailureScope,
+  type Id,
+  type UserRole,
+} from '@zvonix/shared';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import {
   QualityRepository,
   type FailureThresholdRow,
@@ -94,6 +101,7 @@ export class QualityService {
     private readonly repository: QualityRepository,
     private readonly telephony: TelephonyRepository,
     private readonly audit: AuditService,
+    private readonly settings: SettingsService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('quality');
@@ -192,6 +200,32 @@ export class QualityService {
             (left.simsSuspended + left.gatewaysSuspended) || right.attempts - left.attempts,
       );
     return { partners: sorted(byPartner), operators: sorted(byOperator) };
+  }
+
+  /**
+   * Заторможенные операторы ([ADR-0108](../../../../../docs/adr/0108-avtotormozhenie-operatora-i-sip.md)): порог отказов снял за
+   * {@link CALL_BRAKE_DAYS} суток не меньше `calls.brake_suspensions` разных SIM оператора. Оператор начал резать
+   * номера — остальные его номера звонят реже, не дожидаясь, пока снимут и их. Снимается само: снятия уходят за окно.
+   */
+  async brakedOperators(now: Date): Promise<ReadonlySet<string>> {
+    const { brakeSuspensions } = await this.settings.callPace();
+    if (brakeSuspensions <= 0) return new Set();
+    const events = await this.audit.occurrences(
+      ['sim.suspended_by_failures'],
+      new Date(now.getTime() - CALL_BRAKE_DAYS * 86_400_000),
+    );
+    const simIds = [
+      ...new Set(events.flatMap((event) => (event.entityId === null ? [] : [event.entityId]))),
+    ];
+    if (simIds.length < brakeSuspensions) return new Set();
+    const perOperator = new Map<string, number>();
+    for (const owner of await this.repository.ownersOf(simIds, [])) {
+      if (owner.operatorId === null) continue;
+      perOperator.set(owner.operatorId, (perOperator.get(owner.operatorId) ?? 0) + 1);
+    }
+    return new Set(
+      [...perOperator].filter(([, count]) => count >= brakeSuspensions).map(([id]) => id),
+    );
   }
 
   /** Партнёры, у которых порог отказов с `since` снял два объекта и больше — для тревоги администраторам (ADR-0106). */
