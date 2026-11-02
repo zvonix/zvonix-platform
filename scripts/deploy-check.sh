@@ -208,6 +208,28 @@ probe_stop
 [ "$(active_slot)" = b ] || fail "после обновления активен не «b»"
 systemctl is-active --quiet zvonix-api@a && fail "прежний экземпляр не остановлен"
 
+step "Прежний экземпляр дорабатывает соединения"
+# Открытое соединение с портом экземпляра «a» держится 4 секунды: остановка ждёт его, а не обрывает.
+DRAIN_SECONDS=30
+systemctl start zvonix-api@a
+wait_ready "http://127.0.0.1:$(api_port a)/health/live" || fail "экземпляр «a» для пробы не поднялся"
+(
+  exec 3<>"/dev/tcp/127.0.0.1/$(api_port a)"
+  sleep 4
+  exec 3>&-
+) &
+holder=$!
+sleep 1
+started="$(date +%s)"
+drain_slot a
+waited=$(($(date +%s) - started))
+wait "$holder" 2>/dev/null || true
+stop_slot a
+[ "$waited" -ge 2 ] || fail "остановка не ждала открытого соединения (${waited} с)"
+[ "$waited" -lt 30 ] || fail "ожидание не закончилось, когда соединение закрылось"
+grep -q 'zvonix_slot' "$NGINX_SLOT" || fail "журнал постоянных адресов не настроен"
+[ -s "$SLOT_LOG" ] || fail "журнал постоянных адресов пуст"
+
 step "Выпуск, который не поднимается"
 broken="${RELEASES}/check-broken"
 cp -a "$first" "$broken"
