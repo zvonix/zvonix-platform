@@ -773,7 +773,24 @@ except ImportError:  # Windows: только проверки службы; на
     fcntl = None
 
 RESTORE_DB = LIVE_DB + '_restore'
-SERVICES = shlex.split(os.environ.get('ZVONIX_SERVICES', 'zvonix-api zvonix-worker zvonix-web'))
+# Активный экземпляр API и кабинета (ADR-0110) пишет выкладка; до экземпляров — прежние службы.
+SLOT_FILE = os.environ.get('ZVONIX_SLOT_FILE', '/etc/zvonix/slot')
+
+
+def services():
+    """Службы площадки в порядке запуска: API, воркер, кабинет — активного экземпляра, если он есть."""
+    if 'ZVONIX_SERVICES' in os.environ:
+        return shlex.split(os.environ['ZVONIX_SERVICES'])
+    try:
+        with open(SLOT_FILE, encoding='utf-8') as handle:
+            slot = handle.read().strip()
+    except OSError:
+        slot = ''
+    if slot in ('a', 'b'):
+        return ['zvonix-api@' + slot, 'zvonix-worker', 'zvonix-web@' + slot]
+    return ['zvonix-api', 'zvonix-worker', 'zvonix-web']
+
+
 API_READY = os.environ.get('ZVONIX_API_READY', 'http://127.0.0.1:8000/health/ready')
 WEB_READY = os.environ.get('ZVONIX_WEB_READY', 'http://127.0.0.1:3000/login')
 # В проверках «готовность» — внешняя команда: код 0 значит «служба отвечает».
@@ -829,7 +846,7 @@ def wait_ready():
 
 def set_services(action, journal):
     """Остановка идёт в обратном порядке запуска: сначала кабинет и воркер, потом API."""
-    names = list(reversed(SERVICES)) if action == 'stop' else SERVICES
+    names = list(reversed(services())) if action == 'stop' else services()
     ok = True
     for name in names:
         code, output = run_long(SYSTEMCTL + [action, name], 180)

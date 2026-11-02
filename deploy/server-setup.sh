@@ -503,7 +503,9 @@ fi
 if [ "$ADDRESS_CHANGED" = yes ]; then
   # Процессы читают окружение при старте. Службы ставит выкладка: до первой их ещё нет,
   # а try-restart незнакомой службы — ошибка.
-  for unit in zvonix-api zvonix-worker zvonix-web; do
+  # Экземпляры API и кабинета (ADR-0110) — шаблонами: перезапускаются только работающие.
+  systemctl try-restart 'zvonix-api@*.service' 'zvonix-web@*.service' zvonix-worker.service 2>/dev/null || true
+  for unit in zvonix-api zvonix-web; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
       systemctl try-restart "$unit"
     fi
