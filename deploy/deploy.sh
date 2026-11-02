@@ -353,9 +353,11 @@ unpack_release() {
   local modules=()
   mapfile -t modules < <(find "$release" -maxdepth 3 -name package.json -not -path '*/node_modules/*' -printf '%h/node_modules\n')
   install -d -o zvonix -g zvonix -m 0755 "${modules[@]}"
-  # Версию pnpm берёт corepack из `packageManager` выпуска.
+  # Версию pnpm берёт corepack из `packageManager` выпуска. Хранилище — явным путём, тем же, что pnpm берёт по
+  # умолчанию на Linux: с путём «от домашнего каталога» pnpm выбирает место хранилища, создавая пробный файл в корне
+  # выпуска, а корень принадлежит root (поймано пробой выкладки в CI, ADR-0109).
   run_with_heartbeat sudo -u zvonix -H env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true \
-    sh -c 'cd "$0" && pnpm install --frozen-lockfile --prod --filter "@zvonix/api..." --filter "@zvonix/worker..."' \
+    sh -c 'cd "$0" && pnpm install --frozen-lockfile --prod --store-dir "$HOME/.local/share/pnpm/store" --filter "@zvonix/api..." --filter "@zvonix/worker..."' \
     "$release"
   chown -R root:root "${modules[@]}"
   chmod -R go-w "${modules[@]}"
