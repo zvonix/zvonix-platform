@@ -56,6 +56,7 @@
 | Установка площадки     | Одной строкой под root — [deploy/README.md](deploy/README.md), «Установка одной командой»; спрашивает адрес кабинета (домен — сертификат и https ставятся сами), первого администратора кабинет заводит по коду из вывода выкладки ([ADR-0050](docs/adr/0050-ustanovka-odnoy-komandoy-i-pervyy-vhod.md)) |
 | Разбор миграций выпуска | `node scripts/migration-risk.mjs [база]` — что в новых миграциях теряет данные или не накатится; навык `/release` |
 | **Полная проверка**    | `pnpm verify` (то же — `pnpm check`) из любого терминала: запускалка находит bash, проверяет базу и Redis до первого шага и печатает строку о выпуске. Сам гейт — `bash scripts/check.sh`, его гоняет CI |
+| Проба выкладки | `scripts/deploy-check.sh` — только CI, от root на Ubuntu: настоящий архив, функции `deploy.sh`, права на выпуск, подпись, кабинет настоящим юнитом ([ADR-0109](docs/adr/0109-podlinnost-vypuska-i-prava-na-kod.md)). Единственный шаг вне гейта: локально он невозможен |
 | Сгенерировать миграцию | `pnpm db:generate` — **после `pnpm build`**: читается собранная схема |
 | Применить миграции     | `pnpm db:migrate` |
 | Завести администратора или поддержку | `ADMIN_EMAIL=… ADMIN_PASSWORD=… [ADMIN_ROLE=support] pnpm admin:create` (после `pnpm build`) |

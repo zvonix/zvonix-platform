@@ -105,6 +105,7 @@ const SHELL_SCRIPTS = [
   'deploy/backup.sh',
   'deploy/server-setup.sh',
   'deploy/install.sh',
+  'scripts/deploy-check.sh',
 ];
 
 // Каждый скрипт проверяется независимо от остальных и от XML: сломанный файл не отменяет

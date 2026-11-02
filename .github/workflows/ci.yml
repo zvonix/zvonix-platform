@@ -88,6 +88,14 @@ jobs:
       - name: Полная проверка
         run: bash scripts/check.sh
 
+      # Единственное исключение из правила выше: шагу нужны root, systemd и настоящая Ubuntu, локально он
+      # невозможен (ADR-0109). Сборку берёт у шага выше: архив — настоящий, распаковка — функциями deploy.sh.
+      - name: Проба выкладки
+        run: |
+          node scripts/release-pack.mjs v0.0.0-check release-check
+          sudo env "PATH=$PATH" CI=true TEST_DATABASE_URL="$TEST_DATABASE_URL" TEST_REDIS_URL="$TEST_REDIS_URL" \
+            bash scripts/deploy-check.sh release-check/zvonix-v0.0.0-check.tgz
+
   # Проверка, которую нельзя пройти на Windows: имена файлов, отличающиеся только регистром.
   case-sensitivity:
     runs-on: ubuntu-latest
