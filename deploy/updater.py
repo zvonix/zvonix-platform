@@ -576,11 +576,14 @@ def verify_backup(backup_id, lines):
             return 1
         lines.append('оглавление читается')
         run_long(pg('dropdb', '--if-exists', VERIFY_DB), 300)
-        code, output = run_long(pg('createdb', VERIFY_DB), 300)
+        code, output = run_long(pg('createdb', '-O', DB_OWNER, VERIFY_DB), 300)
         if code != 0:
             detail = 'временная база не создана: ' + output.strip()[-200:]
             return 1
-        code, output = run_long(pg('pg_restore', '--no-owner', '--exit-on-error', '-d', VERIFY_DB, path))
+        # От роли владельца базы, а не суперпользователя: копию мог загрузить кабинет, и её команды не должны
+        # получить права postgres (COPY … TO PROGRAM — оболочка от его имени; ADR-0109).
+        code, output = run_long(pg('pg_restore', '--no-owner', '--role=' + DB_OWNER, '--exit-on-error', '-d',
+                                   VERIFY_DB, path))
         if code != 0:
             detail = 'копия не разворачивается: ' + output.strip()[-200:]
             return 1

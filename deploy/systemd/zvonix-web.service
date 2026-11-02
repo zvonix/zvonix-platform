@@ -27,9 +27,10 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-# Next пишет кэш рядом со сборкой. Запись открыта только каталогу выпусков,
-# а не всей /opt.
-ReadWritePaths=/opt/zvonix/releases
+# Next пишет кэш в `.next/cache` сборки, а это ссылка выкладки в /var/cache/zvonix-web/<выпуск>
+# (ADR-0109): каталог выпуска принадлежит root, и кабинет в него не пишет. Дефис — каталога может
+# ещё не быть до первой выкладки новым сценарием.
+ReadWritePaths=-/var/cache/zvonix-web
 
 [Install]
 WantedBy=multi-user.target

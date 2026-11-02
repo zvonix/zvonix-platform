@@ -562,8 +562,11 @@ describe('обновление узла', () => {
       'utf8',
     );
     expect(deploy).toContain('bash "$script" --update');
+    // Скрипт собирается из кода выпуска, а не берётся у API: его исполняет root (ADR-0109).
+    expect(deploy).toContain('dist/modules/nodes/node-script.js');
+    expect(deploy).not.toContain('/install.sh"');
     // До строки DEPLOY_OK: выкладка сообщает об узле, прежде чем сказать «готово».
-    expect(deploy.indexOf('update_local_node\n    first_run_hint')).toBeGreaterThan(0);
+    expect(deploy.indexOf('update_local_node "$release"\n    first_run_hint')).toBeGreaterThan(0);
     expect(deploy).toContain('узел АТС не обновлён — площадка работает');
   });
 });

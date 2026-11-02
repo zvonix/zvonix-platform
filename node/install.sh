@@ -832,7 +832,16 @@ cat >/usr/local/sbin/zvonix-node-update <<UPDATE
 set -eu
 SCRIPT="\$(mktemp)"
 trap 'rm -f "\$SCRIPT"' EXIT
-curl -fsSL --max-time 60 -o "\$SCRIPT" "${CONTROL_PLANE}/install.sh"
+# Площадка на этой же машине: скрипт собирается из её выпуска (каталог root, подпись проверена), а не берётся
+# у её API — исполняет его root, и взломанный API иначе получил бы root (ADR-0109).
+RELEASE=/opt/zvonix/current
+if [ -f "\$RELEASE/apps/api/dist/modules/nodes/node-script.js" ] && [ -r /etc/zvonix/zvonix.env ]; then
+  sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; cd "\$0/apps/api" && exec node dist/modules/nodes/node-script.js' \\
+    "\$RELEASE" >"\$SCRIPT"
+  [ -s "\$SCRIPT" ]
+else
+  curl -fsSL --max-time 60 -o "\$SCRIPT" "${CONTROL_PLANE}/install.sh"
+fi
 # Один запуск за раз: автообновление из пульса и ручной вызов не должны идти вдвоём.
 exec flock -n /run/zvonix-node-update.lock bash "\$SCRIPT" --update
 UPDATE

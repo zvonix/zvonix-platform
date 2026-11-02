@@ -16,6 +16,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Код «не выполнено»: у шага проверки три исхода, и это третий. */
 const NOT_RUN = 78;
+
+/** Запись Playwright о прошлом прогоне: её пишет только доживший до конца процесс. */
+const LAST_RUN = path.join(ROOT, 'test-results', '.last-run.json');
+
+/** Дошёл ли прогон, начатый в `startedAt`, до конца: погибший записи об упавшем не оставляет. */
+function finishedSince(startedAt) {
+  try {
+    return statSync(LAST_RUN).mtimeMs >= startedAt;
+  } catch {
+    return false;
+  }
+}
 
 /** Запускает команду и отдаёт её код возврата вместе с выводом. */
 function run(command, args, options = {}) {
@@ -71,19 +84,22 @@ async function main() {
 
   // База приводится к чистому виду тем же процессом, что её наполняет: сброс требует
   // пакета базы, а корень монорепозитория его не зависимость.
-  process.stdout.write('Готовим базу и наполняем стенд…\n');
-  const seeded = await run(process.execPath, [path.join('dist', 'testing', 'seed-e2e.js')], {
-    cwd: path.join(ROOT, 'apps', 'api'),
-    env: { ...process.env, ...STACK_ENV, DATABASE_URL: TEST_DATABASE_URL },
-  });
-  if (seeded.code !== 0) {
-    process.stderr.write(`Наполнение стенда не удалось:\n${seeded.output}\n`);
-    process.exitCode = 1;
-    return;
-  }
+  const seed = async () => {
+    process.stdout.write('Готовим базу и наполняем стенд…\n');
+    const seeded = await run(process.execPath, [path.join('dist', 'testing', 'seed-e2e.js')], {
+      cwd: path.join(ROOT, 'apps', 'api'),
+      env: { ...process.env, ...STACK_ENV, DATABASE_URL: TEST_DATABASE_URL },
+    });
+    if (seeded.code !== 0) {
+      process.stderr.write(`Наполнение стенда не удалось:\n${seeded.output}\n`);
+      process.exitCode = 1;
+    }
+    return seeded.code === 0;
+  };
+  if (!(await seed())) return;
 
   process.stdout.write('Поднимаем кабинет и API…\n');
-  const stack = await startStack();
+  let stack = await startStack();
 
   try {
     const playwright = (extraArgs) =>
@@ -100,6 +116,7 @@ async function main() {
     // Свои аргументы Playwright — `E2E_ARGS="-g часть.названия --repeat-each=10"`: поймать нестабильный тест,
     // не гоняя весь набор. Пробелы в названии — точкой (это регулярное выражение).
     const extra = (process.env.E2E_ARGS ?? '').split(/\s+/).filter((arg) => arg !== '');
+    const startedAt = Date.now();
     let result = await playwright(extra);
     // С собственными аргументами повтора нет: `--last-failed` стирает следы только что упавшего.
     if (result.code !== 0 && extra.length === 0) {
@@ -111,7 +128,18 @@ async function main() {
       process.stdout.write(
         `\nПервый прогон завершился с кодом ${String(result.code)}. Повторяем упавшее один раз (сбои окружения Windows бывают разовыми).\n`,
       );
-      result = await playwright(['--last-failed']);
+      if (finishedSince(startedAt)) {
+        result = await playwright(['--last-failed']);
+      } else {
+        // Процесс погиб (`spawn UNKNOWN`, когда у Windows кончились ресурсы; 2026-11-02): записи об упавшем нет, и
+        // `--last-failed` запустил бы весь набор. По базе первого прохода тесты натыкаются на свои же данные и
+        // падают ложно, поэтому весь набор идёт только по чистому стенду.
+        process.stdout.write('Прогон погиб, не дойдя до конца: весь набор — по чистому стенду.\n');
+        await stack.stop();
+        if (!(await seed())) return;
+        stack = await startStack();
+        result = await playwright([]);
+      }
       if (result.code === 0) {
         process.stdout.write(
           '\nУпавшее при первом прогоне прошло при повторе: это сбой окружения, а не код. Первый вывод выше.\n',
