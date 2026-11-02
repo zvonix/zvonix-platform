@@ -187,19 +187,21 @@ full-upgrade` (блокировку dpkg в первые минуты держи
 возвращается сама. Вернуть вручную (если после восстановления выяснилось, что нужна была прежняя):
 
 ```
-sudo systemctl stop zvonix-web zvonix-worker zvonix-api
+S=$(cat /etc/zvonix/slot)   # активный экземпляр API и кабинета, a или b (ADR-0110)
+sudo systemctl stop zvonix-web@$S zvonix-worker zvonix-api@$S
 sudo -u postgres psql -c "ALTER DATABASE zvonix RENAME TO zvonix_after_restore"
 sudo -u postgres psql -c "ALTER DATABASE zvonix_replaced_<время> RENAME TO zvonix"
-sudo systemctl start zvonix-api zvonix-worker zvonix-web
+sudo systemctl start zvonix-api@$S zvonix-worker zvonix-web@$S
 ```
 
 **Восстановить вручную** (останавливает площадку на время; делает человек, не выкладка):
 
 ```
-sudo systemctl stop zvonix-api zvonix-worker zvonix-web
+S=$(cat /etc/zvonix/slot)   # активный экземпляр API и кабинета, a или b (ADR-0110)
+sudo systemctl stop zvonix-api@$S zvonix-worker zvonix-web@$S
 sudo -u postgres dropdb zvonix && sudo -u postgres createdb -O zvonix zvonix
 sudo -u postgres pg_restore --no-owner --role=zvonix -d zvonix /var/backups/zvonix/daily/daily-<время>.dump
-sudo systemctl start zvonix-api zvonix-worker zvonix-web
+sudo systemctl start zvonix-api@$S zvonix-worker zvonix-web@$S
 ```
 
 После восстановления откройте кабинет и проверьте последние платежи и вызовы: копия отстаёт от работы на время с момента снимка.
@@ -252,7 +254,8 @@ file:backup.key -in daily-….dump.enc -out daily-….dump`, дальше — «
 
 Вручную (сервер уже стоит, подготовку повторять не хочется):
 
-1. В `/etc/zvonix/zvonix.env` дописать `SMPP_PORT=2775` (обычный TCP) и перезапустить `zvonix-api`.
+1. В `/etc/zvonix/zvonix.env` дописать `SMPP_PORT=2775` (обычный TCP) и перезапустить API: `sudo systemctl restart zvonix-api@$(cat /etc/zvonix/slot)` (ADR-0110) — или
+   выложить выпуск ещё раз, тогда без перерыва.
    Порт слушает только API: воркер переменную читает, но слушателя не поднимает.
 2. Открыть порт: `ufw allow 2775/tcp comment 'SMPP'`. Пароль по обычному порту идёт открытым текстом, поэтому
    клиентам лучше давать порт с шифрованием или список разрешённых адресов (клиент задаёт его в кабинете).
@@ -298,7 +301,12 @@ sudo zvonix-deploy --prepare v0.1.0   # заранее: скачать и про
 sudo zvonix-deploy --rollback  # вернуть предыдущий выпуск; миграции остаются
 ```
 
-Не поднялся новый выпуск — скрипт сам возвращает прежний и называет это последней строкой.
+**Без простоя** ([ADR-0110](../docs/adr/0110-obnovlenie-bez-prostoya.md)): выпуск поднимается во втором экземпляре рядом с работающим, nginx
+переключает на него постоянные адреса 127.0.0.1:8000 и :3000, и 90 секунд выкладка наблюдает. Не поднялся или
+упал в окне — трафик остаётся (или возвращается) на прежнем выпуске, который всё это время работал; последняя строка
+это называет. Первая выкладка этой схемы один раз переводит площадку с прежних служб `zvonix-api`/`zvonix-web` на
+экземпляры — перерыв на этом шаге длится, пока поднимается API. Активный экземпляр — `cat /etc/zvonix/slot`, журналы —
+`journalctl -u 'zvonix-api@*' -u 'zvonix-web@*'`, постоянные адреса — `/etc/nginx/conf.d/zvonix-slot.conf`.
 
 Перед миграциями выкладка снимает **копию базы** — строка `копия базы: /var/backups/zvonix/…`
 в выводе. Не снялась — выкладка останавливается до миграций. Откат возвращает код, но не базу;
@@ -306,7 +314,8 @@ sudo zvonix-deploy --rollback  # вернуть предыдущий выпус�
 записанного после неё ([ADR-0049](../docs/adr/0049-vykladka-ploshchadki.md), ревизия 2026-09-22):
 
 ```bash
-sudo systemctl stop zvonix-api zvonix-worker zvonix-web
+S=$(cat /etc/zvonix/slot)   # активный экземпляр API и кабинета, a или b (ADR-0110)
+sudo systemctl stop zvonix-api@$S zvonix-worker zvonix-web@$S
 sudo -u postgres pg_restore --clean --if-exists -d zvonix /var/backups/zvonix/<файл>.dump
 ```
 
@@ -360,7 +369,7 @@ Destination `127.0.0.1:8080`, Add.
 с методом, шаблоном маршрута, кодом ответа и временем (номера абонентов в запись не попадают):
 
 ```bash
-journalctl -u zvonix-api --since "1 hour ago" | grep "Медленный запрос"
+journalctl -u 'zvonix-api@*' --since "1 hour ago" | grep "Медленный запрос"
 ```
 
 По `route` видно, какой раздел тормозит; по `correlation_id` — все записи того же запроса.
@@ -421,7 +430,7 @@ update users set totp_secret = null, totp_confirmed_at = null, totp_last_step = 
 `SIP_REALM` в `/etc/zvonix/zvonix.env` — общий SIP-домен площадки, например `sip.zvonix.com`.
 Он входит в хеш пароля каждого шлюза и каждой линии, поэтому задаётся **до выдачи первого
 пароля**: смена потом означает перевыпуск всех. Подготовка его не пишет — без строки
-действует заглушка `sip.zvonix.local`. После правки — `systemctl restart zvonix-api zvonix-worker`.
+действует заглушка `sip.zvonix.local`. После правки — `systemctl restart zvonix-api@$(cat /etc/zvonix/slot) zvonix-worker`.
 
 ## Узел АТС на этой же машине
 

@@ -13,9 +13,10 @@
 #
 # Новый выпуск ставится рядом с работающим. Перед миграциями снимается копия базы
 # (/var/backups/zvonix, пять последних); без неё миграции не идут. Миграции применяются
-# до переключения: они совместимы с прежним кодом (ADR-0005). Потом меняется ссылка
-# и перезапускаются службы. Не поднялся — ссылка возвращается на прежний выпуск.
-# Миграции откат не откатывает — для этого и копия.
+# до переключения: они совместимы с прежним кодом (ADR-0005). Потом выпуск поднимается во
+# втором экземпляре рядом с работающим, nginx переключается на него, и 90 секунд выкладка
+# наблюдает; сбой — nginx возвращается на прежний экземпляр, который всё это время работал
+# (ADR-0110). Миграции откат не откатывает — для этого и копия.
 set -euo pipefail
 
 ROOT=/opt/zvonix
@@ -27,7 +28,15 @@ KEEP=5
 BACKUPS=/var/backups/zvonix
 # Имя базы — то, что заводит deploy/server-setup.sh.
 DATABASE=zvonix
-SERVICES=(zvonix-api zvonix-worker zvonix-web)
+# Экземпляры API и кабинета (ADR-0110): «a» и «b», активный записан в SLOT_FILE. Постоянные адреса 127.0.0.1:8000 и
+# :3000 держит nginx (NGINX_SLOT) и ведёт на порты активного экземпляра.
+SLOTS="${ROOT}/slots"
+SLOT_FILE=/etc/zvonix/slot
+NGINX_SLOT=/etc/nginx/conf.d/zvonix-slot.conf
+# Службы до экземпляров: выкладка один раз переводит площадку с них на экземпляры.
+LEGACY_SERVICES=(zvonix-api zvonix-web)
+# Сколько секунд после переключения выкладка наблюдает за новым экземпляром, прежде чем остановить прежний.
+WATCH_SECONDS="${ZVONIX_WATCH_SECONDS:-90}"
 # Миграции, которые меняют или удаляют данные, без явного разрешения не идут (ADR-0086, часть 3).
 ALLOW_RISKY=0
 # Сколько секунд службы должны проработать после «готов», прежде чем выпуск признан поднявшимся.
@@ -52,7 +61,7 @@ die() {
 step() { printf '\n=== %s\n' "$*"; }
 
 [ "$(id -u)" -eq 0 ] || die "нужны права root"
-for command in curl tar sha256sum ssh-keygen node pnpm python3 systemctl sudo find pg_dump flock; do
+for command in curl tar sha256sum ssh-keygen node pnpm python3 systemctl sudo find pg_dump flock nginx; do
   command -v "$command" >/dev/null 2>&1 \
     || die "не найдена команда ${command} — сначала deploy/server-setup.sh"
 done
@@ -87,37 +96,238 @@ point() {
   mv -Tf "${1}.new" "$1"
 }
 
-# Переход на выпуск: службы той же версии, ссылка, перезапуск, ожидание ответа.
-activate() {
+# Системные файлы выпуска: юниты, сценарии выкладки, копий и службы обновления. Только у выпуска с экземплярами
+# (ADR-0110): откат на более старый выпуск не возвращает сценарий, который ничего не знает об экземплярах, — его код
+# работает в экземпляре, а выкладкой правит текущий сценарий.
+install_system_files() {
   local release="$1"
-  harden_release "$release"
-  if [ -d "${release}/deploy/systemd" ]; then
-    install -m 0644 "${release}"/deploy/systemd/zvonix-*.service "${release}"/deploy/systemd/zvonix-*.timer       "${release}"/deploy/systemd/zvonix-*.path /etc/systemd/system/
-    install -m 0755 "${release}/deploy/deploy.sh" /usr/local/sbin/zvonix-deploy
-    # Ежедневная копия базы: сценарий и таймер ставятся выкладкой, как и службы.
-    install -m 0755 "${release}/deploy/backup.sh" /usr/local/sbin/zvonix-backup
-    # Обновление из кабинета (ADR-0074): служба от root и каталог обмена с API. Служба
-    # обновления выкладкой не перезапускается — она сама её и запускает.
-    install -m 0755 "${release}/deploy/updater.py" /usr/local/sbin/zvonix-updater
-    install -d -o root -g root -m 0755 /var/lib/zvonix-updater /var/lib/zvonix-updater/runs
-    install -d -o zvonix -g zvonix -m 0750 /var/lib/zvonix-updater/requests /var/lib/zvonix-updater/uploads
-  fi
-  point "$CURRENT" "$release"
+  [ -f "${release}/deploy/systemd/zvonix-api@.service" ] || return 0
+  install -m 0644 "${release}"/deploy/systemd/zvonix-*.service "${release}"/deploy/systemd/zvonix-*.timer \
+    "${release}"/deploy/systemd/zvonix-*.path /etc/systemd/system/
+  install -m 0755 "${release}/deploy/deploy.sh" /usr/local/sbin/zvonix-deploy
+  # Ежедневная копия базы: сценарий и таймер ставятся выкладкой, как и службы.
+  install -m 0755 "${release}/deploy/backup.sh" /usr/local/sbin/zvonix-backup
+  # Обновление из кабинета (ADR-0074): служба от root и каталог обмена с API. Служба
+  # обновления выкладкой не перезапускается — она сама её и запускает.
+  install -m 0755 "${release}/deploy/updater.py" /usr/local/sbin/zvonix-updater
+  install -d -o root -g root -m 0755 /var/lib/zvonix-updater /var/lib/zvonix-updater/runs
+  install -d -o zvonix -g zvonix -m 0750 /var/lib/zvonix-updater/requests /var/lib/zvonix-updater/uploads
   systemctl daemon-reload
-  systemctl enable "${SERVICES[@]}" >/dev/null 2>&1
   systemctl enable --now zvonix-backup.timer >/dev/null 2>&1 || echo "ВНИМАНИЕ: таймер копий не включён" >&2
-  systemctl enable --now zvonix-updater.path zvonix-updater.timer >/dev/null 2>&1     || echo "ВНИМАНИЕ: обновление из кабинета не включено" >&2
-  systemctl restart "${SERVICES[@]}"
-  wait_ready "$API_READY" && wait_ready "$WEB_READY" || return 1
-  # «Готов» не ловит службу, которая падает сразу после запуска (цикл перезапуска): ждём и проверяем, что все живы.
+  systemctl enable --now zvonix-updater.path zvonix-updater.timer >/dev/null 2>&1 \
+    || echo "ВНИМАНИЕ: обновление из кабинета не включено" >&2
+}
+
+active_slot() {
+  local slot
+  slot="$(cat "$SLOT_FILE" 2>/dev/null || true)"
+  case "$slot" in a | b) echo "$slot" ;; *) echo "" ;; esac
+}
+other_slot() { [ "$1" = a ] && echo b || echo a; }
+api_port() { [ "$1" = a ] && echo 8101 || echo 8102; }
+web_port() { [ "$1" = a ] && echo 3101 || echo 3102; }
+slot_units() { echo "zvonix-api@${1} zvonix-web@${1}"; }
+
+# Экземпляр с выпуском: ссылка, порты, запуск и ответ «готов» на его собственных портах — до того, как ему пойдёт
+# трафик. Код 1 — не поднялся; экземпляр при этом остановлен.
+start_slot() {
+  local slot="$1" release="$2" name
+  install -d -o root -g root -m 0755 "$SLOTS"
+  point "${SLOTS}/${slot}" "$release"
+  printf 'APP_PORT=%s\nPORT=%s\n' "$(api_port "$slot")" "$(web_port "$slot")" >"/etc/zvonix/slot-${slot}.env"
+  chmod 0644 "/etc/zvonix/slot-${slot}.env"
+  # shellcheck disable=SC2046 # имена служб — слова без пробелов
+  systemctl restart $(slot_units "$slot")
+  if ! wait_ready "http://127.0.0.1:$(api_port "$slot")/health/ready" \
+      || ! wait_ready "http://127.0.0.1:$(web_port "$slot")/login"; then
+    stop_slot "$slot"
+    return 1
+  fi
+  # «Готов» не ловит службу, которая падает сразу после запуска (цикл перезапуска): ждём и проверяем, что обе живы.
   sleep "$STABLE_SECONDS"
-  local name
-  for name in "${SERVICES[@]}"; do
+  for name in $(slot_units "$slot"); do
     if ! systemctl is-active --quiet "$name"; then
       echo "служба ${name} не работает через ${STABLE_SECONDS} с после запуска" >&2
+      stop_slot "$slot"
       return 1
     fi
   done
+}
+
+stop_slot() {
+  # shellcheck disable=SC2046
+  systemctl stop $(slot_units "$1") 2>/dev/null || true
+  # shellcheck disable=SC2046
+  systemctl disable $(slot_units "$1") >/dev/null 2>&1 || true
+}
+
+# Постоянные адреса — на экземпляр `slot`. Проверка конфигурации до перезагрузки; не прошла — прежний файл на месте.
+# `reload` мягкий: прежние рабочие процессы nginx дорабатывают начатые запросы.
+point_nginx() {
+  local slot="$1" draft="${NGINX_SLOT}.new"
+  cat >"$draft" <<NGINX
+  # Порождается zvonix-deploy (ADR-0110): постоянные адреса площадки ведут на активный экземпляр «${slot}».
+  # Не править — перезапишется следующей выкладкой.
+  map \$http_x_forwarded_proto \$zvonix_forwarded_proto {
+      default \$http_x_forwarded_proto;
+      ""      \$scheme;
+  }
+
+  # API: сайт площадки, узел АТС на этой машине, служба обновления. Пределы тела и ожидания — самые широкие
+  # из тех, что задаёт сайт (записи разговоров): узкие пределы держит сайт до этого прохода.
+  server {
+      listen 127.0.0.1:8000;
+      server_tokens off;
+      client_max_body_size 200m;
+      proxy_request_buffering off;
+      proxy_buffering off;
+      proxy_read_timeout 300s;
+      proxy_send_timeout 300s;
+      location / {
+          proxy_pass http://127.0.0.1:$(api_port "$slot");
+          proxy_http_version 1.1;
+          proxy_set_header Host \$http_host;
+          proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto \$zvonix_forwarded_proto;
+      }
+  }
+
+  server {
+      listen 127.0.0.1:3000;
+      server_tokens off;
+      proxy_read_timeout 60s;
+      location / {
+          proxy_pass http://127.0.0.1:$(web_port "$slot");
+          proxy_http_version 1.1;
+          proxy_set_header Host \$http_host;
+          proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto \$zvonix_forwarded_proto;
+      }
+  }
+NGINX
+  local previous=""
+  [ -f "$NGINX_SLOT" ] && previous="$(cat "$NGINX_SLOT")"
+  mv -f "$draft" "$NGINX_SLOT"
+  if ! nginx -t >/dev/null 2>&1; then
+    nginx -t >&2 || true
+    if [ -n "$previous" ]; then printf '%s\n' "$previous" >"$NGINX_SLOT"; else rm -f "$NGINX_SLOT"; fi
+    return 1
+  fi
+  systemctl reload nginx || return 1
+  printf '%s\n' "$slot" >"$SLOT_FILE"
+  # shellcheck disable=SC2046
+  systemctl enable $(slot_units "$slot") >/dev/null 2>&1 || true
+  # Перезагрузка асинхронна: постоянный адрес должен ответить, прежде чем ему поверят.
+  wait_ready "$API_READY" && wait_ready "$WEB_READY"
+}
+
+# Окно наблюдения: новый экземпляр отвечает через постоянные адреса и жив. Код 1 — сбой в окне.
+watch_slot() {
+  local slot="$1" left="$WATCH_SECONDS" name
+  echo "наблюдение за новым выпуском: ${WATCH_SECONDS} с"
+  while [ "$left" -gt 0 ]; do
+    sleep 5
+    left=$((left - 5))
+    for name in $(slot_units "$slot"); do
+      systemctl is-active --quiet "$name" || { echo "служба ${name} остановилась в окне наблюдения" >&2; return 1; }
+    done
+    curl -fs --max-time 5 -o /dev/null "$API_READY" || { echo "API не ответил в окне наблюдения" >&2; return 1; }
+    curl -fs --max-time 5 -o /dev/null "$WEB_READY" || { echo "кабинет не ответил в окне наблюдения" >&2; return 1; }
+  done
+}
+
+# Площадка до экземпляров: службы zvonix-api/zvonix-web. Останавливаются и убираются — их порты 8000 и 3000 займёт
+# nginx. Единственный перерыв за всю историю переходов: прежний API держит порт SMPP без общего режима, и новый
+# экземпляр рядом с ним его не открыл бы (ADR-0110).
+retire_legacy() {
+  local name
+  for name in "${LEGACY_SERVICES[@]}"; do
+    systemctl stop "$name" 2>/dev/null || true
+    systemctl disable "$name" >/dev/null 2>&1 || true
+    rm -f "/etc/systemd/system/${name}.service"
+  done
+  systemctl daemon-reload
+}
+
+legacy_running() {
+  local name
+  for name in "${LEGACY_SERVICES[@]}"; do
+    [ -f "/etc/systemd/system/${name}.service" ] && return 0
+    systemctl is-active --quiet "$name" && return 0
+  done
+  return 1
+}
+
+# Переход на выпуск без простоя (ADR-0110): выпуск поднимается в свободном экземпляре, nginx переключается на него,
+# затем окно наблюдения; прежний экземпляр работает до конца окна и принимает трафик обратно при сбое.
+# Код 1 — выпуск не поднялся или не выдержал окна; трафик при этом снова на прежнем выпуске.
+activate() {
+  local release="$1" before="${2:-}" active target
+  harden_release "$release"
+  install_system_files "$release"
+  active="$(active_slot)"
+  target="$(other_slot "${active:-b}")"
+
+  if [ -z "$active" ] && legacy_running; then
+    step "Переход на экземпляры (один раз)"
+    retire_legacy
+  fi
+
+  step "Экземпляр «${target}»: запуск"
+  if ! start_slot "$target" "$release"; then
+    echo "выпуск не поднялся в экземпляре «${target}» — трафик не переключался" >&2
+    [ -n "$active" ] || revive "$before"
+    return 1
+  fi
+
+  step "Переключение на «${target}»"
+  if ! point_nginx "$target"; then
+    echo "переключение nginx не удалось — трафик остался на прежнем выпуске" >&2
+    stop_slot "$target"
+    [ -n "$active" ] || revive "$before"
+    return 1
+  fi
+  point "$CURRENT" "$release"
+  systemctl enable zvonix-worker >/dev/null 2>&1 || true
+  systemctl restart zvonix-worker
+
+  if ! watch_slot "$target"; then
+    echo "выпуск не выдержал окна наблюдения — возвращаю прежний" >&2
+    revert "$active" "$target" "$before"
+    return 1
+  fi
+  [ -z "$active" ] || stop_slot "$active"
+  systemctl is-active --quiet zvonix-worker || { echo "воркер не работает" >&2; return 1; }
+}
+
+# Возврат после сбоя в окне: прежний экземпляр ещё работает — nginx обратно на него; его нет (переход с одного
+# экземпляра) — прежний выпуск поднимается во втором экземпляре.
+revert() {
+  local active="$1" failed="$2" before="$3"
+  if [ -n "$active" ] && point_nginx "$active"; then
+    [ -z "$before" ] || point "$CURRENT" "$before"
+    systemctl restart zvonix-worker
+    stop_slot "$failed"
+    echo "работает прежний выпуск в экземпляре «${active}»" >&2
+    return 0
+  fi
+  stop_slot "$failed"
+  revive "$before"
+}
+
+# Работающего экземпляра нет (переход с одного экземпляра сорвался): прежний выпуск — в экземпляр «b»; при переходе
+# новый выпуск ставится в «a», так что «b» свободен.
+revive() {
+  local before="$1"
+  [ -n "$before" ] || return 0
+  if start_slot b "$before" && point_nginx b; then
+    point "$CURRENT" "$before"
+    systemctl restart zvonix-worker
+    echo "работает прежний выпуск ${before} в экземпляре «b»" >&2
+    return 0
+  fi
+  echo "прежний выпуск ${before} тоже не поднялся — journalctl -u 'zvonix-api@*' -u 'zvonix-web@*'" >&2
+  return 1
 }
 
 # Старые выпуски, кроме текущего и предыдущего: хранятся KEEP последних.
@@ -620,7 +830,7 @@ install_release() {
   fi
 
   step "Переход на выпуск"
-  if activate "$release"; then
+  if activate "$release" "$before"; then
     if [ -n "$before" ]; then
       point "$PREVIOUS" "$before"
     fi
@@ -632,10 +842,8 @@ install_release() {
     return 0
   fi
 
-  [ -n "$before" ] || die "выпуск не поднялся, а прежнего нет — journalctl -u zvonix-api -u zvonix-web"
-  echo "Выпуск не поднялся — возвращаю ${before}" >&2
-  activate "$before" || die "не поднялся и прежний выпуск ${before} — journalctl -u zvonix-api -u zvonix-web"
-  die "выпуск ${release} не поднялся, работает прежний ${before}"
+  # Прежний выпуск activate уже вернул сам: трафик на него и не уходил либо вернулся из окна наблюдения.
+  die "выпуск ${release} не поднялся или не выдержал наблюдения, работает прежний ${before:-(нет)} — journalctl -u 'zvonix-api@*' -u 'zvonix-web@*'"
 }
 
 rollback() {
@@ -646,7 +854,7 @@ rollback() {
   [ -d "$target" ] || die "предыдущий выпуск ${target} удалён"
 
   step "Откат на ${target}"
-  activate "$target" || die "предыдущий выпуск не поднялся — journalctl -u zvonix-api -u zvonix-web"
+  activate "$target" "$current" || die "предыдущий выпуск не поднялся, работает текущий — journalctl -u 'zvonix-api@*' -u 'zvonix-web@*'"
   point "$PREVIOUS" "$current"
   update_local_node "$target"
   echo "ROLLBACK_OK ${target}"

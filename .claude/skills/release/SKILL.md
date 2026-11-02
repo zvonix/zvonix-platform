@@ -59,8 +59,9 @@ argument-hint: '[метка, например v0.1.0]'
 7. **Проверка после** — команды раздела «Проверка после выкладки» в
    [deploy/README.md](../../../deploy/README.md), плюс:
    ```bash
-   systemctl is-active zvonix-api zvonix-worker zvonix-web
-   journalctl -u zvonix-api -u zvonix-worker --since '-10 min' -p warning --no-pager
+   S=$(cat /etc/zvonix/slot)   # активный экземпляр (ADR-0110)
+   systemctl is-active zvonix-api@$S zvonix-worker zvonix-web@$S
+   journalctl -u 'zvonix-api@*' -u 'zvonix-web@*' -u zvonix-worker --since '-10 min' -p warning --no-pager
    ```
    Кабинет своими глазами — через туннель, если владелец хочет.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Проба выкладки на настоящей Ubuntu (ADR-0109): только CI, от root — запускать на рабочей машине нельзя.
+# Проба выкладки на настоящей Ubuntu (ADR-0109, ADR-0110): только CI, от root — запускать на рабочей машине нельзя.
 #
 #   sudo env "PATH=$PATH" bash scripts/deploy-check.sh <архив выпуска>
 #
@@ -30,7 +30,7 @@ eval "$(grep -E '^(RELEASE_NAMESPACE|WEB_CACHE)=' "$DEPLOY")"
 
 RELEASES=/opt/zvonix/releases
 WORK="$(mktemp -d)"
-trap 'systemctl stop zvonix-web 2>/dev/null || true; rm -rf "$WORK"' EXIT
+trap 'systemctl stop "zvonix-api@*" "zvonix-web@*" zvonix-api zvonix-web zvonix-worker 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
 fail() {
   echo "ПРОБА ВЫКЛАДКИ НЕ ПРОШЛА: $*" >&2
@@ -127,23 +127,114 @@ pkill -u zvonix -f 'dist/main.js' || true
 wait "$api" 2>/dev/null || true
 [ "$up" -eq 1 ] || { tail -20 "${WORK}/api.log" >&2; fail "API выпуска не запустился"; }
 
-step "Кабинет настоящим юнитом"
-ln -sfn "$release" /opt/zvonix/current
-install -m 0644 "${release}/deploy/systemd/zvonix-web.service" /etc/systemd/system/
+step "Функции выкладки целиком"
+# Все функции и постоянные deploy.sh — кроме разбора аргументов внизу; часть постоянных ниже ужимается под пробу.
+eval "$(awk '
+  /^[a-z_]+\(\) \{.*\}$/ { print; next }
+  /^[a-z_]+\(\) \{/ { inside = 1 }
+  inside { print; if ($0 ~ /^\}/) inside = 0; next }
+  /^[A-Z_]+=/ && !/^ARGS=/ { print }
+' "$DEPLOY")"
+RELEASES=/opt/zvonix/releases
+WATCH_SECONDS=20
+STABLE_SECONDS=2
+WORK="$(mktemp -d)"
+
+step "Площадка до экземпляров"
+command -v nginx >/dev/null || apt-get install -y -qq nginx >/dev/null
+rm -f /etc/nginx/sites-enabled/default
+systemctl start nginx
+install -d -m 0755 /etc/zvonix
+cp "$env_file" /etc/zvonix/zvonix.env
+chmod 0640 /etc/zvonix/zvonix.env
+chgrp zvonix /etc/zvonix/zvonix.env
+first="$release"
+second="${RELEASES}/check-second"
+cp -a "$first" "$second"
+web_cache "$second"
+point "$CURRENT" "$first"
+# Прежние службы — как их ставили выпуски до ADR-0110: один экземпляр на 8000 и 3000.
+cat >/etc/systemd/system/zvonix-api.service <<UNIT
+[Service]
+User=zvonix
+WorkingDirectory=/opt/zvonix/current/apps/api
+EnvironmentFile=/etc/zvonix/zvonix.env
+Environment=RECORDINGS_DIR=/tmp/zvonix-check-rec SUPPORT_DIR=/tmp/zvonix-check-sup SMPP_PORT=0
+ExecStart=/usr/bin/node dist/main.js
+UNIT
+cat >/etc/systemd/system/zvonix-web.service <<UNIT
+[Service]
+User=zvonix
+WorkingDirectory=/opt/zvonix/current/apps/web/.next/standalone/apps/web
+Environment=NODE_ENV=production HOSTNAME=127.0.0.1 PORT=3000
+ExecStart=/usr/bin/node server.js
+UNIT
+# Воркер и экземпляры — настоящими юнитами выпуска; SMPP в пробе не нужен.
+install_system_files "$first"
+printf 'SMPP_PORT=0\n' >>/etc/zvonix/zvonix.env
 systemctl daemon-reload
-systemctl start zvonix-web
-up=0
-for _ in $(seq 1 40); do
-  if curl -fs --max-time 2 -o /dev/null http://127.0.0.1:3000/login; then
-    up=1
-    break
-  fi
-  sleep 1
-done
-journal="$(journalctl -u zvonix-web --no-pager -o cat)"
-[ "$up" -eq 1 ] || { printf '%s\n' "$journal" | tail -20 >&2; fail "кабинет не запустился"; }
-curl -fs --max-time 5 -o /dev/null http://127.0.0.1:3000/login || fail "кабинет перестал отвечать"
-journal="$(journalctl -u zvonix-web --no-pager -o cat)"
+systemctl start zvonix-api zvonix-web
+wait_ready "$API_READY" && wait_ready "$WEB_READY" || fail "прежние службы не поднялись"
+
+# Непрерывные запросы к постоянным адресам: каждый отказ — строка в файле.
+probe_start() {
+  : >"${WORK}/refused"
+  (
+    while [ ! -f "${WORK}/stop-probe" ]; do
+      curl -fs --max-time 3 -o /dev/null "$API_READY" || echo "api $(date +%T.%N)" >>"${WORK}/refused"
+      curl -fs --max-time 3 -o /dev/null "$WEB_READY" || echo "web $(date +%T.%N)" >>"${WORK}/refused"
+      sleep 0.2
+    done
+  ) &
+  PROBE=$!
+}
+probe_stop() {
+  touch "${WORK}/stop-probe"
+  wait "$PROBE" 2>/dev/null || true
+  rm -f "${WORK}/stop-probe"
+}
+
+step "Переход на экземпляры"
+activate "$second" "$first" || fail "переход с одного экземпляра не удался"
+[ "$(active_slot)" = a ] || fail "после перехода активен не «a»"
+legacy_running && fail "прежние службы остались"
+[ "$(readlink -f "$CURRENT")" = "$second" ] || fail "current не на новом выпуске"
+
+step "Обновление без простоя"
+probe_start
+activate "$first" "$second" || { probe_stop; fail "обновление не удалось"; }
+probe_stop
+[ ! -s "${WORK}/refused" ] || { cat "${WORK}/refused" >&2; fail "во время обновления были отказы"; }
+[ "$(active_slot)" = b ] || fail "после обновления активен не «b»"
+systemctl is-active --quiet zvonix-api@a && fail "прежний экземпляр не остановлен"
+
+step "Выпуск, который не поднимается"
+broken="${RELEASES}/check-broken"
+cp -a "$first" "$broken"
+printf 'process.exit(1);\n' >"${broken}/apps/api/dist/main.js"
+web_cache "$broken"
+probe_start
+if activate "$broken" "$first"; then probe_stop; fail "сломанный выпуск принят"; fi
+probe_stop
+[ ! -s "${WORK}/refused" ] || { cat "${WORK}/refused" >&2; fail "сломанный выпуск вызвал отказы"; }
+[ "$(active_slot)" = b ] || fail "после отказа активен не прежний «b»"
+[ "$(readlink -f "$CURRENT")" = "$first" ] || fail "current сдвинулся на сломанный выпуск"
+
+step "Выпуск, который падает в окне наблюдения"
+dying="${RELEASES}/check-dying"
+cp -a "$first" "$dying"
+mv "${dying}/apps/api/dist/main.js" "${dying}/apps/api/dist/main-real.js"
+# Поднимается и отвечает «готов», а через 8 секунд выходит с кодом 0 — systemd его не перезапустит.
+printf "import './main-real.js';\nsetTimeout(() => process.exit(0), 8000);\n" >"${dying}/apps/api/dist/main.js"
+web_cache "$dying"
+if activate "$dying" "$first"; then fail "выпуск, упавший в окне, принят"; fi
+[ "$(active_slot)" = b ] || fail "после сбоя в окне активен не прежний «b»"
+[ "$(readlink -f "$CURRENT")" = "$first" ] || fail "current не вернулся на прежний выпуск"
+wait_ready "$API_READY" && wait_ready "$WEB_READY" || fail "после возврата площадка не отвечает"
+systemctl is-active --quiet zvonix-worker || fail "воркер не работает после возврата"
+
+step "Кабинет пишет только в свой кэш"
+journal="$(journalctl -u 'zvonix-web@*' --no-pager -o cat)"
 if printf '%s\n' "$journal" | grep -E 'EROFS|EACCES'; then fail "кабинет пытается писать вне своего кэша"; fi
 
 echo

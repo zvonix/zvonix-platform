@@ -1,6 +1,7 @@
-# API площадки (ADR-0049). Слушает только 127.0.0.1: наружу его отдаёт обратный прокси.
+# API площадки (ADR-0049), экземпляр «%i» (ADR-0110). Слушает только 127.0.0.1 на порту экземпляра; постоянный
+# адрес 127.0.0.1:8000 держит nginx и ведёт на активный экземпляр.
 [Unit]
-Description=Zvonix API
+Description=Zvonix API (%i)
 After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
 
@@ -8,8 +9,10 @@ Wants=network-online.target
 Type=simple
 User=zvonix
 Group=zvonix
-WorkingDirectory=/opt/zvonix/current/apps/api
+WorkingDirectory=/opt/zvonix/slots/%i/apps/api
 EnvironmentFile=/etc/zvonix/zvonix.env
+# Порт экземпляра — после общего окружения: APP_PORT в нём перекрывается.
+EnvironmentFile=/etc/zvonix/slot-%i.env
 # Записи разговоров (ADR-0063): каталог создаёт и отдаёт службе сам systemd, и он остаётся
 # записываемым при ProtectSystem=strict. Вне каталога выпуска — выкладка записи не стирает.
 StateDirectory=zvonix-recordings zvonix-support

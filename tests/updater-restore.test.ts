@@ -83,6 +83,8 @@ function runUpdater(extra: Record<string, string> = {}): void {
       ZVONIX_EXPORT_OWNER: '',
       ZVONIX_ENV_FILE: path.join(dir, 'нет-такого-файла'),
       ZVONIX_GITHUB_ENV: path.join(dir, 'нет-такого-файла'),
+      // Экземпляра нет — прежние службы; свой файл экземпляра задаёт тест (ADR-0110).
+      ZVONIX_SLOT_FILE: path.join(dir, 'slot'),
       FAKE_DIR: dir,
       ...extra,
     },
@@ -142,6 +144,25 @@ describe('восстановление: успех', () => {
     expect(drops.some((line) => line.split(' ').includes('zvonix'))).toBe(false);
     expect(drops).toContain('dropdb --if-exists zvonix_replaced_20260101000000');
     expect(journal(id)).toContain('Прежняя база сохранена как zvonix_replaced_');
+  });
+
+  it('службы — активного экземпляра, когда он записан (ADR-0110)', () => {
+    setup({ freshCheck: true });
+    writeFileSync(path.join(dir, 'slot'), 'b\n');
+    const id = enqueue();
+    runUpdater();
+
+    expect(state(id)).toMatchObject({ status: 'succeeded', target });
+    expect(calls().filter((line) => line.startsWith('systemctl stop'))).toEqual([
+      'systemctl stop zvonix-web@b',
+      'systemctl stop zvonix-worker',
+      'systemctl stop zvonix-api@b',
+    ]);
+    expect(calls().filter((line) => line.startsWith('systemctl start'))).toEqual([
+      'systemctl start zvonix-api@b',
+      'systemctl start zvonix-worker',
+      'systemctl start zvonix-web@b',
+    ]);
   });
 
   it('копия без свежей проверки сначала проверяется сама', () => {

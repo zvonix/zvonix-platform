@@ -1,9 +1,10 @@
-# Кабинет (ADR-0037, ADR-0049): самодостаточная сборка Next на 127.0.0.1:3000.
+# Кабинет (ADR-0037, ADR-0049), экземпляр «%i» (ADR-0110): самодостаточная сборка Next на порту экземпляра;
+# постоянный адрес 127.0.0.1:3000 держит nginx и ведёт на активный экземпляр.
 #
 # Окружения площадки здесь нет намеренно: кабинету не нужны ни база, ни `SECRET_KEY`,
 # а в API он ходит через тот же обратный прокси, что и браузер.
 [Unit]
-Description=Zvonix cabinet
+Description=Zvonix cabinet (%i)
 After=network-online.target
 Wants=network-online.target
 
@@ -11,10 +12,10 @@ Wants=network-online.target
 Type=simple
 User=zvonix
 Group=zvonix
-WorkingDirectory=/opt/zvonix/current/apps/web/.next/standalone/apps/web
+WorkingDirectory=/opt/zvonix/slots/%i/apps/web/.next/standalone/apps/web
+EnvironmentFile=/etc/zvonix/slot-%i.env
 Environment=NODE_ENV=production
 Environment=HOSTNAME=127.0.0.1
-Environment=PORT=3000
 ExecStart=/usr/bin/node server.js
 Restart=on-failure
 RestartSec=3

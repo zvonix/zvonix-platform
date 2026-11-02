@@ -74,6 +74,9 @@ interface FailureRecord {
   since: number;
 }
 
+/** Общий порт для двух экземпляров API — только где система его поддерживает. */
+const SHARED_PORT = process.platform === 'linux';
+
 @Injectable()
 export class SmppServer implements SessionHost, OnApplicationShutdown {
   private readonly logger: Logger;
@@ -131,7 +134,9 @@ export class SmppServer implements SessionHost, OnApplicationShutdown {
     });
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(options.port, options.host, () => {
+      // Общий порт на Linux (ADR-0110): при обновлении без простоя два экземпляра API принимают подключения на одном
+      // порту, пока прежний не остановлен. Другие системы его не поддерживают и отказали бы в `listen`.
+      server.listen({ port: options.port, host: options.host, reusePort: SHARED_PORT }, () => {
         server.off('error', reject);
         resolve();
       });

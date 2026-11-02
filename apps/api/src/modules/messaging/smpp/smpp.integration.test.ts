@@ -1100,6 +1100,26 @@ describe('отчёты о доставке', () => {
   });
 });
 
+// Обновление без простоя (ADR-0110): второй экземпляр API открывает тот же порт SMPP, пока первый работает. Только
+// на Linux — там, где площадка работает; Windows общий порт не поддерживает.
+describe('общий порт SMPP', () => {
+  it.runIf(process.platform === 'linux')(
+    'второй слушатель открывает занятый порт, и программа входит через него',
+    async () => {
+      expect(await api().get(SmppServer).listen({ host: '127.0.0.1', port })).toBe(port);
+      const { credentials } = await smppClient('11');
+      const esme = await connect();
+      const response = await esme.bind(
+        Command.bindTransceiver,
+        credentials.systemId,
+        credentials.password,
+      );
+      expect(response.status).toBe(Status.ok);
+      esme.destroy();
+    },
+  );
+});
+
 // Последним: останавливает слушатель, после чего он поднимается заново на новом порту.
 describe('остановка площадки', () => {
   it('вошедшая программа получает unbind и, ответив, отключается штатно — без ожидания предела', async () => {
