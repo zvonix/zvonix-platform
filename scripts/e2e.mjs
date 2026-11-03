@@ -28,7 +28,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NOT_RUN = 78;
 
 /** Запись Playwright о прошлом прогоне: её пишет только доживший до конца процесс. */
-const LAST_RUN = path.join(ROOT, 'test-results', '.last-run.json');
+const LAST_RUN = path.join(ROOT, 'test-results', 'e2e', '.last-run.json');
 
 /** Дошёл ли прогон, начатый в `startedAt`, до конца: погибший записи об упавшем не оставляет. */
 function finishedSince(startedAt) {

@@ -52,8 +52,8 @@
 | `audit` | Неизменяемый журнал действий: запись рядом с действием, у денежных — **той же транзакцией** ([ADR-0034](adr/0034-zhurnal-deneg-odnoy-tranzakciey.md)), и чтение с отбором ([docs/api/audit.md](api/audit.md)). Только чтение: правки и удаления в API нет. Контроллер зарегистрирован отдельным `AuditHttpModule` — `IdentityModule` импортирует `AuditModule`, и обратный импорт замкнул бы круг | `apps/api/src/modules/audit` | БД, `identity` (имена исполнителей) |
 | `web` | Админка и кабинеты клиента и партнёра. Next.js (App Router), сессия в cookie ([ADR-0037](adr/0037-sessiya-v-brauzere.md)), общий источник с API за обратным прокси | `apps/web` | `api` |
 | `worker` | Расписание фоновых задач ([ADR-0020](adr/0020-fonovye-zadachi.md)): уборка резервов, зависших вызовов, замолчавших узлов, записей по сроку и закрытых окон лимитов; снятие с маршрутизации по порогу отказов ([ADR-0027](adr/0027-porog-otklyucheniya.md)), отправка писем ([ADR-0029](adr/0029-pochta.md)), обновление плана нумерации ([ADR-0032](adr/0032-zagruzka-plana-numeracii.md)), фоновое обновление просроченных записей об операторах. Дальше — сверка CDR, выплаты | `apps/worker` | `billing`, `telephony`, `nodes`, `recordings`, `limits` |
-| `esl` | Долгоживущее соединение с узлами, события вызовов в реальном времени | `apps/esl` | `telephony` |
-| `agent` | На узле: установка, обновление, метрики, выгрузка записей | `apps/agent` | control plane |
+| `esl` | Долгоживущее соединение с узлами, события вызовов в реальном времени. **Не заведён:** сейчас ESL — соединение на одну команду из API (`apps/api/src/infra/esl.ts`, [ADR-0046](adr/0046-iniciaciya-vyzova-iz-api.md)) | `apps/esl` (нет) | `telephony` |
+| `agent` | На узле: установка, обновление, метрики, выгрузка записей. **Не заведён:** то же делают скрипты `node/install.sh` — пульс, выгрузка записей, `zvonix-node-update` ([ADR-0068](adr/0068-avtoobnovlenie-uzlov.md)) | `apps/agent` (нет) | control plane |
 
 ### Кабинет и API — один источник
 

@@ -29,6 +29,9 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   reporter: [['list']],
+  // Своя подпапка: перед прогоном Playwright удаляет папку результатов целиком, и общей `test-results` вместе с ней
+  // пропадал журнал полной проверки `test-results/verify-last.log` (2026-11-03: красный итог без журнала).
+  outputDir: 'test-results/e2e',
   use: {
     ...(baseURL === undefined ? {} : { baseURL }),
     // Русский интерфейс: часть проверок ищет текст, и локаль браузера на него влияет.
