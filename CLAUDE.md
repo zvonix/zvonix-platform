@@ -27,7 +27,7 @@
 - Данные: PostgreSQL 16 · Drizzle ORM + drizzle-kit · Redis 7 · записи разговоров — файлы на диске площадки ([ADR-0063](docs/adr/0063-hranilishche-zapisey-na-diske.md))
 - Фоновые задачи: BullMQ
 - Телефония: FreeSWITCH ([ADR-0009](docs/adr/0009-programmnaya-ats.md)), `mod_xml_curl` за маршрутом, ESL для событий
-- Android-приложение партнёра: Kotlin
+- Android-приложение партнёра: Kotlin, отдельный репозиторий ([ADR-0111](docs/adr/0111-chasti-proekta-otdelnymi-repozitoriyami.md))
 - Разработка: **WSL2 / Ubuntu 24.04**. Прод: **Ubuntu**. См. [ADR-0007](docs/adr/0007-lokalnaya-sreda.md).
 
 ## Команды
@@ -133,7 +133,6 @@ packages/
   logger/  — логгер (ADR-0004)
 node/      — конфигурация FreeSWITCH и скрипт установки узла
 deploy/    — выкладка площадки: скрипт, службы systemd, сайт nginx (ADR-0049)
-android/   — приложение партнёра (Kotlin)
 docs/      — документация (см. ниже)
 scripts/   — check.sh: единая точка проверки проекта
 .github/   — CI: те же проверки, но на Ubuntu
@@ -143,6 +142,13 @@ scripts/   — check.sh: единая точка проверки проекта
 ```
 Доменные модули — в `apps/api/src/modules/`, поимённо совпадают с таблицей компонентов
 в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Этот репозиторий — часть `platform/` общей рабочей папки проекта. Приложение партнёра
+(Kotlin), расширение для браузера и другие части — **соседние папки со своими
+репозиториями**, а не каталоги здесь; общие правила для всех частей — в `CLAUDE.md`
+рабочей папки ([ADR-0111](docs/adr/0111-chasti-proekta-otdelnymi-repozitoriyami.md)).
+Этот репозиторий не переименовывается и не переносится: на его имя и пути от корня
+опираются установка и обновление серверов.
 
 ## Где искать детали
 
