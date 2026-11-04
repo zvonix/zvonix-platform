@@ -119,10 +119,16 @@ Docker будет добавлен внутрь WSL2 отдельным ADR, к�
 
 ```bash
 PG=/c/Users/admin/.local/pg
-$PG/pgsql/bin/pg_ctl.exe -D $PG/data -l $PG/pg.log -o "-p 5432 -c listen_addresses=127.0.0.1" start
+$PG/pgsql/bin/pg_ctl.exe -D $PG/data -l $PG/pg.log -o "-p 5440 -c listen_addresses=127.0.0.1" start
 $PG/pgsql/bin/pg_ctl.exe -D $PG/data status
 $PG/pgsql/bin/pg_ctl.exe -D $PG/data stop
 ```
+
+Порт **5440**, а не стандартный: на этой машине PostgreSQL других проектов занимали сперва 5432, потом 5433
+(2026-11-03 — `D:\tools\pg-local`). Наш сервер после перезагрузки не поднят, чужой отвечает на том же порту — и все
+шаги с базой падали на «неверный пароль». Адрес и команда запуска — в `.env.verify.local`
+(`TEST_DATABASE_URL=postgresql://zvonix:zvonix@127.0.0.1:5440/zvonix_test`, `VERIFY_START_POSTGRES=…` с той же
+командой). `pnpm verify` теперь не только стучится в порт, но и входит в базу: чужой сервер называется до первого шага.
 
 **Управление локальной Redis** (добавлено 2026-09-02 вместе с [ADR-0020](0020-fonovye-zadachi.md)).
 Тем же способом, что и PostgreSQL: переносимые бинарники без установщика, службы и прав

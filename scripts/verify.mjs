@@ -15,6 +15,8 @@
  *    и без них пять шагов из четырнадцати красные заранее. Узнавать это через
  *    пять минут, на падении тестов, незачем: соединение проверяется за секунду.
  *    В CI обе поднимает сам рабочий процесс, поэтому там этой проверки нет.
+ *    В базу проверка ещё и **входит**: на порту может отвечать чужой PostgreSQL другого
+ *    проекта, и тогда все шаги с базой падают на «неверный пароль» (2026-11-03).
  * 3. **Строка о выпуске.** После зелёной проверки — что именно проверено и чем
  *    выпускать ([deploy/README.md](../deploy/README.md), «Выпуск»). Дерево снимается
  *    до шагов и сверяется после: правка во время десятиминутной проверки значит,
@@ -33,6 +35,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -124,6 +127,33 @@ async function startIfConfigured(service, bash, host, port) {
   return reachable(host, port);
 }
 
+/**
+ * Вход в базу по адресу проверки. `null` — вошли; иначе — почему нет. Драйвер берётся у `packages/db`: в корне
+ * его нет, а своя зависимость ради одного соединения не нужна.
+ */
+async function loginProblem(url) {
+  const { Client } = createRequire(path.join(ROOT, 'packages', 'db', 'package.json'))('pg');
+  const client = new Client({
+    connectionString: url,
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS * 2,
+  });
+  try {
+    await client.connect();
+    await client.query('select 1');
+    return null;
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+    if (code === '28P01' || code === '28000') {
+      return 'порт отвечает, но вход отклонён — похоже, на нём чужой PostgreSQL (другого проекта), а наш не запущен';
+    }
+    if (code === '3D000') return 'сервер отвечает, но тестовой базы на нём нет';
+    return `не удалось войти: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
 /** Строки отказа по недоступным службам; пустой список — всё отвечает. */
 async function unreachableServices(bash) {
   const problems = [];
@@ -145,6 +175,14 @@ async function unreachableServices(bash) {
       problems.push(
         `${service.name} не отвечает на ${host}:${String(port)} (${service.variable}). ` +
           `Как запустить — ${LOCAL_SETUP}, ${service.section}.`,
+      );
+      continue;
+    }
+    const login = service.variable === 'TEST_DATABASE_URL' ? await loginProblem(url.href) : null;
+    if (login !== null) {
+      problems.push(
+        `${service.name} на ${host}:${String(port)} (${service.variable}): ${login}. ` +
+          `Как запустить свой — ${LOCAL_SETUP}, ${service.section}.`,
       );
     }
   }
