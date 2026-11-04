@@ -35,8 +35,10 @@ apps/esl      Потребитель событий FreeSWITCH
 apps/agent    Агент узла АТС
 packages/     shared, db, config, logger
 node/         Конфигурация FreeSWITCH и установка узла
-android/      Приложение партнёра (Kotlin)
 ```
+
+Приложение партнёра (Kotlin) и другие части проекта — отдельные репозитории
+([ADR-0111](docs/adr/0111-chasti-proekta-otdelnymi-repozitoriyami.md)).
 
 ## Документация
 
