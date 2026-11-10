@@ -1803,14 +1803,36 @@ test.describe('партнёр добавляет своё оборудовани
     await page.getByRole('link', { name: gatewayName, exact: true }).click();
     await expect(page.getByRole('heading', { name: gatewayName, exact: true })).toBeVisible();
 
-    // Сервер, порт и режим видны всегда: раньше — только в минуту добавления.
-    const connection = page.getByRole('region', { name: 'Подключение' });
-    await expect(connection).toContainText('5060');
-    await expect(connection).toContainText('Config by Line');
+    // Указали четыре слота — четыре линии, а не «портов не заведено».
+    const lines = page.getByRole('region', { name: 'Линии и SIM-карты' });
+    await expect(lines.getByRole('button', { name: 'Вставить SIM' })).toHaveCount(4);
 
-    // Указали четыре слота — четыре порта, а не «портов не заведено».
-    const ports = page.getByRole('region', { name: 'Порты' });
-    await expect(ports.getByRole('button', { name: 'Вставить SIM' })).toHaveCount(4);
+    // Что ввести в устройство — своей страницей, а не полотном над линиями (владелец, 2026-11-10).
+    await page.getByRole('link', { name: 'Подключение GOIP' }).click();
+    await expect(page.getByText('Config by Line')).toBeVisible();
+    await expect(page.getByText(/порт 5060/u).first()).toBeVisible();
+    await expect(page.getByRole('table', { name: 'Настройки линий' }).getByRole('row')).toHaveCount(
+      5,
+    );
+
+    // Название, модель и число линий меняются после добавления — в настройках.
+    await page.getByRole('link', { name: '← К шлюзу' }).click();
+    await page.getByRole('link', { name: 'Настройки', exact: true }).click();
+    const renamed = `${gatewayName} в гараже`;
+    await page.getByLabel('Название').fill(renamed);
+    await page.getByLabel('Модель').fill('GoIP-8');
+    await page.getByLabel('Число линий').fill('6');
+    await expect(page.getByText('Добавятся линии 5–6')).toBeVisible();
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    // Новые линии получают входы сразу и показываются один раз.
+    await expect(page.getByText(`Входы новых линий шлюза «${renamed}»`)).toBeVisible();
+    await closeSecret(page);
+    await expect(page.getByRole('status').filter({ hasText: 'Сохранено' })).toBeVisible();
+
+    await page.getByRole('link', { name: '← К шлюзу' }).click();
+    await expect(page.getByRole('heading', { name: renamed, exact: true })).toBeVisible();
+    await expect(page.getByText('GoIP-8')).toBeVisible();
+    await expect(lines.getByRole('button', { name: 'Вставить SIM' })).toHaveCount(6);
   });
 
   test('SIM вставляется в порт по номеру, оператора не спрашивают', async ({ page }) => {
@@ -1883,6 +1905,9 @@ test.describe('партнёр добавляет своё оборудовани
     await page.getByRole('dialog').getByRole('button', { name: 'Добавить шлюз' }).click();
     await closeSecret(page);
     await page.getByRole('link', { name: 'Шлюз на удаление' }).click();
+    // Удаление — в настройках, внизу и отдельно: рядом с «Выключить» оно стояло зря.
+    await expect(page.getByRole('button', { name: 'Удалить шлюз' })).toHaveCount(0);
+    await page.getByRole('link', { name: 'Настройки', exact: true }).click();
 
     await page.getByRole('button', { name: 'Удалить шлюз' }).click();
     const dialog = page.getByRole('alertdialog');
@@ -1891,8 +1916,7 @@ test.describe('партнёр добавляет своё оборудовани
     await expect(dialog).toContainText('навсегда');
     await dialog.getByRole('button', { name: 'Удалить навсегда' }).click();
 
-    await expect(page.getByText(/Такого шлюза нет/u)).toBeVisible();
-    await page.getByRole('link', { name: '← Всё оборудование' }).click();
+    await expect(page).toHaveURL(/\/partner\/equipment$/u);
     await expect(page.getByRole('row', { name: /Шлюз на удаление/u })).toHaveCount(0);
   });
 });
@@ -1947,12 +1971,15 @@ test.describe('операторы связи (ADR-0053)', () => {
     await closeSecret(page);
     await page.getByRole('link', { name: 'GOIP с префиксами' }).click();
 
-    const connection = page.getByRole('region', { name: 'Подключение' });
-    await expect(connection).toContainText('Single Server Mode');
-    await expect(connection).toContainText('Match Callee');
-    const ports = page.getByRole('region', { name: 'Порты' });
-    await expect(ports.getByRole('row', { name: /^1 префикс 99001/u })).toBeVisible();
-    await expect(ports.getByRole('row', { name: /^2 префикс 99002/u })).toBeVisible();
+    const lines = page.getByRole('region', { name: 'Линии и SIM-карты' });
+    await expect(lines.getByRole('row', { name: /^1 префикс 99001/u })).toBeVisible();
+    await expect(lines.getByRole('row', { name: /^2 префикс 99002/u })).toBeVisible();
+
+    await page.getByRole('link', { name: 'Подключение GOIP' }).click();
+    await expect(page.getByText('Single Server Mode')).toBeVisible();
+    await expect(page.getByText('Match Callee')).toBeVisible();
+    const prefixes = page.getByRole('table', { name: 'Префиксы линий' });
+    await expect(prefixes.getByRole('row', { name: 'Line 2 99002' })).toBeVisible();
   });
 });
 
@@ -1996,23 +2023,25 @@ test.describe('оборудование одной таблицей, вход п
     await expect(secrets.getByRole('row', { name: /^Line 1 pt-/u })).toBeVisible();
     await expect(secrets.getByRole('row', { name: /^Line 2 pt-/u })).toBeVisible();
 
-    // Ссылка на шлюз — в том же окне: из него сразу к настройкам линий.
-    await secrets.getByRole('link', { name: 'Открыть шлюз — порты и настройки →' }).click();
+    // Ссылка — в том же окне: из него сразу к тому, что ввести в устройство.
+    await secrets.getByRole('link', { name: 'Что ввести в устройство →' }).click();
     // Настройки — построчно для каждой линии, теми же полями, что у линии в GOIP.
     const lines = page.getByRole('table', { name: 'Настройки линий' });
     // Префикс линии — в строке: без Routing Prefix GOIP ждёт тонового набора (2026-09-29).
     await expect(lines.getByRole('row', { name: /^Line 1 pt-/u })).toContainText('99001');
     await expect(lines.getByRole('row', { name: /^Line 2 pt-/u })).toContainText('не на связи');
-    const ports = page.getByRole('region', { name: 'Порты' });
 
+    // Способ подключения — настройка шлюза, а не шаг инструкции: меняется в настройках.
+    await page.getByRole('link', { name: 'настройках шлюза' }).first().click();
     await page.getByRole('button', { name: 'Перейти на один вход для шлюза' }).click();
     await page
       .getByRole('alertdialog')
       .getByRole('button', { name: 'Перейти на один вход для шлюза' })
       .click();
-    const connection = page.getByRole('region', { name: 'Подключение' });
-    await expect(connection).toContainText('Single Server Mode');
-    await expect(ports.getByRole('row', { name: /^1 префикс 99001/u })).toBeVisible();
+    await expect(page.getByText('весь шлюз одним входом')).toBeVisible();
+    await page.getByRole('link', { name: '← К шлюзу' }).click();
+    await page.getByRole('link', { name: 'Подключение GOIP' }).click();
+    await expect(page.getByText('Single Server Mode')).toBeVisible();
   });
 
   test('тестовый звонок с карты: окно с номером и понятный отказ, пока линия не на связи', async ({

@@ -1082,6 +1082,60 @@ export class TelephonyRepository {
     }
   }
 
+  /** Название и модель шлюза — то, что партнёр задал при добавлении. */
+  async setGatewayDetails(
+    id: GatewayId,
+    details: { name: string; model: string | null },
+    executor: Executor = this.db,
+  ): Promise<GatewayRow | undefined> {
+    try {
+      const [row] = await executor
+        .update(gateways)
+        .set({ name: details.name, model: details.model })
+        .where(eq(gateways.id, id))
+        .returning();
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
+  /**
+   * Удаляет порты шлюза с номерами больше `keep` — **только пустые**, без SIM.
+   *
+   * Условие «без карты» стоит в самом запросе, а не в проверке перед ним: вызывающий
+   * держит блокировку шлюза, и вставка карты ждёт её же (ADR-0048), но запрос
+   * не должен полагаться на то, что проверка и удаление разделены только этим.
+   * Порт со вставленной картой не удаляется никогда — его номер возвращается
+   * в `occupied`, и вызывающий откатывает транзакцию.
+   */
+  async deletePortsAbove(
+    gatewayId: GatewayId,
+    keep: number,
+    executor: Executor,
+  ): Promise<{ removed: GatewayPortRow[]; occupied: number[] }> {
+    const above = and(
+      eq(gatewayPorts.gatewayId, gatewayId),
+      sql`${gatewayPorts.portNumber} > ${keep}`,
+    );
+    const occupied = await executor
+      .select({ portNumber: gatewayPorts.portNumber })
+      .from(gatewayPorts)
+      .where(and(above, isNotNull(gatewayPorts.simCardId)))
+      .orderBy(asc(gatewayPorts.portNumber));
+    if (occupied.length > 0)
+      return { removed: [], occupied: occupied.map((row) => row.portNumber) };
+    try {
+      const removed = await executor
+        .delete(gatewayPorts)
+        .where(and(above, isNull(gatewayPorts.simCardId)))
+        .returning();
+      return { removed, occupied: [] };
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
+  }
+
   /** Свой тариф SIM (ADR-0056); `null` — как у шлюза. */
   async setSimTariff(
     id: SimCardId,
@@ -1225,8 +1279,8 @@ export class TelephonyRepository {
       .for('no key update');
   }
 
-  async listPorts(gatewayId: GatewayId): Promise<GatewayPortRow[]> {
-    return this.db
+  async listPorts(gatewayId: GatewayId, executor: Executor = this.db): Promise<GatewayPortRow[]> {
+    return executor
       .select()
       .from(gatewayPorts)
       .where(eq(gatewayPorts.gatewayId, gatewayId))

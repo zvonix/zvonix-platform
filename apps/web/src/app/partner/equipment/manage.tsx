@@ -34,8 +34,8 @@ import { EQUIPMENT_KEY, gatewayStateName, type Gateway, type Port, type Sim } fr
  * 2026-09-24).
  */
 
-/** Номер порта и число портов — в тех же пределах, что у API. */
-const MAX_PORTS = 256;
+/** Число линий шлюза — в тех же пределах, что у API. */
+export const MAX_PORTS = 256;
 
 /** Общий хвост любого действия: перечитать оборудование целиком. */
 export function useRefresh(): () => Promise<void> {
@@ -124,10 +124,10 @@ export function AddGateway() {
 function GatewayLink({ id }: { id: string }) {
   return (
     <Link
-      href={`/partner/equipment/${id}`}
+      href={`/partner/equipment/${id}/connect`}
       className="self-start font-semibold text-primary underline-offset-4 hover:underline"
     >
-      Открыть шлюз — порты и настройки →
+      Что ввести в устройство →
     </Link>
   );
 }
@@ -306,13 +306,11 @@ export function GatewayStatus({ gateway }: { gateway: Gateway }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {badge}
         <span className="text-muted-foreground">
-          Включить или удалить этот шлюз может только администратор площадки.
+          Включить этот шлюз может только администратор площадки.
         </span>
       </div>
     );
   }
-
-  const occupied = gateway.ports.filter((port) => port.sim !== null).length;
 
   return (
     <div className="flex flex-col gap-1">
@@ -342,22 +340,51 @@ export function GatewayStatus({ gateway }: { gateway: Gateway }) {
             Включить шлюз
           </Button>
         )}
-        <ConfirmAction
-          label="Удалить шлюз"
-          title={`Удалить шлюз «${gateway.name}»`}
-          consequence={
-            <p>
-              Шлюз удаляется навсегда: вернуть его нельзя, только добавить заново. Карты из его
-              портов вынимаются — их можно вставить в другой шлюз.
-              {occupied > 0 && ` Карт в портах сейчас: ${String(occupied)}.`}
-            </p>
-          }
-          confirmLabel="Удалить навсегда"
-          variant="ghost"
-          onConfirm={() => change.mutateAsync('retired')}
-        />
       </div>
       {error !== undefined && <ErrorNote error={error} />}
+    </div>
+  );
+}
+
+/**
+ * Удалить шлюз — в настройках, внизу и отдельно от остального: необратимо
+ * ([DESIGN.md](../../../../../../docs/DESIGN.md), «Страница объекта: что где лежит»).
+ * Отключённым площадкой партнёр не распоряжается (ADR-0047) — тогда кнопки нет, есть причина.
+ */
+export function DeleteGateway({ gateway, onDeleted }: { gateway: Gateway; onDeleted: () => void }) {
+  const remove = useMutation({
+    mutationFn: () =>
+      request<unknown>(`/partner/gateways/${gateway.id}/status`, {
+        method: 'POST',
+        body: { status: 'retired' },
+      }),
+    onSuccess: onDeleted,
+  });
+
+  if (gateway.status === 'suspended' && gateway.suspended_by !== 'partner') {
+    return (
+      <p className="text-muted-foreground">
+        Шлюз отключён площадкой — удалить его может только администратор.
+      </p>
+    );
+  }
+
+  const occupied = gateway.ports.filter((port) => port.sim !== null).length;
+  return (
+    <div>
+      <ConfirmAction
+        label="Удалить шлюз"
+        title={`Удалить шлюз «${gateway.name}»`}
+        consequence={
+          <p>
+            Шлюз удаляется навсегда: вернуть его нельзя, только добавить заново. Карты из его линий
+            вынимаются — их можно вставить в другой шлюз.
+            {occupied > 0 && ` Карт в линиях сейчас: ${String(occupied)}.`}
+          </p>
+        }
+        confirmLabel="Удалить навсегда"
+        onConfirm={() => remove.mutateAsync()}
+      />
     </div>
   );
 }
@@ -498,7 +525,7 @@ export function RegistrationMode({
   );
 }
 
-/** Входы линиям, у которых их нет, — после «Добавить порты». */
+/** Входы линиям, у которых их нет, — например, заведённым администратором. */
 export function IssueMissingLines({
   gateway,
   onIssued,
@@ -583,69 +610,6 @@ export function NewLineAccount({
       className="h-5 px-1 text-primary"
       onConfirm={() => reset.mutateAsync()}
     />
-  );
-}
-
-/** Ещё порты — следующими номерами после последнего. */
-export function AddPorts({ gateway }: { gateway: Gateway }) {
-  const refresh = useRefresh();
-  const add = useMutation({
-    mutationFn: (count: number) =>
-      request<unknown>(`/partner/gateways/${gateway.id}/ports`, {
-        method: 'POST',
-        body: { count },
-      }),
-    onSuccess: refresh,
-  });
-
-  return (
-    <FormDialog label="Добавить порты" title={`Порты шлюза «${gateway.name}»`} variant="outline">
-      <PortsForm
-        last={gateway.ports.at(-1)?.port_number ?? 0}
-        onAdd={(count) => add.mutateAsync(count)}
-      />
-    </FormDialog>
-  );
-}
-
-function PortsForm({ last, onAdd }: { last: number; onAdd: (count: number) => Promise<unknown> }) {
-  const [value, setValue] = useState('1');
-  const count = integerFromInput(value);
-  const valid = count !== undefined && count >= 1 && last + count <= MAX_PORTS;
-
-  return (
-    <DialogForm
-      submitLabel="Добавить"
-      canSubmit={valid}
-      onSubmit={async () => {
-        if (count !== undefined) await onAdd(count);
-      }}
-    >
-      <DialogField
-        label="Сколько портов"
-        hint={
-          valid
-            ? `Появятся порты ${String(last + 1)}–${String(last + count)}`
-            : `Сейчас последний — ${String(last)}`
-        }
-      >
-        <Input
-          className="num"
-          inputMode="numeric"
-          autoComplete="off"
-          autoFocus
-          value={value}
-          onChange={(event) => {
-            setValue(event.target.value);
-          }}
-        />
-      </DialogField>
-      {value !== '' && !valid && (
-        <p className="text-warn sm:col-span-2">
-          Целое число; всего портов у шлюза — не больше {String(MAX_PORTS)}.
-        </p>
-      )}
-    </DialogForm>
   );
 }
 

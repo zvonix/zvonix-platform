@@ -49,6 +49,29 @@ export const createGatewaySchema = z.object({
   registrationMode: z.enum(GATEWAY_REGISTRATION_MODES).optional(),
 });
 
+/**
+ * Название и модель своего шлюза — то, что задано при добавлении. Пустая модель — `null`:
+ * поле в форме очищают, а не удаляют.
+ */
+export const gatewayDetailsSchema = z.object({
+  name,
+  model: z
+    .string()
+    .trim()
+    .max(100, 'слишком длинная')
+    .transform((value) => (value === '' ? null : value))
+    .nullable(),
+});
+
+/** Сколько линий у шлюза: после сохранения у него ровно линии 1…count. */
+export const portCountSchema = z.object({
+  count: z.coerce
+    .number()
+    .int('должно быть целым числом')
+    .min(0, 'не может быть отрицательным')
+    .max(MAX_GATEWAY_PORTS, 'неправдоподобно много'),
+});
+
 /** Смена способа подключения шлюза (ADR-0054). Допустимость проверяет служба. */
 export const registrationModeSchema = z.object({
   mode: z.enum(GATEWAY_REGISTRATION_MODES),

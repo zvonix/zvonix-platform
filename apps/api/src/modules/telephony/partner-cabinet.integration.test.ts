@@ -2403,3 +2403,187 @@ describe('партнёр сам выбирает письма (ADR-0104)', () =>
     expect(foreign.statusCode).toBe(400);
   });
 });
+
+describe('настройки своего шлюза: название, модель, число линий', () => {
+  // Свой партнёр: у общего шлюзов уже на предел.
+  let owner: Awaited<ReturnType<typeof createPartner>>;
+  beforeAll(async () => {
+    owner = await createPartner('Николаев Николай');
+  });
+
+  async function createGateway(portCount: number, registrationMode?: 'port') {
+    const response = await post(
+      '/partner/gateways',
+      {
+        name: unique('Шлюз'),
+        type: 'goip',
+        model: 'GoIP-8',
+        portCount,
+        ...(registrationMode === undefined ? {} : { registrationMode }),
+      },
+      as(owner.token),
+    );
+    expect(response.statusCode).toBe(201);
+    return response.json<{ gateway: { id: string } }>().gateway.id;
+  }
+
+  async function portsOf(gatewayId: string) {
+    type Row = EquipmentResponse['gateways'][number];
+    type Port = Row['ports'][number] & { sip_username: string | null };
+    const equipment = (await get('/partner/equipment', as(owner.token))).json<{
+      gateways: (Omit<Row, 'ports'> & { model: string | null; ports: Port[] })[];
+    }>();
+    const gateway = equipment.gateways.find((row) => row.id === gatewayId);
+    if (gateway === undefined) throw new Error('Шлюза нет в оборудовании');
+    return gateway;
+  }
+
+  it('название и модель меняются после добавления, и это видно в журнале', async () => {
+    const gatewayId = await createGateway(0);
+    const name = unique('Гараж');
+
+    const response = await post(
+      `/partner/gateways/${gatewayId}/details`,
+      { name, model: '  ' },
+      as(owner.token),
+    );
+    expect(response.statusCode).toBe(201);
+    // Пустая модель — «не указана», а не строка из пробелов.
+    expect(response.json<{ gateway: { name: string; model: string | null } }>().gateway).toEqual({
+      id: gatewayId,
+      name,
+      model: null,
+    });
+    const shown = await portsOf(gatewayId);
+    expect(shown.name).toBe(name);
+    expect(shown.model).toBeNull();
+
+    // Повтор того же — не событие: вторая строка в журнале была бы ложной историей.
+    await post(`/partner/gateways/${gatewayId}/details`, { name, model: null }, as(owner.token));
+    const journal = await withDatabase(async (execute) =>
+      execute(
+        sql`select before, after from audit_log where entity_id = ${gatewayId} and action = 'gateway.details_changed'`,
+      ),
+    );
+    expect(journal.rows).toHaveLength(1);
+    expect(journal.rows[0]).toMatchObject({
+      before: { model: 'GoIP-8' },
+      after: { name, model: null },
+    });
+  });
+
+  it('короткое название — отказ с полем, а не молча обрезанная строка', async () => {
+    const gatewayId = await createGateway(0);
+    const response = await post(
+      `/partner/gateways/${gatewayId}/details`,
+      { name: 'а', model: null },
+      as(owner.token),
+    );
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('чужой шлюз и свой транк через настройки шлюза не меняются', async () => {
+    const foreign = await post(
+      `/partner/gateways/${myGateway}/details`,
+      { name: unique('Чужой'), model: null },
+      as(owner.token),
+    );
+    expect(foreign.statusCode).toBe(404);
+    const trunk = await post(
+      `/partner/gateways/${myTrunk}/port-count`,
+      { count: 4 },
+      as(mine.token),
+    );
+    expect(trunk.statusCode).toBe(404);
+  });
+
+  it('число линий: больше — заводятся следующие, меньше — пустые удаляются', async () => {
+    const gatewayId = await createGateway(2);
+
+    const grown = await post(
+      `/partner/gateways/${gatewayId}/port-count`,
+      { count: 5 },
+      as(owner.token),
+    );
+    expect(grown.statusCode).toBe(201);
+    expect(grown.json<{ added: number; removed: number }>()).toMatchObject({
+      added: 3,
+      removed: 0,
+    });
+    expect((await portsOf(gatewayId)).ports.map((port) => port.port_number)).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
+
+    const shrunk = await post(
+      `/partner/gateways/${gatewayId}/port-count`,
+      { count: 3 },
+      as(owner.token),
+    );
+    expect(shrunk.json<{ added: number; removed: number }>()).toMatchObject({
+      added: 0,
+      removed: 2,
+    });
+    expect((await portsOf(gatewayId)).ports.map((port) => port.port_number)).toEqual([1, 2, 3]);
+
+    const tooMany = await post(
+      `/partner/gateways/${gatewayId}/port-count`,
+      { count: 257 },
+      as(owner.token),
+    );
+    expect(tooMany.statusCode).toBe(400);
+  });
+
+  it('линию с картой не удаляет — и не меняет ничего, а называет, откуда вынуть', async () => {
+    const gatewayId = await createGateway(4);
+    const port = (await portsOf(gatewayId)).ports.find((row) => row.port_number === 3);
+    const sim = (
+      await post('/partner/sim-cards', { operatorId, msisdn: nextMsisdn() }, as(owner.token))
+    ).json<{ sim: { id: string } }>().sim.id;
+    expect(
+      (
+        await post(
+          `/partner/gateway-ports/${port?.id ?? ''}/sim`,
+          { simCardId: sim },
+          as(owner.token),
+        )
+      ).statusCode,
+    ).toBe(201);
+
+    const refused = await post(
+      `/partner/gateways/${gatewayId}/port-count`,
+      { count: 1 },
+      as(owner.token),
+    );
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { message: string } }>().error.message).toContain('линий 3');
+    // Линия 4 пустая, но и она осталась: половина изменения хуже отказа целиком.
+    expect((await portsOf(gatewayId)).ports.map((row) => row.port_number)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('при входе по линиям новые линии сразу получают вход, удалённые — теряют', async () => {
+    const gatewayId = await createGateway(2, 'port');
+
+    const grown = await post(
+      `/partner/gateways/${gatewayId}/port-count`,
+      { count: 3 },
+      as(owner.token),
+    );
+    const accounts = grown.json<{ port_accounts: { port_number: number; password: string }[] }>()
+      .port_accounts;
+    // Только новой линии: прежние уже введены в GOIP, менять им пароль нельзя.
+    expect(accounts.map((account) => account.port_number)).toEqual([3]);
+    expect(accounts[0]?.password.length).toBeGreaterThan(10);
+    const withThree = await portsOf(gatewayId);
+    const removedName = withThree.ports[2]?.sip_username;
+    expect(removedName).toMatch(/^pt-/u);
+
+    await post(`/partner/gateways/${gatewayId}/port-count`, { count: 2 }, as(owner.token));
+    const journal = await withDatabase(async (execute) =>
+      execute(
+        sql`select count(*)::int as n from audit_log where action = 'gateway_port.removed' and before->>'sip_username' = ${removedName ?? ''}`,
+      ),
+    );
+    expect((journal.rows[0] as { n: number }).n).toBe(1);
+    expect((await portsOf(gatewayId)).ports).toHaveLength(2);
+  });
+});
