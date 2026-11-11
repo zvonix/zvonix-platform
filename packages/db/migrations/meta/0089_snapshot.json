@@ -256,12 +256,8 @@
           "name": "applications_user_id_users_id_fk",
           "tableFrom": "applications",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -269,12 +265,8 @@
           "name": "applications_decided_by_user_id_users_id_fk",
           "tableFrom": "applications",
           "tableTo": "users",
-          "columnsFrom": [
-            "decided_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["decided_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -455,12 +447,8 @@
           "name": "audit_log_actor_user_id_users_id_fk",
           "tableFrom": "audit_log",
           "tableTo": "users",
-          "columnsFrom": [
-            "actor_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["actor_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -584,12 +572,8 @@
           "name": "auth_tokens_user_id_users_id_fk",
           "tableFrom": "auth_tokens",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -798,12 +782,8 @@
           "name": "bot_connections_client_id_clients_id_fk",
           "tableFrom": "bot_connections",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -811,12 +791,8 @@
           "name": "bot_connections_bot_id_messenger_bots_id_fk",
           "tableFrom": "bot_connections",
           "tableTo": "messenger_bots",
-          "columnsFrom": [
-            "bot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["bot_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -921,12 +897,8 @@
           "name": "bot_subscriber_events_subscriber_id_bot_subscribers_id_fk",
           "tableFrom": "bot_subscriber_events",
           "tableTo": "bot_subscribers",
-          "columnsFrom": [
-            "subscriber_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["subscriber_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -934,12 +906,8 @@
           "name": "bot_subscriber_events_client_id_clients_id_fk",
           "tableFrom": "bot_subscriber_events",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -947,12 +915,8 @@
           "name": "bot_subscriber_events_bot_id_messenger_bots_id_fk",
           "tableFrom": "bot_subscriber_events",
           "tableTo": "messenger_bots",
-          "columnsFrom": [
-            "bot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["bot_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1092,12 +1056,8 @@
           "name": "bot_subscribers_bot_id_messenger_bots_id_fk",
           "tableFrom": "bot_subscribers",
           "tableTo": "messenger_bots",
-          "columnsFrom": [
-            "bot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["bot_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1105,12 +1065,8 @@
           "name": "bot_subscribers_client_id_clients_id_fk",
           "tableFrom": "bot_subscribers",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1406,12 +1362,8 @@
           "name": "calls_channel_id_channels_id_fk",
           "tableFrom": "calls",
           "tableTo": "channels",
-          "columnsFrom": [
-            "channel_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["channel_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1419,12 +1371,8 @@
           "name": "calls_partner_rate_id_partner_rates_id_fk",
           "tableFrom": "calls",
           "tableTo": "partner_rates",
-          "columnsFrom": [
-            "partner_rate_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_rate_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1432,12 +1380,8 @@
           "name": "calls_node_id_nodes_id_fk",
           "tableFrom": "calls",
           "tableTo": "nodes",
-          "columnsFrom": [
-            "node_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1445,12 +1389,8 @@
           "name": "calls_operator_id_operators_id_fk",
           "tableFrom": "calls",
           "tableTo": "operators",
-          "columnsFrom": [
-            "operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1458,12 +1398,8 @@
           "name": "calls_sim_card_id_sim_cards_id_fk",
           "tableFrom": "calls",
           "tableTo": "sim_cards",
-          "columnsFrom": [
-            "sim_card_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sim_card_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1471,12 +1407,8 @@
           "name": "calls_gateway_id_gateways_id_fk",
           "tableFrom": "calls",
           "tableTo": "gateways",
-          "columnsFrom": [
-            "gateway_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["gateway_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1566,12 +1498,8 @@
           "name": "channel_allowed_operators_channel_id_channels_id_fk",
           "tableFrom": "channel_allowed_operators",
           "tableTo": "channels",
-          "columnsFrom": [
-            "channel_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["channel_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1579,12 +1507,8 @@
           "name": "channel_allowed_operators_operator_id_operators_id_fk",
           "tableFrom": "channel_allowed_operators",
           "tableTo": "operators",
-          "columnsFrom": [
-            "operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1712,12 +1636,8 @@
           "name": "channel_partner_priorities_channel_id_channels_id_fk",
           "tableFrom": "channel_partner_priorities",
           "tableTo": "channels",
-          "columnsFrom": [
-            "channel_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["channel_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1725,12 +1645,8 @@
           "name": "channel_partner_priorities_partner_id_partners_id_fk",
           "tableFrom": "channel_partner_priorities",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1913,12 +1829,8 @@
           "name": "channels_client_id_clients_id_fk",
           "tableFrom": "channels",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1926,12 +1838,8 @@
           "name": "channels_registration_node_id_nodes_id_fk",
           "tableFrom": "channels",
           "tableTo": "nodes",
-          "columnsFrom": [
-            "registration_node_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["registration_node_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -2036,12 +1944,8 @@
           "name": "client_account_exclusions_client_id_clients_id_fk",
           "tableFrom": "client_account_exclusions",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2049,12 +1953,8 @@
           "name": "client_account_exclusions_account_id_messenger_accounts_id_fk",
           "tableFrom": "client_account_exclusions",
           "tableTo": "messenger_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2130,12 +2030,8 @@
           "name": "client_call_requirements_client_id_clients_id_fk",
           "tableFrom": "client_call_requirements",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2239,12 +2135,8 @@
           "name": "client_message_requirements_client_id_clients_id_fk",
           "tableFrom": "client_message_requirements",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2365,12 +2257,8 @@
           "name": "client_partner_priorities_client_id_clients_id_fk",
           "tableFrom": "client_partner_priorities",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2378,12 +2266,8 @@
           "name": "client_partner_priorities_partner_id_partners_id_fk",
           "tableFrom": "client_partner_priorities",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2498,12 +2382,8 @@
           "name": "clients_owner_user_id_users_id_fk",
           "tableFrom": "clients",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2608,12 +2488,8 @@
           "name": "commission_rules_client_id_clients_id_fk",
           "tableFrom": "commission_rules",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2884,12 +2760,8 @@
           "name": "gateway_ports_gateway_id_gateways_id_fk",
           "tableFrom": "gateway_ports",
           "tableTo": "gateways",
-          "columnsFrom": [
-            "gateway_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["gateway_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2897,12 +2769,8 @@
           "name": "gateway_ports_sim_card_id_sim_cards_id_fk",
           "tableFrom": "gateway_ports",
           "tableTo": "sim_cards",
-          "columnsFrom": [
-            "sim_card_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sim_card_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -2910,12 +2778,8 @@
           "name": "gateway_ports_node_id_nodes_id_fk",
           "tableFrom": "gateway_ports",
           "tableTo": "nodes",
-          "columnsFrom": [
-            "node_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3137,12 +3001,8 @@
           "name": "gateways_partner_id_partners_id_fk",
           "tableFrom": "gateways",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3150,12 +3010,8 @@
           "name": "gateways_tariff_id_partner_tariffs_id_fk",
           "tableFrom": "gateways",
           "tableTo": "partner_tariffs",
-          "columnsFrom": [
-            "tariff_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tariff_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3163,12 +3019,8 @@
           "name": "gateways_node_id_nodes_id_fk",
           "tableFrom": "gateways",
           "tableTo": "nodes",
-          "columnsFrom": [
-            "node_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3312,12 +3164,8 @@
           "name": "ledger_entries_transaction_id_ledger_transactions_id_fk",
           "tableFrom": "ledger_entries",
           "tableTo": "ledger_transactions",
-          "columnsFrom": [
-            "transaction_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["transaction_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3325,12 +3173,8 @@
           "name": "ledger_entries_account_id_accounts_id_fk",
           "tableFrom": "ledger_entries",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -3464,12 +3308,8 @@
           "name": "ledger_transactions_created_by_user_id_users_id_fk",
           "tableFrom": "ledger_transactions",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3550,12 +3390,8 @@
           "name": "limit_counters_limit_rule_id_limit_rules_id_fk",
           "tableFrom": "limit_counters",
           "tableTo": "limit_rules",
-          "columnsFrom": [
-            "limit_rule_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["limit_rule_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3563,12 +3399,8 @@
           "name": "limit_counters_sim_card_id_sim_cards_id_fk",
           "tableFrom": "limit_counters",
           "tableTo": "sim_cards",
-          "columnsFrom": [
-            "sim_card_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sim_card_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3578,11 +3410,7 @@
         "limit_counters_bucket_key": {
           "name": "limit_counters_bucket_key",
           "nullsNotDistinct": true,
-          "columns": [
-            "limit_rule_id",
-            "sim_card_id",
-            "bucket_start"
-          ]
+          "columns": ["limit_rule_id", "sim_card_id", "bucket_start"]
         }
       },
       "policies": {},
@@ -3783,12 +3611,8 @@
           "name": "limit_rules_client_id_clients_id_fk",
           "tableFrom": "limit_rules",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3796,12 +3620,8 @@
           "name": "limit_rules_channel_id_channels_id_fk",
           "tableFrom": "limit_rules",
           "tableTo": "channels",
-          "columnsFrom": [
-            "channel_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["channel_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3809,12 +3629,8 @@
           "name": "limit_rules_partner_id_partners_id_fk",
           "tableFrom": "limit_rules",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3822,12 +3638,8 @@
           "name": "limit_rules_sim_card_id_sim_cards_id_fk",
           "tableFrom": "limit_rules",
           "tableTo": "sim_cards",
-          "columnsFrom": [
-            "sim_card_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sim_card_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3835,12 +3647,8 @@
           "name": "limit_rules_tariff_id_partner_tariffs_id_fk",
           "tableFrom": "limit_rules",
           "tableTo": "partner_tariffs",
-          "columnsFrom": [
-            "tariff_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tariff_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4044,12 +3852,8 @@
           "name": "machine_credentials_created_by_user_id_users_id_fk",
           "tableFrom": "machine_credentials",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -4154,12 +3958,8 @@
           "name": "message_refusals_client_id_clients_id_fk",
           "tableFrom": "message_refusals",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4275,12 +4075,8 @@
           "name": "message_stops_client_id_clients_id_fk",
           "tableFrom": "message_stops",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4355,12 +4151,8 @@
           "name": "message_templates_client_id_clients_id_fk",
           "tableFrom": "message_templates",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4732,12 +4524,8 @@
           "name": "messages_client_id_clients_id_fk",
           "tableFrom": "messages",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4745,12 +4533,8 @@
           "name": "messages_account_id_messenger_accounts_id_fk",
           "tableFrom": "messages",
           "tableTo": "messenger_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4758,12 +4542,8 @@
           "name": "messages_partner_id_partners_id_fk",
           "tableFrom": "messages",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -4771,12 +4551,8 @@
           "name": "messages_bot_id_messenger_bots_id_fk",
           "tableFrom": "messages",
           "tableTo": "messenger_bots",
-          "columnsFrom": [
-            "bot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["bot_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4895,12 +4671,8 @@
           "name": "messenger_account_events_account_id_messenger_accounts_id_fk",
           "tableFrom": "messenger_account_events",
           "tableTo": "messenger_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -5182,12 +4954,8 @@
           "name": "messenger_accounts_partner_id_partners_id_fk",
           "tableFrom": "messenger_accounts",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -5195,12 +4963,8 @@
           "name": "messenger_accounts_tariff_id_messenger_tariffs_id_fk",
           "tableFrom": "messenger_accounts",
           "tableTo": "messenger_tariffs",
-          "columnsFrom": [
-            "tariff_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tariff_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -5359,12 +5123,8 @@
           "name": "messenger_bots_client_id_clients_id_fk",
           "tableFrom": "messenger_bots",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -5500,12 +5260,8 @@
           "name": "messenger_tariffs_partner_id_partners_id_fk",
           "tableFrom": "messenger_tariffs",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -5761,12 +5517,8 @@
           "name": "notification_preferences_user_id_users_id_fk",
           "tableFrom": "notification_preferences",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -5855,12 +5607,8 @@
           "name": "number_checks_account_id_messenger_accounts_id_fk",
           "tableFrom": "number_checks",
           "tableTo": "messenger_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -6020,12 +5768,8 @@
           "name": "number_resolutions_operator_id_operators_id_fk",
           "tableFrom": "number_resolutions",
           "tableTo": "operators",
-          "columnsFrom": [
-            "operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -6033,12 +5777,8 @@
           "name": "number_resolutions_previous_operator_id_operators_id_fk",
           "tableFrom": "number_resolutions",
           "tableTo": "operators",
-          "columnsFrom": [
-            "previous_operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["previous_operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -6202,12 +5942,8 @@
           "name": "numbering_plan_ranges_operator_id_operators_id_fk",
           "tableFrom": "numbering_plan_ranges",
           "tableTo": "operators",
-          "columnsFrom": [
-            "operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -6298,12 +6034,8 @@
           "name": "operator_aliases_operator_id_operators_id_fk",
           "tableFrom": "operator_aliases",
           "tableTo": "operators",
-          "columnsFrom": [
-            "operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -6433,12 +6165,8 @@
           "name": "operators_host_operator_id_operators_id_fk",
           "tableFrom": "operators",
           "tableTo": "operators",
-          "columnsFrom": [
-            "host_operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["host_operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -6667,12 +6395,8 @@
           "name": "partner_aliases_partner_id_partners_id_fk",
           "tableFrom": "partner_aliases",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -6747,12 +6471,8 @@
           "name": "partner_coverage_partner_id_partners_id_fk",
           "tableFrom": "partner_coverage",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -6873,12 +6593,8 @@
           "name": "partner_distributions_partner_id_partners_id_fk",
           "tableFrom": "partner_distributions",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -7086,12 +6802,8 @@
           "name": "partner_rates_partner_id_partners_id_fk",
           "tableFrom": "partner_rates",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -7099,12 +6811,8 @@
           "name": "partner_rates_tariff_id_partner_tariffs_id_fk",
           "tableFrom": "partner_rates",
           "tableTo": "partner_tariffs",
-          "columnsFrom": [
-            "tariff_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tariff_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -7112,12 +6820,8 @@
           "name": "partner_rates_operator_id_operators_id_fk",
           "tableFrom": "partner_rates",
           "tableTo": "operators",
-          "columnsFrom": [
-            "operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -7238,12 +6942,8 @@
           "name": "partner_tariffs_partner_id_partners_id_fk",
           "tableFrom": "partner_tariffs",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -7360,12 +7060,8 @@
           "name": "partners_owner_user_id_users_id_fk",
           "tableFrom": "partners",
           "tableTo": "users",
-          "columnsFrom": [
-            "owner_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["owner_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -7539,12 +7235,8 @@
           "name": "payments_client_id_clients_id_fk",
           "tableFrom": "payments",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -7552,12 +7244,8 @@
           "name": "payments_created_by_user_id_users_id_fk",
           "tableFrom": "payments",
           "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -7565,12 +7253,8 @@
           "name": "payments_resolved_by_user_id_users_id_fk",
           "tableFrom": "payments",
           "tableTo": "users",
-          "columnsFrom": [
-            "resolved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["resolved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -7667,12 +7351,8 @@
           "name": "platform_settings_updated_by_user_id_users_id_fk",
           "tableFrom": "platform_settings",
           "tableTo": "users",
-          "columnsFrom": [
-            "updated_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["updated_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -7784,12 +7464,8 @@
           "name": "price_bands_operator_id_operators_id_fk",
           "tableFrom": "price_bands",
           "tableTo": "operators",
-          "columnsFrom": [
-            "operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -7924,12 +7600,8 @@
           "name": "recording_grants_recording_id_recordings_id_fk",
           "tableFrom": "recording_grants",
           "tableTo": "recordings",
-          "columnsFrom": [
-            "recording_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["recording_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -7937,12 +7609,8 @@
           "name": "recording_grants_partner_id_partners_id_fk",
           "tableFrom": "recording_grants",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -7950,12 +7618,8 @@
           "name": "recording_grants_granted_by_user_id_users_id_fk",
           "tableFrom": "recording_grants",
           "tableTo": "users",
-          "columnsFrom": [
-            "granted_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["granted_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -8084,12 +7748,8 @@
           "name": "recordings_call_id_calls_id_fk",
           "tableFrom": "recordings",
           "tableTo": "calls",
-          "columnsFrom": [
-            "call_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["call_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -8230,12 +7890,8 @@
           "name": "reservations_call_id_calls_id_fk",
           "tableFrom": "reservations",
           "tableTo": "calls",
-          "columnsFrom": [
-            "call_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["call_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -8243,12 +7899,8 @@
           "name": "reservations_client_id_clients_id_fk",
           "tableFrom": "reservations",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -8380,12 +8032,8 @@
           "name": "server_metrics_node_id_nodes_id_fk",
           "tableFrom": "server_metrics",
           "tableTo": "nodes",
-          "columnsFrom": [
-            "node_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8514,12 +8162,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -8725,12 +8369,8 @@
           "name": "sim_cards_partner_id_partners_id_fk",
           "tableFrom": "sim_cards",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -8738,12 +8378,8 @@
           "name": "sim_cards_tariff_id_partner_tariffs_id_fk",
           "tableFrom": "sim_cards",
           "tableTo": "partner_tariffs",
-          "columnsFrom": [
-            "tariff_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tariff_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -8751,12 +8387,8 @@
           "name": "sim_cards_operator_id_operators_id_fk",
           "tableFrom": "sim_cards",
           "tableTo": "operators",
-          "columnsFrom": [
-            "operator_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["operator_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -8864,12 +8496,8 @@
           "name": "sip_trunks_gateway_id_gateways_id_fk",
           "tableFrom": "sip_trunks",
           "tableTo": "gateways",
-          "columnsFrom": [
-            "gateway_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["gateway_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -9014,12 +8642,8 @@
           "name": "smpp_accounts_client_id_clients_id_fk",
           "tableFrom": "smpp_accounts",
           "tableTo": "clients",
-          "columnsFrom": [
-            "client_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["client_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -9154,12 +8778,8 @@
           "name": "smpp_events_account_id_smpp_accounts_id_fk",
           "tableFrom": "smpp_events",
           "tableTo": "smpp_accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -9288,12 +8908,8 @@
           "name": "support_attachments_uploader_user_id_users_id_fk",
           "tableFrom": "support_attachments",
           "tableTo": "users",
-          "columnsFrom": [
-            "uploader_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["uploader_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -9301,12 +8917,8 @@
           "name": "support_attachments_message_id_support_ticket_messages_id_fk",
           "tableFrom": "support_attachments",
           "tableTo": "support_ticket_messages",
-          "columnsFrom": [
-            "message_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["message_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -9399,12 +9011,8 @@
           "name": "support_ticket_messages_ticket_id_support_tickets_id_fk",
           "tableFrom": "support_ticket_messages",
           "tableTo": "support_tickets",
-          "columnsFrom": [
-            "ticket_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["ticket_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -9412,12 +9020,8 @@
           "name": "support_ticket_messages_author_user_id_users_id_fk",
           "tableFrom": "support_ticket_messages",
           "tableTo": "users",
-          "columnsFrom": [
-            "author_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["author_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -9579,12 +9183,8 @@
           "name": "support_tickets_author_user_id_users_id_fk",
           "tableFrom": "support_tickets",
           "tableTo": "users",
-          "columnsFrom": [
-            "author_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["author_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -9592,12 +9192,8 @@
           "name": "support_tickets_assignee_user_id_users_id_fk",
           "tableFrom": "support_tickets",
           "tableTo": "users",
-          "columnsFrom": [
-            "assignee_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["assignee_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -9811,12 +9407,8 @@
           "name": "test_calls_sim_card_id_sim_cards_id_fk",
           "tableFrom": "test_calls",
           "tableTo": "sim_cards",
-          "columnsFrom": [
-            "sim_card_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sim_card_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -9824,12 +9416,8 @@
           "name": "test_calls_partner_id_partners_id_fk",
           "tableFrom": "test_calls",
           "tableTo": "partners",
-          "columnsFrom": [
-            "partner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["partner_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -9837,12 +9425,8 @@
           "name": "test_calls_gateway_id_gateways_id_fk",
           "tableFrom": "test_calls",
           "tableTo": "gateways",
-          "columnsFrom": [
-            "gateway_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["gateway_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -9850,12 +9434,8 @@
           "name": "test_calls_node_id_nodes_id_fk",
           "tableFrom": "test_calls",
           "tableTo": "nodes",
-          "columnsFrom": [
-            "node_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["node_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -9863,12 +9443,8 @@
           "name": "test_calls_requested_by_users_id_fk",
           "tableFrom": "test_calls",
           "tableTo": "users",
-          "columnsFrom": [
-            "requested_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["requested_by"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
