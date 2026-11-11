@@ -93,18 +93,23 @@ export class NodeAgentController {
   async heartbeat(
     @Body(zodBody(heartbeatSchema)) body: z.infer<typeof heartbeatSchema>,
     @CurrentMachine() machine: MachinePrincipal,
+    @Ip() ip: string,
   ): Promise<{
     status: string;
     next_heartbeat_in_ms: number;
     set_version: string;
     auto_update: boolean;
   }> {
-    const node = await this.nodes.heartbeat(machine, {
-      activeCalls: body.activeCalls,
-      agentVersion: body.agentVersion ?? null,
-      setVersion: body.setVersion ?? null,
-      degraded: body.degraded,
-    });
+    const node = await this.nodes.heartbeat(
+      machine,
+      {
+        activeCalls: body.activeCalls,
+        agentVersion: body.agentVersion ?? null,
+        setVersion: body.setVersion ?? null,
+        degraded: body.degraded,
+      },
+      ip,
+    );
 
     return {
       status: node.status,

@@ -149,9 +149,14 @@ export class TelephonyService {
    * `sip.zvonix.local` в поле «Сервер» (2026-10-22). Адреса узла нет — имя кабинета: при установке «всё на одной машине»
    * узел там же.
    */
-  async sipServer(): Promise<string> {
+  /**
+   * Куда партнёры и клиенты направляют SIP — адрес работающего узла. `null` — адреса нет ни у одного:
+   * кабинет говорит это прямо. Домен сайта вместо него не подставляется никогда — так GOIP уходил на машину
+   * без телефонии, и ошибку не видел никто ([ADR-0113](../../../../../docs/adr/0113-adres-sip-uzla-sam-i-bez-podmeny.md)).
+   */
+  async sipServer(): Promise<string | null> {
     const [address] = await this.nodes.sipAddresses();
-    return address ?? new URL(this.config.PUBLIC_BASE_URL).hostname;
+    return address ?? null;
   }
 
   // --- Шлюзы -----------------------------------------------------------------

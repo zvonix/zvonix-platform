@@ -152,7 +152,7 @@ interface GatewayView {
  * в `node/conf/autoload_configs/sofia.conf.xml`.
  */
 interface ConnectionView {
-  readonly server: string;
+  readonly server: string | null;
   readonly port: number;
 }
 
@@ -634,7 +634,7 @@ interface SipAccountView {
   readonly username: string;
   readonly password: string;
   readonly realm: string;
-  readonly server: string;
+  readonly server: string | null;
 }
 
 /** Порт в ответе на действие: без SIM — её состояние партнёр перечитывает целиком. */

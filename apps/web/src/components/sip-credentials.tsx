@@ -3,13 +3,14 @@
 import { goipLinePrefix } from '@zvonix/shared';
 import type { ReactNode } from 'react';
 import { OneTimeSecret } from '@/components/one-time-secret';
+import { SipServer } from '@/components/sip-server';
 
 export interface SipAccount {
   readonly username: string;
   readonly password: string;
   readonly realm: string;
   /** Адрес узла — куда подключаться. Домен (`realm`) узел подставляет сам. */
-  readonly server: string;
+  readonly server: string | null;
 }
 
 /**
@@ -58,7 +59,9 @@ export function SipCredentials({
         <dt className="text-muted-foreground">Пароль</dt>
         <dd className="num select-all">{account.password}</dd>
         <dt className="text-muted-foreground">Сервер</dt>
-        <dd className="num select-all">{account.server}</dd>
+        <dd>
+          <SipServer server={account.server} />
+        </dd>
       </dl>
       {children}
     </OneTimeSecret>
@@ -100,7 +103,7 @@ export function LineCredentials({
   /** Что делать дальше — например, ссылка на страницу шлюза. */
   children?: ReactNode;
 }) {
-  const server = lines[0]?.server ?? '';
+  const server = lines[0]?.server ?? null;
   return (
     <OneTimeSecret title={title} onClose={onClose}>
       <p>
@@ -111,7 +114,7 @@ export function LineCredentials({
         <span className="text-muted-foreground">
           SIP Proxy, SIP Registrar Server у всех линий:{' '}
         </span>
-        <span className="num select-all">{server}</span>
+        <SipServer server={server} />
       </p>
       <div className="overflow-x-auto">
         {/* Без переносов: разорванный логин или пароль переписывают с ошибкой. */}

@@ -12,7 +12,7 @@ import type { Principal } from '../identity/identity.service.js';
 import { NodeSetService } from './node-set.service.js';
 import type { NodeRow } from './nodes.repository.js';
 import { NodesService, type ProvisionedNode } from './nodes.service.js';
-import { provisionNodeSchema, reissueInstallSchema } from './schemas.js';
+import { nodeSettingsSchema, provisionNodeSchema, reissueInstallSchema } from './schemas.js';
 
 interface NodeView {
   readonly id: string;
@@ -102,6 +102,26 @@ export class NodesController {
   @Get(':id')
   async get(@Param('id') id: string): Promise<{ node: NodeView }> {
     return { node: toNodeView(await this.nodes.get(parseId(id, 'node'))) };
+  }
+
+  /**
+   * Настройки узла: название и адрес SIP ([ADR-0113](../../../../../docs/adr/0113-adres-sip-uzla-sam-i-bez-podmeny.md)).
+   * Пустой адрес — определить по пульсу узла заново.
+   */
+  @Roles('admin')
+  @Post(':id/settings')
+  async settings(
+    @Param('id') id: string,
+    @Body(zodBody(nodeSettingsSchema)) body: z.infer<typeof nodeSettingsSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ node: NodeView }> {
+    const updated = await this.nodes.updateSettings(
+      parseId(id, 'node'),
+      { name: body.name, sipAddress: body.sipAddress },
+      actor.userId,
+      actor.role,
+    );
+    return { node: toNodeView(updated) };
   }
 
   /**

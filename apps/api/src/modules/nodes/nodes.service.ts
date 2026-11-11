@@ -23,6 +23,7 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { AuditService } from '../audit/audit.service.js';
 import { MachineService, type MachinePrincipal } from '../machine/machine.service.js';
 import { NodesRepository, type NodeId, type NodeRow } from './nodes.repository.js';
+import { detectSipAddress } from './sip-address.js';
 
 /** Узел вместе с командой, которую администратор скопирует на сервер. */
 export interface ProvisionedNode {
@@ -179,8 +180,10 @@ export class NodesService {
 
     await this.machine.consumeEnrollment(principal.credentialId, ip);
 
-    const registered = await this.repository.markInstalling(nodeId, hostname, agentVersion);
-    if (registered === undefined) throw notFound('Узел не найден');
+    const installing = await this.repository.markInstalling(nodeId, hostname, agentVersion);
+    if (installing === undefined) throw notFound('Узел не найден');
+    // Адрес SIP — сразу при установке, не дожидаясь первого пульса (ADR-0113).
+    const registered = await this.detectAddress(installing, ip);
 
     const issued = await this.machine.issue({
       kind: 'node',
@@ -230,7 +233,11 @@ export class NodesService {
    * нагрузка выше порога. Решение «жив или нет» при этом остаётся за control plane —
    * молчание переводит узел в `offline` независимо от того, что он присылал раньше.
    */
-  async heartbeat(principal: MachinePrincipal, input: HeartbeatInput): Promise<NodeRow> {
+  async heartbeat(
+    principal: MachinePrincipal,
+    input: HeartbeatInput,
+    ip?: string,
+  ): Promise<NodeRow> {
     const nodeId = parseId(principal.ownerId, 'node');
     const status: NodeStatus = input.degraded ? 'degraded' : 'online';
     const updated = await this.repository.recordHeartbeat(nodeId, {
@@ -241,6 +248,58 @@ export class NodesService {
       at: new Date(),
     });
     if (updated === undefined) throw notFound('Узел не найден');
+    return this.detectAddress(updated, ip);
+  }
+
+  /**
+   * Адрес SIP по адресу обращения, если у узла его ещё нет (ADR-0113). Заданный — администратором
+   * или раньше — не трогается.
+   */
+  private async detectAddress(node: NodeRow, ip: string | undefined): Promise<NodeRow> {
+    if (node.sipAddress !== null) return node;
+    const address = detectSipAddress(ip, this.config.PUBLIC_BASE_URL);
+    if (address === undefined) return node;
+    const filled = await this.repository.fillSipAddress(node.id, address);
+    if (filled === undefined) return (await this.repository.findById(node.id)) ?? node;
+    await this.audit.record({
+      action: 'node.sip_address_detected',
+      entityType: 'node',
+      entityId: node.id,
+      ip: ip ?? null,
+      before: { sip_address: null },
+      after: { sip_address: address },
+    });
+    this.logger.info('Адрес SIP узла определён по его обращению', {
+      node_id: node.id,
+      sip_address: address,
+    });
+    return filled;
+  }
+
+  /**
+   * Настройки узла: название и адрес SIP (ADR-0113). Пустой адрес — определить по пульсу заново.
+   * Не изменилось ничего — ни записи, ни строки в журнале.
+   */
+  async updateSettings(
+    id: NodeId,
+    settings: { name: string; sipAddress: string | null },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<NodeRow> {
+    const node = await this.require(id);
+    if (node.status === 'decommissioned') throw conflict('Узел удалён: настраивать нечего');
+    if (node.name === settings.name && node.sipAddress === settings.sipAddress) return node;
+    const updated = await this.repository.updateSettings(id, settings);
+    if (updated === undefined) throw notFound('Узел не найден');
+    await this.audit.record({
+      action: 'node.settings_changed',
+      entityType: 'node',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: { name: node.name, sip_address: node.sipAddress },
+      after: { name: updated.name, sip_address: updated.sipAddress },
+    });
     return updated;
   }
 

@@ -8,6 +8,7 @@ import { useState, type ReactNode } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { CopyButton } from '@/components/copy-button';
+import { SipServer } from '@/components/sip-server';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { SectionTabs } from '@/components/section-tabs';
@@ -322,7 +323,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** Что вписать в программу: секрета здесь нет, пароль — только «Новым паролем» (ADR-0101, п. 7). */
-function ConnectionTab({ channel, server }: { channel: Channel; server: string }) {
+function ConnectionTab({ channel, server }: { channel: Channel; server: string | null }) {
   return (
     <div className="flex flex-col gap-4">
       <p className="flex flex-wrap items-baseline gap-2">
@@ -331,10 +332,16 @@ function ConnectionTab({ channel, server }: { channel: Channel; server: string }
       </p>
       <dl className="grid max-w-xl grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2">
         <Field label="Сервер">
-          <span className="num select-all break-all" translate="no">
-            {server}
-          </span>
-          <CopyButton value={server} label="Скопировать сервер" />
+          {server === null ? (
+            <SipServer server={null} />
+          ) : (
+            <>
+              <span className="num select-all break-all" translate="no">
+                {server}
+              </span>
+              <CopyButton value={server} label="Скопировать сервер" />
+            </>
+          )}
         </Field>
         <Field label="Порт">
           <span className="num">5060 · UDP или TCP</span>

@@ -58,7 +58,7 @@ interface SipAccountView {
   readonly password: string;
   readonly realm: string;
   /** Куда подключаться — адрес узла, а не домен (`TelephonyService.sipServer`). */
-  readonly server: string;
+  readonly server: string | null;
 }
 
 /** Вход линии GOIP (ADR-0054): тот же один показ пароля, с портом, к которому он выдан. */
@@ -758,12 +758,12 @@ function toPortView(row: GatewayPortRow): PortView {
   };
 }
 
-function toAccountView(account: IssuedSipAccount, server: string): SipAccountView {
+function toAccountView(account: IssuedSipAccount, server: string | null): SipAccountView {
   return { username: account.username, password: account.password, realm: account.realm, server };
 }
 
 /** Общий вид входа линии для обоих контуров: администратора и самого партнёра. */
-export function toPortAccountView(account: IssuedPortAccount, server: string): PortAccountView {
+export function toPortAccountView(account: IssuedPortAccount, server: string | null): PortAccountView {
   return {
     port_id: account.portId,
     port_number: account.portNumber,

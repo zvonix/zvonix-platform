@@ -22,6 +22,7 @@ import { DatabaseService } from '../infra/database.service.js';
 import { BillingService } from '../modules/billing/billing.service.js';
 import { CatalogService } from '../modules/catalog/catalog.service.js';
 import { IdentityService } from '../modules/identity/identity.service.js';
+import { NodesService } from '../modules/nodes/nodes.service.js';
 import { TelephonyService } from '../modules/telephony/telephony.service.js';
 
 /** Пароль стенда. Совпадает с `E2E_PASSWORD` в `scripts/e2e-stack.mjs`. */
@@ -169,6 +170,16 @@ async function main(): Promise<void> {
       },
       actor,
     );
+
+    // Узел АТС с адресом, как на настоящей площадке: без него кабинет честно говорит партнёру и клиенту,
+    // что подключаться некуда (ADR-0113), и страницы подключения на стенде были бы пустыми.
+    await app
+      .get(NodesService)
+      .provision(
+        { name: 'Стенд-1', sipAddress: 'sip.e2e.zvonix.test', allowedIps: [] },
+        actor.userId,
+        actor.role,
+      );
 
     // Оператор нужен кабинету партнёра: без него SIM не завести. Заводить его в самой
     // проверке значило бы проверять админку, а не то, что партнёр видит у себя.

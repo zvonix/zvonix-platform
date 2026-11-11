@@ -2725,3 +2725,29 @@ test.describe('картинки в обращениях (ADR-0089)', () => {
     await clientContext.close();
   });
 });
+
+test.describe('настройки узла АТС (ADR-0113)', () => {
+  test('адрес SIP и название меняются окном «Настройки» в строке узла', async ({ page }) => {
+    // Раньше адрес задавался только при добавлении узла, и узел без адреса так и оставался:
+    // партнёру подставлялся домен сайта, GOIP уходил на машину без телефонии (владелец, 2026-11-11).
+    await signIn(page, PEOPLE.admin);
+    await page.goto('/nodes');
+    const row = page.getByRole('row').filter({ hasText: 'Стенд-1' });
+    await expect(row).toContainText('sip.e2e.zvonix.test');
+
+    await row.getByRole('button', { name: 'Настройки' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Адрес SIP').fill('http://плохо/путь');
+    await expect(dialog.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
+    await dialog.getByLabel('Адрес SIP').fill('203.0.113.50');
+    await dialog.getByRole('button', { name: 'Сохранить' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(row).toContainText('203.0.113.50');
+
+    // Вернуть стендовый адрес: остальные проверки стенда видят его в кабинете партнёра.
+    await row.getByRole('button', { name: 'Настройки' }).click();
+    await page.getByRole('dialog').getByLabel('Адрес SIP').fill('sip.e2e.zvonix.test');
+    await page.getByRole('dialog').getByRole('button', { name: 'Сохранить' }).click();
+    await expect(row).toContainText('sip.e2e.zvonix.test');
+  });
+});

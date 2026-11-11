@@ -98,7 +98,7 @@ export interface Trunk {
 
 /** Куда регистрировать шлюз — одно на всех. */
 export interface Connection {
-  readonly server: string;
+  readonly server: string | null;
   readonly port: number;
 }
 

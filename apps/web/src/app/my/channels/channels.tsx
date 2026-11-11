@@ -30,7 +30,7 @@ export interface Channel {
 
 export interface ChannelList {
   readonly channels: readonly Channel[];
-  readonly server: string;
+  readonly server: string | null;
   readonly max_channels: number;
 }
 
