@@ -60,12 +60,28 @@ RELEASE_NAMESPACE=zvonix-release
 WEB_CACHE=/var/cache/zvonix-web
 # Архив без подписи: только ключом командной строки с --archive; служба обновления его не передаёт.
 UNSIGNED=0
+# Каталоги данных — те же, что службам задают их юниты (zvonix-api@.service, zvonix-worker.service), а не zvonix.env.
+RECORDINGS_DIR=/var/lib/zvonix-recordings
+SUPPORT_DIR=/var/lib/zvonix-support
 
 die() {
   echo "Ошибка: $*" >&2
   exit 1
 }
 step() { printf '\n=== %s\n' "$*"; }
+
+# Код выпуска от zvonix с окружением площадки — так же, как его видят службы. Каталоги данных службам задаёт systemd,
+# а не zvonix.env; без них служебный запуск брал умолчание ./data внутри каталога выпуска, принадлежащего root
+# (ADR-0109), и печатал в вывод выкладки ложное «разговоры сохраняться не будут» (выкладка v0.1.177, 2026-11-11).
+# zvonix.env читается после них, как EnvironmentFile у юнитов. Каталоги заводятся заранее: на новой машине systemd
+# создаёт их только при первом старте службы. `script` — команда sh; остальные аргументы — её $0, $1…
+app_sh() {
+  local script="$1"
+  shift
+  install -d -o zvonix -g zvonix -m 0750 "$RECORDINGS_DIR" "$SUPPORT_DIR"
+  sudo -u zvonix env "RECORDINGS_DIR=${RECORDINGS_DIR}" "SUPPORT_DIR=${SUPPORT_DIR}" \
+    sh -c "set -a; . '${ETC}/zvonix.env'; set +a; ${script}" "$@"
+}
 
 [ "$(id -u)" -eq 0 ] || die "нужны права root"
 for command in curl tar sha256sum ssh-keygen node pnpm python3 systemctl sudo find pg_dump flock nginx ss; do
@@ -432,8 +448,8 @@ backup_database() {
 # DEPLOY_OK — она последняя по договорённости. Сбой здесь выкладку не отменяет: выпуск
 # уже работает, а код можно получить той же командой отдельно (deploy/README.md).
 first_run_hint() {
-  sudo -u zvonix sh -c \
-    'set -a; . /etc/zvonix/zvonix.env; set +a; cd "$0/apps/api" && exec node dist/modules/identity/first-run-code.js' \
+  app_sh \
+    'cd "$0/apps/api" && exec node dist/modules/identity/first-run-code.js' \
     "$1" || echo "код первого запуска не получен — см. deploy/README.md, «Первый вход»" >&2
 }
 
@@ -448,7 +464,7 @@ update_local_node() {
   step "Узел АТС на этой машине"
   script="${WORK}/node-install.sh"
   # Сборка — от zvonix: ей нужно только окружение площадки, а права root на чтение конфигурации не нужны.
-  if sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; cd "$0/apps/api" && exec node dist/modules/nodes/node-script.js' \
+  if app_sh 'cd "$0/apps/api" && exec node dist/modules/nodes/node-script.js' \
       "$release" >"$script" && [ -s "$script" ] && bash "$script" --update; then
     return 0
   fi
@@ -761,7 +777,7 @@ check_rehearsal() {
     return 0
   fi
 
-  if ! sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; export DATABASE_URL="$1"; cd "$0" && exec node packages/db/dist/migrate.js' \
+  if ! app_sh 'export DATABASE_URL="$1"; cd "$0" && exec node packages/db/dist/migrate.js' \
       "$release" "$test_url" >"${WORK}/rehearsal-migrate.log" 2>&1; then
     check "Репетиция на копии базы" fail "миграции не прошли на копии данных: $(tail -3 "${WORK}/rehearsal-migrate.log" | tr '\n' ' ')"
     rehearsal_cleanup
@@ -769,7 +785,7 @@ check_rehearsal() {
   fi
 
   # API выпуска на запасном порту, только на себя; SMPP и обмен с службой обновления выключены.
-  sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; export DATABASE_URL="$1" APP_HOST=127.0.0.1 APP_PORT="$2" SMPP_PORT=0 SMPP_TLS_PORT=0 UPDATER_DIR=/nonexistent; cd "$0/apps/api" && exec node dist/main.js' \
+  app_sh 'export DATABASE_URL="$1" APP_HOST=127.0.0.1 APP_PORT="$2" SMPP_PORT=0 SMPP_TLS_PORT=0 UPDATER_DIR=/nonexistent; cd "$0/apps/api" && exec node dist/main.js' \
     "$release" "$test_url" "$REHEARSAL_PORT" >"${WORK}/rehearsal-api.log" 2>&1 &
   pid=$!
   for attempt in $(seq 1 40); do
@@ -861,7 +877,7 @@ install_release() {
   backup_database "$label"
 
   step "Миграции"
-  sudo -u zvonix sh -c 'set -a; . /etc/zvonix/zvonix.env; set +a; cd "$0" && exec node packages/db/dist/migrate.js' \
+  app_sh 'cd "$0" && exec node packages/db/dist/migrate.js' \
     "$release"
 
   before=""

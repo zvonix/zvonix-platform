@@ -176,6 +176,18 @@ systemctl daemon-reload
 systemctl start zvonix-api zvonix-web
 wait_ready "$API_READY" && wait_ready "$WEB_READY" || fail "прежние службы не поднялись"
 
+step "Служебный запуск выпуска видит каталоги данных"
+# Выкладка v0.1.177 печатала ложное «разговоры сохраняться не будут»: код первого входа запускался без каталогов,
+# которые службам задаёт systemd, и пробовал писать в каталог выпуска, принадлежащий root (2026-11-11).
+hint="$(first_run_hint "$first" 2>&1)"
+if printf '%s' "$hint" | grep -qE 'недоступен для записи|EACCES'; then
+  printf '%s\n' "$hint" >&2
+  fail "служебный запуск выпуска не видит каталог записей"
+fi
+for dir in "$RECORDINGS_DIR" "$SUPPORT_DIR"; do
+  [ "$(stat -c %U "$dir")" = zvonix ] || fail "каталог ${dir} не принадлежит zvonix"
+done
+
 # Непрерывные запросы к постоянным адресам: каждый отказ — строка в файле.
 probe_start() {
   : >"${WORK}/refused"
