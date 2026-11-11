@@ -2,7 +2,7 @@
  * Реестр узлов: человеческая часть (ADR-0009).
  */
 
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
@@ -11,6 +11,7 @@ import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import { NodeSetService } from './node-set.service.js';
 import type { NodeRow } from './nodes.repository.js';
+import type { SipCheck } from './sip-dns.js';
 import { NodesService, type ProvisionedNode } from './nodes.service.js';
 import { nodeSettingsSchema, provisionNodeSchema, reissueInstallSchema } from './schemas.js';
 
@@ -26,6 +27,8 @@ interface NodeView {
   readonly active_calls: number;
   readonly last_heartbeat_at: string | null;
   readonly created_at: string;
+  /** Адрес, с которого узел последний раз обращался к площадке (ADR-0113, ревизия). */
+  readonly last_address: string | null;
 }
 
 /**
@@ -92,16 +95,53 @@ export class NodesController {
 
   @Roles('admin', 'support')
   @Get()
-  async list(): Promise<{ nodes: NodeView[]; current_set_version: string }> {
+  async list(): Promise<{
+    nodes: (NodeView & { sip_check: SipCheckView | null })[];
+    current_set_version: string;
+  }> {
     const rows = await this.nodes.list();
+    // Проверка адреса SIP — у каждого работающего узла, из минутной памяти DNS: строка списка сразу
+    // говорит, верна ли запись (ADR-0113, ревизия). У удалённого проверять нечего.
+    const nodes = await Promise.all(
+      rows.map(async (row) => ({
+        ...toNodeView(row),
+        sip_check:
+          row.status === 'decommissioned' ? null : toSipCheckView(await this.nodes.sipCheckOf(row)),
+      })),
+    );
     // Версия набора площадки: по ней кабинет отличает актуальный узел от отставшего (ADR-0068).
-    return { nodes: rows.map(toNodeView), current_set_version: await this.nodeSet.version() };
+    return { nodes, current_set_version: await this.nodeSet.version() };
   }
 
   @Roles('admin', 'support')
   @Get(':id')
   async get(@Param('id') id: string): Promise<{ node: NodeView }> {
     return { node: toNodeView(await this.nodes.get(parseId(id, 'node'))) };
+  }
+
+  /**
+   * Куда ведёт адрес SIP узла ([ADR-0113](../../../../../docs/adr/0113-adres-sip-uzla-sam-i-bez-podmeny.md),
+   * ревизия): DNS-запись есть ли, туда ли, какую завести. `?address=` — проверить вводимый адрес до сохранения,
+   * `?fresh=1` — спросить DNS заново, мимо минутной памяти.
+   */
+  @Roles('admin', 'support')
+  @Get(':id/sip-check')
+  async sipCheck(
+    @Param('id') id: string,
+    @Query('address') address: string | undefined,
+    @Query('fresh') fresh: string | undefined,
+  ): Promise<{ check: SipCheckView }> {
+    const candidate =
+      address === undefined
+        ? undefined
+        : address.trim() === ''
+          ? null
+          : address.trim().slice(0, 200);
+    const check = await this.nodes.sipCheck(parseId(id, 'node'), {
+      ...(candidate === undefined ? {} : { candidate }),
+      fresh: fresh === '1',
+    });
+    return { check: toSipCheckView(check) };
   }
 
   /**
@@ -154,6 +194,24 @@ function toProvisionedView(provisioned: ProvisionedNode): {
   };
 }
 
+interface SipCheckView {
+  verdict: SipCheck['verdict'];
+  address: string | null;
+  resolved: readonly string[];
+  expected: readonly string[];
+  record: SipCheck['record'];
+}
+
+function toSipCheckView(check: SipCheck): SipCheckView {
+  return {
+    verdict: check.verdict,
+    address: check.address,
+    resolved: check.resolved,
+    expected: check.expected,
+    record: check.record,
+  };
+}
+
 function toNodeView(row: NodeRow): NodeView {
   return {
     id: row.id,
@@ -165,6 +223,7 @@ function toNodeView(row: NodeRow): NodeView {
     set_version: row.setVersion,
     active_calls: row.activeCalls,
     last_heartbeat_at: row.lastHeartbeatAt?.toISOString() ?? null,
+    last_address: row.lastAddress,
     created_at: row.createdAt.toISOString(),
   };
 }

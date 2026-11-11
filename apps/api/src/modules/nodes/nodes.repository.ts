@@ -62,11 +62,12 @@ export class NodesRepository {
     id: NodeId,
     hostname: string,
     agentVersion: string | null,
+    lastAddress: string | null,
   ): Promise<NodeRow | undefined> {
     try {
       const [row] = await this.db
         .update(nodes)
-        .set({ hostname, agentVersion, status: 'installing' })
+        .set({ hostname, agentVersion, lastAddress, status: 'installing' })
         .where(eq(nodes.id, id))
         .returning();
       return row;
@@ -92,6 +93,7 @@ export class NodesRepository {
       activeCalls: number;
       agentVersion: string | null;
       setVersion: string | null;
+      lastAddress: string | null;
       at: Date;
     },
   ): Promise<NodeRow | undefined> {
@@ -102,6 +104,8 @@ export class NodesRepository {
         activeCalls: beat.activeCalls,
         agentVersion: beat.agentVersion,
         setVersion: beat.setVersion,
+        // Пустой адрес пульса прежний не стирает: узнать адрес узла заново негде.
+        ...(beat.lastAddress === null ? {} : { lastAddress: beat.lastAddress }),
         lastHeartbeatAt: beat.at,
       })
       .where(eq(nodes.id, id))

@@ -619,3 +619,48 @@ describe('адрес SIP узла и настройки (ADR-0113)', () => {
     ).toBe(400);
   });
 });
+
+describe('проверка адреса SIP по DNS (ADR-0113, ревизия)', () => {
+  it('отвечает вердиктом и запиcью, которую завести; вводимый адрес проверяется до сохранения', async () => {
+    const provisioned = await provision();
+    const enrolled = await api().inject({
+      method: 'POST',
+      url: '/node/enroll',
+      headers: bearer(tokenOf(provisioned)),
+      remoteAddress: '203.0.113.20',
+      payload: { hostname: `node-dns-${String(counter)}`, agentVersion: '1.0.0' },
+    });
+    expect(enrolled.statusCode).toBe(200);
+    const id = provisioned.node.id;
+
+    // Узел установлен с публичного адреса — он и стал адресом SIP: указан IP узла.
+    const saved = await api().inject({
+      method: 'GET',
+      url: `/nodes/${id}/sip-check`,
+      headers: auth(),
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json<{ check: { verdict: string; expected: string[] } }>().check).toMatchObject({
+      verdict: 'ip',
+      expected: ['203.0.113.20'],
+    });
+
+    // Чужой IP, введённый в окне, — не адрес узла.
+    const typed = await api().inject({
+      method: 'GET',
+      url: `/nodes/${id}/sip-check?address=198.51.100.9`,
+      headers: auth(),
+    });
+    expect(typed.json<{ check: { verdict: string } }>().check.verdict).toBe('ip_mismatch');
+
+    // Список узлов сразу несёт отметку проверки.
+    const list = await api().inject({ method: 'GET', url: '/nodes', headers: auth() });
+    const row = list
+      .json<{
+        nodes: { id: string; sip_check: { verdict: string } | null; last_address: string | null }[];
+      }>()
+      .nodes.find((node) => node.id === id);
+    expect(row?.sip_check?.verdict).toBe('ip');
+    expect(row?.last_address).toBe('203.0.113.20');
+  });
+});

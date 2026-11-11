@@ -41,7 +41,10 @@ interface OwnSipAccount {
   readonly server: string | null;
 }
 
-function toOwnAccount(account: Omit<OwnSipAccount, 'server'>, server: string | null): OwnSipAccount {
+function toOwnAccount(
+  account: Omit<OwnSipAccount, 'server'>,
+  server: string | null,
+): OwnSipAccount {
   return { username: account.username, password: account.password, realm: account.realm, server };
 }
 

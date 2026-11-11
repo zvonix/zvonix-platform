@@ -23,7 +23,9 @@ import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/to
 import { AuditService } from '../audit/audit.service.js';
 import { MachineService, type MachinePrincipal } from '../machine/machine.service.js';
 import { NodesRepository, type NodeId, type NodeRow } from './nodes.repository.js';
+import { NameResolver } from './name-resolver.js';
 import { detectSipAddress } from './sip-address.js';
+import { checkSipAddress, type SipCheck } from './sip-dns.js';
 
 /** Узел вместе с командой, которую администратор скопирует на сервер. */
 export interface ProvisionedNode {
@@ -69,6 +71,7 @@ export class NodesService {
     private readonly repository: NodesRepository,
     private readonly machine: MachineService,
     private readonly audit: AuditService,
+    private readonly names: NameResolver,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -180,7 +183,12 @@ export class NodesService {
 
     await this.machine.consumeEnrollment(principal.credentialId, ip);
 
-    const installing = await this.repository.markInstalling(nodeId, hostname, agentVersion);
+    const installing = await this.repository.markInstalling(
+      nodeId,
+      hostname,
+      agentVersion,
+      ip ?? null,
+    );
     if (installing === undefined) throw notFound('Узел не найден');
     // Адрес SIP — сразу при установке, не дожидаясь первого пульса (ADR-0113).
     const registered = await this.detectAddress(installing, ip);
@@ -245,6 +253,7 @@ export class NodesService {
       activeCalls: input.activeCalls,
       agentVersion: input.agentVersion,
       setVersion: input.setVersion,
+      lastAddress: ip ?? null,
       at: new Date(),
     });
     if (updated === undefined) throw notFound('Узел не найден');
@@ -274,6 +283,35 @@ export class NodesService {
       sip_address: address,
     });
     return filled;
+  }
+
+  /**
+   * Куда ведёт адрес SIP узла и туда ли, где узел стоит (ADR-0113, ревизия). `candidate` — проверить адрес,
+   * который администратор ещё только вводит; без него — сохранённый. `fresh` — мимо памяти DNS.
+   */
+  async sipCheck(
+    id: NodeId,
+    options: { readonly candidate?: string | null; readonly fresh?: boolean } = {},
+  ): Promise<SipCheck> {
+    const node = await this.require(id);
+    return this.checkOf(node, options);
+  }
+
+  /** То же для строки списка — по сохранённому адресу и из памяти DNS. */
+  async sipCheckOf(node: NodeRow): Promise<SipCheck> {
+    return this.checkOf(node, {});
+  }
+
+  private checkOf(
+    node: NodeRow,
+    options: { readonly candidate?: string | null; readonly fresh?: boolean },
+  ): Promise<SipCheck> {
+    return checkSipAddress({
+      address: options.candidate === undefined ? node.sipAddress : options.candidate,
+      nodeAddress: node.lastAddress,
+      publicBaseUrl: this.config.PUBLIC_BASE_URL,
+      resolve: (name) => this.names.resolve(name, options.fresh === true),
+    });
   }
 
   /**

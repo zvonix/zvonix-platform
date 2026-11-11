@@ -7,12 +7,13 @@ import { NodeAgentController } from './node-agent.controller.js';
 import { NodeSetService } from './node-set.service.js';
 import { NodesController } from './nodes.controller.js';
 import { NodesRepository } from './nodes.repository.js';
+import { NameResolver } from './name-resolver.js';
 import { NodesService } from './nodes.service.js';
 
 @Module({
   imports: [AuditModule, MachineModule, SettingsModule],
   controllers: [NodesController, NodeAgentController, NodeInstallController],
-  providers: [NodesService, NodesRepository, NodeSetService],
+  providers: [NodesService, NodesRepository, NodeSetService, NameResolver],
   // Понадобится маршрутизации: вызов направляется только на узел, который отвечает.
   exports: [NodesService, NodesRepository, NodeSetService],
 })

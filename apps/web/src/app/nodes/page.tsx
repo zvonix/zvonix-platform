@@ -25,6 +25,7 @@ import { NODE_STATUS_MEANING, NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
 import { AllowedIpsField, parseAddresses } from './allowed-ips';
 import { NewNodeForm, type NodeDraft } from './new-node-form';
 import { NodeSettingsForm, type NodeSettingsDraft } from './node-settings';
+import { SipCheckBadge, type SipCheck } from './sip-check';
 
 const COLUMNS = 8;
 
@@ -33,6 +34,8 @@ interface Node {
   readonly name: string;
   readonly hostname: string | null;
   readonly sip_address: string | null;
+  /** Проверка адреса SIP по DNS (ADR-0113, ревизия); у удалённого узла — `null`. */
+  readonly sip_check?: SipCheck | null;
   readonly status: NodeStatus;
   readonly agent_version: string | null;
   /** Версия набора на узле (ADR-0068); пусто — узел её не присылает. */
@@ -298,6 +301,7 @@ function NodeRows({
             {node.sip_address}
           </span>
         )}
+        <SipCheckBadge check={node.sip_check ?? null} />
       </TableCell>
 
       <TableCell className="num text-right">{node.active_calls}</TableCell>
@@ -356,6 +360,7 @@ function NodeRows({
               disabled={busy}
             >
               <NodeSettingsForm
+                nodeId={node.id}
                 initial={{ name: node.name, sipAddress: node.sip_address ?? '' }}
                 onSave={onSaveSettings}
               />

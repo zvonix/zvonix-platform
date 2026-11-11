@@ -102,6 +102,16 @@ API стоит за nginx под этим префиксом, а корень д
 `node.sip_address_detected`. Адрес — то, что партнёры и клиенты видят как сервер SIP; если его нет
 ни у одного узла, в их ответах `server: null`, а не домен сайта.
 
+## `GET /nodes/:id/sip-check` — роли `admin`, `support`
+
+Куда ведёт адрес SIP узла ([ADR-0113](../adr/0113-adres-sip-uzla-sam-i-bez-podmeny.md), «Ревизия: проверка
+DNS»). `?address=` — проверить вводимый адрес до сохранения (пусто — «не задан»), `?fresh=1` — спросить DNS
+заново, мимо минутной памяти. `200` →
+`{ "check": { "verdict", "address", "resolved": […], "expected": […], "record": { "name", "type", "value" } | null } }`.
+Вердикты — `ok`, `mismatch`, `missing`, `ip`, `ip_mismatch`, `none`, `unverifiable`, `error`; смысл — в ADR.
+Тот же `check` — полем `sip_check` у каждой строки `GET /nodes` (у удалённого узла `null`), рядом `last_address` —
+адрес последнего обращения узла.
+
 ## `GET /install.sh` — публичный
 
 Скрипт установки, собранный под эту площадку

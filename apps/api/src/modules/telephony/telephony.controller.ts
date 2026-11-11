@@ -763,7 +763,10 @@ function toAccountView(account: IssuedSipAccount, server: string | null): SipAcc
 }
 
 /** Общий вид входа линии для обоих контуров: администратора и самого партнёра. */
-export function toPortAccountView(account: IssuedPortAccount, server: string | null): PortAccountView {
+export function toPortAccountView(
+  account: IssuedPortAccount,
+  server: string | null,
+): PortAccountView {
   return {
     port_id: account.portId,
     port_number: account.portNumber,

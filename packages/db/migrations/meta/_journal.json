@@ -631,6 +631,13 @@
       "when": 1794374439992,
       "tag": "0089_sim_paused",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1794403346384,
+      "tag": "0090_nodes_last_address",
+      "breakpoints": true
     }
   ]
 }
