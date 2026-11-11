@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { USABLE_SIM_STATUSES } from '@zvonix/shared';
 import {
   holdTransaction,
   prepareEnvironment,
@@ -2585,5 +2586,85 @@ describe('настройки своего шлюза: название, моде
     );
     expect((journal.rows[0] as { n: number }).n).toBe(1);
     expect((await portsOf(gatewayId)).ports).toHaveLength(2);
+  });
+});
+
+describe('партнёр выключает карту на время (ADR-0112)', () => {
+  let owner: Awaited<ReturnType<typeof createPartner>>;
+  beforeAll(async () => {
+    owner = await createPartner('Павлов Павел');
+  });
+
+  /** Своя карта, включённая площадкой: источника оператора на стенде нет. */
+  async function activeSim(): Promise<string> {
+    const sim = (
+      await post('/partner/sim-cards', { operatorId, msisdn: nextMsisdn() }, as(owner.token))
+    ).json<{ sim: { id: string } }>().sim.id;
+    expect((await post(`/sim-cards/${sim}/status`, { status: 'active' })).statusCode).toBe(201);
+    return sim;
+  }
+
+  const setStatus = (sim: string, status: string) =>
+    post(`/partner/sim-cards/${sim}/status`, { status }, as(owner.token));
+
+  it('включённую выключает и включает обратно сам; повтор — не событие', async () => {
+    const sim = await activeSim();
+
+    const paused = await setStatus(sim, 'paused');
+    expect(paused.statusCode).toBe(201);
+    expect(paused.json<{ sim: { status: string } }>().sim.status).toBe('paused');
+    expect((await setStatus(sim, 'paused')).statusCode).toBe(201);
+
+    const journal = await withDatabase(async (execute) =>
+      execute(
+        sql`select before, after from audit_log where entity_id = ${sim} and action = 'sim.status_changed' order by created_at`,
+      ),
+    );
+    // Повтор выключения не пишет вторую строку: журнал — история, а не эхо нажатий.
+    expect(journal.rows.at(-1)).toMatchObject({
+      before: { status: 'active' },
+      after: { status: 'paused' },
+    });
+    expect(
+      journal.rows.filter(
+        (row) => (row as { after: { status: string } }).after.status === 'paused',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('новую не выключить — выключать нечего; придержанную — нельзя, иначе обход пробы', async () => {
+    const fresh = (
+      await post('/partner/sim-cards', { operatorId, msisdn: nextMsisdn() }, as(owner.token))
+    ).json<{ sim: { id: string } }>().sim.id;
+    expect((await setStatus(fresh, 'paused')).statusCode).toBe(409);
+
+    const held = await activeSim();
+    expect((await post(`/sim-cards/${held}/status`, { status: 'throttled' })).statusCode).toBe(201);
+    const refused = await setStatus(held, 'paused');
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { message: string } }>().error.message).toContain('площадки');
+  });
+
+  it('администратор не выключает карту «как партнёр»: у площадки для этого «придержать»', async () => {
+    const sim = await activeSim();
+    expect((await post(`/sim-cards/${sim}/status`, { status: 'paused' })).statusCode).toBe(400);
+    // Выключенную партнёром администратор переводит куда угодно.
+    await setStatus(sim, 'paused');
+    expect((await post(`/sim-cards/${sim}/status`, { status: 'throttled' })).statusCode).toBe(201);
+  });
+
+  it('чужую карту не выключить', async () => {
+    expect((await setStatus(mySim, 'paused')).statusCode).toBe(404);
+  });
+
+  it('выключенная карта видна в оборудовании выключенной и не попадает в отбор', async () => {
+    const sim = await activeSim();
+    await setStatus(sim, 'paused');
+    const equipment = (await get('/partner/equipment', as(owner.token))).json<{
+      spare_sims: { id: string; status: string }[];
+    }>();
+    expect(equipment.spare_sims.find((row) => row.id === sim)?.status).toBe('paused');
+    // Отбор под вызов берёт только эти состояния — выключенная выпадает сама.
+    expect(USABLE_SIM_STATUSES).toEqual(['active']);
   });
 });

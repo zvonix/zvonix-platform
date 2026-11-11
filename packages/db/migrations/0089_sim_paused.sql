@@ -1,0 +1,2 @@
+ALTER TABLE "sim_cards" DROP CONSTRAINT "sim_cards_status_check";--> statement-breakpoint
+ALTER TABLE "sim_cards" ADD CONSTRAINT "sim_cards_status_check" CHECK ("sim_cards"."status" in ('new', 'active', 'paused', 'throttled', 'blocked', 'retired'));

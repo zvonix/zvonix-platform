@@ -15,10 +15,11 @@ import {
 } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
 import { integerFromInput } from '@/lib/money';
-import { REGISTRATION_MODE_NAME } from '@/lib/labels';
+import { REGISTRATION_MODE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
 import { EQUIPMENT_KEY, gatewayStateName, type Gateway, type Port, type Sim } from './equipment';
 
 /**
@@ -756,6 +757,50 @@ export function RemoveSim({ portId }: { portId: string }) {
  * Рисуется только то, что API примет. Заблокированную площадкой карту партнёр не трогает — это её рычаг; придержанную
  * за неудачные вызовы включает сам после удачного тестового звонка (ADR-0100). Стоящую в порту не удалить, сначала её вынимают.
  */
+/** Состояния, которыми партнёр распоряжается переключателем (ADR-0112). */
+const SWITCHABLE: ReadonlySet<Sim['status']> = new Set(['new', 'active', 'paused']);
+
+/**
+ * Включена ли карта — переключателем прямо в строке ([ADR-0112](../../../../../../docs/adr/0112-sim-vyklyuchena-partnyorom.md);
+ * владелец, 2026-11-11: «включил SIM, нет кнопки отключить — может, рубильник?»).
+ *
+ * Выключенная остаётся в линии с тарифом и историей и только выпадает из отбора; идущий разговор не рвётся,
+ * поэтому подтверждения нет — вернуть можно тем же движением. Придержанную и заблокированную площадкой
+ * переключателем не тронуть: у них только название состояния, а путь назад — в действиях строки.
+ * Отказ включения (оператор не совпал, номер придержан) — под переключателем, словами API.
+ */
+export function SimSwitch({ sim }: { sim: Sim }) {
+  const refresh = useRefresh();
+  const change = useMutation({
+    mutationFn: (status: 'active' | 'paused') =>
+      request<unknown>(`/partner/sim-cards/${sim.id}/status`, {
+        method: 'POST',
+        body: { status },
+      }),
+    onSuccess: refresh,
+  });
+  const error = asApiError(change.error);
+
+  if (!SWITCHABLE.has(sim.status)) return <>{SIM_STATUS_NAME[sim.status]}</>;
+  const on = sim.status === 'active';
+  return (
+    <span className="inline-flex flex-col gap-1">
+      <label className="inline-flex cursor-pointer items-center gap-2">
+        <Switch
+          checked={on}
+          disabled={change.isPending}
+          aria-label={`Карта ${sim.msisdn} ${on ? 'включена' : 'выключена'}`}
+          onCheckedChange={(checked) => {
+            change.mutate(checked ? 'active' : 'paused');
+          }}
+        />
+        <span className={on ? '' : 'text-muted-foreground'}>{SIM_STATUS_NAME[sim.status]}</span>
+      </label>
+      {error !== undefined && <ErrorNote error={error} />}
+    </span>
+  );
+}
+
 export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
   const refresh = useRefresh();
 
@@ -795,38 +840,21 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
       />
     );
   }
-  // Включённая карта в порту действий здесь не имеет; вне шлюза её можно удалить
-  // (владелец, 2026-09-29: «карты вне шлюза — как удалить?»).
-  if (sim.status === 'active' && inPort) return null;
+  // Включить и выключить — переключателем в колонке состояния (SimSwitch); здесь остаётся удаление карты
+  // вне шлюза (владелец, 2026-09-29: «карты вне шлюза — как удалить?»).
+  if (inPort) return null;
 
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap justify-end gap-2">
-        {sim.status === 'new' && (
-          <Button
-            size="sm"
-            disabled={activate.isPending}
-            onClick={() => {
-              activate.mutate();
-            }}
-          >
-            Включить
-          </Button>
-        )}
-        {!inPort && (
-          <ConfirmAction
-            label="Удалить"
-            title={`Удалить карту ${sim.msisdn}`}
-            consequence={
-              <p>Карта удаляется навсегда. Вернуть её нельзя — только добавить заново.</p>
-            }
-            confirmLabel="Удалить карту"
-            disabled={activate.isPending}
-            onConfirm={() => retire.mutateAsync()}
-          />
-        )}
+        <ConfirmAction
+          label="Удалить"
+          title={`Удалить карту ${sim.msisdn}`}
+          consequence={<p>Карта удаляется навсегда. Вернуть её нельзя — только добавить заново.</p>}
+          confirmLabel="Удалить карту"
+          onConfirm={() => retire.mutateAsync()}
+        />
       </div>
-      {error !== undefined && <ErrorNote error={error} />}
     </div>
   );
 }

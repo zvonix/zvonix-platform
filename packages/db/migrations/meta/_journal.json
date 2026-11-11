@@ -624,6 +624,13 @@
       "when": 1793352541543,
       "tag": "0088_numbers_exhausted",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1794374439992,
+      "tag": "0089_sim_paused",
+      "breakpoints": true
     }
   ]
 }

@@ -3,13 +3,13 @@
 import { goipLinePrefix, TESTABLE_SIM_STATUSES } from '@zvonix/shared';
 import { NumberPace } from '@/components/number-pace';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
-import { PORT_STATE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
+import { PORT_STATE_NAME } from '@/lib/labels';
 import { TestCallButton } from '@/components/test-call';
 import { TariffSelect, useTariffName } from '@/components/tariff-select';
 import { PARTNER_RATES_KEY } from '@/lib/tariffs';
 import { Presence } from '@/components/presence';
 import { EQUIPMENT_KEY, type Gateway, type Port, type Sim } from './equipment';
-import { InsertSim, RemoveSim, SimActions } from './manage';
+import { InsertSim, RemoveSim, SimActions, SimSwitch } from './manage';
 
 /**
  * Строки портов — одни на общую таблицу оборудования и на страницу шлюза
@@ -66,7 +66,7 @@ export function PortRow({
               Подтверждение оператора площадкой партнёру ничего не даёт и ничего от него
               не требует (владелец, 2026-09-25) — здесь только состояние карты.
             */}
-            {SIM_STATUS_NAME[port.sim.status]}
+            <SimSwitch sim={port.sim} />
             {port.sim.poor_connection === true && <PoorConnection block />}
             <NumberPace pace={port.sim.pace} block />
           </>

@@ -50,6 +50,8 @@ const COLUMNS = 7;
 const STATUS_ACTION: Record<SimStatus, string> = {
   new: 'Вернуть в «новая»',
   active: 'Включить',
+  // Не предлагается: «выключена» — решение самого партнёра, у площадки для этого «Придержать» (ADR-0112).
+  paused: 'Выключить',
   throttled: 'Придержать',
   blocked: 'Заблокировать',
   retired: 'Вывести навсегда',
@@ -198,14 +200,14 @@ export function PartnerSims({
                     <StatusDialog
                       subject={`SIM ${sim.msisdn}`}
                       current={SIM_STATUS_NAME[sim.status]}
-                      options={SIM_STATUSES.filter((status) => status !== sim.status).map(
-                        (status) => ({
-                          value: status,
-                          action: STATUS_ACTION[status],
-                          meaning: SIM_STATUS_MEANING[status],
-                          danger: status === 'blocked' || status === 'retired',
-                        }),
-                      )}
+                      options={SIM_STATUSES.filter(
+                        (status) => status !== sim.status && status !== 'paused',
+                      ).map((status) => ({
+                        value: status,
+                        action: STATUS_ACTION[status],
+                        meaning: SIM_STATUS_MEANING[status],
+                        danger: status === 'blocked' || status === 'retired',
+                      }))}
                       onChange={(status) => changeStatus.mutateAsync({ id: sim.id, status })}
                     />
                   )}

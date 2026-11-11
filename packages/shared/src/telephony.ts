@@ -192,6 +192,8 @@ export function isSipUsername(value: string): boolean {
  *
  * `new`       — заведена партнёром, в работу не пущена;
  * `active`    — принимает вызовы;
+ * `paused`    — выключена партнёром на время; включает он же, той же дверью, что новую
+ *               ([ADR-0112](../../../docs/adr/0112-sim-vyklyuchena-partnyorom.md));
  * `throttled` — придержана площадкой: порогом отказов сети или администратором.
  *               Сама не возвращается, и партнёр её не снимает — только администратор
  *               ([ADR-0027](../../../docs/adr/0027-porog-otklyucheniya.md),
@@ -199,7 +201,7 @@ export function isSipUsername(value: string): boolean {
  * `blocked`   — заблокирована оператором или администратором. Сама не возвращается;
  * `retired`   — выведена навсегда. Запись остаётся: на неё ссылаются CDR.
  */
-export const SIM_STATUSES = ['new', 'active', 'throttled', 'blocked', 'retired'] as const;
+export const SIM_STATUSES = ['new', 'active', 'paused', 'throttled', 'blocked', 'retired'] as const;
 export type SimStatus = (typeof SIM_STATUSES)[number];
 
 /** Состояния, в которых SIM годится для вызова. */
@@ -331,10 +333,11 @@ export type TestCallStatus = (typeof TEST_CALL_STATUSES)[number];
  * Состояния SIM, с которых можно позвонить на пробу.
  *
  * `new` — прежде всего: карту проверяют при подключении, до подтверждения оператора.
+ * `paused` — выключенную партнёром проверяют перед тем, как включить (ADR-0112).
  * `throttled` — чтобы убедиться, что придержанная карта снова проходит в сеть.
  * `blocked` и `retired` — нет: карту выключили намеренно.
  */
-export const TESTABLE_SIM_STATUSES: readonly SimStatus[] = ['new', 'active', 'throttled'];
+export const TESTABLE_SIM_STATUSES: readonly SimStatus[] = ['new', 'active', 'paused', 'throttled'];
 
 /**
  * Сколько ждать итога. Дозвон — до сорока секунд, сигналы после ответа — пять секунд;

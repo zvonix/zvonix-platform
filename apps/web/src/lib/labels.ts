@@ -237,6 +237,7 @@ export const GATEWAY_LOCK_MEANING =
 export const SIM_STATUS_NAME: Record<SimStatus, string> = {
   new: 'Новая',
   active: 'Включена',
+  paused: 'Выключена вами',
   throttled: 'Придержана',
   blocked: 'Заблокирована',
   retired: 'Выведена',
@@ -320,6 +321,7 @@ export const GATEWAY_STATUS_MEANING: Record<GatewayStatus, string> = {
 export const SIM_STATUS_MEANING: Record<SimStatus, string> = {
   new: 'SIM добавлена, но в отбор под вызовы не попадает, пока её не включат.',
   active: 'SIM участвует в отборе под вызовы.',
+  paused: 'SIM выключена партнёром на время: в отбор не попадает, пока он её не включит.',
   throttled:
     'SIM придержана: в отбор не попадает и сама не вернётся. Партнёр её не включает — только администратор.',
   blocked: 'SIM заблокирована: в отбор не попадает и сама не вернётся — только решением человека.',

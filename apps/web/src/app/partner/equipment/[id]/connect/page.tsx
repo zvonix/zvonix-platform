@@ -6,7 +6,9 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { Presence } from '@/components/presence';
+import { CopyButton } from '@/components/copy-button';
 import { LineCredentials, type IssuedLines } from '@/components/sip-credentials';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -16,7 +18,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { REGISTRATION_MODE_NAME } from '@/lib/labels';
-import type { Connection, Gateway } from '../../equipment';
+import { useUrlState } from '@/lib/url-state';
+import type { Connection, Gateway, Port } from '../../equipment';
 import { IssueMissingLines, NewLineAccount, NewPassword } from '../../manage';
 import { connectLabel, GatewayLoader } from '../gateway-loader';
 
@@ -167,12 +170,16 @@ function GatewaySettings({ gateway, connection }: { gateway: Gateway; connection
 }
 
 /**
- * Что ввести в GOIP при входе по линиям — **полем в поле, как на странице Basic VoIP**
+ * Что ввести в GOIP при входе по линиям — двумя шагами
  * ([ADR-0054](../../../../../../../../docs/adr/0054-vhod-po-liniyam-goip.md)).
  *
- * Без Routing Prefix линия принимает звонок площадки как двухступенчатый и ждёт тонового
- * набора (владелец, 2026-09-29: «там нет ничего про префикс и про Config Mode»). Поэтому —
- * общие поля одним блоком в порядке страницы GOIP и таблица того, что у линий разное.
+ * Шаг 1 — общее для всех линий, вводится один раз; когда хоть одна линия на связи, он свёрнут.
+ * Шаг 2 — **одна линия за раз**: выбор линии и только её поля, каждое с копированием. Раньше всё было
+ * одной страницей — общие поля и таблица всех линий с паролями подряд (владелец, 2026-11-11: «настройки
+ * и для общей, и для каждой линии все опять в куче»). Выбранная линия живёт в адресе (`?line=3`).
+ *
+ * Без Routing Prefix линия принимает звонок площадки как двухступенчатый и ждёт тонового набора
+ * (владелец, 2026-09-29) — поэтому префикс стоит в поле линии, а не в пояснении.
  */
 function LineSettings({
   gateway,
@@ -183,6 +190,7 @@ function LineSettings({
   connection: Connection;
   onIssued: (issued: IssuedLines) => void;
 }) {
+  const url = useUrlState();
   // Порт 5060 у GOIP по умолчанию и отдельно не вводится; другой — пишется через двоеточие.
   const proxy =
     connection.port === 5060
@@ -190,92 +198,137 @@ function LineSettings({
       : `${connection.server}:${String(connection.port)}`;
   const portNote =
     connection.port === 5060 ? 'порт 5060 — по умолчанию, отдельно не вводится' : undefined;
-  return (
-    <div className="flex flex-col gap-3">
-      <section aria-labelledby="common" className="flex max-w-[720px] flex-col gap-2">
-        <h3 id="common" className="font-semibold">
-          1. Общее — одинаково у всех линий
-        </h3>
-        <p className="text-muted-foreground">Configurations → Basic VoIP:</p>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-card p-3">
-          <GoipField name="Config Mode" value="Config by Line" />
-          <GoipField name="SIP Proxy" value={proxy} copy note={portNote} />
-          <GoipField name="SIP Registrar" value={proxy} copy note={portNote} />
-          <GoipField name="Re-register Period (s)" value="60" />
-          <GoipField name="Outbound Proxy" value="пусто" empty />
-          <GoipField name="Home Domain" value="пусто" empty />
-          <GoipField name="Backup Server" value="Disable" />
-          <GoipField name="Prefix Match Mode" value="Match Callee" />
-          <GoipField name="Delete Callee Prefix while Dialing" value="Enable" />
-        </dl>
-        <p className="text-muted-foreground">
-          И на странице Configurations → Call Out:{' '}
-          <span className="text-foreground">Call OUT via GSM — Enable</span>, Dial Plan — пусто.
-        </p>
-      </section>
+  const anyConnected = gateway.ports.some((port) => port.connection.connected);
+  const selected =
+    gateway.ports.find((port) => String(port.port_number) === url.get('line')) ?? gateway.ports[0];
 
-      <section aria-labelledby="per-line" className="flex flex-col gap-2">
+  return (
+    <div className="flex flex-col gap-4">
+      <details
+        open={!anyConnected}
+        className="max-w-[720px] rounded-lg border border-border bg-card"
+      >
+        <summary className="cursor-pointer p-3 font-semibold">
+          Шаг 1. Общие настройки — вводятся один раз, одинаковы у всех линий
+        </summary>
+        <div className="flex flex-col gap-2 px-3 pb-3">
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+            <GoipField name="Config Mode" value="Config by Line" />
+            <GoipField name="SIP Proxy" value={proxy} copy note={portNote} />
+            <GoipField name="SIP Registrar" value={proxy} copy note={portNote} />
+            <GoipField name="Re-register Period (s)" value="60" />
+            <GoipField name="Outbound Proxy" value="пусто" empty />
+            <GoipField name="Home Domain" value="пусто" empty />
+            <GoipField name="Backup Server" value="Disable" />
+            <GoipField name="Prefix Match Mode" value="Match Callee" />
+            <GoipField name="Delete Callee Prefix while Dialing" value="Enable" />
+          </dl>
+          <p className="text-muted-foreground">
+            И на странице Configurations → Call Out:{' '}
+            <span className="text-foreground">Call OUT via GSM — Enable</span>, Dial Plan — пусто.
+          </p>
+        </div>
+      </details>
+
+      <section aria-labelledby="per-line" className="flex max-w-[720px] flex-col gap-3">
         <h3 id="per-line" className="font-semibold">
-          2. Каждая линия — по строке таблицы
+          Шаг 2. Линии — каждая отдельно
         </h3>
-        <p className="max-w-[720px] text-muted-foreground">
-          <span className="text-foreground">Routing Prefix обязателен</span>: по нему GOIP понимает,
-          что звонок площадки нужно набрать с этой линии; без него линия ждёт номер тоновым набором
-          и звонки не проходят. Число линий меняется в{' '}
-          <Link href={`/partner/equipment/${gateway.id}/settings`}>настройках шлюза</Link>.
-        </p>
         <IssueMissingLines gateway={gateway} onIssued={onIssued} />
-        {gateway.ports.length === 0 ? (
-          <p className="text-muted-foreground">Линий нет — укажите их число в настройках шлюза.</p>
+        {selected === undefined ? (
+          <p className="text-muted-foreground">
+            Линий нет — укажите их число в{' '}
+            <Link href={`/partner/equipment/${gateway.id}/settings`}>настройках шлюза</Link>.
+          </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-border bg-card">
-            <Table aria-label="Настройки линий" className="whitespace-nowrap">
-              <TableHeader>
-                <TableRow className="text-muted-foreground hover:bg-transparent">
-                  <TableHead className="h-8">Линия</TableHead>
-                  <TableHead className="h-8">Authentication ID</TableHead>
-                  <TableHead className="h-8">Password</TableHead>
-                  <TableHead className="h-8">Routing Prefix</TableHead>
-                  <TableHead className="h-8">Phone Number</TableHead>
-                  <TableHead className="h-8">Связь</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {gateway.ports.map((port) => (
-                  <TableRow key={port.id}>
-                    <TableCell className="num">Line {port.port_number}</TableCell>
-                    <TableCell className="num select-all">
-                      {port.sip_username ?? <span className="text-warn">вход не выдан</span>}
-                    </TableCell>
-                    <TableCell>
-                      {port.sip_username !== null && (
-                        <span className="flex items-center gap-2">
-                          <span className="text-muted-foreground">показан при выдаче</span>
-                          <NewLineAccount gateway={gateway} port={port} onIssued={onIssued} />
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="num select-all">
-                      {goipLinePrefix(port.port_number)}
-                    </TableCell>
-                    <TableCell className="num">
-                      {port.sip_username === null ? (
-                        <span className="text-faint">—</span>
-                      ) : (
-                        <span className="text-muted-foreground">как Authentication ID</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Presence connection={port.connection} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <>
+            <div role="group" aria-label="Линия" className="flex flex-wrap gap-1.5">
+              {gateway.ports.map((port) => {
+                const current = port.id === selected.id;
+                return (
+                  <Button
+                    key={port.id}
+                    type="button"
+                    size="sm"
+                    variant={current ? 'default' : 'outline'}
+                    aria-pressed={current}
+                    onClick={() => {
+                      url.set({ line: String(port.port_number) });
+                    }}
+                  >
+                    <span
+                      aria-hidden
+                      className={`size-2 rounded-full ${port.connection.connected ? 'bg-ok' : 'bg-warn'}`}
+                    />
+                    Line {port.port_number}
+                    <span className="sr-only">
+                      {port.connection.connected ? ' — на связи' : ' — не на связи'}
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
+            <LineCard gateway={gateway} port={selected} onIssued={onIssued} />
+          </>
         )}
       </section>
     </div>
+  );
+}
+
+/** Поля одной линии — ровно то, что вводится в Line N на странице Basic VoIP. */
+function LineCard({
+  gateway,
+  port,
+  onIssued,
+}: {
+  gateway: Gateway;
+  port: Port;
+  onIssued: (issued: IssuedLines) => void;
+}) {
+  const prefix = goipLinePrefix(port.port_number);
+  return (
+    <section
+      aria-label={`Line ${String(port.port_number)}`}
+      className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3"
+    >
+      <p className="flex flex-wrap items-center gap-x-2">
+        <span className="num font-semibold">Line {port.port_number}</span>
+        <Presence connection={port.connection} />
+        {port.sim !== null && (
+          <span className="num text-muted-foreground">· SIM {port.sim.msisdn}</span>
+        )}
+      </p>
+      {port.sip_username === null ? (
+        <p className="text-warn">
+          У линии ещё нет входа — выдайте его кнопкой выше, пароль покажут один раз.
+        </p>
+      ) : (
+        <dl className="grid grid-cols-[max-content_1fr] items-center gap-x-4 gap-y-1">
+          <CopyField name="Authentication ID" value={port.sip_username} />
+          <dt className="text-muted-foreground">Password</dt>
+          <dd className="flex flex-wrap items-center gap-2">
+            <span className="text-muted-foreground">показан один раз, при выдаче</span>
+            <NewLineAccount gateway={gateway} port={port} onIssued={onIssued} />
+          </dd>
+          <CopyField name="Phone Number" value={port.sip_username} />
+          <CopyField name="Routing Prefix" value={prefix} />
+        </dl>
+      )}
+    </section>
+  );
+}
+
+/** Поле линии со значением и кнопкой копирования: переносить в GOIP строку за строкой. */
+function CopyField({ name, value }: { name: string; value: string }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{name}</dt>
+      <dd className="flex items-center gap-1">
+        <span className="num select-all">{value}</span>
+        <CopyButton value={value} label={`Скопировать ${name}`} />
+      </dd>
+    </>
   );
 }
 

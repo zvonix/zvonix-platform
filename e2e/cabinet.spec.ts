@@ -1811,9 +1811,8 @@ test.describe('партнёр добавляет своё оборудовани
     await page.getByRole('link', { name: 'Подключение GOIP' }).click();
     await expect(page.getByText('Config by Line')).toBeVisible();
     await expect(page.getByText(/порт 5060/u).first()).toBeVisible();
-    await expect(page.getByRole('table', { name: 'Настройки линий' }).getByRole('row')).toHaveCount(
-      5,
-    );
+    // Линии — по одной: выбор линии и только её поля (владелец, 2026-11-11: «опять всё в куче»).
+    await expect(page.getByRole('group', { name: 'Линия' }).getByRole('button')).toHaveCount(4);
 
     // Название, модель и число линий меняются после добавления — в настройках.
     await page.getByRole('link', { name: '← К шлюзу' }).click();
@@ -2025,11 +2024,19 @@ test.describe('оборудование одной таблицей, вход п
 
     // Ссылка — в том же окне: из него сразу к тому, что ввести в устройство.
     await secrets.getByRole('link', { name: 'Что ввести в устройство →' }).click();
-    // Настройки — построчно для каждой линии, теми же полями, что у линии в GOIP.
-    const lines = page.getByRole('table', { name: 'Настройки линий' });
-    // Префикс линии — в строке: без Routing Prefix GOIP ждёт тонового набора (2026-09-29).
-    await expect(lines.getByRole('row', { name: /^Line 1 pt-/u })).toContainText('99001');
-    await expect(lines.getByRole('row', { name: /^Line 2 pt-/u })).toContainText('не на связи');
+    // Линия за раз: по умолчанию первая, её поля — те же, что у Line 1 в GOIP.
+    const card = (line: number) => page.getByRole('region', { name: `Line ${String(line)}` });
+    await expect(card(1)).toContainText(/Authentication IDpt-/u);
+    // Префикс — полем линии: без Routing Prefix GOIP ждёт тонового набора (2026-09-29).
+    await expect(card(1)).toContainText('99001');
+    await page
+      .getByRole('group', { name: 'Линия' })
+      .getByRole('button', { name: /^Line 2/u })
+      .click();
+    await expect(page).toHaveURL(/[?&]line=2/u);
+    await expect(card(2)).toContainText('99002');
+    await expect(card(2)).toContainText('не на связи');
+    await expect(card(1)).toHaveCount(0);
 
     // Способ подключения — настройка шлюза, а не шаг инструкции: меняется в настройках.
     await page.getByRole('link', { name: 'настройках шлюза' }).first().click();
@@ -2083,6 +2090,19 @@ test.describe('оборудование одной таблицей, вход п
     await dialog.getByLabel('Куда звонить').fill('+7 913 000-11-22');
     await dialog.getByRole('button', { name: 'Позвонить' }).click();
     await expect(dialog).toContainText('Линия ещё не подключилась к площадке');
+    await page.keyboard.press('Escape');
+
+    // Включить и выключить карту — переключателем в строке, без окон (ADR-0112; владелец, 2026-11-11:
+    // «включил SIM, нет кнопки отключить»). Выключенная остаётся в линии.
+    const toggle = group.getByRole('switch', { name: /^Карта 79135550001/u });
+    await expect(toggle).not.toBeChecked();
+    await toggle.click();
+    await expect(toggle).toBeChecked();
+    await expect(group.getByText('Включена', { exact: true })).toBeVisible();
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    await expect(group.getByText('Выключена вами', { exact: true })).toBeVisible();
+    await expect(group.getByText('79135550001')).toBeVisible();
   });
 });
 
