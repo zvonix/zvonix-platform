@@ -114,7 +114,7 @@ export const partnerGatewayStatusSchema = z.object({
  * что сейчас в базе.
  */
 export const partnerSimStatusSchema = z.object({
-  status: z.enum(['active', 'retired']),
+  status: z.enum(['active', 'paused', 'retired']),
 });
 
 export const gatewayStatusSchema = z.object({
@@ -235,8 +235,13 @@ export const createSimSchema = z.object({
 /** SIM, которую заводит сам партнёр. Оператор сверяется с источником при заведении. */
 export const partnerSimSchema = createSimSchema.omit({ partnerId: true });
 
+/**
+ * Состояния карты, в которые её переводит администратор. Без `paused`: «выключена» — решение
+ * самого партнёра, и площадка, выключив карту так, выдала бы своё решение за его (ADR-0112).
+ * У площадки для этого `throttled`. Из `paused` администратор переводит куда угодно.
+ */
 export const simStatusSchema = z.object({
-  status: z.enum(SIM_STATUSES),
+  status: z.enum(SIM_STATUSES).exclude(['paused']),
 });
 
 export const simConcurrencySchema = z.object({

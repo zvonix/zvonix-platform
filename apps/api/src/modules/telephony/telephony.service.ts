@@ -2280,6 +2280,50 @@ export class TelephonyService {
     return updated;
   }
 
+  /**
+   * Выключить свою карту на время ([ADR-0112](../../../../../docs/adr/0112-sim-vyklyuchena-partnyorom.md)).
+   *
+   * Только из `active`: придержанная площадкой так не выключается — иначе «выключил — включил»
+   * снимало бы придержание в обход тестового звонка (ADR-0100). Уже выключенная — повтор,
+   * не событие. Запись условием на прежнее состояние: пока шёл запрос, площадка могла
+   * придержать карту, и безусловная запись затёрла бы её решение (ADR-0048).
+   * Идущий разговор не рвётся: карта только выпадает из отбора под новые вызовы.
+   */
+  async pauseOwnSim(
+    id: SimCardId,
+    partnerId: PartnerId,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<SimCardRow> {
+    const sim = await this.requireOwnSim(id, partnerId);
+    if (sim.status === 'paused') return sim;
+    if (sim.status !== 'active') {
+      throw conflict(
+        sim.status === 'new'
+          ? 'Карта ещё не включалась — выключать нечего'
+          : 'Карта не в работе по решению площадки — выключить её нельзя',
+      );
+    }
+
+    const updated = await this.repository.transitionSimStatus(id, 'active', 'paused');
+    if (updated === undefined) return this.rejectStaleSim(id);
+
+    await this.audit.record({
+      action: 'sim.status_changed',
+      entityType: 'sim_card',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: { status: sim.status },
+      after: { status: updated.status },
+    });
+    this.logger.info('SIM выключена партнёром', {
+      sim_card_id: id,
+      msisdn: maskMsisdn(sim.msisdn),
+    });
+    return updated;
+  }
+
   /** Условие на прежнее состояние карты не совпало: карты нет — `404`, есть — её успели изменить. */
   private async rejectStaleSim(id: SimCardId): Promise<never> {
     const current = await this.repository.findSim(id);

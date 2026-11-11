@@ -583,7 +583,7 @@ export class PartnerEquipmentController {
   }
 
   /**
-   * Распорядиться своей картой: включить или списать.
+   * Распорядиться своей картой: включить, выключить на время (ADR-0112) или списать.
    *
    * Одна дверь на оба действия намеренно: две — это два места, где однажды разойдутся
    * проверки владения. Включение проходит только с подтверждённым оператором,
@@ -601,7 +601,9 @@ export class PartnerEquipmentController {
     const sim =
       body.status === 'active'
         ? await this.telephony.activateOwnSim(simCardId, partner.id, actor.userId, actor.role)
-        : await this.telephony.retireOwnSim(simCardId, partner.id, actor.userId, actor.role);
+        : body.status === 'paused'
+          ? await this.telephony.pauseOwnSim(simCardId, partner.id, actor.userId, actor.role)
+          : await this.telephony.retireOwnSim(simCardId, partner.id, actor.userId, actor.role);
 
     const operators = await this.catalog.operatorNamesOf([sim.operatorId]);
     return { sim: toSimView(sim, operators) };

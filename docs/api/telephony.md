@@ -453,7 +453,10 @@ SIM не уникален»). Лимиты от этого не слабеют: 
 
 ## `POST /sim-cards/:id/status` — роль `admin`
 
-Жизненный цикл: `new → active → throttled → blocked → retired`.
+Жизненный цикл: `new → active → throttled → blocked → retired`; `paused` — выключена
+партнёром на время ([ADR-0112](../adr/0112-sim-vyklyuchena-partnyorom.md)). В `paused` этот
+обработчик не переводит (`400`): это решение самого партнёра, у площадки — `throttled`.
+Из `paused` — куда угодно, как из `active`.
 `throttled` ставит порог отказов сети или администратор. Сама карта в `active`
 не возвращается и партнёром не включается — только этим обработчиком
 ([ADR-0027](../adr/0027-porog-otklyucheniya.md), [ADR-0047](../adr/0047-kto-vyklyuchil-shlyuz.md)).

@@ -17,7 +17,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
-import { GATEWAY_TYPE_NAME, REGISTRATION_MODE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
+import { GATEWAY_TYPE_NAME, REGISTRATION_MODE_NAME } from '@/lib/labels';
 import {
   EQUIPMENT_KEY,
   gatewayStateName,
@@ -27,7 +27,7 @@ import {
   type Gateway,
   type Sim,
 } from './equipment';
-import { AddGateway, SimActions } from './manage';
+import { AddGateway, SimActions, SimSwitch } from './manage';
 import { AddTrunk, TrunksSection } from './trunks';
 import { Presence } from '@/components/presence';
 import { PORT_COLUMNS, PoorConnection, PortHeader, PortRow } from './ports';
@@ -155,7 +155,9 @@ function PartnerEquipment() {
                     <TableCell>
                       {sim.operator_name ?? <span className="text-faint">—</span>}
                     </TableCell>
-                    <TableCell>{SIM_STATUS_NAME[sim.status]}</TableCell>
+                    <TableCell>
+                      <SimSwitch sim={sim} />
+                    </TableCell>
                     <TableCell>
                       <SimActions sim={sim} inPort={false} />
                     </TableCell>
