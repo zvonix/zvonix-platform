@@ -296,7 +296,7 @@ export class TelephonyService {
   }
 
   /**
-   * Входы всем портам шлюза, у которых их нет, — после «Добавить порты»
+   * Входы всем портам шлюза, у которых их нет, — для линий, заведённых администратором,
    * или для линий, пропущенных при переключении.
    *
    * Уже выданные не трогаются: перевыпуск входа — отдельное действие над одним портом,
@@ -1145,6 +1145,16 @@ export class TelephonyService {
       );
     });
 
+    await this.recordCreatedPorts(gatewayId, ports, actorUserId, actorRole);
+    return ports;
+  }
+
+  private async recordCreatedPorts(
+    gatewayId: GatewayId,
+    ports: readonly GatewayPortRow[],
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<void> {
     for (const port of ports) {
       await this.audit.record({
         action: 'gateway_port.created',
@@ -1155,7 +1165,120 @@ export class TelephonyService {
         after: { gateway_id: gatewayId, port_number: port.portNumber },
       });
     }
-    return ports;
+  }
+
+  /**
+   * Название и модель шлюза — то, что задано при добавлении, меняется и потом
+   * ([DESIGN.md](../../../../../docs/DESIGN.md), «Страница объекта: что где лежит»).
+   * Не изменилось ничего — ни записи, ни строки в журнале.
+   */
+  async setGatewayDetails(
+    id: GatewayId,
+    details: { name: string; model: string | null },
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<GatewayRow> {
+    const { before, after } = await this.repository.transaction(async (tx) => {
+      const gateway = await this.repository.lockGatewayForPorts(id, tx);
+      if (gateway === undefined) throw notFound('Шлюз не найден');
+      if (gateway.status === 'retired') throw conflict('Шлюз списан: настраивать нечего');
+      if (gateway.name === details.name && gateway.model === details.model) {
+        return { before: gateway, after: gateway };
+      }
+      const updated = await this.repository.setGatewayDetails(id, details, tx);
+      if (updated === undefined) throw notFound('Шлюз не найден');
+      return { before: gateway, after: updated };
+    });
+    if (before !== after) {
+      await this.audit.record({
+        action: 'gateway.details_changed',
+        entityType: 'gateway',
+        entityId: id,
+        actorUserId,
+        actorRole,
+        before: { name: before.name, model: before.model },
+        after: { name: after.name, model: after.model },
+      });
+    }
+    return after;
+  }
+
+  /**
+   * Число линий шлюза: после вызова у него ровно порты `1…count`.
+   *
+   * Недостающие номера заводятся, лишние — удаляются, но **только пустые**: порт
+   * со вставленной картой не удаляется, и тогда не меняется ничего, а отказ называет,
+   * из каких линий вынуть карты. Всё под блокировкой шлюза, как и вставка карты
+   * ([ADR-0048](../../../../../docs/adr/0048-poryadok-blokirovok-portov.md)): карта
+   * не успеет встать в порт между проверкой и удалением.
+   *
+   * При входе по линиям новым линиям сразу выдаются входы — иначе партнёр увидел бы
+   * линии, которые нельзя ввести в устройство, и искал бы отдельную кнопку.
+   * Удалённая линия сбрасывает регистрацию на узлах: её вход больше не существует.
+   */
+  async setPortCount(
+    gatewayId: GatewayId,
+    target: number,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{
+    created: GatewayPortRow[];
+    removed: GatewayPortRow[];
+    accounts: IssuedPortAccount[];
+  }> {
+    if (!Number.isInteger(target) || target < 0 || target > MAX_GATEWAY_PORTS) {
+      throw conflict(`Линий у шлюза — от 0 до ${String(MAX_GATEWAY_PORTS)}`);
+    }
+    const result = await this.repository.transaction(async (tx) => {
+      const gateway = await this.repository.lockGatewayForPorts(gatewayId, tx);
+      if (gateway === undefined) throw notFound('Шлюз не найден');
+      if (gateway.type === 'sip_trunk') throw conflict('У SIP-транка линий нет');
+      if (gateway.status === 'retired') throw conflict('Шлюз списан: настраивать нечего');
+
+      const { removed, occupied } = await this.repository.deletePortsAbove(gatewayId, target, tx);
+      if (occupied.length > 0) {
+        throw conflict(
+          `Сначала выньте карты из линий ${occupied.join(', ')}: линию с картой удалить нельзя`,
+          { details: { occupied_port_numbers: occupied.map(String) } },
+        );
+      }
+      const existing = new Set(
+        (await this.repository.listPorts(gatewayId, tx)).map((port) => port.portNumber),
+      );
+      const missing = Array.from({ length: target }, (_, index) => index + 1).filter(
+        (portNumber) => !existing.has(portNumber),
+      );
+      const created = await this.repository.createPorts(gatewayId, missing, tx);
+      const accounts =
+        gateway.registrationMode === 'port' && created.length > 0
+          ? await this.issuePortAccounts(created, tx)
+          : [];
+      return { created, removed, accounts };
+    });
+
+    await this.recordCreatedPorts(gatewayId, result.created, actorUserId, actorRole);
+    for (const port of result.removed) {
+      await this.audit.record({
+        action: 'gateway_port.removed',
+        entityType: 'gateway_port',
+        entityId: port.id,
+        actorUserId,
+        actorRole,
+        before: {
+          gateway_id: gatewayId,
+          port_number: port.portNumber,
+          sip_username: port.sipUsername,
+        },
+      });
+    }
+    if (result.accounts.length > 0) {
+      await this.recordPortAccounts(result.accounts, actorUserId, actorRole);
+    }
+    const gone = result.removed.flatMap((port) =>
+      port.sipUsername === null ? [] : [port.sipUsername],
+    );
+    if (gone.length > 0) await this.registrations.flushOnNodes(gone);
+    return result;
   }
 
   /**

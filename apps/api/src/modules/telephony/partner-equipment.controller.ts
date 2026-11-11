@@ -40,10 +40,12 @@ import type { Principal } from '../identity/identity.service.js';
 import {
   addPortSchema,
   assignSimSchema,
+  gatewayDetailsSchema,
   partnerGatewaySchema,
   partnerGatewayStatusSchema,
   partnerSimSchema,
   partnerSimStatusSchema,
+  portCountSchema,
   registrationModeSchema,
   tariffChoiceSchema,
 } from './schemas.js';
@@ -397,7 +399,7 @@ export class PartnerEquipmentController {
     return { sim: { id: updated.id, tariff_id: updated.tariffId } };
   }
 
-  /** Входы линиям своего шлюза, у которых их ещё нет — например, после «Добавить порты». */
+  /** Входы линиям своего шлюза, у которых их ещё нет — например, заведённым администратором. */
   @Cabinets('partner')
   @Post('partner/gateways/:id/port-credentials')
   async issuePortCredentials(
@@ -481,6 +483,57 @@ export class PartnerEquipmentController {
         realm: account.realm,
         server: await this.telephony.sipServer(),
       },
+    };
+  }
+
+  /**
+   * Название и модель своего шлюза. Что задано при добавлении, то меняется и потом
+   * ([DESIGN.md](../../../../../docs/DESIGN.md), «Страница объекта: что где лежит»).
+   */
+  @Cabinets('partner')
+  @Post('partner/gateways/:id/details')
+  async setGatewayDetails(
+    @Param('id') id: string,
+    @Body(zodBody(gatewayDetailsSchema)) body: z.infer<typeof gatewayDetailsSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ gateway: { id: string; name: string; model: string | null } }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const gatewayId = parseId(id, 'gateway');
+    await this.telephony.requireOwnGateway(gatewayId, partner.id);
+    const updated = await this.telephony.setGatewayDetails(
+      gatewayId,
+      { name: body.name, model: body.model },
+      actor.userId,
+      actor.role,
+    );
+    return { gateway: { id: updated.id, name: updated.name, model: updated.model } };
+  }
+
+  /**
+   * Сколько линий у своего шлюза: недостающие заводятся, лишние пустые удаляются.
+   * Линию с картой не удаляет — отказ называет, из каких линий вынуть карты.
+   * При входе по линиям новым линиям входы выдаются здесь же и показываются один раз.
+   */
+  @Cabinets('partner')
+  @Post('partner/gateways/:id/port-count')
+  async setPortCount(
+    @Param('id') id: string,
+    @Body(zodBody(portCountSchema)) body: z.infer<typeof portCountSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ added: number; removed: number; port_accounts: PortAccountView[] }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const gatewayId = parseId(id, 'gateway');
+    await this.telephony.requireOwnGateway(gatewayId, partner.id);
+    const result = await this.telephony.setPortCount(
+      gatewayId,
+      body.count,
+      actor.userId,
+      actor.role,
+    );
+    return {
+      added: result.created.length,
+      removed: result.removed.length,
+      port_accounts: await this.portViews(result.accounts),
     };
   }
 
