@@ -107,7 +107,9 @@ API стоит за nginx под этим префиксом, а корень д
 Куда ведёт адрес SIP узла ([ADR-0113](../adr/0113-adres-sip-uzla-sam-i-bez-podmeny.md), «Ревизия: проверка
 DNS»). `?address=` — проверить вводимый адрес до сохранения (пусто — «не задан»), `?fresh=1` — спросить DNS
 заново, мимо минутной памяти. `200` →
-`{ "check": { "verdict", "address", "resolved": […], "expected": […], "record": { "name", "type", "value" } | null } }`.
+`{ "check": { "verdict", "address", "resolved": […], "expected": […], "record": { "name", "type", "value" } | null, "authoritative", "stale": { "addresses", "expiresInSeconds" } | null } }`.
+`resolved` — ответ главных серверов домена (`authoritative: true`); `stale` — что ещё помнит DNS сервера площадки,
+если отличается, и через сколько секунд обновится.
 Вердикты — `ok`, `mismatch`, `missing`, `ip`, `ip_mismatch`, `none`, `unverifiable`, `error`; смысл — в ADR.
 Тот же `check` — полем `sip_check` у каждой строки `GET /nodes` (у удалённого узла `null`), рядом `last_address` —
 адрес последнего обращения узла.

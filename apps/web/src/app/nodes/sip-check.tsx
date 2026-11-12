@@ -18,6 +18,13 @@ export interface SipCheck {
     readonly type: 'A' | 'AAAA';
     readonly value: string;
   } | null;
+  /** Ответ главных серверов домена — то, что заведено у регистратора. */
+  readonly authoritative: boolean;
+  /** DNS сервера площадки ещё помнит старые адреса — до срока. */
+  readonly stale: {
+    readonly addresses: readonly string[];
+    readonly expiresInSeconds: number | null;
+  } | null;
 }
 
 /** Короткая отметка для строки списка: видно, что не так, не открывая окна. */
@@ -74,6 +81,7 @@ export function SipCheckReport({
       ) : (
         <>
           <Verdict check={check} />
+          <Source check={check} />
           {check.record !== null && check.verdict !== 'ok' && (
             <RecordToCreate
               record={check.record}
@@ -87,6 +95,49 @@ export function SipCheckReport({
   );
 }
 
+/**
+ * Откуда ответ и что ещё помнит кэш (ADR-0113, ревизия «главные серверы домена»).
+ *
+ * Первая проверка спрашивала DNS хостинга и назвала «ведёт не туда» запись, которая у регистратора уже была
+ * верной: хостинг помнил старый адрес ещё 43 минуты (владелец, 2026-11-12). Теперь ответ — от главных серверов
+ * домена, а старая память хостинга — отдельной строкой со сроком.
+ */
+function Source({ check }: { check: SipCheck }) {
+  const asked =
+    check.verdict === 'ok' || check.verdict === 'mismatch' || check.verdict === 'missing';
+  return (
+    <>
+      {check.stale !== null && (
+        <p className="text-warn">
+          DNS сервера площадки ещё помнит старый адрес{' '}
+          <span className="num">{check.stale.addresses.join(', ')}</span> — запись недавно меняли.
+          {check.stale.expiresInSeconds === null
+            ? ' Обновится сам в течение часа.'
+            : ` Обновится сам примерно через ${minutes(check.stale.expiresInSeconds)}.`}{' '}
+          До этого GOIP, которые спрашивают тот же DNS, могут уходить по старому адресу.
+        </p>
+      )}
+      {asked && (
+        <p className="text-muted-foreground">
+          {check.authoritative
+            ? 'Ответ главных серверов домена — то, что заведено у регистратора.'
+            : 'Главные серверы домена не ответили — показан ответ DNS сервера площадки; после правки записи он может отставать до часа.'}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** «43 мин», «1 ч 5 мин», «меньше минуты». */
+function minutes(seconds: number): string {
+  if (seconds < 60) return 'меньше минуты';
+  const total = Math.round(seconds / 60);
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (hours === 0) return `${String(rest)} мин`;
+  return rest === 0 ? `${String(hours)} ч` : `${String(hours)} ч ${String(rest)} мин`;
+}
+
 function Verdict({ check }: { check: SipCheck }) {
   const node = check.expected.join(', ');
   const resolved = check.resolved.join(', ');
@@ -95,8 +146,8 @@ function Verdict({ check }: { check: SipCheck }) {
       return (
         <p className="text-ok">
           ✓ <span className="num">{check.address}</span> ведёт на{' '}
-          <span className="num">{resolved}</span> — это адрес узла. Всё верно: этот адрес партнёры
-          вписывают в GOIP.
+          <span className="num">{resolved}</span> — это адрес узла. Запись верная: этот адрес
+          партнёры вписывают в GOIP.
         </p>
       );
     case 'mismatch':
