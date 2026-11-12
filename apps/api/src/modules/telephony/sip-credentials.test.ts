@@ -55,6 +55,8 @@ describe('выпуск учётных данных', () => {
     const a = issueSipCredentials('gateway', REALM);
     const b = issueSipCredentials('gateway', REALM);
     expect(a.password.length).toBe(32);
+    // Только буквы и цифры без похожих: выделение мышью не рвёт пароль на `-` и `_` (2026-11-12).
+    expect(a.password).toMatch(/^[A-HJ-NP-Za-km-np-z2-9]{32}$/u);
     expect(a.password).not.toBe(b.password);
     expect(a.username).not.toBe(b.username);
   });
