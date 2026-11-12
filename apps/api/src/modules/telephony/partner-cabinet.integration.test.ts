@@ -2703,3 +2703,62 @@ describe('партнёр выключает карту на время (ADR-0112
     expect(USABLE_SIM_STATUSES).toEqual(['active']);
   });
 });
+
+describe('партнёр выбирает, как звонят его карты (ADR-0117)', () => {
+  const put = (url: string, payload: Record<string, unknown>, headers: Record<string, string>) =>
+    api().inject({ method: 'PUT', url, headers, payload });
+  const allow = (value: boolean) =>
+    put('/settings', { settings: { 'calls.partner_may_disable_recommended': value } }, auth());
+  const state = async (bearer: string) =>
+    (await get('/partner/limits', as(bearer))).json<{
+      call_pace: { partner_id: string; recommended: boolean; may_disable: boolean };
+    }>().call_pace;
+
+  it('свой — меняет, чужой — 404; площадка запретила — выключить нельзя, включить можно', async () => {
+    const owner = await createPartner('Сидоров Семён');
+    const stranger = await createPartner('Петров Пётр');
+    expect(await state(owner.token)).toEqual({
+      partner_id: owner.id,
+      recommended: true,
+      may_disable: true,
+    });
+
+    const off = await put(
+      `/partners/${owner.id}/call-pace`,
+      { recommended: false },
+      as(owner.token),
+    );
+    expect(off.statusCode).toBe(200);
+    expect((await state(owner.token)).recommended).toBe(false);
+    expect(
+      (await put(`/partners/${owner.id}/call-pace`, { recommended: true }, as(stranger.token)))
+        .statusCode,
+    ).toBe(404);
+
+    expect((await allow(false)).statusCode).toBe(200);
+    try {
+      // Запрет сильнее выбора: кабинет показывает, что действует, а не прежний выбор.
+      expect(await state(owner.token)).toMatchObject({ recommended: true, may_disable: false });
+      const locked = await put(
+        `/partners/${stranger.id}/call-pace`,
+        { recommended: false },
+        as(stranger.token),
+      );
+      expect(locked.statusCode).toBe(409);
+      expect(locked.json<{ error: { details: { reason: string } } }>().error.details.reason).toBe(
+        'call_pace_locked',
+      );
+      expect(
+        (await put(`/partners/${owner.id}/call-pace`, { recommended: true }, as(owner.token)))
+          .statusCode,
+      ).toBe(200);
+      // Администратор меняет любому и при запрете.
+      expect(
+        (await put(`/partners/${stranger.id}/call-pace`, { recommended: false }, auth()))
+          .statusCode,
+      ).toBe(200);
+    } finally {
+      expect((await allow(true)).statusCode).toBe(200);
+    }
+  }, 60_000);
+});

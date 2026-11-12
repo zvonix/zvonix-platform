@@ -9,6 +9,7 @@ import {
   callWarmupDay,
   isPoorNumber,
   trunkSpacedUntil,
+  withoutRecommendedPace,
 } from './call-pace.js';
 import { awakeNumbers, jitteredPauseMs, paceJitter, sleepUntil } from './pace-jitter.js';
 
@@ -310,5 +311,41 @@ describe('автоторможение, сон номеров транка, ро
     );
     expect(trunkSpacedUntil(now, 0, now)).toBeNull();
     expect(trunkSpacedUntil(null, 1, now)).toBeNull();
+  });
+});
+
+describe('номер партнёра со своими лимитами (ADR-0117)', () => {
+  const base = {
+    warmupEnabled: true,
+    perHour: 15,
+    perDay: 100,
+    pauseSeconds: 30,
+    warmupPauseSeconds: 90,
+    distinctPerHour: 15,
+    distinctPerDay: 100,
+    sleepHours: 6,
+    poorAnswerPercent: 20,
+    brakeSuspensions: 2,
+    brakePercent: 50,
+    trunkCallsPerSecond: 1,
+    dailyVariationPercent: 30,
+  };
+
+  it('без прогрева, пределов и абонентов; пауза — обычная, сон и шаг транка остаются', () => {
+    const own = withoutRecommendedPace(base);
+    expect(callPace(own, 3)).toMatchObject({
+      perHour: null,
+      perDay: null,
+      warmupDay: null,
+      distinctPerHour: null,
+      distinctPerDay: null,
+      pauseSeconds: 30,
+    });
+    expect(own).toMatchObject({
+      sleepHours: 6,
+      trunkCallsPerSecond: 1,
+      poorAnswerPercent: 0,
+      dailyVariationPercent: 0,
+    });
   });
 });

@@ -122,6 +122,7 @@ export interface PartnerWithBalance {
   readonly name: string;
   readonly status: PartnerStatus;
   readonly listensToRecordings: boolean;
+  readonly callsRecommended: boolean;
   readonly createdAt: Date;
   readonly balance: MoneyAmount;
   /** Псевдоним заводится вместе с партнёром, но список обязан пережить его отсутствие. */
@@ -328,6 +329,7 @@ export class BillingRepository {
         name: partners.name,
         status: partners.status,
         listensToRecordings: partners.listensToRecordings,
+        callsRecommended: partners.callsRecommended,
         createdAt: partners.createdAt,
         displayName: partnerAliases.displayName,
         balance: sql<string>`coalesce(${accounts.balance}, 0)`,
@@ -476,6 +478,29 @@ export class BillingRepository {
         ),
       )
       .orderBy(orderByText(partnerAliases.displayName));
+  }
+
+  /**
+   * Из перечисленных партнёров — те, чьи карты работают по своим лимитам, а не по рекомендациям площадки
+   * ([ADR-0117](../../../../../docs/adr/0117-partner-vybiraet-temp-kart.md)). Одним запросом на отбор кандидатов.
+   */
+  async partnersOnOwnCallPace(ids: readonly PartnerId[]): Promise<ReadonlySet<string>> {
+    if (ids.length === 0) return new Set();
+    const rows = await this.db
+      .select({ id: partners.id })
+      .from(partners)
+      .where(and(inArray(partners.id, [...ids]), eq(partners.callsRecommended, false)));
+    return new Set(rows.map((row) => row.id));
+  }
+
+  /** Партнёр выбрал, работают ли его карты по рекомендациям площадки (ADR-0117). */
+  async setCallsRecommended(id: PartnerId, recommended: boolean): Promise<PartnerRow | undefined> {
+    const [row] = await this.db
+      .update(partners)
+      .set({ callsRecommended: recommended, updatedAt: new Date() })
+      .where(eq(partners.id, id))
+      .returning();
+    return row;
   }
 
   /** Меняет объявленное намерение партнёра слушать записи. */

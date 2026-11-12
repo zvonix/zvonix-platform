@@ -95,6 +95,7 @@ const LABELS: Record<string, string> = {
   'payments.manual_instructions': 'Реквизиты для пополнения переводом',
   'pricing.price_bands_enabled': 'Проверять коридоры цен',
   'calls.warmup_enabled': 'Прогревать новые номера',
+  'calls.partner_may_disable_recommended': 'Партнёр может снять рекомендации со своих карт',
   'calls.recommended_per_hour': 'Попыток в час на номер, не больше',
   'calls.recommended_per_day': 'Попыток в сутки на номер, не больше',
   'calls.daily_variation_percent': 'Предел в сутки ниже по дням, до %',

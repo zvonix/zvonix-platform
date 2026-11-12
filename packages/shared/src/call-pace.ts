@@ -109,6 +109,25 @@ export interface CallPaceSettings {
   readonly trunkCallsPerSecond: number;
 }
 
+/**
+ * Настройки номера партнёра, выключившего рекомендации площадки
+ * ([ADR-0117](../../../docs/adr/0117-partner-vybiraet-temp-kart.md)): без прогрева, пределов в час и в сутки, разных
+ * абонентов, замедления «плохого» номера и разного предела по дням. Пауза после звонка и сон остаются — защита от вида
+ * программы; пауза прогрева не действует, потому что прогрева нет. Автоторможение выключает вызывающий.
+ */
+export function withoutRecommendedPace(settings: CallPaceSettings): CallPaceSettings {
+  return {
+    ...settings,
+    warmupEnabled: false,
+    perHour: 0,
+    perDay: 0,
+    distinctPerHour: 0,
+    distinctPerDay: 0,
+    poorAnswerPercent: 0,
+    dailyVariationPercent: 0,
+  };
+}
+
 /** Окно автоторможения: снятия старше этого номера оператора уже не тормозят. */
 export const CALL_BRAKE_DAYS = 7;
 

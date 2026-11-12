@@ -41,6 +41,7 @@ import {
   partnerListQuerySchema,
   partnerStatusSchema,
   recordingsAccessSchema,
+  callPaceSchema,
 } from './schemas.js';
 
 /** Потолок страницы движения по счёту: это таблица для человека, а не выгрузка. */
@@ -69,6 +70,8 @@ interface PartnerView {
   readonly display_name: string | null;
   readonly status: PartnerStatus;
   readonly listens_to_recordings: boolean;
+  /** Карты работают по рекомендациям площадки (ADR-0117). */
+  readonly calls_recommended: boolean;
   readonly balance: string;
   readonly created_at: string;
 }
@@ -572,6 +575,26 @@ export class BillingController {
   }
 
   /**
+   * Работают ли карты партнёра по рекомендациям площадки
+   * ([ADR-0117](../../../../../docs/adr/0117-partner-vybiraet-temp-kart.md)). Партнёр — только свой, администратор — любой.
+   */
+  @Roles('admin')
+  @Cabinets('partner')
+  @Put('partners/:id/call-pace')
+  async setCallPace(
+    @Param('id') id: string,
+    @Body(zodBody(callPaceSchema)) body: z.infer<typeof callPaceSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ partner: { id: string; calls_recommended: boolean } }> {
+    const partner = await this.billing.setCallsRecommended(
+      parseId(id, 'partner'),
+      body.recommended,
+      { userId: parseId(actor.userId, 'user'), role: actor.role },
+    );
+    return { partner: { id: partner.id, calls_recommended: partner.callsRecommended } };
+  }
+
+  /**
    * Сверка остатков с журналом.
    *
    * Пустой список — норма. Непустой означает, что какое-то движение прошло мимо
@@ -615,6 +638,7 @@ function toPartnerView(row: PartnerWithBalance): PartnerView {
     display_name: row.displayName,
     status: row.status,
     listens_to_recordings: row.listensToRecordings,
+    calls_recommended: row.callsRecommended,
     balance: Money.format(row.balance),
     created_at: row.createdAt.toISOString(),
   };

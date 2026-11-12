@@ -9,6 +9,8 @@ export interface PartnerRow {
   readonly display_name: string | null;
   readonly status: PartnerStatus;
   readonly listens_to_recordings: boolean;
+  /** Карты по рекомендациям площадки или по лимитам партнёра (ADR-0117). */
+  readonly calls_recommended: boolean;
   readonly balance: string;
   readonly created_at: string;
 }

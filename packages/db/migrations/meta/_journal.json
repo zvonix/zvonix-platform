@@ -645,6 +645,13 @@
       "when": 1794470065715,
       "tag": "0091_node_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1794488270808,
+      "tag": "0092_partners_calls_recommended",
+      "breakpoints": true
     }
   ]
 }

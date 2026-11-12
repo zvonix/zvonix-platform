@@ -1,0 +1,1 @@
+ALTER TABLE "partners" ADD COLUMN "calls_recommended" boolean DEFAULT true NOT NULL;

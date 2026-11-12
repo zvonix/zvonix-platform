@@ -87,6 +87,9 @@ export const topUpSchema = depositSchema.extend({
  */
 export const recordingsAccessSchema = z.object({ listens: z.boolean() });
 
+/** Карты партнёра по рекомендациям площадки или по его лимитам (ADR-0117). */
+export const callPaceSchema = z.object({ recommended: z.boolean() });
+
 /**
  * Отбор клиентов.
  *
