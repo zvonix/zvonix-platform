@@ -629,3 +629,18 @@ export const updateSipTrunkSchema = z
 export const testCallSchema = z.object({
   destination: z.string().trim().min(1, 'укажите номер').max(32, 'слишком длинный'),
 });
+
+/**
+ * Список регистраций, который узел присылает сам вместе с пульсом
+ * ([ADR-0114](../../../../../docs/adr/0114-uzel-sam-soobshchaet-registracii.md)): ответ FreeSWITCH
+ * на `show registrations as json`, как есть или без лишних полей. Пустой список у FreeSWITCH — `{"row_count":0}`, без `rows`.
+ * Строки разбирает `readRegistrations`; здесь — только форма и предел, чтобы один узел не прислал неподъёмное.
+ */
+const MAX_REPORTED_REGISTRATIONS = 5000;
+
+export const registrationsReportSchema = z.object({
+  rows: z
+    .array(z.record(z.string(), z.unknown()))
+    .max(MAX_REPORTED_REGISTRATIONS, 'неправдоподобно много регистраций')
+    .optional(),
+});

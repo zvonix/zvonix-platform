@@ -623,7 +623,7 @@ if printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" \
     --data-binary "@${ESL_BODY}" "${CONTROL_PLANE}/node/esl" >/dev/null; then
   echo "Тестовый звонок с SIM доступен: площадка знает пароль ESL узла"
 else
-  echo "Справка: тестовый звонок с SIM для узла на отдельной машине недоступен — площадка принимает пароль ESL только от узла на той же машине. Звонки клиентов это не затрагивает"
+  echo "Справка: тестовый звонок с SIM для узла на отдельной машине недоступен — площадка принимает пароль ESL только от узла на той же машине. Звонки клиентов и отметку «на связи» это не затрагивает"
 fi
 rm -f "$ESL_BODY"
 
@@ -640,6 +640,9 @@ install -d -m 0700 "$NODE_ETC"
 # Замер нагрузки, памяти и диска (ADR-0065, POST /node/metrics): тот же ключ, другой адрес.
 ( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/metrics"\n' \
   "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/metrics.curl" )
+# Кто вошёл на узел (ADR-0114, POST /node/registrations): тот же ключ, другой адрес.
+( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/registrations"\n' \
+  "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/registrations.curl" )
 
 cat >/usr/local/sbin/zvonix-heartbeat <<HEARTBEAT
 #!/bin/sh
@@ -663,6 +666,16 @@ if [ -n "\$LOAD" ] && [ -n "\$CORES" ] && [ -n "\$MEMT" ] && [ -n "\$MEMA" ] && 
 fi
 "${FS_CLI}" -x 'sofia status' 2>/dev/null \\
   | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING' || DEGRADED=true
+# Кто вошёл на узел (ADR-0114). Площадка ходит в ESL только на своей машине и об узле на отдельном
+# сервере узнаёт лишь так; без этого вошедший GOIP в кабинете «не на связи». Поля url, token, hostname
+# и metadata площадке не нужны — вырезаются, чтобы список влезал в предел тела. FreeSWITCH не ответил —
+# не шлём ничего: отметки погаснут сами, как и положено у молчащего узла.
+REGS="\$("${FS_CLI}" -x 'show registrations as json' 2>/dev/null | tr -d '\n' \\
+  | sed -E 's/,"(url|token|hostname|metadata)":"[^"]*"//g')"
+case "\$REGS" in
+  '{'*) printf '%s' "\$REGS" | curl -fsS --max-time 10 -K "${NODE_ETC}/registrations.curl" \\
+          -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true ;;
+esac
 # Версия набора на узле — ею площадка видит, отстаёт ли узел (ADR-0068). Файл пишет
 # обновление, когда набор применён целиком; нет файла — узел версию не сообщает.
 HAVE="\$(head -c 64 "${NODE_ETC}/set-version" 2>/dev/null | tr -cd '0-9a-f')"
