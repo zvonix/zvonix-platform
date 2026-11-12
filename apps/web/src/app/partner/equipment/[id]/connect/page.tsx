@@ -139,13 +139,19 @@ function GatewaySettings({
         <dt className="text-muted-foreground">
           {goip ? 'SIP Proxy, SIP Registrar Server' : 'Сервер'}
         </dt>
-        <dd className="num select-all">{connection.server}</dd>
+        <dd className="flex items-center gap-1">
+          <span className="num select-all">{connection.server}</span>
+          <CopyButton value={connection.server} label="Скопировать адрес" />
+        </dd>
         <dt className="text-muted-foreground">Порт</dt>
         <dd className="num select-all">{connection.port}</dd>
         <dt className="text-muted-foreground">
           {goip ? 'Authentication ID, Phone Number' : 'Логин'}
         </dt>
-        <dd className="num select-all">{gateway.sip_username}</dd>
+        <dd className="flex items-center gap-1">
+          <span className="num select-all">{gateway.sip_username}</span>
+          <CopyButton value={gateway.sip_username} label="Скопировать логин" />
+        </dd>
         <dt className="text-muted-foreground">{goip ? 'Password' : 'Пароль'}</dt>
         <dd>
           показан один раз, при добавлении шлюза. Потеряли — выдайте новый: старые логин и пароль
@@ -175,8 +181,12 @@ function GatewaySettings({
                 {gateway.ports.map((port) => (
                   <TableRow key={port.id}>
                     <TableCell className="num">Line {port.port_number}</TableCell>
-                    <TableCell className="num select-all">
-                      {goipLinePrefix(port.port_number)}
+                    <TableCell>
+                      <span className="num select-all">{goipLinePrefix(port.port_number)}</span>
+                      <CopyButton
+                        value={goipLinePrefix(port.port_number)}
+                        label={`Скопировать Routing Prefix линии ${String(port.port_number)}`}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

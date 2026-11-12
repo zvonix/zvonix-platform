@@ -2,6 +2,7 @@ import {
   jitteredPauseMs,
   sleepUntil,
   spreadHourlyLimit,
+  variedDailyLimit,
   WARMUP_IDLE_DAYS,
   WARMUP_DAYS,
   WARMUP_DEFAULT_CEILING,
@@ -31,12 +32,18 @@ export interface RecommendedProfile {
    * в отличие от остального профиля действует у **всех** аккаунтов, а не только с галочкой. 0 — не спит.
    */
   readonly sleepHours: number;
+  /**
+   * Разный предел по дням ([ADR-0116](../../../../../docs/adr/0116-raznyy-sutochnyy-predel-po-dnyam.md)), %; как и сон,
+   * у **всех** аккаунтов. 0 — каждый день одинаково.
+   */
+  readonly dailyVariationPercent: number;
 }
 
 /** Аккаунт с наложенным профилем: к лимитам добавлена минимальная пауза, которую нужно выдержать, и часы сна. */
 export type WithRecommended<T> = T & {
   readonly recommendedPaceSeconds?: number;
   readonly sleepHours?: number;
+  readonly dailyVariationPercent?: number;
 };
 
 /** Предел профиля; 0 — без ограничения. Лимит тарифа при этом не действует (ADR-0090). */
@@ -54,8 +61,18 @@ export function withRecommended<
   >,
 >(account: T, profile: RecommendedProfile): WithRecommended<T> {
   // Сон — у всех аккаунтов: защита репутации площадки не зависит от галочки партнёра (ADR-0107).
+  // Разный предел по дням (ADR-0116) — тоже у всех.
+  // Нечего добавить — тот же объект, без копии.
   const sleeping: WithRecommended<T> =
-    profile.sleepHours > 0 ? { ...account, sleepHours: profile.sleepHours } : account;
+    profile.sleepHours <= 0 && profile.dailyVariationPercent <= 0
+      ? account
+      : {
+          ...account,
+          ...(profile.sleepHours > 0 ? { sleepHours: profile.sleepHours } : {}),
+          ...(profile.dailyVariationPercent > 0
+            ? { dailyVariationPercent: profile.dailyVariationPercent }
+            : {}),
+        };
   if (!account.recommended) return sleeping;
   // Профиль из одних нулей — режим выключен на площадке: действуют лимиты тарифа, как без галочки.
   if (
@@ -83,12 +100,19 @@ export function withRecommended<
 export function effectiveLimits(
   account: Pick<
     MessengerAccountRow,
-    'warmupEnabled' | 'warmupStartedAt' | 'limitPerDay' | 'limitPerHour' | 'lastUsedAt'
-  >,
+    'id' | 'warmupEnabled' | 'warmupStartedAt' | 'limitPerDay' | 'limitPerHour' | 'lastUsedAt'
+  > & { readonly dailyVariationPercent?: number },
   now: Date,
 ): EffectiveLimits {
+  // Разный предел по дням (ADR-0116): своя доля у аккаунта на каждую дату по Москве; ноль первых суток остаётся нулём.
+  const varied = (limit: number): number =>
+    variedDailyLimit(limit, account.id, now, account.dailyVariationPercent ?? 0);
   if (!account.warmupEnabled) {
-    return { daily: account.limitPerDay, hourly: account.limitPerHour, warmupDay: null };
+    return {
+      daily: account.limitPerDay === null ? null : varied(account.limitPerDay),
+      hourly: account.limitPerHour,
+      warmupDay: null,
+    };
   }
   const ceiling = account.limitPerDay ?? WARMUP_DEFAULT_CEILING;
   // Молчавший — с суток 1, а не 0: у суток 0 предел ноль, и аккаунт, не отправив ничего, не перезапустил бы прогрев вовсе.
@@ -98,7 +122,7 @@ export function effectiveLimits(
       : isIdle(account, now)
         ? 1
         : Math.max(0, Math.floor((now.getTime() - account.warmupStartedAt.getTime()) / 86_400_000));
-  const daily = day === null ? ceiling : warmupDailyLimit(day, ceiling);
+  const daily = varied(day === null ? ceiling : warmupDailyLimit(day, ceiling));
   // Лимит в час из тарифа действует и во время прогрева: берётся меньшее из заданного и равномерной доли суток.
   const spread = spreadHourlyLimit(daily);
   return {

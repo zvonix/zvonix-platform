@@ -138,6 +138,7 @@ export class SettingsService {
       warmupEnabled: this.flag(values, 'calls.warmup_enabled'),
       perHour: this.number(values, 'calls.recommended_per_hour'),
       perDay: this.number(values, 'calls.recommended_per_day'),
+      dailyVariationPercent: this.number(values, 'calls.daily_variation_percent'),
       pauseSeconds: this.number(values, 'calls.pause_seconds'),
       warmupPauseSeconds: this.number(values, 'calls.warmup_pause_seconds'),
       distinctPerHour: this.number(values, 'calls.distinct_per_hour'),
@@ -234,6 +235,7 @@ export class SettingsService {
       readonly perDay: number;
       /** Сон аккаунта, часов в сутки (ADR-0107) — у всех аккаунтов; 0 — не спит. */
       readonly sleepHours: number;
+      readonly dailyVariationPercent: number;
     };
     readonly duplicateWindowMinutes: number;
     readonly recipientLimitPerHour: number;
@@ -266,6 +268,7 @@ export class SettingsService {
         perHour: this.number(values, 'messages.recommended_per_hour'),
         perDay: this.number(values, 'messages.recommended_per_day'),
         sleepHours: this.number(values, 'messages.sleep_hours'),
+        dailyVariationPercent: this.number(values, 'messages.daily_variation_percent'),
       },
       duplicateWindowMinutes: this.number(values, 'messages.duplicate_window_minutes'),
       recipientLimitPerHour: this.number(values, 'messages.recipient_limit_per_hour'),

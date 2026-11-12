@@ -298,7 +298,7 @@ export class TelephonyController {
     return { port_accounts: await this.portViews(accounts) };
   }
 
-  /** Новый вход одной линии: имя и пароль меняются, прежние перестают работать. */
+  /** Новый пароль одной линии: логин прежний, старый пароль перестаёт работать. */
   @Roles('admin')
   @Post('gateway-ports/:id/credentials')
   async resetPortCredentials(

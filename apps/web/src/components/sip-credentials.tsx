@@ -156,7 +156,13 @@ export function LineCredentials({
                     label={`Скопировать пароль линии ${String(line.port_number)}`}
                   />
                 </td>
-                <td className="num select-all">{goipLinePrefix(line.port_number)}</td>
+                <td>
+                  <span className="num select-all">{goipLinePrefix(line.port_number)}</span>
+                  <CopyButton
+                    value={goipLinePrefix(line.port_number)}
+                    label={`Скопировать Routing Prefix линии ${String(line.port_number)}`}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

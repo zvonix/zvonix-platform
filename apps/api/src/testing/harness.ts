@@ -115,6 +115,8 @@ export async function resetDatabase(url = TEST_DATABASE_URL): Promise<void> {
              (gen_random_uuid(), 'calls.recipient_per_hour', '0'),
              (gen_random_uuid(), 'calls.recipient_per_day', '0'),
              (gen_random_uuid(), 'calls.sleep_hours', '0'),
+             (gen_random_uuid(), 'calls.daily_variation_percent', '0'),
+             (gen_random_uuid(), 'messages.daily_variation_percent', '0'),
              (gen_random_uuid(), 'calls.poor_answer_percent', '0'),
              (gen_random_uuid(), 'calls.brake_suspensions', '0'),
              (gen_random_uuid(), 'calls.trunk_calls_per_second', '0'),
