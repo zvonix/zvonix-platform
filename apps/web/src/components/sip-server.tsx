@@ -7,10 +7,18 @@
  * на связь (владелец, 2026-11-11). Поэтому здесь не подставляется ничего: человек видит, что ждать
  * нужно площадку, а не искать ошибку у себя.
  */
+import { CopyButton } from '@/components/copy-button';
+
 const NO_SIP_SERVER =
   'адрес для подключения ещё не задан площадкой — подключать устройство пока некуда, напишите в поддержку';
 
 export function SipServer({ server }: { server: string | null }) {
   if (server === null) return <span className="text-warn">{NO_SIP_SERVER}</span>;
-  return <span className="num select-all">{server}</span>;
+  // С кнопкой «копировать», как у логина и пароля: адрес вводят в GOIP, и опечатка в нём — линия без связи.
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="num select-all">{server}</span>
+      <CopyButton value={server} label="Скопировать адрес" />
+    </span>
+  );
 }
