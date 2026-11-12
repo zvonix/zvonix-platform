@@ -4,7 +4,11 @@
  * и линия GOIP ([ADR-0103](../../../../../docs/adr/0103-shlyuz-na-svyazi-po-oprosu-i-trevoga-partnyoru.md)).
  *
  * Отметка запроса учётной записи здесь не годится: узел спрашивает запись и у устройства со старым паролем.
- * Регистрация на узле появляется только после верного пароля — поэтому опрос, а не отметка.
+ * Регистрация на узле появляется только после верного пароля — поэтому список регистраций, а не отметка.
+ *
+ * Список приходит двумя путями ([ADR-0114](../../../../../docs/adr/0114-uzel-sam-soobshchaet-registracii.md)):
+ * узел присылает его сам вместе с пульсом (`POST /node/registrations`) — так видны узлы на любой машине;
+ * узел на машине площадки площадка ещё и опрашивает по ESL. Оба пути пишут одно и то же.
  */
 
 import { Inject, Injectable } from '@nestjs/common';
@@ -54,6 +58,11 @@ export function parseRegistrations(body: string): NodeRegistration[] {
   } catch (cause) {
     throw new Error(`Узел ответил не JSON: ${body.trim().slice(0, 80)}`, { cause });
   }
+  return readRegistrations(parsed);
+}
+
+/** То же для уже разобранного JSON — тело `POST /node/registrations`. */
+export function readRegistrations(parsed: unknown): NodeRegistration[] {
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error('Узел ответил не объектом');
   }
@@ -165,7 +174,6 @@ export class RegistrationsService {
    * через молчащий узел действительно не звонит. Остальные узлы опрашиваются дальше.
    */
   async poll(now: Date): Promise<number> {
-    const realm = this.config.SIP_REALM.toLowerCase();
     let recorded = 0;
     for (const node of await this.liveNodes()) {
       let registrations: NodeRegistration[];
@@ -183,12 +191,28 @@ export class RegistrationsService {
         });
         continue;
       }
-      const own = byOwner(registrations.filter((entry) => entry.realm.toLowerCase() === realm));
-      recorded += await this.repository.recordChannelRegistrations(node, own.ch, now);
-      recorded += await this.repository.recordGatewayRegistrations(own.gw, now);
-      recorded += await this.repository.recordPortRegistrations(own.pt, now);
+      recorded += await this.record(node, registrations, now);
     }
     return recorded;
+  }
+
+  /**
+   * Отметить регистрации узла — из опроса или из списка, который узел прислал сам (ADR-0114). Возвращает, сколько
+   * устройств отмечено. Отсутствующих в списке не гасит: их отметка перестаёт обновляться и через
+   * `REGISTRATION_FRESH_MS` гаснет. Чужой домен не в счёт: учётные записи площадки — только в её `SIP_REALM`.
+   */
+  async record(
+    node: NodeId,
+    registrations: readonly NodeRegistration[],
+    now: Date,
+  ): Promise<number> {
+    const realm = this.config.SIP_REALM.toLowerCase();
+    const own = byOwner(registrations.filter((entry) => entry.realm.toLowerCase() === realm));
+    return (
+      (await this.repository.recordChannelRegistrations(node, own.ch, now)) +
+      (await this.repository.recordGatewayRegistrations(own.gw, now)) +
+      (await this.repository.recordPortRegistrations(own.pt, now))
+    );
   }
 
   /**

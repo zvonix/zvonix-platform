@@ -2319,6 +2319,41 @@ describe('«на связи» по опросу узла (ADR-0103)', () => {
     expect((await shown(stranger.gateway.id)).connection.connected).toBe(false);
   }, 120_000);
 
+  it('узел на отдельной машине присылает список сам (ADR-0114) — линия «на связи» без ESL', async () => {
+    const gateway = await activeGateway('port');
+    const [first] = gateway.port_accounts;
+    if (first === undefined) throw new Error('Входов нет');
+    registrations = [];
+    // Так присылает пульс: ответ FreeSWITCH без url, token, hostname, metadata.
+    const {
+      url: _url,
+      token: _token,
+      hostname: _host,
+      metadata: _meta,
+      ...slim
+    } = row(first.username);
+    const send = (
+      payload: Record<string, unknown>,
+      headers: Record<string, string> = as(nodeKey),
+    ) => api().inject({ method: 'POST', url: '/node/registrations', headers, payload });
+
+    const reply = await send({ row_count: 1, rows: [slim] });
+    expect(reply.statusCode).toBe(200);
+    expect(reply.json<{ recorded: number }>().recorded).toBe(1);
+    const view = await shown(gateway.gateway.id);
+    expect(view.ports[0]?.connection).toMatchObject({
+      connected: true,
+      address: '198.51.100.7:5060/udp',
+    });
+
+    // Пустой список FreeSWITCH — без `rows`: принимается, отмечать нечего.
+    expect((await send({ row_count: 0 })).json<{ recorded: number }>().recorded).toBe(0);
+    // Только узлу: человеку и без ключа — нет.
+    expect((await send({ row_count: 0 }, as(owner.token))).statusCode).toBe(401);
+    expect((await send({ row_count: 0 }, {})).statusCode).toBe(401);
+    expect((await send({ rows: 'нет' })).statusCode).toBe(400);
+  }, 120_000);
+
   it('вход по линиям — на связи та линия, что зарегистрирована, и шлюз целиком', async () => {
     const gateway = await activeGateway('port');
     const [first] = gateway.port_accounts;

@@ -5,6 +5,7 @@ import {
   REGISTRATION_FRESH_MS,
   isRegistered,
   parseRegistrations,
+  readRegistrations,
 } from './registrations.service.js';
 import type { ChannelRow } from './telephony.repository.js';
 
@@ -124,5 +125,34 @@ describe('подключение шлюза или линии GOIP', () => {
       knocked_at: null,
       rejected: false,
     });
+  });
+});
+
+describe('список, присланный узлом (ADR-0114)', () => {
+  it('разобранный JSON без лишних полей — то же, что ответ ESL', () => {
+    expect(
+      readRegistrations({
+        row_count: 1,
+        rows: [
+          {
+            reg_user: 'pt-abcdefabcdef',
+            realm: 'sip.zvonix.test',
+            expires: '1800000000',
+            network_ip: '203.0.113.5',
+            network_port: '5060',
+            network_proto: 'udp',
+          },
+        ],
+      }),
+    ).toEqual(
+      parseRegistrations(
+        '{"row_count":1,"rows":[{"reg_user":"pt-abcdefabcdef","realm":"sip.zvonix.test","url":"sofia/zvonix/sip:x","expires":"1800000000","network_ip":"203.0.113.5","network_port":"5060","network_proto":"udp"}]}',
+      ),
+    );
+  });
+
+  it('не объект — ошибка, пустой список — пусто', () => {
+    expect(() => readRegistrations('строка')).toThrow();
+    expect(readRegistrations({ row_count: 0 })).toEqual([]);
   });
 });
