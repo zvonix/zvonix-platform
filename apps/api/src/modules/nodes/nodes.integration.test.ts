@@ -18,6 +18,7 @@ import {
   uniqueEmail,
   withDatabase,
 } from '../../testing/harness.js';
+import type { NodeId } from './nodes.repository.js';
 
 prepareEnvironment();
 
@@ -662,5 +663,93 @@ describe('проверка адреса SIP по DNS (ADR-0113, ревизия)'
       .nodes.find((node) => node.id === id);
     expect(row?.sip_check?.verdict).toBe('ip');
     expect(row?.last_address).toBe('203.0.113.20');
+  });
+});
+
+describe('команды узлу на отдельной машине (ADR-0115)', () => {
+  const commandsOf = async () => {
+    const { NodeCommandsService } = await import('./node-commands.service.js');
+    return api().get(NodeCommandsService);
+  };
+  const polled = async (nodeId: string) => {
+    const { NodesRepository } = await import('./nodes.repository.js');
+    await api()
+      .get(NodesRepository)
+      .markCommandsPolled(nodeId as NodeId, new Date());
+  };
+  const take = (presented: string) =>
+    api().inject({ method: 'GET', url: '/node/commands', headers: bearer(presented) });
+  const result = (presented: string, id: string, body: string) =>
+    api().inject({
+      method: 'POST',
+      url: `/node/commands/${id}/result`,
+      headers: { ...bearer(presented), 'content-type': 'text/plain' },
+      payload: body,
+    });
+
+  it('без ESL и без службы команд узел команд не принимает', async () => {
+    const { nodeId } = await enrolledNode();
+    const commands = await commandsOf();
+    expect(await commands.available(nodeId as NodeId)).toBe(false);
+    await expect(commands.run(nodeId as NodeId, 'originate {x}y', 2000)).rejects.toMatchObject({
+      failure: 'connect',
+    });
+  });
+
+  it('служба забирает команду долгим запросом, ответ возвращается вызывающему', async () => {
+    const { nodeId, presented } = await enrolledNode();
+    const commands = await commandsOf();
+    await polled(nodeId);
+    expect(await commands.available(nodeId as NodeId)).toBe(true);
+
+    const running = commands.run(nodeId as NodeId, 'originate {a=b}sofia/zvonix/x &park', 10_000);
+    const taken = await take(presented);
+    expect(taken.statusCode).toBe(200);
+    const [id, command] = taken.body.split('\n');
+    expect(command).toBe('originate {a=b}sofia/zvonix/x &park');
+
+    expect((await result(presented, id ?? '', '+OK 5f1c\n')).statusCode).toBe(200);
+    await expect(running).resolves.toBe('+OK 5f1c');
+
+    // Повторный ответ, чужой узел, неизвестная команда — 404; не текст — 400.
+    expect((await result(presented, id ?? '', '+OK')).statusCode).toBe(404);
+    const other = await enrolledNode();
+    expect((await result(other.presented, id ?? '', '+OK')).statusCode).toBe(404);
+    expect(
+      (await result(presented, '0190c5a8-0000-7000-8000-000000000000', '+OK')).statusCode,
+    ).toBe(404);
+    const json = await api().inject({
+      method: 'POST',
+      url: `/node/commands/${id ?? ''}/result`,
+      headers: bearer(presented),
+      payload: { reply: '+OK' },
+    });
+    expect(json.statusCode).toBe(400);
+  });
+
+  it('команду, которую узел не забрал вовремя, никто уже не получит', async () => {
+    const { nodeId } = await enrolledNode();
+    const commands = await commandsOf();
+    await polled(nodeId);
+    await expect(commands.run(nodeId as NodeId, 'originate {x}y', 1500)).rejects.toMatchObject({
+      failure: 'connect',
+    });
+    const { NodesRepository } = await import('./nodes.repository.js');
+    expect(
+      await api()
+        .get(NodesRepository)
+        .claimCommand(nodeId as NodeId, new Date()),
+    ).toBeUndefined();
+  });
+
+  it('команды старше суток убираются', async () => {
+    const commands = await commandsOf();
+    const removed = await commands.purge(new Date(Date.now() + 2 * 24 * 60 * 60_000));
+    expect(removed).toBeGreaterThan(0);
+    expect(await commands.purge(new Date(Date.now() + 2 * 24 * 60 * 60_000))).toBe(0);
+  });
+
+  it('без ключа узла — 401', async () => {
+    expect((await api().inject({ method: 'GET', url: '/node/commands' })).statusCode).toBe(401);
   });
 });

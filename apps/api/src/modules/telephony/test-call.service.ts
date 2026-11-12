@@ -2,7 +2,8 @@
  * Тестовый звонок с SIM ([ADR-0055](../../../../../docs/adr/0055-testovyy-zvonok-s-sim.md)) и через SIP-транк
  * ([ADR-0100](../../../../../docs/adr/0100-sip-provayder-partnyora-i-vklyuchenie-posle-proby.md)).
  *
- * Площадка сама звонит с выбранной карты или через транк через ESL узла. Проверяется ровно одно —
+ * Площадка сама звонит с выбранной карты или через транк командой узлу: по ESL своей машины или через очередь,
+ * которую служба узла забирает сама ([ADR-0115](../../../../../docs/adr/0115-uzel-zabiraet-komandy.md)). Проверяется ровно одно —
  * работают ли GOIP, линия и SIM или транк: ни клиента, ни цены, ни оператора номера здесь нет,
  * и звонок в деньгах не участвует.
  */
@@ -20,11 +21,12 @@ import {
   type TestCallStatus,
   type UserRole,
 } from '@zvonix/shared';
-import { EslError, eslApi, type EslTarget } from '../../infra/esl.js';
+import { EslError } from '../../infra/esl.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { BlockedNumberService } from '../catalog/blocked-numbers.service.js';
-import { NodesService } from '../nodes/nodes.service.js';
+import { NodeCommandsService } from '../nodes/node-commands.service.js';
+import type { NodeId } from '../nodes/nodes.repository.js';
 import type { ParsedCdr } from './cdr-parse.js';
 import { statusFromHangupCause } from './cdr-parse.js';
 import { simDialTarget, simEndpoint, trunkEndpoint } from './sim-dial.js';
@@ -61,7 +63,7 @@ export class TestCallService {
   constructor(
     private readonly repository: TestCallRepository,
     private readonly telephony: TelephonyRepository,
-    private readonly nodes: NodesService,
+    private readonly commands: NodeCommandsService,
     private readonly blocked: BlockedNumberService,
     private readonly audit: AuditService,
     @Inject(APP_CONFIG) private readonly config: Config,
@@ -128,8 +130,7 @@ export class TestCallService {
       );
     }
 
-    const esl = await this.nodes.eslTargetOf(nodeId);
-    if (esl === undefined) {
+    if (!(await this.commands.available(nodeId))) {
       throw conflict(
         'Узел площадки пока не принимает команды на звонок — напишите администратору площадки',
         { details: { reason: 'node_not_ready' } },
@@ -186,7 +187,7 @@ export class TestCallService {
     const endpoint = simEndpoint(target, destination, this.config.SIP_REALM);
     // Не ждём: итог дописывается сам. Ошибка фона не должна теряться молча — `dial`
     // ловит всё и пишет итог; сюда долетит лишь сбой записи итога, его видно в логе.
-    void this.dial(row.id, esl, endpoint).catch((cause: unknown) => {
+    void this.dial(row.id, nodeId, endpoint).catch((cause: unknown) => {
       this.logger.error('Итог тестового звонка не записан', cause, { test_call_id: row.id });
     });
 
@@ -220,8 +221,7 @@ export class TestCallService {
     await this.rejectBlocked(destination);
 
     const nodeId = gateway.nodeId;
-    const esl = nodeId === null ? undefined : await this.nodes.eslTargetOf(nodeId);
-    if (nodeId === null || esl === undefined) {
+    if (nodeId === null || !(await this.commands.available(nodeId))) {
       throw conflict(
         'Узел площадки пока не принимает команды на звонок — напишите администратору площадки',
         { details: { reason: 'node_not_ready' } },
@@ -267,7 +267,7 @@ export class TestCallService {
       after: { test_call_id: row.id, destination: maskPhone(destination) },
     });
 
-    void this.dial(row.id, esl, trunkEndpoint(gateway.sipUsername, destination)).catch(
+    void this.dial(row.id, nodeId, trunkEndpoint(gateway.sipUsername, destination)).catch(
       (cause: unknown) => {
         this.logger.error('Итог тестового звонка не записан', cause, { test_call_id: row.id });
       },
@@ -310,7 +310,7 @@ export class TestCallService {
     });
   }
 
-  private async dial(id: TestCallId, esl: EslTarget, endpoint: string): Promise<void> {
+  private async dial(id: TestCallId, nodeId: NodeId, endpoint: string): Promise<void> {
     const variables = [
       `origination_uuid=${id}`,
       `zvonix_test_call=${id}`,
@@ -322,7 +322,7 @@ export class TestCallService {
 
     let reply: string;
     try {
-      reply = await eslApi(esl, command, { timeoutMs: ESL_COMMAND_TIMEOUT_MS });
+      reply = await this.commands.run(nodeId, command, ESL_COMMAND_TIMEOUT_MS);
     } catch (cause) {
       const failure = cause instanceof EslError ? cause.failure : 'protocol';
       this.logger.warn('Узел не принял команду тестового звонка', {

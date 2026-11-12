@@ -24,7 +24,7 @@ export {
   ledgerEntries,
 } from './billing.js';
 export { machineCredentials } from './machine.js';
-export { nodes } from './nodes.js';
+export { nodes, nodeCommands } from './nodes.js';
 export {
   gateways,
   sipTrunks,
