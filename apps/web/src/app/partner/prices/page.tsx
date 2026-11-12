@@ -27,6 +27,7 @@ import {
   type Rate,
   type Tariff,
 } from '@/lib/tariffs';
+import { CallPace } from './call-pace';
 import { SetPrice } from './set-price';
 import { TariffLimits } from './tariff-limits';
 
@@ -64,6 +65,8 @@ function PartnerTariffs() {
       <div>
         <NewTariff />
       </div>
+
+      <CallPace />
 
       {outside.length > 0 && (
         <p className="text-warn">

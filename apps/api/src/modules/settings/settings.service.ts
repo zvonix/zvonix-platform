@@ -132,6 +132,11 @@ export class SettingsService {
   }
 
   /** Прогрев и рекомендованная работа номера SIM и транка (ADR-0105). */
+  /** Может ли партнёр выключить рекомендованную работу своих номеров (ADR-0117). */
+  async partnerMayDisableCallPace(): Promise<boolean> {
+    return this.flag(await this.values(), 'calls.partner_may_disable_recommended');
+  }
+
   async callPace(): Promise<CallPaceSettings> {
     const values = await this.values();
     return {

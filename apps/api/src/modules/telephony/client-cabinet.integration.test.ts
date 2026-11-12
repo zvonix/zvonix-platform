@@ -612,9 +612,10 @@ describe('свои линии', () => {
       as(owner.token),
     );
     expect(reset.statusCode).toBe(201);
-    expect(reset.json<{ account: { username: string } }>().account.username).not.toBe(
-      body.account.username,
-    );
+    // Новый пароль к прежнему имени: программу перенастраивать только в пароле.
+    const renewed = reset.json<{ account: { username: string; password: string } }>().account;
+    expect(renewed.username).toBe(body.account.username);
+    expect(renewed.password).not.toBe(body.account.password);
 
     // Чужая линия — как несуществующая.
     const foreign = await post(`/client/channels/${rich.channel}/credentials`, {}, as(owner.token));

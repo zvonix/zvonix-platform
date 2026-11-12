@@ -743,8 +743,10 @@ export class TelephonyService {
    * пароль канала — это чужие вызовы **за счёт клиента**. Без этого пути единственным
    * ответом на утечку было бы отключение канала целиком.
    *
-   * Меняется и имя, и пароль: имя уже засветилось в записи регистрации на узле
-   * и в логах, а перенастраивать АТС клиенту всё равно придётся — пусть меняется всё разом.
+   * Меняется только пароль, имя прежнее — как у шлюза и линии GOIP. Раньше менялось и имя («уже засветилось
+   * в журналах»), но имя не секрет: доступ держит пароль, а новое имя заставляло клиента перенастраивать программу
+   * целиком и путало (владелец, 2026-11-12: «я же пароль меняю, а не логин»). Старый пароль перестаёт подходить
+   * сразу: каталог отдаёт узлу новый хеш.
    */
   async resetChannelCredentials(
     id: ChannelId,
@@ -755,7 +757,7 @@ export class TelephonyService {
     if (existing === undefined) throw notFound('Канал не найден');
     if (existing.status === 'closed') throw conflict('Линия удалена — доступ к ней не выдаётся');
 
-    const credentials = issueSipCredentials('channel', this.realm);
+    const credentials = renewSipPassword(existing.sipUsername, this.realm);
     const updated = await this.repository.replaceChannelCredentials(
       id,
       credentials.username,
@@ -771,8 +773,8 @@ export class TelephonyService {
       entityId: id,
       actorUserId,
       actorRole,
-      before: { sip_username: existing.sipUsername },
-      after: { sip_username: updated.sipUsername },
+      // Имя прежнее — меняется пароль; самого пароля в журнале нет.
+      after: { sip_username: updated.sipUsername, password_changed: true },
     });
 
     return this.toAccount(credentials);

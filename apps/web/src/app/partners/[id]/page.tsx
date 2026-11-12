@@ -149,6 +149,49 @@ function PartnerCard({ id }: { id: string }) {
             <dt className="text-muted-foreground">Слушает записи:</dt>
             <dd>{partner.listens_to_recordings ? 'да' : 'нет'}</dd>
           </div>
+          <div className="flex items-center gap-1">
+            {/* Выбор партнёра (ADR-0117); при запрете площадки он не действует — об этом говорит настройка. */}
+            <dt className="text-muted-foreground">Карты звонят:</dt>
+            <dd className={partner.calls_recommended ? '' : 'text-warn'}>
+              {partner.calls_recommended ? 'по рекомендациям площадки' : 'по лимитам партнёра'}
+            </dd>
+            {canChange && (
+              <ConfirmAction
+                label={partner.calls_recommended ? 'Снять' : 'Вернуть'}
+                title={
+                  partner.calls_recommended
+                    ? `Карты партнёра «${partner.name}» — по его лимитам`
+                    : `Карты партнёра «${partner.name}» — по рекомендациям площадки`
+                }
+                consequence={
+                  partner.calls_recommended ? (
+                    <p>
+                      Прогрев и пределы площадки перестанут действовать на его карты и
+                      SIP-провайдеров; останутся его лимиты, пауза после звонка и сон номера.
+                    </p>
+                  ) : (
+                    <p>
+                      Карты партнёра снова будут звонить по рекомендациям площадки: прогрев, пределы
+                      в час и в сутки. Партнёр может снять их сам, если площадка разрешает.
+                    </p>
+                  )
+                }
+                confirmLabel={
+                  partner.calls_recommended ? 'Снять рекомендации' : 'Вернуть рекомендации'
+                }
+                tone={partner.calls_recommended ? 'danger' : 'neutral'}
+                variant="ghost"
+                size="xs"
+                onConfirm={async () => {
+                  await request<unknown>(`/partners/${id}/call-pace`, {
+                    method: 'PUT',
+                    body: { recommended: !partner.calls_recommended },
+                  });
+                  await atMost(invalidate());
+                }}
+              />
+            )}
+          </div>
           <div className="flex gap-1">
             <dt className="text-muted-foreground">Добавлен:</dt>
             <dd className="num">{moment(partner.created_at)}</dd>

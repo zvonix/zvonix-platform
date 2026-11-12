@@ -34,6 +34,7 @@ const SUBGROUPS: Record<string, string> = {
   'notifications.alerts_enabled': 'Администраторам',
   'notifications.support_staff_enabled': 'Администраторам',
   'calls.warmup_enabled': 'Прогрев',
+  'calls.partner_may_disable_recommended': 'Рекомендованная работа номера',
   'calls.recommended_per_hour': 'Рекомендованная работа номера',
   'calls.recommended_per_day': 'Рекомендованная работа номера',
   'calls.daily_variation_percent': 'Рекомендованная работа номера',

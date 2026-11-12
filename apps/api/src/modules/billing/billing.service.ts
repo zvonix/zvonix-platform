@@ -24,6 +24,7 @@ import {
 } from '@zvonix/shared';
 import { AuditService, type AuditEvent } from '../audit/audit.service.js';
 import { MachineService } from '../machine/machine.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 import {
   BillingRepository,
   type AccountId,
@@ -118,6 +119,7 @@ export class BillingService {
     // Ключи клиентского API (ADR-0044): закрытие клиента обязано закрывать и машинную
     // дверь. Тот же приём, что и у узла, выводимого из эксплуатации (`nodes.service`).
     private readonly machine: MachineService,
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -551,6 +553,45 @@ export class BillingService {
       after: { listens_to_recordings: updated.listensToRecordings },
     });
 
+    return updated;
+  }
+
+  /**
+   * Работают ли карты партнёра по рекомендациям площадки ([ADR-0117](../../../../../docs/adr/0117-partner-vybiraet-temp-kart.md)).
+   *
+   * Меняет сам партнёр (только свой) или администратор. Выключить может партнёр, только если площадка это разрешает
+   * (`calls.partner_may_disable_recommended`); включить обратно — всегда. Администратор меняет любому и всегда:
+   * при запрете флаг всё равно не действует, а запись о выборе партнёра сохраняется.
+   */
+  async setCallsRecommended(
+    partnerId: PartnerId,
+    recommended: boolean,
+    actor: { userId: UserId; role: UserRole },
+  ): Promise<PartnerRow> {
+    const partner = await this.repository.findPartner(partnerId);
+    if (partner === undefined) throw notFound('Партнёр не найден');
+    if (actor.role !== 'admin') {
+      const own = await this.repository.findPartnerOwnedBy(actor.userId);
+      if (own === undefined || own.id !== partnerId) throw notFound('Партнёр не найден');
+      if (!recommended && !(await this.settings.partnerMayDisableCallPace())) {
+        throw conflict('Площадка не разрешает выключать рекомендованную работу карт', {
+          details: { reason: 'call_pace_locked' },
+        });
+      }
+    }
+
+    const updated = await this.repository.setCallsRecommended(partnerId, recommended);
+    if (updated === undefined) throw notFound('Партнёр не найден');
+
+    await this.audit.record({
+      action: 'partner.call_pace_set',
+      entityType: 'partner',
+      entityId: partnerId,
+      actorUserId: actor.userId,
+      actorRole: actor.role,
+      before: { calls_recommended: partner.callsRecommended },
+      after: { calls_recommended: updated.callsRecommended },
+    });
     return updated;
   }
 

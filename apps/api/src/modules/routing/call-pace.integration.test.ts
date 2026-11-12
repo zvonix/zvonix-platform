@@ -271,6 +271,7 @@ const PACE_OFF = {
   'calls.trunk_calls_per_second': 0,
   'calls.caller_id_per_hour': 0,
   'calls.caller_id_per_day': 0,
+  'calls.partner_may_disable_recommended': true,
 };
 
 async function settings(values: Record<string, unknown>) {
@@ -750,5 +751,75 @@ describe('автоторможение оператора, шаг SIP-прова
       await execute(sql`update channels set caller_id = null where id = ${channel}`);
     });
     expect(await gatewayOf((await route(channel, destination)).callId)).toBe(trunk);
+  });
+});
+
+describe('партнёр выбирает: рекомендации площадки или свои лимиты (ADR-0117)', () => {
+  const choose = (partnerId: string, recommended: boolean) =>
+    api().inject({
+      method: 'PUT',
+      url: `/partners/${partnerId}/call-pace`,
+      headers: auth(),
+      payload: { recommended },
+    });
+
+  it('выключил — без прогрева и пределов площадки; площадка запретила — рекомендации снова у всех', async () => {
+    await settings({
+      'calls.warmup_enabled': true,
+      'calls.recommended_per_hour': 20,
+      'calls.recommended_per_day': 150,
+    });
+    const { operator, channel, destination } = await scenario();
+    const own = await createPartner(operator);
+
+    const chosen = await choose(own.id, false);
+    expect(chosen.statusCode).toBe(200);
+    expect(
+      chosen.json<{ partner: { calls_recommended: boolean } }>().partner.calls_recommended,
+    ).toBe(false);
+    // Новый номер на прогреве звонил бы дважды в час; по своим лимитам — без предела.
+    for (let index = 0; index < 4; index += 1) {
+      expect((await route(channel, destination)).outcome).toBe('routed');
+    }
+    expect(await paceOf(own.id, own.simId)).toMatchObject({
+      warmup_day: null,
+      per_hour: null,
+      per_day: null,
+      used_hour: 4,
+      poor: false,
+      braked: false,
+    });
+
+    // Площадка запретила снимать рекомендации — они снова действуют, хотя выбор партнёра сохранён.
+    await settings({
+      'calls.warmup_enabled': true,
+      'calls.recommended_per_hour': 20,
+      'calls.recommended_per_day': 150,
+      'calls.partner_may_disable_recommended': false,
+    });
+    expect((await route(channel, destination)).reason).toBe('numbers_exhausted');
+    expect(await paceOf(own.id, own.simId)).toMatchObject({ per_hour: 2, per_day: 10 });
+
+    // Журнал: кто и что выбрал.
+    await withDatabase(async (execute) => {
+      const rows = await execute(
+        sql`select before, after from audit_log where action = 'partner.call_pace_set' and entity_id = ${own.id}`,
+      );
+      expect(rows.rows).toEqual([
+        { before: { calls_recommended: true }, after: { calls_recommended: false } },
+      ]);
+    });
+  });
+
+  it('пауза после звонка остаётся и у своих лимитов', async () => {
+    await settings({ 'calls.pause_seconds': 600 });
+    const { operator, channel, destination } = await scenario();
+    const own = await createPartner(operator);
+    expect((await choose(own.id, false)).statusCode).toBe(200);
+
+    const first = await route(channel, destination);
+    expect(first.outcome).toBe('routed');
+    await endCall(first.callId);
+    expect((await route(channel, destination)).reason).toBe('numbers_exhausted');
   });
 });

@@ -70,9 +70,18 @@ export interface PartnerLimits {
     readonly name: string;
     readonly is_default: boolean;
   }[];
+  /**
+   * Карты по рекомендациям площадки или по своим лимитам
+   * ([ADR-0117](../../../../docs/adr/0117-partner-vybiraet-temp-kart.md)). `recommended` — что действует сейчас.
+   */
+  readonly call_pace: {
+    readonly partner_id: string;
+    readonly recommended: boolean;
+    readonly may_disable: boolean;
+  };
 }
 
-const LIMITS_KEY = ['partner', 'limits'] as const;
+export const LIMITS_KEY = ['partner', 'limits'] as const;
 
 /** Чьи лимиты правятся: адрес обработчиков и ключ запроса. Партнёр по умолчанию — так было до клиента. */
 export interface LimitsScope {

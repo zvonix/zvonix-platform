@@ -41,7 +41,11 @@ export function TariffLimits({ tariffId }: { tariffId: string }) {
         </p>
       )}
       {limits.data !== undefined && rules.length === 0 && (
-        <p className="text-muted-foreground">Лимитов нет — карты звонят без ограничений.</p>
+        <p className="text-muted-foreground">
+          {limits.data.call_pace.recommended
+            ? 'Своих лимитов нет — карты звонят по рекомендациям площадки.'
+            : 'Лимитов нет — карты звонят без ограничений, кроме паузы после звонка и сна.'}
+        </p>
       )}
       {rules.map((row) => (
         <div key={row.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">

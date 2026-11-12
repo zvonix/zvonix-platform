@@ -16,11 +16,13 @@ import {
   isIdleNumber,
   isPoorNumber,
   trunkSpacedUntil,
+  withoutRecommendedPace,
   type CallPace,
   type CallPaceSettings,
   type Id,
   variedDailyLimit,
 } from '@zvonix/shared';
+import { BillingRepository } from '../billing/billing.repository.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { CallRepository, type Executor, type NumberAttempts } from './call.repository.js';
 import { QualityService } from './quality.service.js';
@@ -42,6 +44,8 @@ export interface PacedNumber {
   readonly numbers: number;
   /** Оператор SIM — по нему автоторможение (ADR-0108); у транка оператора нет. */
   readonly operatorId: string | null;
+  /** Чей номер: партнёр выбирает, работают ли его номера по рекомендациям площадки (ADR-0117). */
+  readonly partnerId: Id<'partner'>;
 }
 
 /** Пределы номера и израсходованное за скользящие час и сутки. */
@@ -88,6 +92,7 @@ export function pacedSim(sim: SimCardRow): PacedNumber {
     warmupStartedAt: sim.warmupStartedAt,
     numbers: 1,
     operatorId: sim.operatorId,
+    partnerId: sim.partnerId,
   };
 }
 
@@ -98,6 +103,7 @@ export function pacedTrunk(row: { gateway: GatewayRow; trunk: SipTrunkRow }): Pa
     warmupStartedAt: row.trunk.warmupStartedAt,
     numbers: row.trunk.numbersCount,
     operatorId: null,
+    partnerId: row.gateway.partnerId,
   };
 }
 
@@ -147,12 +153,16 @@ export function toPaceView(pace: NumberPace): NumberPaceView {
 }
 
 function paceOf(
-  settings: CallPaceSettings,
+  recommendedSettings: CallPaceSettings,
   number: PacedNumber,
   attempts: NumberAttempts,
   now: Date,
-  braked: boolean,
+  recommendedBraked: boolean,
+  recommended: boolean,
 ): NumberPace {
+  // Партнёр выключил рекомендации (ADR-0117): только пауза и сон; автоторможение — тоже часть рекомендаций.
+  const settings = recommended ? recommendedSettings : withoutRecommendedPace(recommendedSettings);
+  const braked = recommended && recommendedBraked;
   const warmupDay = callWarmupDay(number.warmupStartedAt, attempts.lastAt, now);
   const poor = isPoorNumber(attempts.day, attempts.realAnsweredDay, settings.poorAnswerPercent);
   // Сон (ADR-0107, ADR-0108): у каждого номера свои часы, и у транка — у каждого его номера. Сутки считаются на все
@@ -218,6 +228,7 @@ export class CallPaceService {
     private readonly telephony: TelephonyRepository,
     private readonly settings: SettingsService,
     private readonly quality: QualityService,
+    private readonly billing: BillingRepository,
   ) {}
 
   /**
@@ -230,9 +241,10 @@ export class CallPaceService {
     destination?: string,
     executor?: Executor,
   ): Promise<Map<string, NumberPace>> {
-    const [settings, braked] = await Promise.all([
+    const [settings, braked, own] = await Promise.all([
       this.settings.callPace(),
       this.quality.brakedOperators(now),
+      this.ownPacePartners(numbers),
     ]);
     const window = callRestWindowMs(settings);
     const options = {
@@ -266,10 +278,24 @@ export class CallPaceService {
           attempts,
           now,
           number.operatorId !== null && braked.has(number.operatorId),
+          !own.has(number.partnerId),
         ),
       );
     }
     return result;
+  }
+
+  /**
+   * Партнёры этих номеров, чьи карты работают по своим лимитам (ADR-0117). Пусто, если площадка этого не разрешает:
+   * тогда рекомендации действуют у всех, даже у выключивших их раньше.
+   */
+  private async ownPacePartners(numbers: readonly PacedNumber[]): Promise<ReadonlySet<string>> {
+    if (numbers.length === 0 || !(await this.settings.partnerMayDisableCallPace())) {
+      return new Set();
+    }
+    return this.billing.partnersOnOwnCallPace([
+      ...new Set(numbers.map((number) => number.partnerId)),
+    ]);
   }
 
   /**

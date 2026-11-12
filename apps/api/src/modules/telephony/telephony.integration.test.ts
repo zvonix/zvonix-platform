@@ -285,11 +285,19 @@ describe('выдача учётных данных', () => {
     expect(reset.statusCode).toBe(201);
     const fresh = reset.json<{ account: SipAccount }>().account;
 
-    expect(fresh.username).not.toBe(body.account.username);
+    // Имя прежнее, пароль новый: отзыв доступа — новый хеш в каталоге, старый пароль к нему не подходит.
+    const before = (await askDirectory(body.account.username)).body;
+    expect(fresh.username).toBe(body.account.username);
     expect(fresh.password).not.toBe(body.account.password);
-    // Старое имя перестаёт находиться в каталоге — это и есть отзыв доступа.
-    expect((await askDirectory(body.account.username)).body).toContain('not found');
-    expect((await askDirectory(fresh.username)).body).toContain('<user id=');
+    expect(before).toContain('<user id=');
+    expect(before).toContain(
+      createHash('md5').update(`${fresh.username}:${fresh.realm}:${fresh.password}`).digest('hex'),
+    );
+    expect(before).not.toContain(
+      createHash('md5')
+        .update(`${body.account.username}:${body.account.realm}:${body.account.password}`)
+        .digest('hex'),
+    );
   });
 
   it('перевыпуск несуществующего канала — 404', async () => {

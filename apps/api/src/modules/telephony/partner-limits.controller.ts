@@ -25,6 +25,7 @@ import { TariffService } from '../catalog/tariff.service.js';
 import { LimitService, type RuleOwner } from '../limits/limit.service.js';
 import { changeLimitSchema, partnerLimitSchema } from '../limits/schemas.js';
 import { toLimitView, toUsageView, type LimitUsageView, type LimitView } from '../limits/views.js';
+import { SettingsService } from '../settings/settings.service.js';
 import { accountTimezone } from './limit-owners.service.js';
 import { TelephonyService } from './telephony.service.js';
 
@@ -35,6 +36,7 @@ export class PartnerLimitsController {
     private readonly telephony: TelephonyService,
     private readonly billing: BillingService,
     private readonly tariffs: TariffService,
+    private readonly settings: SettingsService,
   ) {}
 
   /**
@@ -49,12 +51,18 @@ export class PartnerLimitsController {
     tariff_limits: LimitView[];
     sims: { id: string; msisdn: string; tariff_id: string }[];
     tariffs: { id: string; name: string; is_default: boolean }[];
+    /**
+     * Карты по рекомендациям площадки или по своим лимитам (ADR-0117): выбор партнёра, может ли он его менять
+     * и действует ли он (при запрете площадки рекомендации действуют у всех).
+     */
+    call_pace: { partner_id: string; recommended: boolean; may_disable: boolean };
   }> {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
-    const [allSims, tariffOfSim, tariffs] = await Promise.all([
+    const [allSims, tariffOfSim, tariffs, mayDisable] = await Promise.all([
       this.telephony.listSims(partner.id),
       this.telephony.simTariffs(partner.id),
       this.tariffs.listTariffs(partner.id),
+      this.settings.partnerMayDisableCallPace(),
     ]);
     const sims = allSims.filter((sim) => sim.status !== 'retired');
     const tariffRules = await this.limits.rules({ tariffIds: tariffs.map((tariff) => tariff.id) });
@@ -85,6 +93,12 @@ export class PartnerLimitsController {
         name: tariff.name,
         is_default: tariff.isDefault,
       })),
+      call_pace: {
+        partner_id: partner.id,
+        // Запрет площадки сильнее выбора: рекомендации действуют у всех, и кабинет показывает это, а не прежний выбор.
+        recommended: partner.callsRecommended || !mayDisable,
+        may_disable: mayDisable,
+      },
     };
   }
 
