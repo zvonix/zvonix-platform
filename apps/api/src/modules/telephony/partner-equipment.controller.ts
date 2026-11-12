@@ -418,7 +418,7 @@ export class PartnerEquipmentController {
     return { port_accounts: await this.portViews(accounts) };
   }
 
-  /** Новый вход одной линии своего шлюза: прежние имя и пароль перестают работать. */
+  /** Новый пароль одной линии своего шлюза: логин прежний, старый пароль перестаёт работать. */
   @Cabinets('partner')
   @Post('partner/gateway-ports/:id/credentials')
   async resetPortCredentials(

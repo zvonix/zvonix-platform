@@ -423,7 +423,7 @@ export function AfterTestCall({
   );
 }
 
-/** Новый пароль SIP: имя и пароль меняются разом, старые перестают работать. */
+/** Новый пароль SIP: логин прежний, старый пароль перестаёт работать. */
 export function NewPassword({ gateway }: { gateway: Gateway }) {
   const [account, setAccount] = useState<SipAccount | undefined>(undefined);
   const refresh = useRefresh();
@@ -570,7 +570,7 @@ export function IssueMissingLines({
   );
 }
 
-/** Новый пароль одной линии: меняются логин и пароль, прежние перестают работать. */
+/** Новый пароль одной линии: логин прежний, старый пароль перестаёт работать. */
 export function NewLineAccount({
   gateway,
   port,
