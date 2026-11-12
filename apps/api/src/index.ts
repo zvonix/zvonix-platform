@@ -61,6 +61,7 @@ export { MessagesService } from './modules/messaging/messages.service.js';
 export { MessagingService } from './modules/messaging/messaging.service.js';
 export { NodesModule } from './modules/nodes/nodes.module.js';
 export { NodesService } from './modules/nodes/nodes.service.js';
+export { NodeCommandsService } from './modules/nodes/node-commands.service.js';
 
 export { RecordingsModule } from './modules/recordings/recordings.module.js';
 export {

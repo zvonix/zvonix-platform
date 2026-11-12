@@ -32,6 +32,7 @@ import {
   BotsService,
   MessagesService,
   MessagingService,
+  NodeCommandsService,
   NodesService,
   OperatorResolverService,
   QualityService,
@@ -235,6 +236,7 @@ export class BackgroundTasks {
     private readonly cdr: CdrService,
     private readonly registrations: RegistrationsService,
     private readonly nodes: NodesService,
+    private readonly nodeCommands: NodeCommandsService,
     private readonly recordings: RecordingsService,
     private readonly identity: IdentityService,
     private readonly limits: LimitService,
@@ -408,6 +410,11 @@ export class BackgroundTasks {
         name: 'servers.sample',
         everySeconds: SERVER_SAMPLE_SECONDS,
         run: (now) => this.servers.samplePlatform(now),
+      },
+      {
+        name: 'nodes.purge-commands',
+        everySeconds: 3600,
+        run: (now) => this.nodeCommands.purge(now),
       },
       {
         name: 'servers.purge-history',

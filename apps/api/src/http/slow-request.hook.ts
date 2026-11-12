@@ -13,6 +13,12 @@ import type { FastifyInstance } from 'fastify';
 /** Дольше этого запрос считается медленным: кабинет ждёт 20 с, и задолго до них человек видит «зависание». */
 const SLOW_REQUEST_MS = 2_000;
 
+/**
+ * Долгие запросы по устройству, а не медленные: служба команд узла ждёт команду до 25 с
+ * ([ADR-0115](../../../../docs/adr/0115-uzel-zabiraet-komandy.md)). Считать их медленными — засыпать журнал.
+ */
+const LONG_POLL_ROUTE = /\/node\/commands$/u;
+
 export function registerSlowRequestLog(
   fastify: FastifyInstance,
   logger: Logger,
@@ -21,7 +27,7 @@ export function registerSlowRequestLog(
   const log = logger.child('http');
   fastify.addHook('onResponse', (request, reply, done) => {
     const elapsed = reply.elapsedTime;
-    if (elapsed >= thresholdMs) {
+    if (elapsed >= thresholdMs && !LONG_POLL_ROUTE.test(request.routeOptions.url ?? '')) {
       log.warn('Медленный запрос', {
         method: request.method,
         route: request.routeOptions.url ?? 'неизвестный маршрут',

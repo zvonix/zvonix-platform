@@ -13,8 +13,9 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import { isSipUsername } from '@zvonix/shared';
-import { EslError, eslApi, type EslTarget } from '../../infra/esl.js';
+import { EslError, eslApi } from '../../infra/esl.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
+import { NodeCommandsService } from '../nodes/node-commands.service.js';
 import { NodesService } from '../nodes/nodes.service.js';
 import type { NodeId } from '../nodes/nodes.repository.js';
 import { TelephonyRepository, type ChannelRow } from './telephony.repository.js';
@@ -160,6 +161,7 @@ export class RegistrationsService {
   constructor(
     private readonly repository: TelephonyRepository,
     private readonly nodes: NodesService,
+    private readonly commands: NodeCommandsService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -234,9 +236,10 @@ export class RegistrationsService {
     const names = usernames.filter(isSipUsername);
     if (names.length === 0) return;
     for (const node of await this.liveNodes()) {
-      let target: EslTarget | undefined;
+      // Узел своей машины — по ESL, отдельной — через службу команд (ADR-0115); не принимает ни так, ни так — пропуск.
+      let ready: boolean;
       try {
-        target = await this.nodes.eslTargetOf(node);
+        ready = await this.commands.available(node);
       } catch (cause) {
         this.logger.warn('Узел не сбросил регистрацию', {
           node_id: node,
@@ -244,11 +247,11 @@ export class RegistrationsService {
         });
         continue;
       }
-      if (target === undefined) continue;
+      if (!ready) continue;
       for (const username of names) {
         const command = `sofia profile ${SOFIA_PROFILE} flush_inbound_reg ${username}@${this.config.SIP_REALM}`;
         try {
-          const reply = await eslApi(target, command, { timeoutMs: ESL_TIMEOUT_MS });
+          const reply = await this.commands.run(node, command, ESL_TIMEOUT_MS);
           if (reply.trim().startsWith('-ERR')) {
             this.logger.warn('Узел не сбросил регистрацию', {
               node_id: node,

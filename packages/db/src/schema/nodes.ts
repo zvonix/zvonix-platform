@@ -9,7 +9,7 @@
 import { sql } from 'drizzle-orm';
 import { check, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { NODE_STATUSES, type NodeStatus } from '@zvonix/shared';
-import { createdAt, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
+import { createdAt, idRef, oneOf, primaryId, timestamptz, updatedAt } from '../columns.js';
 
 export const nodes = pgTable(
   'nodes',
@@ -69,6 +69,13 @@ export const nodes = pgTable(
      */
     eslSecret: text(),
 
+    /**
+     * Когда служба команд узла последний раз спрашивала команды
+     * ([ADR-0115](../../../docs/adr/0115-uzel-zabiraet-komandy.md)). Недавно — узлу на отдельной машине
+     * можно отдать тестовый звонок и сброс входа через очередь `node_commands`.
+     */
+    commandsPolledAt: timestamptz(),
+
     /** Активных вызовов на момент последнего heartbeat. */
     activeCalls: integer().notNull().default(0),
 
@@ -86,5 +93,43 @@ export const nodes = pgTable(
       .on(t.hostname)
       .where(sql`${t.hostname} is not null`),
     index('nodes_status_idx').on(t.status),
+  ],
+);
+
+/**
+ * Команды узлу, которые он забирает сам ([ADR-0115](../../../docs/adr/0115-uzel-zabiraet-komandy.md)):
+ * `originate` тестового звонка и `flush_inbound_reg`. Площадка ставит строку и ждёт ответа; служба на узле
+ * берёт её долгим запросом, выполняет `fs_cli` и присылает ответ. Строки старше суток убирает фоновая задача:
+ * в команде звонка — номер абонента.
+ */
+export const nodeCommands = pgTable(
+  'node_commands',
+  {
+    id: primaryId<'nodeCommand'>(),
+
+    /** Чья команда. Уходит вместе с узлом. */
+    nodeId: idRef<'node'>()
+      .notNull()
+      .references(() => nodes.id, { onDelete: 'cascade' }),
+
+    /** Строка `api` FreeSWITCH, одна строка без переводов. */
+    command: text().notNull(),
+
+    createdAt: createdAt(),
+
+    /** До какого времени узел должен взять команду; позже она не выдаётся — звонок не состоялся. */
+    takeBefore: timestamptz().notNull(),
+
+    takenAt: timestamptz(),
+    finishedAt: timestamptz(),
+
+    /** Ответ FreeSWITCH как есть: `+OK …` или `-ERR …`. */
+    reply: text(),
+  },
+  (t) => [
+    index('node_commands_waiting_idx')
+      .on(t.nodeId, t.createdAt)
+      .where(sql`${t.takenAt} is null`),
+    index('node_commands_created_idx').on(t.createdAt),
   ],
 );

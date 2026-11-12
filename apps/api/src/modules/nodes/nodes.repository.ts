@@ -3,14 +3,16 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, eq, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import { orderByText, toDatabaseError, type Database } from '@zvonix/db';
-import { nodes } from '@zvonix/db/schema';
+import { nodeCommands, nodes } from '@zvonix/db/schema';
 import { newId, ROUTABLE_NODE_STATUSES, type Id, type NodeStatus } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type NodeId = Id<'node'>;
 export type NodeRow = typeof nodes.$inferSelect;
+export type NodeCommandRow = typeof nodeCommands.$inferSelect;
+export type NodeCommandId = Id<'nodeCommand'>;
 
 @Injectable()
 export class NodesRepository {
@@ -193,5 +195,83 @@ export class NodesRepository {
       .from(nodes)
       .where(sql`${nodes.hostname} = ${hostname}`);
     return row;
+  }
+
+  // --- Команды узлу (ADR-0115) ---------------------------------------------------------
+
+  async enqueueCommand(nodeId: NodeId, command: string, takeBefore: Date): Promise<NodeCommandRow> {
+    const [row] = await this.db
+      .insert(nodeCommands)
+      .values({ id: newId<'nodeCommand'>(), nodeId, command, takeBefore })
+      .returning();
+    if (row === undefined) throw new Error('Вставка не вернула строку');
+    return row;
+  }
+
+  async findCommand(id: NodeCommandId): Promise<NodeCommandRow | undefined> {
+    const [row] = await this.db.select().from(nodeCommands).where(eq(nodeCommands.id, id));
+    return row;
+  }
+
+  /** Служба команд узла спросила команды — узел умеет их брать. */
+  async markCommandsPolled(nodeId: NodeId, at: Date): Promise<void> {
+    await this.db.update(nodes).set({ commandsPolledAt: at }).where(eq(nodes.id, nodeId));
+  }
+
+  /**
+   * Взять старейшую невзятую команду узла, срок которой не истёк. `skip locked` — два долгих запроса одного узла
+   * (перезапуск службы, два экземпляра API) не возьмут одну команду дважды.
+   */
+  async claimCommand(nodeId: NodeId, at: Date): Promise<NodeCommandRow | undefined> {
+    const waiting = this.db
+      .select({ id: nodeCommands.id })
+      .from(nodeCommands)
+      .where(
+        and(
+          eq(nodeCommands.nodeId, nodeId),
+          isNull(nodeCommands.takenAt),
+          gt(nodeCommands.takeBefore, at),
+        ),
+      )
+      .orderBy(nodeCommands.createdAt)
+      .limit(1)
+      .for('update', { skipLocked: true });
+    const [row] = await this.db
+      .update(nodeCommands)
+      .set({ takenAt: at })
+      .where(inArray(nodeCommands.id, waiting))
+      .returning();
+    return row;
+  }
+
+  /** Ответ узла на взятую им команду. `undefined` — команда не его, не взята или уже выполнена. */
+  async finishCommand(
+    nodeId: NodeId,
+    id: NodeCommandId,
+    reply: string,
+    at: Date,
+  ): Promise<NodeCommandRow | undefined> {
+    const [row] = await this.db
+      .update(nodeCommands)
+      .set({ reply, finishedAt: at })
+      .where(
+        and(
+          eq(nodeCommands.id, id),
+          eq(nodeCommands.nodeId, nodeId),
+          isNotNull(nodeCommands.takenAt),
+          isNull(nodeCommands.finishedAt),
+        ),
+      )
+      .returning();
+    return row;
+  }
+
+  /** Убрать команды, поставленные раньше `before`. Возвращает, сколько убрано. */
+  async purgeCommands(before: Date): Promise<number> {
+    const removed = await this.db
+      .delete(nodeCommands)
+      .where(lt(nodeCommands.createdAt, before))
+      .returning({ id: nodeCommands.id });
+    return removed.length;
   }
 }

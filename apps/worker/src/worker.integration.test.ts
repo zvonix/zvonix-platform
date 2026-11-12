@@ -111,6 +111,7 @@ describe('реестр фоновых задач', () => {
       'messages.check-health',
       'messaging.refresh-accounts',
       'servers.sample',
+      'nodes.purge-commands',
       'servers.purge-history',
       'auth-tokens.purge-expired',
     ]);

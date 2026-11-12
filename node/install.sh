@@ -621,9 +621,9 @@ printf '{"password":"%s"}' "$ESL_PASSWORD" >"$ESL_BODY"
 if printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" \
   | curl -fsS --max-time 30 -K - -X PUT -H 'Content-Type: application/json' \
     --data-binary "@${ESL_BODY}" "${CONTROL_PLANE}/node/esl" >/dev/null; then
-  echo "Тестовый звонок с SIM доступен: площадка знает пароль ESL узла"
+  echo "Площадка знает пароль ESL узла: команды узлу идут напрямую"
 else
-  echo "Справка: тестовый звонок с SIM для узла на отдельной машине недоступен — площадка принимает пароль ESL только от узла на той же машине. Звонки клиентов и отметку «на связи» это не затрагивает"
+  echo "Справка: узел на отдельной машине — площадка не знает пароль ESL, команды узлу пойдут через службу команд (ниже)"
 fi
 rm -f "$ESL_BODY"
 
@@ -735,6 +735,78 @@ if /usr/local/sbin/zvonix-heartbeat; then
   echo "Пульс узла идёт: площадка видит узел «работает»"
 else
   echo "ВНИМАНИЕ: площадка не приняла пульс узла — узел останется «ставится» (journalctl -u zvonix-heartbeat)" >&2
+fi
+
+# --- Служба команд узла (ADR-0115, GET /node/commands) -------------------------
+# Тестовый звонок и сброс входа площадка отдаёт по ESL только узлу своей машины. Узел на отдельной
+# машине сам забирает их долгим запросом, выполняет fs_cli и присылает ответ. Выполняет только две
+# разрешённые команды — прочие отвергает, кто бы их ни прислал. ESL наружу не открывается.
+# Ключ — в файле только для root, в аргументы процесса не попадает; адрес — в самом скрипте.
+
+( umask 077 && printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" >"${NODE_ETC}/commands.curl" )
+
+cat >/usr/local/sbin/zvonix-commands <<COMMANDS_HEAD
+#!/bin/sh
+# Служба команд узла Zvonix (ADR-0115) — порождается node/install.sh, правится там.
+FS_CLI="${FS_CLI}"
+CONTROL_PLANE="${CONTROL_PLANE}"
+AUTH="${NODE_ETC}/commands.curl"
+COMMANDS_HEAD
+cat >>/usr/local/sbin/zvonix-commands <<'COMMANDS'
+set -u
+BODY="$(mktemp)"
+trap 'rm -f "$BODY"' EXIT
+
+# Ответ FreeSWITCH площадке. Не дошёл — итог звонка всё равно придёт с CDR.
+report() {
+  printf '%s' "$2" | curl -sS --max-time 15 -K "$AUTH" -X POST -H 'Content-Type: text/plain' \
+    --data-binary @- "${CONTROL_PLANE}/node/commands/$1/result" >/dev/null 2>&1 || true
+}
+
+while :; do
+  # Площадка держит запрос до 25 с: 200 — команда, 204 — команд нет. Площадка недоступна — пауза.
+  CODE="$(curl -sS --max-time 40 -K "$AUTH" -o "$BODY" -w '%{http_code}' \
+    "${CONTROL_PLANE}/node/commands" 2>/dev/null)" || CODE=000
+  case "$CODE" in
+    200) ;;
+    204) continue ;;
+    *) sleep 5; continue ;;
+  esac
+  ID="$(sed -n 1p "$BODY" | tr -cd '0-9a-f-')"
+  API="$(sed -n 2p "$BODY")"
+  [ -n "$ID" ] || continue
+  case "$API" in
+    # originate держит ответ, пока абонент не снимет трубку, — в фоне, чтобы не ждать следующую команду.
+    'originate {'*|'sofia profile zvonix flush_inbound_reg '*)
+      ( report "$ID" "$("$FS_CLI" -x "$API" 2>&1)" ) & ;;
+    *) report "$ID" '-ERR NODE_REFUSED' ;;
+  esac
+done
+COMMANDS
+chmod 0700 /usr/local/sbin/zvonix-commands
+
+cat >/etc/systemd/system/zvonix-commands.service <<'UNIT'
+[Unit]
+Description=Служба команд узла Zvonix: тестовый звонок и сброс входа
+Wants=network-online.target
+After=network-online.target freeswitch.service
+
+[Service]
+ExecStart=/usr/local/sbin/zvonix-commands
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable zvonix-commands.service >/dev/null 2>&1
+# Перезапуск, а не start: при обновлении служба должна взять новый скрипт.
+if systemctl restart zvonix-commands.service; then
+  echo "Служба команд узла запущена: тестовый звонок с SIM доступен"
+else
+  echo "ВНИМАНИЕ: служба команд узла не запустилась — тестовый звонок недоступен (journalctl -u zvonix-commands)" >&2
 fi
 
 # --- Выгрузка записей разговоров (ADR-0063, docs/api/recordings.md) ----------

@@ -22,6 +22,7 @@ import {
   withDatabase,
 } from '../../testing/harness.js';
 import { FakeEsl } from '../../testing/fake-esl.js';
+import { NodesRepository, type NodeId } from '../nodes/nodes.repository.js';
 import { NodesService } from '../nodes/nodes.service.js';
 import { parseOriginateReply } from './test-call.service.js';
 
@@ -727,4 +728,65 @@ describe('ответ originate', () => {
       hangupCause: 'UNEXPECTED_REPLY: что-то не то',
     });
   });
+});
+
+describe('тестовый звонок с узла на отдельной машине (ADR-0115)', () => {
+  let partner: { id: string; token: string };
+  let gateway: Gateway;
+
+  beforeAll(async () => {
+    // ESL узла площадке недоступен — как у узла на другом сервере.
+    vi.spyOn(api().get(NodesService), 'eslTargetOf').mockImplementation(() =>
+      Promise.resolve(undefined),
+    );
+    partner = await createPartner();
+    gateway = await createGateway(partner.token, 2);
+  });
+
+  it('без службы команд — понятный отказ; со службой — команда уходит узлу, итог по его ответу', async () => {
+    const line = gateway.ports[0];
+    if (line === undefined) throw new Error('Нет порта');
+    const simId = await simInPort(partner.token, line);
+
+    const refused = await post(
+      `/partner/sim-cards/${simId}/test-call`,
+      { destination: '79130001133' },
+      partner.token,
+    );
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { details: { reason: string } } }>().error.details.reason).toBe(
+      'node_not_ready',
+    );
+
+    await api()
+      .get(NodesRepository)
+      .markCommandsPolled(nodeId as NodeId, new Date());
+    const started = await post(
+      `/partner/sim-cards/${simId}/test-call`,
+      { destination: '79130001133' },
+      partner.token,
+    );
+    expect(started.statusCode).toBe(202);
+    const call = started.json<{ test_call: { id: string } }>().test_call;
+
+    const taken = await api().inject({
+      method: 'GET',
+      url: '/node/commands',
+      headers: as(nodeKey),
+    });
+    expect(taken.statusCode).toBe(200);
+    const [commandId, command] = taken.body.split('\n');
+    expect(command).toContain(`zvonix_test_call=${call.id}`);
+    expect(command).toMatch(/^originate \{/u);
+
+    const answered = await api().inject({
+      method: 'POST',
+      url: `/node/commands/${commandId ?? ''}/result`,
+      headers: { ...as(nodeKey), 'content-type': 'text/plain' },
+      payload: '-ERR USER_BUSY\n',
+    });
+    expect(answered.statusCode).toBe(200);
+    const done = await settled(call.id, partner.token, '/partner/test-calls');
+    expect(done).toMatchObject({ status: 'busy', hangup_cause: 'USER_BUSY' });
+  }, 120_000);
 });
