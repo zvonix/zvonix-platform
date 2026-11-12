@@ -200,6 +200,8 @@ interface SipCheckView {
   resolved: readonly string[];
   expected: readonly string[];
   record: SipCheck['record'];
+  authoritative: boolean;
+  stale: SipCheck['stale'];
 }
 
 function toSipCheckView(check: SipCheck): SipCheckView {
@@ -209,6 +211,8 @@ function toSipCheckView(check: SipCheck): SipCheckView {
     resolved: check.resolved,
     expected: check.expected,
     record: check.record,
+    authoritative: check.authoritative,
+    stale: check.stale,
   };
 }
 

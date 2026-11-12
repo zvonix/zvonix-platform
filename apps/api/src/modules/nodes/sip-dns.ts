@@ -43,10 +43,28 @@ export interface SipCheck {
     readonly type: 'A' | 'AAAA';
     readonly value: string;
   } | null;
+  /** Ответ дали главные серверы домена — то, что заведено у регистратора; `false` — только DNS сервера. */
+  readonly authoritative: boolean;
+  /**
+   * DNS сервера площадки ещё помнит другие адреса — запись недавно меняли. Обновится сам через
+   * `expiresInSeconds` (`null` — срок неизвестен). Пока не обновится, GOIP, спросившие тот же кэш,
+   * могут уходить по старому адресу.
+   */
+  readonly stale: {
+    readonly addresses: readonly string[];
+    readonly expiresInSeconds: number | null;
+  } | null;
 }
 
-/** Разрешение имени: адреса или `undefined`, если имени нет. Отказ DNS — исключение. */
-export type ResolveName = (name: string) => Promise<readonly string[] | undefined>;
+/** Ответ DNS об имени: адреса (`undefined` — записи нет), чей ответ и что ещё помнит кэш. */
+export interface NameAnswer {
+  readonly addresses: readonly string[] | undefined;
+  readonly authoritative: boolean;
+  readonly stale: SipCheck['stale'];
+}
+
+/** Разрешение имени. Не ответил ни один DNS — исключение. */
+export type ResolveName = (name: string) => Promise<NameAnswer>;
 
 /** Имя без порта: `sip.zvonix.com:5070` → `sip.zvonix.com`, `[2001:db8::1]:5060` → `2001:db8::1`. */
 export function hostOf(address: string): string {
@@ -87,7 +105,9 @@ export async function checkSipAddress(input: {
   let expected: readonly string[] = [];
   if (detected !== undefined) {
     expected =
-      isIP(detected) !== 0 ? [detected] : ((await safeResolve(input.resolve, siteHost)) ?? []);
+      isIP(detected) !== 0
+        ? [detected]
+        : ((await safeResolve(input.resolve, siteHost))?.addresses ?? []);
   }
 
   // Запись — для имени, которое вписано: его и надо исправить. Вписан IP или ничего — предлагается имя
@@ -104,12 +124,18 @@ export async function checkSipAddress(input: {
           value: target,
         }
       : null;
-  const result = (verdict: SipCheckVerdict, resolved: readonly string[] = []): SipCheck => ({
+  const result = (
+    verdict: SipCheckVerdict,
+    resolved: readonly string[] = [],
+    answer?: NameAnswer,
+  ): SipCheck => ({
     verdict,
     address: input.address,
     resolved,
     expected,
     record,
+    authoritative: answer?.authoritative ?? false,
+    stale: answer?.stale ?? null,
   });
 
   if (input.address === null) return result('none');
@@ -120,21 +146,19 @@ export async function checkSipAddress(input: {
     return result(expected.includes(host) ? 'ip' : 'ip_mismatch', [host]);
   }
 
-  let resolved: readonly string[] | undefined;
+  let answer: NameAnswer;
   try {
-    resolved = await input.resolve(host);
+    answer = await input.resolve(host);
   } catch {
     return result('error');
   }
-  if (resolved === undefined || resolved.length === 0) return result('missing');
-  if (expected.length === 0) return result('unverifiable', resolved);
-  return result(resolved.some((ip) => expected.includes(ip)) ? 'ok' : 'mismatch', resolved);
+  const resolved = answer.addresses;
+  if (resolved === undefined || resolved.length === 0) return result('missing', [], answer);
+  if (expected.length === 0) return result('unverifiable', resolved, answer);
+  return result(resolved.some((ip) => expected.includes(ip)) ? 'ok' : 'mismatch', resolved, answer);
 }
 
-async function safeResolve(
-  resolve: ResolveName,
-  name: string,
-): Promise<readonly string[] | undefined> {
+async function safeResolve(resolve: ResolveName, name: string): Promise<NameAnswer | undefined> {
   try {
     return await resolve(name);
   } catch {

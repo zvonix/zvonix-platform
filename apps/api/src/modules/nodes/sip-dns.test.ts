@@ -4,13 +4,13 @@ import { checkSipAddress, hostOf, suggestedName, type ResolveName } from './sip-
 const SITE = 'https://cp.zvonix.com';
 const NODE = '217.197.114.163';
 
-/** DNS по таблице: имени нет в таблице — записи нет; `throw` — DNS не ответил. */
+/** DNS по таблице: имени нет в таблице — записи нет; 'fail' — DNS не ответил. */
 const dns =
   (table: Record<string, readonly string[] | 'fail'>): ResolveName =>
   (name) => {
     const found = table[name];
     if (found === 'fail') return Promise.reject(new Error('timeout'));
-    return Promise.resolve(found);
+    return Promise.resolve({ addresses: found, authoritative: true, stale: null });
   };
 
 describe('проверка адреса SIP узла (ADR-0113, ревизия)', () => {
@@ -50,6 +50,24 @@ describe('проверка адреса SIP узла (ADR-0113, ревизия)'
     });
     expect(wrong.verdict).toBe('mismatch');
     expect(wrong.resolved).toEqual(['217.197.114.155']);
+  });
+
+  it('главные серверы — верно, кэш хостинга ещё помнит старое: «верно» и срок кэша', async () => {
+    // Ровно случай 2026-11-12: регистратор и весь мир — 217.197.114.163, DNS хостинга — 78.17.98.160.
+    const check = await checkSipAddress({
+      address: 'sip.zvonix.com',
+      nodeAddress: NODE,
+      publicBaseUrl: SITE,
+      resolve: () =>
+        Promise.resolve({
+          addresses: [NODE],
+          authoritative: true,
+          stale: { addresses: ['78.17.98.160'], expiresInSeconds: 2547 },
+        }),
+    });
+    expect(check.verdict).toBe('ok');
+    expect(check.authoritative).toBe(true);
+    expect(check.stale).toEqual({ addresses: ['78.17.98.160'], expiresInSeconds: 2547 });
   });
 
   it('указан IP: свой — работает, но лучше имя; чужой — ошибка', async () => {
