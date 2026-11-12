@@ -23,6 +23,27 @@ export const provisionNodeSchema = z.object({
   allowedIps: z.array(ipAddress).max(8, 'слишком много адресов').default([]),
 });
 
+/**
+ * Адрес SIP: имя или IP, без схемы и пути. Порт — через двоеточие, если не 5060.
+ * Пусто — определить по пульсу узла заново (ADR-0113).
+ */
+const sipAddress = z
+  .string()
+  .trim()
+  .max(200, 'слишком длинный')
+  .regex(
+    /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(?::\d{1,5})?$|^$/u,
+    'имя или IP-адрес, без http:// и пути',
+  )
+  .transform((value) => (value === '' ? null : value))
+  .nullable();
+
+/** Настройки узла (ADR-0113). */
+export const nodeSettingsSchema = z.object({
+  name: z.string().trim().min(2, 'слишком короткое').max(100, 'слишком длинное'),
+  sipAddress,
+});
+
 export const reissueInstallSchema = z.object({
   allowedIps: z.array(ipAddress).max(8, 'слишком много адресов').default([]),
 });

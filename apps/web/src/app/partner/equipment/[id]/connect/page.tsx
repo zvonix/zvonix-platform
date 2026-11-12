@@ -99,17 +99,38 @@ function ConnectionPage({ gateway, connection }: { gateway: Gateway; connection:
           ? 'В веб-интерфейсе GOIP: Configurations → Basic VoIP. Поля названы так же, как там.'
           : 'Эти данные вводятся в настройках SIP самого устройства.'}
       </p>
-      {byLine ? (
-        <LineSettings gateway={gateway} connection={connection} onIssued={onIssued} />
+      {connection.server === null ? (
+        <p role="alert" className="max-w-[720px] text-warn">
+          Площадка ещё не задала адрес для подключения: узел АТС, куда GOIP должен регистрироваться,
+          не настроен. Вводить настройки в устройство пока незачем — напишите в поддержку.
+        </p>
+      ) : byLine ? (
+        <LineSettings
+          gateway={gateway}
+          connection={{ ...connection, server: connection.server }}
+          onIssued={onIssued}
+        />
       ) : (
-        <GatewaySettings gateway={gateway} connection={connection} />
+        <GatewaySettings
+          gateway={gateway}
+          connection={{ ...connection, server: connection.server }}
+        />
       )}
     </>
   );
 }
 
 /** Один вход на весь шлюз: сервер, логин, пароль и, у GOIP, префиксы линий. */
-function GatewaySettings({ gateway, connection }: { gateway: Gateway; connection: Connection }) {
+/** Подключение, у которого адрес есть: поля GOIP показываются только с ним. */
+type KnownConnection = Connection & { readonly server: string };
+
+function GatewaySettings({
+  gateway,
+  connection,
+}: {
+  gateway: Gateway;
+  connection: KnownConnection;
+}) {
   const goip = gateway.type === 'goip';
   return (
     <div className="flex max-w-[720px] flex-col gap-2">
@@ -187,7 +208,7 @@ function LineSettings({
   onIssued,
 }: {
   gateway: Gateway;
-  connection: Connection;
+  connection: KnownConnection;
   onIssued: (issued: IssuedLines) => void;
 }) {
   const url = useUrlState();

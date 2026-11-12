@@ -3,7 +3,7 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, eq, inArray, lt, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import { orderByText, toDatabaseError, type Database } from '@zvonix/db';
 import { nodes } from '@zvonix/db/schema';
 import { newId, ROUTABLE_NODE_STATUSES, type Id, type NodeStatus } from '@zvonix/shared';
@@ -62,11 +62,12 @@ export class NodesRepository {
     id: NodeId,
     hostname: string,
     agentVersion: string | null,
+    lastAddress: string | null,
   ): Promise<NodeRow | undefined> {
     try {
       const [row] = await this.db
         .update(nodes)
-        .set({ hostname, agentVersion, status: 'installing' })
+        .set({ hostname, agentVersion, lastAddress, status: 'installing' })
         .where(eq(nodes.id, id))
         .returning();
       return row;
@@ -92,6 +93,7 @@ export class NodesRepository {
       activeCalls: number;
       agentVersion: string | null;
       setVersion: string | null;
+      lastAddress: string | null;
       at: Date;
     },
   ): Promise<NodeRow | undefined> {
@@ -102,6 +104,8 @@ export class NodesRepository {
         activeCalls: beat.activeCalls,
         agentVersion: beat.agentVersion,
         setVersion: beat.setVersion,
+        // Пустой адрес пульса прежний не стирает: узнать адрес узла заново негде.
+        ...(beat.lastAddress === null ? {} : { lastAddress: beat.lastAddress }),
         lastHeartbeatAt: beat.at,
       })
       .where(eq(nodes.id, id))
@@ -131,6 +135,32 @@ export class NodesRepository {
       )
       .returning({ id: nodes.id });
     return rows.map((row) => row.id);
+  }
+
+  /**
+   * Адрес SIP, определённый площадкой (ADR-0113) — **только если он пуст**. Условие в самом запросе:
+   * пульс и правка администратора могут прийти одновременно, и пульс не должен затереть правку.
+   */
+  async fillSipAddress(id: NodeId, address: string): Promise<NodeRow | undefined> {
+    const [row] = await this.db
+      .update(nodes)
+      .set({ sipAddress: address })
+      .where(and(eq(nodes.id, id), isNull(nodes.sipAddress)))
+      .returning();
+    return row;
+  }
+
+  /** Название и адрес SIP из настроек узла; `null` у адреса — определить по пульсу заново. */
+  async updateSettings(
+    id: NodeId,
+    settings: { name: string; sipAddress: string | null },
+  ): Promise<NodeRow | undefined> {
+    try {
+      const [row] = await this.db.update(nodes).set(settings).where(eq(nodes.id, id)).returning();
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
   }
 
   async setStatus(id: NodeId, status: NodeStatus): Promise<NodeRow | undefined> {

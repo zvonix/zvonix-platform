@@ -38,10 +38,13 @@ interface OwnSipAccount {
   readonly password: string;
   readonly realm: string;
   /** Куда подключаться — адрес узла, а не домен (`TelephonyService.sipServer`). */
-  readonly server: string;
+  readonly server: string | null;
 }
 
-function toOwnAccount(account: Omit<OwnSipAccount, 'server'>, server: string): OwnSipAccount {
+function toOwnAccount(
+  account: Omit<OwnSipAccount, 'server'>,
+  server: string | null,
+): OwnSipAccount {
   return { username: account.username, password: account.password, realm: account.realm, server };
 }
 
@@ -64,7 +67,7 @@ export class ClientReportController {
   async channels(@CurrentUser() actor: Principal): Promise<{
     channels: ClientChannelView[];
     /** Куда подключать программу: адрес узла, а не SIP-домен (`TelephonyService.sipServer`). */
-    server: string;
+    server: string | null;
     /** Сколько линий можно держать; удалённые не в счёт (ADR-0101). */
     max_channels: number;
   }> {

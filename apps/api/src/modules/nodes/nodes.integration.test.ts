@@ -37,6 +37,7 @@ interface NodeView {
   id: string;
   name: string;
   hostname: string | null;
+  sip_address: string | null;
   status: string;
   active_calls: number;
   last_heartbeat_at: string | null;
@@ -523,5 +524,143 @@ describe('версия набора и автообновление (ADR-0068)',
     expect((await beat(presented, {})).json<{ auto_update: boolean }>().auto_update).toBe(true);
     expect((await setAutoUpdate(false)).statusCode).toBe(200);
     expect((await beat(presented, {})).json<{ auto_update: boolean }>().auto_update).toBe(false);
+  });
+});
+
+describe('адрес SIP узла и настройки (ADR-0113)', () => {
+  const beat = (presented: string, remoteAddress: string) =>
+    api().inject({
+      method: 'POST',
+      url: '/node/heartbeat',
+      headers: bearer(presented),
+      remoteAddress,
+      payload: { activeCalls: 0, degraded: false },
+    });
+  const nodeOf = async (nodeId: string) =>
+    (await api().inject({ method: 'GET', url: `/nodes/${nodeId}`, headers: auth() })).json<{
+      node: NodeView;
+    }>().node;
+  const settings = (nodeId: string, payload: Record<string, unknown>) =>
+    api().inject({
+      method: 'POST',
+      url: `/nodes/${nodeId}/settings`,
+      headers: auth(),
+      payload,
+    });
+
+  /** Узел, установленный с заданного адреса: ключ узла привязан к адресу установки. */
+  async function enrolledFrom(remoteAddress: string) {
+    const provisioned = await provision();
+    const response = await api().inject({
+      method: 'POST',
+      url: '/node/enroll',
+      headers: bearer(tokenOf(provisioned)),
+      remoteAddress,
+      payload: { hostname: `node-ip-${String(counter)}`, agentVersion: '1.0.0' },
+    });
+    expect(response.statusCode).toBe(200);
+    const enrolled = response.json<Enrolled>();
+    return {
+      nodeId: provisioned.node.id,
+      presented: `${enrolled.key.key_id}.${enrolled.key.secret}`,
+    };
+  }
+
+  it('адрес берётся из обращения узла сразу при установке; частный — не угадывается', async () => {
+    const outside = await enrolledFrom('203.0.113.7');
+    expect((await nodeOf(outside.nodeId)).sip_address).toBe('203.0.113.7');
+
+    const inside = await enrolledFrom('192.168.80.94');
+    expect((await nodeOf(inside.nodeId)).sip_address).toBeNull();
+    expect((await beat(inside.presented, '192.168.80.94')).statusCode).toBe(200);
+    expect((await nodeOf(inside.nodeId)).sip_address).toBeNull();
+  });
+
+  it('стёртый в настройках адрес определяется заново со следующим пульсом', async () => {
+    const node = await enrolledFrom('203.0.113.9');
+    const name = (await nodeOf(node.nodeId)).name;
+    expect((await settings(node.nodeId, { name, sipAddress: '' })).statusCode).toBe(201);
+    expect((await nodeOf(node.nodeId)).sip_address).toBeNull();
+
+    expect((await beat(node.presented, '203.0.113.9')).statusCode).toBe(200);
+    expect((await nodeOf(node.nodeId)).sip_address).toBe('203.0.113.9');
+  });
+
+  it('заданный адрес пульс не переписывает: правка администратора главнее', async () => {
+    const { nodeId, presented } = await enrolledFrom('203.0.113.8');
+    const name = (await nodeOf(nodeId)).name;
+    const saved = await settings(nodeId, { name, sipAddress: 'sip.zvonix.test' });
+    expect(saved.statusCode).toBe(201);
+    expect((await beat(presented, '203.0.113.8')).statusCode).toBe(200);
+    expect((await nodeOf(nodeId)).sip_address).toBe('sip.zvonix.test');
+  });
+
+  it('название и адрес меняются в настройках, и это видно в журнале', async () => {
+    const { nodeId } = await enrolledNode();
+    const renamed = `Москва-${String(Date.now())}`;
+    const saved = await settings(nodeId, { name: renamed, sipAddress: '198.51.100.4:5070' });
+    expect(saved.statusCode).toBe(201);
+    expect(saved.json<{ node: NodeView }>().node).toMatchObject({
+      name: renamed,
+      sip_address: '198.51.100.4:5070',
+    });
+    const journal = await withDatabase(async (execute) =>
+      execute(
+        sql`select after from audit_log where entity_id = ${nodeId} and action = 'node.settings_changed'`,
+      ),
+    );
+    expect(journal.rows.at(-1)).toMatchObject({
+      after: { name: renamed, sip_address: '198.51.100.4:5070' },
+    });
+
+    // Адрес со схемой или путём — не адрес SIP.
+    expect(
+      (await settings(nodeId, { name: renamed, sipAddress: 'http://1.2.3.4/x' })).statusCode,
+    ).toBe(400);
+  });
+});
+
+describe('проверка адреса SIP по DNS (ADR-0113, ревизия)', () => {
+  it('отвечает вердиктом и запиcью, которую завести; вводимый адрес проверяется до сохранения', async () => {
+    const provisioned = await provision();
+    const enrolled = await api().inject({
+      method: 'POST',
+      url: '/node/enroll',
+      headers: bearer(tokenOf(provisioned)),
+      remoteAddress: '203.0.113.20',
+      payload: { hostname: `node-dns-${String(counter)}`, agentVersion: '1.0.0' },
+    });
+    expect(enrolled.statusCode).toBe(200);
+    const id = provisioned.node.id;
+
+    // Узел установлен с публичного адреса — он и стал адресом SIP: указан IP узла.
+    const saved = await api().inject({
+      method: 'GET',
+      url: `/nodes/${id}/sip-check`,
+      headers: auth(),
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json<{ check: { verdict: string; expected: string[] } }>().check).toMatchObject({
+      verdict: 'ip',
+      expected: ['203.0.113.20'],
+    });
+
+    // Чужой IP, введённый в окне, — не адрес узла.
+    const typed = await api().inject({
+      method: 'GET',
+      url: `/nodes/${id}/sip-check?address=198.51.100.9`,
+      headers: auth(),
+    });
+    expect(typed.json<{ check: { verdict: string } }>().check.verdict).toBe('ip_mismatch');
+
+    // Список узлов сразу несёт отметку проверки.
+    const list = await api().inject({ method: 'GET', url: '/nodes', headers: auth() });
+    const row = list
+      .json<{
+        nodes: { id: string; sip_check: { verdict: string } | null; last_address: string | null }[];
+      }>()
+      .nodes.find((node) => node.id === id);
+    expect(row?.sip_check?.verdict).toBe('ip');
+    expect(row?.last_address).toBe('203.0.113.20');
   });
 });

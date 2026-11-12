@@ -24,6 +24,8 @@ import { moment } from '@/lib/format';
 import { NODE_STATUS_MEANING, NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
 import { AllowedIpsField, parseAddresses } from './allowed-ips';
 import { NewNodeForm, type NodeDraft } from './new-node-form';
+import { NodeSettingsForm, type NodeSettingsDraft } from './node-settings';
+import { SipCheckBadge, type SipCheck } from './sip-check';
 
 const COLUMNS = 8;
 
@@ -32,6 +34,8 @@ interface Node {
   readonly name: string;
   readonly hostname: string | null;
   readonly sip_address: string | null;
+  /** Проверка адреса SIP по DNS (ADR-0113, ревизия); у удалённого узла — `null`. */
+  readonly sip_check?: SipCheck | null;
   readonly status: NodeStatus;
   readonly agent_version: string | null;
   /** Версия набора на узле (ADR-0068); пусто — узел её не присылает. */
@@ -109,6 +113,15 @@ function NodesView() {
       remember(provisioned);
       await refresh();
     },
+  });
+
+  const saveSettings = useMutation({
+    mutationFn: (input: { id: string; draft: NodeSettingsDraft }) =>
+      request<{ node: Node }>(`/nodes/${input.id}/settings`, {
+        method: 'POST',
+        body: { name: input.draft.name, sipAddress: input.draft.sipAddress },
+      }),
+    onSuccess: refresh,
   });
 
   // Вывод из эксплуатации идёт через подтверждение, и его отказ показывается там же:
@@ -226,6 +239,7 @@ function NodesView() {
                 busy={busy}
                 canChange={canChange}
                 onReissue={(allowedIps) => reissue.mutateAsync({ id: node.id, allowedIps })}
+                onSaveSettings={(draft) => saveSettings.mutateAsync({ id: node.id, draft })}
                 onDecommission={() => decommission.mutateAsync(node.id)}
               />
             ))}
@@ -242,6 +256,7 @@ function NodeRows({
   busy,
   canChange,
   onReissue,
+  onSaveSettings,
   onDecommission,
 }: {
   node: Node;
@@ -249,6 +264,7 @@ function NodeRows({
   busy: boolean;
   canChange: boolean;
   onReissue: (allowedIps: string[]) => Promise<unknown>;
+  onSaveSettings: (draft: NodeSettingsDraft) => Promise<unknown>;
   onDecommission: () => Promise<unknown>;
 }) {
   const closed = node.status === 'decommissioned';
@@ -273,12 +289,19 @@ function NodeRows({
 
       <TableCell>
         {node.sip_address === null ? (
-          <span className="text-faint">не задан</span>
+          // Без адреса партнёрам и клиентам подключаться некуда (ADR-0113) — это не мелочь, а причина тишины.
+          <span
+            className="text-warn"
+            title="Площадка определяет адрес по сигналам узла; узел за NAT или с частным адресом — задайте адрес в «Настройках»"
+          >
+            не задан — GOIP подключать некуда
+          </span>
         ) : (
           <span className="num" translate="no">
             {node.sip_address}
           </span>
         )}
+        <SipCheckBadge check={node.sip_check ?? null} />
       </TableCell>
 
       <TableCell className="num text-right">{node.active_calls}</TableCell>
@@ -330,6 +353,18 @@ function NodeRows({
         */}
         {canChange && !closed && (
           <div className="flex justify-end gap-2">
+            <FormDialog
+              label="Настройки"
+              title={`Настройки узла «${node.name}»`}
+              variant="outline"
+              disabled={busy}
+            >
+              <NodeSettingsForm
+                nodeId={node.id}
+                initial={{ name: node.name, sipAddress: node.sip_address ?? '' }}
+                onSave={onSaveSettings}
+              />
+            </FormDialog>
             <FormDialog
               label="Новая команда"
               title={`Новая команда установки для «${node.name}»`}

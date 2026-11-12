@@ -1,0 +1,1 @@
+ALTER TABLE "nodes" ADD COLUMN "last_address" text;
