@@ -19,6 +19,7 @@ import {
   type CallPace,
   type CallPaceSettings,
   type Id,
+  variedDailyLimit,
 } from '@zvonix/shared';
 import { SettingsService } from '../settings/settings.service.js';
 import { CallRepository, type Executor, type NumberAttempts } from './call.repository.js';
@@ -162,6 +163,11 @@ function paceOf(
   const awake = callPace(settings, warmupDay, Math.max(1, sleep.awake), poor, braked);
   const pace: CallPace = {
     ...full,
+    // Разный предел по дням (ADR-0116): своя доля у номера на каждую дату по Москве.
+    perDay:
+      full.perDay === null
+        ? null
+        : variedDailyLimit(full.perDay, number.id, now, settings.dailyVariationPercent),
     perHour: awake.perHour,
     distinctPerHour: awake.distinctPerHour,
     numbers: awake.numbers,

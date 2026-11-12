@@ -55,6 +55,7 @@ describe('прогрев номера', () => {
       brakeSuspensions: 0,
       brakePercent: 50,
       trunkCallsPerSecond: 0,
+      dailyVariationPercent: 0,
     };
     const common = {
       numbers: 1,
@@ -108,6 +109,7 @@ describe('прогрев номера', () => {
       brakeSuspensions: 0,
       brakePercent: 50,
       trunkCallsPerSecond: 0,
+      dailyVariationPercent: 0,
     };
     expect(callPace(off, null)).toEqual({
       numbers: 1,
@@ -188,6 +190,7 @@ describe('пауза номера после вызова (ADR-0106)', () => {
         brakeSuspensions: 0,
         brakePercent: 50,
         trunkCallsPerSecond: 0,
+        dailyVariationPercent: 0,
       }),
     ).toBe(135_000);
   });
@@ -235,6 +238,7 @@ describe('сон номера и «плохой» номер (ADR-0107)', () => 
       brakeSuspensions: 2,
       brakePercent: 50,
       trunkCallsPerSecond: 1,
+      dailyVariationPercent: 0,
     };
     expect(callPace(settings, null, 1, true)).toMatchObject({
       poor: true,
@@ -261,6 +265,7 @@ describe('автоторможение, сон номеров транка, ро
     brakeSuspensions: 2,
     brakePercent: 50,
     trunkCallsPerSecond: 1,
+    dailyVariationPercent: 0,
   };
 
   it('заторможенный номер — половина пределов; вместе с «плохим» — четверть, не ниже единицы', () => {

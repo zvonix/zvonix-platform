@@ -82,6 +82,11 @@ export interface CallPaceSettings {
   readonly warmupEnabled: boolean;
   readonly perHour: number;
   readonly perDay: number;
+  /**
+   * Разный предел по дням ([ADR-0116](../../../docs/adr/0116-raznyy-sutochnyy-predel-po-dnyam.md)): предел дня ниже на
+   * долю до этого процента, свою у номера; 0 — каждый день одинаково.
+   */
+  readonly dailyVariationPercent: number;
   /** Пауза номера после конца вызова, секунд ([ADR-0106](../../../docs/adr/0106-rovnyy-temp-nomera-i-abonenty.md)). */
   readonly pauseSeconds: number;
   /** То же, пока номер на прогреве. */

@@ -81,3 +81,26 @@ export function sleepUntil(key: string, hours: number, now: Date): Date | null {
   const minuteStart = now.getTime() - (now.getTime() % 60_000);
   return new Date(minuteStart + (length - into) * 60_000);
 }
+
+/**
+ * Разный суточный предел по дням ([ADR-0116](../../../docs/adr/0116-raznyy-sutochnyy-predel-po-dnyam.md)): одно и то же
+ * число каждый день — признак программы. Предел дня ниже `limit` на долю от 0 до `percent` %, свою у ключа (номер,
+ * аккаунт) на каждую дату по Москве. Только вниз: верх остаётся настроенным. Ноль остаётся нулём (первые сутки прогрева
+ * MAX), положительный не падает ниже 1.
+ */
+export const DAILY_VARIATION_MAX_PERCENT = 90;
+
+const MOSCOW_DATE = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SLEEP_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+export function variedDailyLimit(limit: number, key: string, now: Date, percent: number): number {
+  if (limit <= 0 || percent <= 0) return limit;
+  const share =
+    Math.min(percent, DAILY_VARIATION_MAX_PERCENT) *
+    paceJitter(`${key}:day:${MOSCOW_DATE.format(now)}`);
+  return Math.max(1, Math.round((limit * (100 - share)) / 100));
+}

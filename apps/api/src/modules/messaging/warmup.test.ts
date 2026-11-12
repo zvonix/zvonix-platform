@@ -123,7 +123,14 @@ describe('прогрев и молчание аккаунта (ADR-0078, рев�
 });
 
 describe('рекомендованная работа (ADR-0088)', () => {
-  const profile = { paceSeconds: 20, perMinute: 2, perHour: 15, perDay: 80, sleepHours: 0 };
+  const profile = {
+    paceSeconds: 20,
+    perMinute: 2,
+    perHour: 15,
+    perDay: 80,
+    sleepHours: 0,
+    dailyVariationPercent: 0,
+  };
   const own = (overrides: Record<string, unknown> = {}) => ({
     recommended: true,
     limitPerMinute: null as number | null,
@@ -152,9 +159,17 @@ describe('рекомендованная работа (ADR-0088)', () => {
         perHour: 0,
         perDay: 0,
         sleepHours: 0,
+        dailyVariationPercent: 0,
       }),
     ).toMatchObject({ limitPerMinute: null, limitPerHour: null, limitPerDay: null });
-    const zeros = { paceSeconds: 0, perMinute: 0, perHour: 0, perDay: 0, sleepHours: 0 };
+    const zeros = {
+      paceSeconds: 0,
+      perMinute: 0,
+      perHour: 0,
+      perDay: 0,
+      sleepHours: 0,
+      dailyVariationPercent: 0,
+    };
     const tariffOnly = own({ limitPerMinute: 1 });
     expect(withRecommended(tariffOnly, zeros)).toBe(tariffOnly);
     const off = own({ recommended: false, limitPerMinute: 50 });
@@ -234,7 +249,14 @@ describe('почему аккаунт на паузе — для таблиц п
 
 describe('сон аккаунта (ADR-0107)', () => {
   it('спящий аккаунт ждёт до пробуждения; сон у всех аккаунтов, даже без галочки', () => {
-    const profile = { paceSeconds: 0, perMinute: 0, perHour: 0, perDay: 0, sleepHours: 12 };
+    const profile = {
+      paceSeconds: 0,
+      perMinute: 0,
+      perHour: 0,
+      perDay: 0,
+      sleepHours: 12,
+      dailyVariationPercent: 0,
+    };
     const base = { ...account(), recommended: false };
     const sleepy = withRecommended(base, profile);
     // Полсуток сна в полосе 20:00–08:00 МСК: в 02:00 МСК (23:00 UTC) спит любой аккаунт.
@@ -248,5 +270,49 @@ describe('сон аккаунта (ADR-0107)', () => {
     });
     const awake = withRecommended(base, { ...profile, sleepHours: 0 });
     expect(accountReadyAt(awake, load({}), night, options)).toBeUndefined();
+  });
+});
+
+describe('разный суточный предел аккаунта по дням (ADR-0116)', () => {
+  it('предел дня — от 70 % до заданного; без разброса — ровно заданный', () => {
+    const daily = (day: number) =>
+      effectiveLimits(
+        account({ limitPerDay: 80, dailyVariationPercent: 30 }),
+        new Date(`2026-10-${String(day).padStart(2, '0')}T10:00:00Z`),
+      ).daily ?? -1;
+    const seen = new Set<number>();
+    for (let day = 1; day <= 28; day += 1) {
+      expect(daily(day)).toBeGreaterThanOrEqual(56);
+      expect(daily(day)).toBeLessThanOrEqual(80);
+      seen.add(daily(day));
+    }
+    expect(seen.size).toBeGreaterThan(3);
+    expect(effectiveLimits(account({ limitPerDay: 80 }), NOW).daily).toBe(80);
+  });
+
+  it('первые сутки прогрева остаются нулём, часовая доля — от предела дня', () => {
+    const warming = account({
+      warmupEnabled: true,
+      warmupStartedAt: new Date('2026-10-14T00:00:00Z'),
+      limitPerDay: 500,
+      dailyVariationPercent: 30,
+    });
+    expect(effectiveLimits(warming, NOW).daily).toBe(0);
+  });
+
+  it('разброс профиля площадки ложится на все аккаунты, как сон', () => {
+    const profile = {
+      paceSeconds: 0,
+      perMinute: 0,
+      perHour: 0,
+      perDay: 0,
+      sleepHours: 0,
+      dailyVariationPercent: 30,
+    };
+    const base = { ...account({ limitPerDay: 80 }), recommended: false };
+    expect(withRecommended(base, profile).dailyVariationPercent).toBe(30);
+    expect(
+      withRecommended(base, { ...profile, dailyVariationPercent: 0 }).dailyVariationPercent,
+    ).toBeUndefined();
   });
 });
