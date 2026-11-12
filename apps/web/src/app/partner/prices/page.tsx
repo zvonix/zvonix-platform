@@ -106,7 +106,7 @@ function TariffCard({
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: PARTNER_RATES_KEY });
   const seconds = data.reference_call_seconds;
-  const columns = data.bands_enabled ? 6 : 5;
+  const columns = data.bands_enabled ? 7 : 6;
   // Общая цена — первой: исключения читаются относительно неё.
   const ordered = [...rates].sort(
     (left, right) => Number(left.operator_id !== null) - Number(right.operator_id !== null),
@@ -125,7 +125,12 @@ function TariffCard({
           </span>
         )}
         <div className="ml-auto flex flex-wrap gap-2">
-          <SetPrice tariff={tariff} operators={data.operators} bandsEnabled={data.bands_enabled} />
+          <SetPrice
+            tariff={tariff}
+            rates={rates}
+            operators={data.operators}
+            bandsEnabled={data.bands_enabled}
+          />
           <RenameTariff tariff={tariff} />
           {!tariff.is_default && <MakeDefault tariff={tariff} />}
           {!tariff.is_default && (
@@ -158,6 +163,9 @@ function TariffCard({
               <TableHead className="h-8">Как считается</TableHead>
               <TableHead className="h-8 text-right">Вызов {seconds} с</TableHead>
               {data.bands_enabled && <TableHead className="h-8">Коридор</TableHead>}
+              <TableHead className="h-8">
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -208,6 +216,15 @@ function TariffCard({
                     )}
                   </TableCell>
                 )}
+                <TableCell className="text-right">
+                  <SetPrice
+                    tariff={tariff}
+                    rates={rates}
+                    rate={rate}
+                    operators={data.operators}
+                    bandsEnabled={data.bands_enabled}
+                  />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

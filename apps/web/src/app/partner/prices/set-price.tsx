@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
 import { TERMINATION_KIND_NAME } from '@/lib/labels';
 import { bandRange, money, numberFromInput } from '@/lib/money';
-import { PARTNER_RATES_KEY, type OperatorChoice, type Tariff } from '@/lib/tariffs';
+import { PARTNER_RATES_KEY, type OperatorChoice, type Rate, type Tariff } from '@/lib/tariffs';
 
 /** Значение пункта «Все операторы» в списке: цена без оператора (ADR-0056). */
 const ALL_OPERATORS = '*';
@@ -35,6 +35,47 @@ const EMPTY: Draft = {
   minimumDurationSeconds: '0',
 };
 
+/** Сумма из машинного вида (`0.2`) — так, как её пишет человек (`0,2`). */
+const typed = (amount: string): string => amount.replace('.', ',');
+
+/** Цена тарифа на это направление: оператор (или все), способ и регион (пустой — любой). */
+function rateFor(rates: readonly Rate[], draft: Draft): Rate | undefined {
+  const region = draft.region.trim().toLowerCase();
+  return rates.find(
+    (rate) =>
+      (rate.operator_id ?? ALL_OPERATORS) === draft.operatorId &&
+      rate.termination_kind === draft.terminationKind &&
+      (rate.region ?? '').toLowerCase() === region,
+  );
+}
+
+/**
+ * Поля под направление: у которого цена уже есть — её числа, чтобы человек правил назначенное, а не вводил заново
+ * (владелец, 2026-11-12: «за соединение есть оплата, жму настроить — её нет»); у нового — то, что уже введено.
+ */
+function withPrices(rates: readonly Rate[], direction: Draft): Draft {
+  const rate = rateFor(rates, direction);
+  // Нового направления нет в тарифе — введённое остаётся: регион набирают по букве, и стирать цену на каждой нельзя.
+  if (rate === undefined) return direction;
+  return {
+    ...direction,
+    pricePerMinute: typed(rate.price_per_minute),
+    connectionFee: rate.connection_fee === '0' ? '' : typed(rate.connection_fee),
+    billingIncrementSeconds: String(rate.billing_increment_seconds),
+    minimumDurationSeconds: String(rate.minimum_duration_seconds),
+  };
+}
+
+/** Направление строки тарифа — чтобы окно открылось на нём. */
+function directionOf(rate: Rate): Draft {
+  return {
+    ...EMPTY,
+    operatorId: rate.operator_id ?? ALL_OPERATORS,
+    terminationKind: rate.termination_kind,
+    region: rate.region ?? '',
+  };
+}
+
 /**
  * Назначение цены в тарифе ([ADR-0056](../../../../../../docs/adr/0056-tarify-partnyora.md)).
  *
@@ -49,21 +90,28 @@ const EMPTY: Draft = {
  */
 export function SetPrice({
   tariff,
+  rates,
   operators,
   bandsEnabled,
+  rate,
 }: {
   tariff: Tariff;
+  /** Цены тарифа: окно подставляет назначенную, если направление совпало. */
+  rates: readonly Rate[];
   operators: readonly OperatorChoice[];
   bandsEnabled: boolean;
+  /** Строка, из которой открыто окно: направление и её числа. Пусто — кнопка тарифа «Назначить цену». */
+  rate?: Rate;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
   return (
     <FormDialog
-      label="Назначить цену"
+      label={rate === undefined ? 'Назначить цену' : 'Изменить'}
       title={`Цена в тарифе «${tariff.name}»`}
-      size="sm"
+      size={rate === undefined ? 'sm' : 'xs'}
+      variant={rate === undefined ? 'default' : 'ghost'}
       open={open}
       onOpenChange={(next) => {
         // Пока цена отправляется, окно не закрывается: иначе ответ пришёл бы в пустоту.
@@ -72,6 +120,8 @@ export function SetPrice({
     >
       <PriceForm
         tariff={tariff}
+        rates={rates}
+        initial={rate === undefined ? EMPTY : directionOf(rate)}
         operators={operators}
         bandsEnabled={bandsEnabled}
         onPending={setPending}
@@ -91,19 +141,28 @@ export function SetPrice({
  */
 function PriceForm({
   tariff,
+  rates,
+  initial,
   operators,
   bandsEnabled,
   onPending,
   onSaved,
 }: {
   tariff: Tariff;
+  rates: readonly Rate[];
+  initial: Draft;
   operators: readonly OperatorChoice[];
   bandsEnabled: boolean;
   onPending: (pending: boolean) => void;
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<Draft>(EMPTY);
+  const [draft, setDraft] = useState<Draft>(() => withPrices(rates, initial));
+  // Направление сменилось — поля под него: назначенная цена или пустые.
+  const redirect = (direction: Draft): void => {
+    setDraft(withPrices(rates, direction));
+  };
+  const existing = rateFor(rates, draft);
 
   const everyone = draft.operatorId === ALL_OPERATORS;
   const chosen = operators.find((operator) => operator.operator_id === draft.operatorId);
@@ -154,7 +213,7 @@ function PriceForm({
             autoFocus
             value={draft.operatorId}
             onChange={(event) => {
-              setDraft({ ...draft, operatorId: event.target.value });
+              redirect({ ...draft, operatorId: event.target.value });
             }}
             className="h-9 w-full rounded-md border border-input bg-transparent px-2"
           >
@@ -171,7 +230,7 @@ function PriceForm({
           <select
             value={draft.terminationKind}
             onChange={(event) => {
-              setDraft({ ...draft, terminationKind: event.target.value as TerminationKind });
+              redirect({ ...draft, terminationKind: event.target.value as TerminationKind });
             }}
             className="h-9 w-full rounded-md border border-input bg-transparent px-2"
           >
@@ -189,7 +248,7 @@ function PriceForm({
             placeholder="любой"
             autoComplete="off"
             onChange={(event) => {
-              setDraft({ ...draft, region: event.target.value });
+              redirect({ ...draft, region: event.target.value });
             }}
           />
         </DialogField>
@@ -247,6 +306,13 @@ function PriceForm({
         </DialogField>
 
         <BandNote everyone={everyone} chosen={chosen} bandsEnabled={bandsEnabled} />
+
+        {existing !== undefined && (
+          <p className="text-muted-foreground sm:col-span-2">
+            Цена на это направление уже назначена — в полях она. Новая заменит её с этой минуты;
+            звонки по прежней цене не пересчитываются.
+          </p>
+        )}
 
         {save.error !== null && (
           <div className="sm:col-span-2">
