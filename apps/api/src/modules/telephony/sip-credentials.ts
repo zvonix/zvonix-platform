@@ -12,7 +12,7 @@
  * где-то ещё. MD5 здесь — требование протокола SIP, а не выбор.
  */
 
-import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 
 /** Длина случайной части имени учётной записи. */
 const USERNAME_CHARS = 12;
@@ -20,8 +20,17 @@ const USERNAME_CHARS = 12;
 /** Алфавит имени: строчные буквы и цифры. Имя попадает в заголовки SIP и в логи узла. */
 const USERNAME_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
-/** 24 байта в base64url — 32 символа. Пароль вводит человек в веб-интерфейс шлюза. */
-const PASSWORD_BYTES = 24;
+/** Длина пароля: 32 знака из 55 — около 185 бит, против прежних 192 у base64url: запас тот же по сути. */
+const PASSWORD_CHARS = 32;
+
+/**
+ * Алфавит пароля: только буквы и цифры, без похожих (`0 O o 1 l I L`).
+ *
+ * Пароль переносит человек — в веб-интерфейс GOIP или софтфон. В base64url были `-` и `_`, и выделение
+ * мышью рвало пароль на них: двойной щелчок брал слово до знака, в GOIP попадала часть, линия получала
+ * «неверный пароль» при верных настройках (владелец, 2026-11-12).
+ */
+const PASSWORD_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 
 /** `port` — вход линии GOIP в режиме «каждая линия отдельно» (ADR-0054). */
 export type SipPrincipalKind = 'gateway' | 'channel' | 'port';
@@ -61,7 +70,10 @@ export function issueSipCredentials(kind: SipPrincipalKind, realm: string): SipC
  * (владелец, 2026-09-25). Имя не секрет — секрет пароль, и утечку закрывает он.
  */
 export function renewSipPassword(username: string, realm: string): SipCredentials {
-  const password = randomBytes(PASSWORD_BYTES).toString('base64url');
+  let password = '';
+  for (let i = 0; i < PASSWORD_CHARS; i += 1) {
+    password += PASSWORD_ALPHABET.charAt(randomInt(PASSWORD_ALPHABET.length));
+  }
   return { username, password, a1Hash: a1Hash(username, realm, password) };
 }
 

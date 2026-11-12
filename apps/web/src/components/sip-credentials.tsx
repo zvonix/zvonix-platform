@@ -4,6 +4,7 @@ import { goipLinePrefix } from '@zvonix/shared';
 import type { ReactNode } from 'react';
 import { OneTimeSecret } from '@/components/one-time-secret';
 import { SipServer } from '@/components/sip-server';
+import { CopyButton } from '@/components/copy-button';
 
 export interface SipAccount {
   readonly username: string;
@@ -55,9 +56,15 @@ export function SipCredentials({
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         <dt className="text-muted-foreground">Имя</dt>
-        <dd className="num select-all">{account.username}</dd>
+        <dd className="flex items-center gap-1">
+          <span className="num select-all">{account.username}</span>
+          <CopyButton value={account.username} label="Скопировать имя" />
+        </dd>
         <dt className="text-muted-foreground">Пароль</dt>
-        <dd className="num select-all">{account.password}</dd>
+        <dd className="flex items-center gap-1">
+          <span className="num select-all">{account.password}</span>
+          <CopyButton value={account.password} label="Скопировать пароль" />
+        </dd>
         <dt className="text-muted-foreground">Сервер</dt>
         <dd>
           <SipServer server={account.server} />
@@ -131,8 +138,24 @@ export function LineCredentials({
             {lines.map((line) => (
               <tr key={line.port_id}>
                 <td className="num pr-4">Line {line.port_number}</td>
-                <td className="num select-all pr-4">{line.username}</td>
-                <td className="num select-all pr-4">{line.password}</td>
+                <td className="pr-4">
+                  <span className="num select-all">{line.username}</span>
+                  <CopyButton
+                    value={line.username}
+                    label={`Скопировать Authentication ID линии ${String(line.port_number)}`}
+                  />
+                </td>
+                <td className="pr-4">
+                  {/*
+                    Кнопкой, а не выделением мышью: выделение рвало пароль, и в GOIP попадала его часть —
+                    «неверный пароль» при верных настройках (владелец, 2026-11-12).
+                  */}
+                  <span className="num select-all">{line.password}</span>
+                  <CopyButton
+                    value={line.password}
+                    label={`Скопировать пароль линии ${String(line.port_number)}`}
+                  />
+                </td>
                 <td className="num select-all">{goipLinePrefix(line.port_number)}</td>
               </tr>
             ))}
