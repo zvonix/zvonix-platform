@@ -15,6 +15,7 @@ import { CurrentMachine } from '../../http/request-context.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
 import { directoryRequestSchema } from './schemas.js';
+import { sipGatewaysXml } from './sip-gateways-xml.js';
 import { TelephonyService } from './telephony.service.js';
 
 @Controller('node')
@@ -51,7 +52,8 @@ export class NodeDirectoryController {
    * ([ADR-0019](../../../../../docs/adr/0019-dostup-mashin.md)). В ответы человеку
    * пароль не попадает никогда.
    *
-   * Ответ JSON, а не XML: конфигурацию sofia собирает агент узла, а не `mod_xml_curl`.
+   * Ответ JSON — для будущего агента узла. Нынешний узел берёт тот же список готовым файлом,
+   * `GET /node/sip-gateways.xml` ниже.
    */
   @Machine('node')
   @Get('sip-gateways')
@@ -74,6 +76,19 @@ export class NodeDirectoryController {
         password: row.password,
       })),
     };
+  }
+
+  /**
+   * Те же транки готовым файлом `zvonix-gateways/*.xml` для FreeSWITCH
+   * ([ADR-0118](../../../../../docs/adr/0118-uzel-zabiraet-tranki-gotovym-xml.md)).
+   * Забирает пульс узла раз в 30 с и при изменении подхватывает без перезапуска профиля.
+   */
+  @Machine('node')
+  @Get('sip-gateways.xml')
+  @Header('Content-Type', 'text/xml; charset=utf-8')
+  @Header('Cache-Control', 'no-store')
+  async sipGatewaysFile(@CurrentMachine() machine: MachinePrincipal): Promise<string> {
+    return sipGatewaysXml(await this.telephony.nodeTrunks(parseId(machine.ownerId, 'node')));
   }
 
   @Machine('node')

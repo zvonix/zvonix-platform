@@ -45,7 +45,26 @@ SIP-транки, привязанные к этому узлу ([ADR-0039](../a
 быть поднятым при следующем же обновлении конфигурации — тем же способом, каким его шлюз
 перестаёт находиться в каталоге.
 
-Ответ JSON, а не XML: конфигурацию sofia собирает агент узла, а не `mod_xml_curl`.
+Ответ JSON — для будущего агента узла. Нынешний узел берёт тот же список готовым файлом.
+
+## `GET /node/sip-gateways.xml` — ключ узла
+
+Те же транки готовым файлом FreeSWITCH ([ADR-0118](../adr/0118-uzel-zabiraet-tranki-gotovym-xml.md)).
+Пульс узла забирает его раз в 30 с в `zvonix-gateways/zvonix.xml`.
+
+`200`, `text/xml`:
+
+```xml
+<include>
+<gateway name="gw-a1b2c3d4e5f6"><param name="proxy" value="sip.provider.ru:5060"/><param name="realm" value="sip.provider.ru"/><param name="register" value="true"/><param name="username" value="zvonix-01"/><param name="password" value="…"/><param name="expire-seconds" value="600"/><param name="retry-seconds" value="30"/><param name="caller-id-in-from" value="false"/></gateway>
+</include>
+```
+
+**Один транк — одна строка**, переводы строк внутри значений экранированы: по строкам узел видит,
+какой транк пропал или изменился, и снимает его (`killgw`) перед `reloadxml` и `sofia profile zvonix rescan`.
+Без регистрации `username` — `zvonix`: FreeSWITCH без него gateway не поднимает. Транков нет —
+пустой `<include>`. Ответ не начинается с `<include>` или не кончается `</include>` — узел оставляет
+прежний файл.
 
 ## Из чего следует форма этого контракта
 

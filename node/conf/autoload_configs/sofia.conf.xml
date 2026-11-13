@@ -12,8 +12,8 @@
   <profiles>
     <profile name="zvonix">
       <!--
-        Транки к партнёрам по SIP (ADR-0039): их собирает агент узла по
-        GET /node/sip-gateways в каталог zvonix-gateways/. Агента ещё нет — каталог пуст.
+        Транки к партнёрам по SIP (ADR-0039): файл zvonix-gateways/zvonix.xml забирает
+        пульс узла из GET /node/sip-gateways.xml и подхватывает без перезапуска (ADR-0118).
       -->
       <gateways>
         <X-PRE-PROCESS cmd="include" data="../zvonix-gateways/*.xml"/>
