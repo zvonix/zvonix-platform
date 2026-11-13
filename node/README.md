@@ -243,8 +243,9 @@ control plane.
 ([ADR-0039](../docs/adr/0039-terminaciya-cherez-sip-trank.md)), но **живого провайдера
 не видела**. Предстоит выяснить:
 
-- принимает ли FreeSWITCH конфигурацию исходящих sofia-gateway, собранную агентом
-  из `GET /node/sip-gateways`, без перезапуска профиля;
+- поднимает ли `reloadxml` + `sofia profile zvonix rescan` транки из `GET /node/sip-gateways.xml`,
+  которые пульс узла кладёт в `zvonix-gateways/zvonix.xml` ([ADR-0118](../docs/adr/0118-uzel-zabiraet-tranki-gotovym-xml.md)),
+  без перезапуска профиля;
 - как ведёт себя `sofia/gateway/<имя>/<номер>` при `407 Proxy Authentication Required`
   от провайдера: перебирает ли `bridge` следующего кандидата или прекращает перебор;
 - что провайдер отвечает при превышении купленной ёмкости и попадает ли этот код

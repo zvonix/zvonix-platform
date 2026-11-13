@@ -355,7 +355,7 @@ stage_conf() {
 }
 
 stage_conf
-# Транки к партнёрам по SIP собирает агент узла сюда (ADR-0039); пока агента нет, пусто.
+# Транки к партнёрам по SIP (ADR-0039) кладёт сюда пульс узла (ADR-0118); при обновлении каталог переносится.
 install -d -m 0750 "${STAGE}/zvonix-gateways"
 
 find "$STAGE" -type f -name '*.xml' -exec sed -i \
@@ -643,6 +643,9 @@ install -d -m 0700 "$NODE_ETC"
 # Кто вошёл на узел (ADR-0114, POST /node/registrations): тот же ключ, другой адрес.
 ( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/registrations"\n' \
   "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/registrations.curl" )
+# SIP-провайдеры партнёров (ADR-0118, GET /node/sip-gateways.xml): тот же ключ, другой адрес.
+( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/sip-gateways.xml"\n' \
+  "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/sip-gateways.curl" )
 
 cat >/usr/local/sbin/zvonix-heartbeat <<HEARTBEAT
 #!/bin/sh
@@ -666,6 +669,34 @@ if [ -n "\$LOAD" ] && [ -n "\$CORES" ] && [ -n "\$MEMT" ] && [ -n "\$MEMA" ] && 
 fi
 "${FS_CLI}" -x 'sofia status' 2>/dev/null \\
   | grep -qE '^[[:space:]]*zvonix[[:space:]]+profile[[:space:]].*RUNNING' || DEGRADED=true
+# SIP-провайдеры партнёров (ADR-0118): площадка отдаёт готовый файл sofia-gateway, по транку на строку.
+# Изменился — пропавшие и изменённые транки снимаются (killgw), профиль перечитывает остальное
+# (reloadxml + rescan) без перезапуска и без обрыва разговоров. Площадка недоступна или ответ
+# не похож на файл — прежний остаётся как есть: провайдеры не пропадают из-за сбоя связи.
+GW_FILE="${CONF_DIR}/zvonix-gateways/zvonix.xml"
+GW_NEW="${NODE_ETC}/sip-gateways.new"
+if curl -fsS --max-time 10 -K "${NODE_ETC}/sip-gateways.curl" -o "\$GW_NEW" 2>/dev/null \\
+  && [ "\$(head -n 1 "\$GW_NEW")" = '<include>' ] && [ "\$(tail -n 1 "\$GW_NEW")" = '</include>' ]; then
+  if ! cmp -s "\$GW_NEW" "\$GW_FILE"; then
+    if [ -f "\$GW_FILE" ]; then
+      grep '^<gateway ' "\$GW_FILE" | while IFS= read -r LINE; do
+        grep -qxF -- "\$LINE" "\$GW_NEW" && continue
+        NAME="\$(printf '%s' "\$LINE" | sed -n 's/^<gateway name="\([A-Za-z0-9._-]*\)".*/\1/p')"
+        [ -n "\$NAME" ] && "${FS_CLI}" -x "sofia profile zvonix killgw \$NAME" >/dev/null 2>&1
+      done
+      # Снятый gateway удаляется фоновым проходом sofia, а не сразу; rescan до него счёл бы
+      # изменённый транк уже существующим и оставил прежние настройки.
+      sleep 3
+    fi
+    install -d -m 0750 "\$(dirname "\$GW_FILE")"
+    chown freeswitch:freeswitch "\$GW_NEW" "\$(dirname "\$GW_FILE")" 2>/dev/null || true
+    chmod 0640 "\$GW_NEW"
+    mv -f "\$GW_NEW" "\$GW_FILE"
+    "${FS_CLI}" -x 'reloadxml' >/dev/null 2>&1
+    "${FS_CLI}" -x 'sofia profile zvonix rescan' >/dev/null 2>&1
+  fi
+fi
+rm -f "\$GW_NEW"
 # Кто вошёл на узел (ADR-0114). Площадка ходит в ESL только на своей машине и об узле на отдельном
 # сервере узнаёт лишь так; без этого вошедший GOIP в кабинете «не на связи». Поля url, token, hostname
 # и metadata площадке не нужны — вырезаются, чтобы список влезал в предел тела. FreeSWITCH не ответил —

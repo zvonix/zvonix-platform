@@ -272,6 +272,25 @@ describe('транк и каталог узла', () => {
     expect(registered?.password).toBe(PROVIDER_SECRET);
   }, 120_000);
 
+  it('узел получает его и готовым файлом FreeSWITCH (ADR-0118)', async () => {
+    const response = await get('/node/sip-gateways.xml', asNode());
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/xml');
+
+    const lines = response.body.trimEnd().split('\n');
+    expect(lines[0]).toBe('<include>');
+    expect(lines.at(-1)).toBe('</include>');
+    const line = lines.find((row) => row.startsWith(`<gateway name="${trunk.sip_username}">`));
+    expect(line).toContain('<param name="proxy" value="sip.provider.example:5070"/>');
+    expect(line).toContain('<param name="realm" value="sip.provider.example"/>');
+    expect(line).toContain('<param name="username" value="zvonix-01"/>');
+    expect(line).toContain(`<param name="password" value="${PROVIDER_SECRET}"/>`);
+  }, 120_000);
+
+  it('человеку файл транков узла недоступен', async () => {
+    expect((await get('/node/sip-gateways.xml')).statusCode).toBe(401);
+  }, 120_000);
+
   it('чужому узлу список не отдаётся', async () => {
     const other = await post('/nodes', { name: unique('Другой узел') });
     const command = other.json<{ install: { command: string } }>().install.command;
