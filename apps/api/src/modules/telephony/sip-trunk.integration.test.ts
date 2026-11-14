@@ -9,6 +9,7 @@
  */
 
 import { sql } from 'drizzle-orm';
+import { parseId } from '@zvonix/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import {
@@ -385,5 +386,70 @@ describe('правка транка', () => {
     const dump = JSON.stringify(entries);
     expect(dump).not.toContain(PROVIDER_SECRET);
     expect(dump).toContain('has_secret');
+  }, 120_000);
+});
+
+describe('цена провайдера и маршрут у клиента (ADR-0120)', () => {
+  it('провайдер с ценой «через SIP» — has_price и маршрут «SIP 1» у клиента', async () => {
+    const listed = await get(`/sip-trunks?partnerId=${partnerId}`);
+    const own = listed.json<{ trunks: (Trunk & { has_price: boolean })[] }>().trunks;
+    expect(own.length).toBeGreaterThan(0);
+    expect(own.every((row) => row.has_price)).toBe(true);
+
+    const { IdentityService } = await import('../identity/identity.service.js');
+    const { ClientRoutesService } = await import('./client-routes.service.js');
+    const viewer = await api().get(IdentityService).createByAdmin({
+      email: uniqueEmail(),
+      password: TEST_PASSWORD,
+      fullName: 'Диспетчер',
+      role: 'client',
+      status: 'active',
+    });
+    const routes = await api()
+      .get(ClientRoutesService)
+      .list(viewer.id, parseId(clientId, 'client'));
+    const trunkRoutes = routes.filter((route) => route.routeId === trunk.id);
+    expect(trunkRoutes).toHaveLength(1);
+    expect(trunkRoutes[0]).toMatchObject({ kind: 'sip', number: 1, configured: false });
+  }, 120_000);
+
+  it('провайдер без цены «через SIP» — has_price false, клиенту не предлагается', async () => {
+    const { IdentityService } = await import('../identity/identity.service.js');
+    const owner = await api().get(IdentityService).createByAdmin({
+      email: uniqueEmail(),
+      password: TEST_PASSWORD,
+      fullName: 'Владелец',
+      role: 'partner',
+      status: 'active',
+    });
+    const bare = (
+      await post('/partners', {
+        ownerUserId: owner.id,
+        name: 'Без цены',
+        displayName: unique('Партнёр'),
+      })
+    ).json<{ partner: { id: string } }>().partner.id;
+    await patch(`/partners/${bare}/status`, { status: 'verified' });
+    // Цена только у SIM: провайдеру она не годится.
+    await post('/partner-rates', {
+      partnerId: bare,
+      operatorId,
+      pricePerMinute: '1',
+      effectiveFrom: '2020-01-01T00:00:00.000Z',
+    });
+    const created = await post('/sip-trunks', {
+      partnerId: bare,
+      nodeId,
+      name: unique('Без цены'),
+      proxyHost: 'sip.noprice.example',
+      registersOutbound: false,
+    });
+    expect(created.statusCode).toBe(201);
+    const view = created.json<{ trunk: Trunk & { has_price: boolean } }>().trunk;
+    expect(view.has_price).toBe(false);
+
+    const { ClientRoutesService } = await import('./client-routes.service.js');
+    const routes = await api().get(ClientRoutesService).list(owner.id, parseId(clientId, 'client'));
+    expect(routes.some((route) => route.routeId === view.id)).toBe(false);
   }, 120_000);
 });

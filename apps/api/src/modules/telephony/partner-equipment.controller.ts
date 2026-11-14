@@ -36,6 +36,7 @@ import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
 import { CatalogService } from '../catalog/catalog.service.js';
+import { TariffService } from '../catalog/tariff.service.js';
 import type { Principal } from '../identity/identity.service.js';
 import {
   addPortSchema,
@@ -187,6 +188,8 @@ interface TrunkView {
   readonly unlimited: boolean;
   /** Партнёр попросил безлимит, решения ещё нет; пусто — не просил или решено. */
   readonly unlimited_requested_at: string | null;
+  /** Есть ли цена «через SIP» в тарифе транка: без неё клиенты через него не звонят (ADR-0120, п. 9). */
+  readonly has_price: boolean;
   readonly pace?: NumberPaceView;
 }
 
@@ -198,7 +201,27 @@ export class PartnerEquipmentController {
     private readonly catalog: CatalogService,
     private readonly quality: QualityService,
     private readonly pace: CallPaceService,
+    private readonly tariffs: TariffService,
   ) {}
+
+  private async trunkViews(
+    rows: readonly { gateway: GatewayRow; trunk: SipTrunkRow }[],
+    paceOf: (id: string) => NumberPaceView | undefined,
+    now: Date,
+  ): Promise<TrunkView[]> {
+    const priced = await this.tariffs.hasPrices(
+      rows.map(({ gateway }) => ({
+        partnerId: gateway.partnerId,
+        tariffId: gateway.tariffId,
+        terminationKind: 'sip',
+      })),
+      now,
+    );
+    return rows.map((row, index) => ({
+      ...toTrunkView(row, priced[index] === true),
+      ...withPace(paceOf(row.gateway.id)),
+    }));
+  }
 
   /** Входы линий с адресом узла — один запрос адреса на весь ответ. */
   private async portViews(accounts: readonly IssuedPortAccount[]): Promise<PortAccountView[]> {
@@ -284,9 +307,11 @@ export class PartnerEquipmentController {
     return {
       connection: { server: await this.telephony.sipServer(), port: NODE_SIP_PORT },
       gateways: gatewayViews,
-      trunks: trunks
-        .filter(({ gateway }) => gateway.status !== 'retired')
-        .map((row) => ({ ...toTrunkView(row), ...withPace(paceOf(row.gateway.id)) })),
+      trunks: await this.trunkViews(
+        trunks.filter(({ gateway }) => gateway.status !== 'retired'),
+        paceOf,
+        now,
+      ),
       spare_sims: sims
         .filter((sim) => !occupied.has(sim.id) && sim.status !== 'retired')
         .map(listed),
@@ -721,7 +746,10 @@ function connectionOf(
   };
 }
 
-function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): TrunkView {
+function toTrunkView(
+  row: { gateway: GatewayRow; trunk: SipTrunkRow },
+  hasPrice: boolean,
+): TrunkView {
   return {
     id: row.gateway.id,
     name: row.gateway.name,
@@ -738,6 +766,7 @@ function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): TrunkVie
     on_node: row.gateway.nodeId !== null,
     unlimited: row.trunk.unlimited,
     unlimited_requested_at: row.trunk.unlimitedRequestedAt?.toISOString() ?? null,
+    has_price: hasPrice,
   };
 }
 

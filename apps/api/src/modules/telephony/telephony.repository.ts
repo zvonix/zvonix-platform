@@ -22,6 +22,7 @@ import {
   channelAllowedOperators,
   channelPartnerPriorities,
   clientPartnerPriorities,
+  clientRoutePriorities,
   channels,
   clients,
   gatewayPorts,
@@ -802,7 +803,7 @@ export class TelephonyRepository {
     } = {},
   ): Promise<TrunkCandidate[]> {
     const { channelId } = options;
-    const priorities = priorityScope(channelId, 'sip', gateways.partnerId);
+    const priorities = priorityScope(channelId, 'sip', gateways.partnerId, gateways.id);
     const conditions: SQL[] = [
       eq(gateways.type, 'sip_trunk'),
       eq(gateways.status, 'active'),
@@ -845,6 +846,7 @@ export class TelephonyRepository {
         clientPartnerPriorities,
         channelId === undefined ? sql`false` : priorities.clientJoin,
       )
+      .leftJoin(clientRoutePriorities, channelId === undefined ? sql`false` : priorities.routeJoin)
       .where(and(...conditions))
       .orderBy(
         sql`coalesce(${priorities.priority}, 2147483647) asc`,
@@ -1397,7 +1399,7 @@ export class TelephonyRepository {
     } = {},
   ): Promise<SimCandidate[]> {
     const channelId = options.channelId;
-    const priorities = priorityScope(channelId, 'sim', simCards.partnerId);
+    const priorities = priorityScope(channelId, 'sim', simCards.partnerId, simCards.id);
 
     // Оператора карты здесь нет: куда SIM звонит, решает цена в её тарифе
     // ([ADR-0056](../../../../../docs/adr/0056-tarify-partnyora.md)) — отсев по цене
@@ -1471,6 +1473,7 @@ export class TelephonyRepository {
         clientPartnerPriorities,
         channelId === undefined ? sql`false` : priorities.clientJoin,
       )
+      .leftJoin(clientRoutePriorities, channelId === undefined ? sql`false` : priorities.routeJoin)
       .where(and(...conditions))
       .orderBy(
         // Без приоритета партнёр идёт последним, а не первым: `NULL` в сортировке
@@ -1517,6 +1520,8 @@ export class TelephonyRepository {
     channelId: ChannelId,
     partnerId: PartnerId,
     terminationKind: TerminationKind,
+    /** Маршрут, по которому выдан вызов: у него своя очередь среди равных цифр (ADR-0120). */
+    route: { readonly simCardId: SimCardId | null; readonly gatewayId: GatewayId },
     at: Date,
     executor: Executor = this.db,
   ): Promise<void> {
@@ -1544,6 +1549,20 @@ export class TelephonyRepository {
           ),
           eq(clientPartnerPriorities.partnerId, partnerId),
           eq(clientPartnerPriorities.offer, terminationKind),
+        ),
+      );
+    await executor
+      .update(clientRoutePriorities)
+      .set({ lastRoutedAt: at })
+      .where(
+        and(
+          eq(
+            clientRoutePriorities.clientId,
+            sql`(select ${channels.clientId} from ${channels} where ${channels.id} = ${channelId})`,
+          ),
+          route.simCardId === null
+            ? eq(clientRoutePriorities.gatewayId, route.gatewayId)
+            : eq(clientRoutePriorities.simCardId, route.simCardId),
         ),
       );
   }
@@ -1823,10 +1842,16 @@ function coversRegion(
  * Строки линии и клиента подключаются левыми соединениями, а какой список действует, решает выражение: так выбор
  * не расходится с правкой списка между двумя чтениями.
  */
-function priorityScope(channelId: ChannelId | undefined, offer: 'sim' | 'sip', partner: AnyColumn) {
+function priorityScope(
+  channelId: ChannelId | undefined,
+  offer: 'sim' | 'sip',
+  partner: AnyColumn,
+  route: AnyColumn,
+) {
   if (channelId === undefined) {
     return {
       clientJoin: sql`false`,
+      routeJoin: sql`false`,
       allowed: sql`true`,
       priority: sql<number | null>`null::integer`,
       lastRoutedAt: sql<Date | null>`null::timestamptz`.mapWith(
@@ -1835,21 +1860,28 @@ function priorityScope(channelId: ChannelId | undefined, offer: 'sim' | 'sip', p
     };
   }
   const hasOwn = sql`exists (select 1 from ${channelPartnerPriorities} as configured where configured.channel_id = ${channelId})`;
+  const clientOfChannel = sql`(select ${channels.clientId} from ${channels} where ${channels.id} = ${channelId})`;
+  // Строка маршрута (ADR-0120) главнее строки предложения: и её цифра, и её «не использовать».
+  const hasRoute = sql`${clientRoutePriorities.id} is not null`;
   return {
     clientJoin: and(
-      eq(
-        clientPartnerPriorities.clientId,
-        sql`(select ${channels.clientId} from ${channels} where ${channels.id} = ${channelId})`,
-      ),
+      eq(clientPartnerPriorities.clientId, clientOfChannel),
       eq(clientPartnerPriorities.partnerId, partner),
       eq(clientPartnerPriorities.offer, offer),
     ) as SQL,
-    allowed: sql`case when ${hasOwn} then ${channelPartnerPriorities.id} is not null else (${clientPartnerPriorities.id} is null or ${clientPartnerPriorities.priority} is not null) end`,
+    routeJoin: and(
+      eq(clientRoutePriorities.clientId, clientOfChannel),
+      eq(
+        offer === 'sim' ? clientRoutePriorities.simCardId : clientRoutePriorities.gatewayId,
+        route,
+      ),
+    ) as SQL,
+    allowed: sql`case when ${hasOwn} then ${channelPartnerPriorities.id} is not null when ${hasRoute} then ${clientRoutePriorities.priority} is not null else (${clientPartnerPriorities.id} is null or ${clientPartnerPriorities.priority} is not null) end`,
     priority: sql<
       number | null
-    >`case when ${hasOwn} then ${channelPartnerPriorities.priority} else ${clientPartnerPriorities.priority} end`,
+    >`case when ${hasOwn} then ${channelPartnerPriorities.priority} when ${hasRoute} then ${clientRoutePriorities.priority} else ${clientPartnerPriorities.priority} end`,
     lastRoutedAt:
-      sql<Date | null>`case when ${hasOwn} then ${channelPartnerPriorities.lastRoutedAt} else ${clientPartnerPriorities.lastRoutedAt} end`.mapWith(
+      sql<Date | null>`case when ${hasOwn} then ${channelPartnerPriorities.lastRoutedAt} when ${hasRoute} then ${clientRoutePriorities.lastRoutedAt} else ${clientPartnerPriorities.lastRoutedAt} end`.mapWith(
         channelPartnerPriorities.lastRoutedAt,
       ),
   };

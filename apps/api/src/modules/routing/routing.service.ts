@@ -698,6 +698,10 @@ export class RoutingService {
           channelId,
           candidate.gateway.partnerId,
           terminationKindOf(candidate.gateway.type),
+          {
+            simCardId: candidate.kind === 'sim' ? candidate.sim.id : null,
+            gatewayId: candidate.gateway.id,
+          },
           call.startedAt,
           tx,
         );

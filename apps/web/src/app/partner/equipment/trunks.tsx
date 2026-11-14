@@ -108,6 +108,14 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
                   <TrunkStatus trunk={trunk} />
                   {trunk.unlimited ? null : <NumberPace pace={trunk.pace} block />}
                   <TrunkUnlimited trunk={trunk} />
+                  {!trunk.has_price && (
+                    <p className="text-warn">
+                      Нет цены через SIP — клиенты через него не звонят.{' '}
+                      <Link href="/partner/prices" className="underline">
+                        Задать цену
+                      </Link>
+                    </p>
+                  )}
                 </TableCell>
                 <TableCell>
                   <TrunkActions trunk={trunk} />

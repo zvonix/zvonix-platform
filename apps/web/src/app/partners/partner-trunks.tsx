@@ -50,6 +50,7 @@ interface Trunk {
   readonly unlimited: boolean;
   /** Партнёр попросил безлимит, решения нет; пусто — не просил или решено. */
   readonly unlimited_requested_at: string | null;
+  readonly has_price: boolean;
   readonly pace?: NumberPaceView;
 }
 
@@ -229,6 +230,11 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                     )}
                     {trunk.unlimited ? null : <NumberPace pace={trunk.pace} block />}
                     <TrunkUnlimited trunk={trunk} canChange={canChange} onDone={refresh} />
+                    {!trunk.has_price && (
+                      <span className="text-warn">
+                        нет цены через SIP — клиенты через него не звонят
+                      </span>
+                    )}
                     {canChange && (
                       <TrunkStatus
                         // Новый выбор после смены состояния: прежний мог совпасть с новым.

@@ -34,6 +34,7 @@ export {
   channelPartnerPriorities,
   clientCallRequirements,
   clientPartnerPriorities,
+  clientRoutePriorities,
   channelAllowedOperators,
   partnerCoverage,
   testCalls,

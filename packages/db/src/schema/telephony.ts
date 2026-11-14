@@ -553,6 +553,50 @@ export const clientPartnerPriorities = pgTable(
 );
 
 /**
+ * Порядок отдельных маршрутов у клиента — одна SIM или один SIP-провайдер партнёра
+ * ([ADR-0120](../../../docs/adr/0120-poryadok-otdelnyh-sim-i-sip-u-klienta.md)).
+ *
+ * Строка маршрута главнее строки предложения (`client_partner_priorities`): цифра здесь действует, даже если
+ * предложение «не использовать», а «не использовать» здесь исключает маршрут при любой цифре предложения.
+ * Свой список линии главнее обоих.
+ */
+export const clientRoutePriorities = pgTable(
+  'client_route_priorities',
+  {
+    id: primaryId<'clientRoutePriority'>(),
+    clientId: idRef<'client'>()
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    /** Карта — либо она, либо провайдер. */
+    simCardId: idRef<'simCard'>().references(() => simCards.id, { onDelete: 'cascade' }),
+    /** SIP-провайдер — его шлюз (`sip_trunks.gateway_id`). */
+    gatewayId: idRef<'gateway'>().references(() => gateways.id, { onDelete: 'cascade' }),
+    /** Меньше — раньше; пусто — «не использовать». */
+    priority: integer(),
+    /** Когда по этому маршруту в последний раз выдали вызов: равные цифры идут по очереди (ADR-0021). */
+    lastRoutedAt: timestamptz(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check(
+      'client_route_priorities_one_route',
+      sql`(${t.simCardId} is null) <> (${t.gatewayId} is null)`,
+    ),
+    check(
+      'client_route_priorities_priority_range',
+      sql`${t.priority} is null or ${t.priority} between 1 and ${sql.raw(String(CLIENT_PRIORITY_MAX))}`,
+    ),
+    uniqueIndex('client_route_priorities_sim_key')
+      .on(t.clientId, t.simCardId)
+      .where(sql`${t.simCardId} is not null`),
+    uniqueIndex('client_route_priorities_gateway_key')
+      .on(t.clientId, t.gatewayId)
+      .where(sql`${t.gatewayId} is not null`),
+  ],
+);
+
+/**
  * Требования клиента к партнёрам для звонков ([ADR-0095](../../../docs/adr/0095-trebovaniya-klienta-k-partnyoram-zvonkov.md)):
  * одна запись на клиента, действует на каждый вызов всех его линий. Сужает кандидатов, порядок не меняет.
  */
