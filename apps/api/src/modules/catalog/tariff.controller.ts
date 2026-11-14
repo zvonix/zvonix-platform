@@ -6,7 +6,14 @@
  */
 
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
-import { Money, parseId, REFERENCE_CALL_SECONDS, type CommissionProduct } from '@zvonix/shared';
+import {
+  internal,
+  Money,
+  parseId,
+  REFERENCE_CALL_SECONDS,
+  terminationKindsOf,
+  type CommissionProduct,
+} from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
@@ -56,9 +63,9 @@ export class TariffController {
   async addPartnerRate(
     @Body(zodBody(addPartnerRateSchema)) body: z.infer<typeof addPartnerRateSchema>,
     @CurrentUser() actor: Principal,
-  ): Promise<{ rate: RateView }> {
+  ): Promise<{ rate: RateView; rates: RateView[] }> {
     const partnerId = parseId(body.partnerId, 'partner');
-    const row = await this.tariffs.addPartnerRate(
+    const rows = await this.tariffs.addPartnerRates(
       {
         partnerId,
         tariffId:
@@ -66,7 +73,7 @@ export class TariffController {
             ? (await this.tariffs.defaultTariff(partnerId)).id
             : parseId(body.tariffId, 'partnerTariff'),
         operatorId: body.operatorId == null ? null : parseId(body.operatorId, 'operator'),
-        terminationKind: body.terminationKind,
+        terminationKind: 'sim',
         region: body.region ?? null,
         pricePerMinute: body.pricePerMinute,
         billingIncrementSeconds: body.billingIncrementSeconds,
@@ -75,10 +82,14 @@ export class TariffController {
         rounding: body.rounding,
         effectiveFrom: body.effectiveFrom === undefined ? new Date() : new Date(body.effectiveFrom),
       },
+      terminationKindsOf(body.terminationKind),
       actor.userId,
       actor.role,
     );
-    return { rate: toRateView(row) };
+    const [first] = rows;
+    if (first === undefined) throw internal('Цена не записана');
+    // `rate` — первая строка, как было; `rates` — все (у «SIM и SIP» их две).
+    return { rate: toRateView(first), rates: rows.map(toRateView) };
   }
 
   @Roles('admin', 'support')

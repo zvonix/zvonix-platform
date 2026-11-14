@@ -275,19 +275,18 @@ function MyCalls() {
                   </span>
                 </TableCell>
 
-                <TableCell className="whitespace-normal">
+                <TableCell className="whitespace-nowrap">
                   <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
                     {CALL_STATUS_NAME[call.status]}
                   </span>
+                  {/* Причина — коротко рядом с итогом; что делать — в подсказке: строка не раздувается. */}
                   {call.failure_reason !== null && (
-                    <>
-                      <span className="block pt-0.5">
-                        {CLIENT_FAILURE_REASON_NAME[call.failure_reason]}
-                      </span>
-                      <span className="block text-muted-foreground">
-                        {CLIENT_FAILURE_REASON_FIX[call.failure_reason]}
-                      </span>
-                    </>
+                    <span
+                      className="ml-2 cursor-help underline decoration-dotted underline-offset-4"
+                      title={CLIENT_FAILURE_REASON_FIX[call.failure_reason]}
+                    >
+                      {CLIENT_FAILURE_REASON_NAME[call.failure_reason]}
+                    </span>
                   )}
                 </TableCell>
 

@@ -201,6 +201,18 @@ export function isSipUsername(value: string): boolean {
  * `blocked`   — заблокирована оператором или администратором. Сама не возвращается;
  * `retired`   — выведена навсегда. Запись остаётся: на неё ссылаются CDR.
  */
+/**
+ * «Через что» у назначаемой цены: SIM, SIP или обе сразу одной ценой (владелец, 2026-11-14: «почему нельзя
+ * выбрать через SIM и SIP»). `both` — только при записи: в тарифе лягут две строки, по одной на способ (ADR-0040).
+ */
+export const RATE_TERMINATION_CHOICES = ['sim', 'sip', 'both'] as const;
+export type RateTerminationChoice = (typeof RATE_TERMINATION_CHOICES)[number];
+
+/** Способы, в которые раскладывается выбор «через что». */
+export function terminationKindsOf(choice: RateTerminationChoice): TerminationKind[] {
+  return choice === 'both' ? ['sim', 'sip'] : [choice];
+}
+
 export const SIM_STATUSES = ['new', 'active', 'paused', 'throttled', 'blocked', 'retired'] as const;
 export type SimStatus = (typeof SIM_STATUSES)[number];
 

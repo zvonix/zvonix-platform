@@ -7,7 +7,7 @@ import { useEffect, useId, useState, type ReactNode, type SubmitEvent } from 're
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { LineCredentials, type IssuedLines, type PortAccount } from '@/components/sip-credentials';
-import { TariffSelect, useTariffName } from '@/components/tariff-select';
+import { TariffSelect } from '@/components/tariff-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { request } from '@/lib/api';
@@ -352,8 +352,6 @@ function Field({
 
 /** Тариф шлюза — для всех его карт без своего (ADR-0056). Сохраняется сразу при выборе. */
 function TariffSection({ gateway }: { gateway: Gateway }) {
-  const nameOf = useTariffName();
-  const fallback = nameOf(null);
   return (
     <section aria-labelledby="tariff" className="flex max-w-[720px] flex-col gap-2">
       <h3 id="tariff" className="font-semibold">
@@ -365,7 +363,9 @@ function TariffSection({ gateway }: { gateway: Gateway }) {
       </p>
       <TariffSelect
         value={gateway.tariff_id}
-        inherited={fallback === undefined ? 'по умолчанию' : `по умолчанию — ${fallback}`}
+        inheritedId={null}
+        inheritedFrom="тариф по умолчанию"
+        kind={gateway.type === 'sip_trunk' ? 'sip' : 'sim'}
         endpoint={`/partner/gateways/${gateway.id}/tariff`}
         label={`Тариф шлюза «${gateway.name}»`}
         invalidate={[EQUIPMENT_KEY, PARTNER_RATES_KEY]}

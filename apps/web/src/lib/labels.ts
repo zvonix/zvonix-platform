@@ -1,5 +1,6 @@
 import { timezoneLabel } from './timezones';
 import type {
+  RateTerminationChoice,
   ApplicationStatus,
   Cabinet,
   CallFailureReason,
@@ -547,7 +548,7 @@ export const CLIENT_FAILURE_REASON_NAME: Record<ClientFailureReason, string> = {
   limit_exceeded: 'Исчерпан лимит',
   recipient_limit: 'Слишком часто одному абоненту',
   requirements_unmet: 'Никто не подошёл под ваши требования',
-  platform: 'Отказ на нашей стороне',
+  platform: 'Нет свободного маршрута',
 };
 
 export const CLIENT_FAILURE_REASON_FIX: Record<ClientFailureReason, string> = {
@@ -567,7 +568,7 @@ export const CLIENT_FAILURE_REASON_FIX: Record<ClientFailureReason, string> = {
   requirements_unmet:
     'На это направление нет партнёра, подходящего под ваши требования (способ, записи, предел цены). Смягчите их в разделе «Приоритеты».',
   platform:
-    'Вызов не удалось выполнить на нашей стороне. Повторите позже; если повторяется — напишите в поддержку, назвав время и номер.',
+    'Все маршруты на это направление сейчас заняты или временно недоступны. Если так долго — напишите в поддержку.',
 };
 
 /**
@@ -581,6 +582,13 @@ export const CLIENT_FAILURE_REASON_FIX: Record<ClientFailureReason, string> = {
 export const TERMINATION_KIND_NAME: Record<TerminationKind, string> = {
   sim: 'SIM',
   sip: 'SIP',
+};
+
+/** «Через что» у назначаемой цены: «SIM и SIP» — одна цена на оба способа, две строки в тарифе. */
+export const RATE_TERMINATION_CHOICE_NAME: Record<RateTerminationChoice, string> = {
+  both: 'SIM и SIP',
+  sim: 'только SIM',
+  sip: 'только SIP',
 };
 
 export const TERMINATION_KIND_MEANING: Record<TerminationKind, string> = {

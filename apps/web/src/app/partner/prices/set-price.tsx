@@ -1,14 +1,14 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { TERMINATION_KINDS, type TerminationKind } from '@zvonix/shared';
+import { RATE_TERMINATION_CHOICES, type RateTerminationChoice } from '@zvonix/shared';
 import { useState } from 'react';
 import { DialogField, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
-import { TERMINATION_KIND_NAME } from '@/lib/labels';
+import { RATE_TERMINATION_CHOICE_NAME } from '@/lib/labels';
 import { bandRange, money, numberFromInput } from '@/lib/money';
 import { PARTNER_RATES_KEY, type OperatorChoice, type Rate, type Tariff } from '@/lib/tariffs';
 
@@ -17,7 +17,8 @@ const ALL_OPERATORS = '*';
 
 interface Draft {
   operatorId: string;
-  terminationKind: TerminationKind;
+  /** «SIM и SIP» по умолчанию: одна цена и картам, и SIP-провайдерам (владелец, 2026-11-14). */
+  terminationKind: RateTerminationChoice;
   region: string;
   pricePerMinute: string;
   connectionFee: string;
@@ -27,7 +28,7 @@ interface Draft {
 
 const EMPTY: Draft = {
   operatorId: ALL_OPERATORS,
-  terminationKind: 'sim',
+  terminationKind: 'both',
   region: '',
   pricePerMinute: '',
   connectionFee: '',
@@ -44,7 +45,8 @@ function rateFor(rates: readonly Rate[], draft: Draft): Rate | undefined {
   return rates.find(
     (rate) =>
       (rate.operator_id ?? ALL_OPERATORS) === draft.operatorId &&
-      rate.termination_kind === draft.terminationKind &&
+      // У «SIM и SIP» поля заполняет цена SIM, а нет её — цена SIP.
+      (draft.terminationKind === 'both' || rate.termination_kind === draft.terminationKind) &&
       (rate.region ?? '').toLowerCase() === region,
   );
 }
@@ -230,13 +232,13 @@ function PriceForm({
           <select
             value={draft.terminationKind}
             onChange={(event) => {
-              redirect({ ...draft, terminationKind: event.target.value as TerminationKind });
+              redirect({ ...draft, terminationKind: event.target.value as RateTerminationChoice });
             }}
             className="h-9 w-full rounded-md border border-input bg-transparent px-2"
           >
-            {TERMINATION_KINDS.map((kind) => (
+            {RATE_TERMINATION_CHOICES.map((kind) => (
               <option key={kind} value={kind}>
-                {TERMINATION_KIND_NAME[kind]}
+                {RATE_TERMINATION_CHOICE_NAME[kind]}
               </option>
             ))}
           </select>
