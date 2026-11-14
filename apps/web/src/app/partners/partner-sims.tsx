@@ -166,7 +166,7 @@ export function PartnerSims({
                     <span className="text-muted-foreground">неизвестен</span>
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className="whitespace-nowrap">
                   <span
                     className={`rounded-sm px-1.5 py-0.5 ${usableTone(
                       USABLE_SIM_STATUSES.includes(sim.status),
@@ -174,7 +174,7 @@ export function PartnerSims({
                   >
                     {SIM_STATUS_NAME[sim.status]}
                   </span>
-                  <NumberPace pace={sim.pace} block />
+                  <NumberPace pace={sim.pace} />
                 </TableCell>
                 <TableCell className="text-right">
                   {canChange ? (

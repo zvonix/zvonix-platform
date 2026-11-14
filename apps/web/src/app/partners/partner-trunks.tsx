@@ -29,7 +29,7 @@ import { moment } from '@/lib/format';
 import { atMost } from '@/lib/wait';
 import { GATEWAY_STATUS_NAME, GATEWAY_SUSPENDED_BY_NAME, usableTone } from '@/lib/labels';
 
-const COLUMNS = 7;
+const COLUMNS = 6;
 
 interface Trunk {
   readonly id: string;
@@ -181,8 +181,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Транк</TableHead>
               <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Провайдер</TableHead>
-              <TableHead className="h-8">Доступ</TableHead>
+              <TableHead className="h-8">Провайдер и доступ</TableHead>
               <TableHead className="h-8 text-right">Каналов</TableHead>
               <TableHead className="h-8 text-right">Номеров</TableHead>
               <TableHead className="h-8"> </TableHead>
@@ -207,15 +206,16 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
 
             {trunks.map((trunk) => (
               <TableRow key={trunk.id}>
-                <TableCell>
+                <TableCell
+                  className="whitespace-nowrap"
+                  title={`Вход на узле: ${trunk.sip_username}`}
+                >
                   {trunk.name}
-                  <span className="num block text-faint" translate="no">
-                    {trunk.sip_username}
-                  </span>
                 </TableCell>
 
                 <TableCell>
-                  <div className="flex flex-col items-start gap-1">
+                  {/* В строку, с переносом только когда не хватает ширины: строка таблицы не раздувается в столбик. */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [&>*]:whitespace-nowrap">
                     <span
                       className={`rounded-sm px-1.5 py-0.5 ${usableTone(
                         REGISTRABLE_GATEWAY_STATUSES.includes(trunk.status),
@@ -228,11 +228,14 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                         {GATEWAY_SUSPENDED_BY_NAME[trunk.suspended_by]}
                       </span>
                     )}
-                    {trunk.unlimited ? null : <NumberPace pace={trunk.pace} block />}
+                    {trunk.unlimited ? null : <NumberPace pace={trunk.pace} />}
                     <TrunkUnlimited trunk={trunk} canChange={canChange} onDone={refresh} />
                     {!trunk.has_price && (
-                      <span className="text-warn">
-                        нет цены через SIP — клиенты через него не звонят
+                      <span
+                        className="text-warn"
+                        title="В тарифе провайдера нет цены «через SIP»: без неё клиенты через него не звонят"
+                      >
+                        нет цены SIP
                       </span>
                     )}
                     {canChange && (
@@ -250,24 +253,28 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                   </div>
                 </TableCell>
 
-                <TableCell className="num" translate="no">
-                  {trunk.proxy_host}
-                </TableCell>
-
-                <TableCell className="whitespace-normal">
+                <TableCell className="whitespace-nowrap">
+                  <span className="num" translate="no">
+                    {trunk.proxy_host}
+                  </span>
                   {trunk.registers_outbound ? (
                     <>
-                      регистрация
-                      <span className="num block text-faint">
+                      <span className="text-muted-foreground"> · регистрация </span>
+                      <span
+                        className="num text-faint"
+                        title={trunk.has_secret ? 'пароль задан' : 'пароля нет'}
+                      >
                         {trunk.outbound_username ?? '—'}
-                        {trunk.has_secret ? ' · пароль задан' : ' · пароля нет'}
                       </span>
+                      {!trunk.has_secret && <span className="text-warn"> · пароля нет</span>}
                     </>
                   ) : (
-                    <>
-                      по адресу
-                      <span className="block text-faint">провайдер узнаёт нас по IP</span>
-                    </>
+                    <span
+                      className="text-muted-foreground"
+                      title="Провайдер узнаёт нас по IP, учётных данных нет"
+                    >
+                      {' · по адресу'}
+                    </span>
                   )}
                 </TableCell>
 
@@ -276,7 +283,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
 
                 <TableCell>
                   {canChange && (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex gap-2">
                       <FormDialog
                         label="Настроить"
                         title={`Настроить транк «${trunk.name}»`}
@@ -330,7 +337,7 @@ function TrunkStatus({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex items-center gap-1">
       <select
         aria-label={`Новое состояние транка «${trunk.name}»`}
         value={chosen}
@@ -427,12 +434,12 @@ function TrunkUnlimited({
   }
   if (trunk.unlimited_requested_at !== null) {
     return (
-      <div className="flex flex-col items-start gap-1">
+      <div className="flex items-center gap-2">
         <span className="rounded-sm bg-warn-soft px-1.5 py-0.5 text-warn">
           просит безлимит с {moment(trunk.unlimited_requested_at)}
         </span>
         {canChange && (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex gap-1">
             {grant}
             <ConfirmAction
               label="Отклонить"
