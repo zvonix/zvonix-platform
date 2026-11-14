@@ -9,7 +9,7 @@
  */
 
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { Money, parseId } from '@zvonix/shared';
+import { Money, parseId, type TerminationKind } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { boundedLimit } from '../../http/pagination.js';
@@ -43,6 +43,8 @@ interface CallView {
   /** Пусто у отказа: до выбора железа дело не дошло. */
   readonly partner: { id: string; name: string; display_name: string | null } | null;
   readonly gateway: { id: string; name: string } | null;
+  /** Через что ушёл вызов — SIM или SIP; пусто у отказа. */
+  readonly termination_kind: TerminationKind | null;
   readonly sim: { id: string; msisdn: string } | null;
 }
 
@@ -191,6 +193,7 @@ function toCallView(row: CallDetails): CallView {
       call.gatewayId === null || row.gatewayName === null
         ? null
         : { id: call.gatewayId, name: row.gatewayName },
+    termination_kind: row.terminationKind,
     sim:
       call.simCardId === null || row.simMsisdn === null
         ? null

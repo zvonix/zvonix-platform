@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { CALL_FAILURE_REASONS, CALL_STATUSES } from '@zvonix/shared';
-import type { CallFailureReason, CallStatus } from '@zvonix/shared';
+import type { CallFailureReason, CallStatus, TerminationKind } from '@zvonix/shared';
 import { Suspense, useState } from 'react';
 import { ListenButton, useListenable } from '@/components/call-recording';
 import { ConsoleShell } from '@/components/console-shell';
@@ -27,7 +27,13 @@ import { loadAllCalls } from '@/lib/csv';
 import { useClients, usePartners } from '@/lib/dictionaries';
 import { duration, moment } from '@/lib/format';
 import { money } from '@/lib/money';
-import { CALL_STATUS_NAME, callTone, FAILURE_REASON_FIX, FAILURE_REASON_NAME } from '@/lib/labels';
+import {
+  CALL_STATUS_NAME,
+  callTone,
+  FAILURE_REASON_FIX,
+  FAILURE_REASON_NAME,
+  TERMINATION_KIND_NAME,
+} from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
 import { CallSummary } from './call-summary';
 import { RoutePreview } from './route-preview';
@@ -56,6 +62,8 @@ interface Call {
   readonly operator: { id: string; name: string } | null;
   readonly partner: { id: string; name: string; display_name: string | null } | null;
   readonly gateway: { id: string; name: string } | null;
+  /** Через что ушёл вызов — SIM или SIP; пусто у отказа. */
+  readonly termination_kind: TerminationKind | null;
   readonly sim: { id: string; msisdn: string } | null;
 }
 
@@ -375,7 +383,8 @@ function CallRow({
         <span className="num text-muted-foreground">{moment(call.started_at)}</span>
       </TableCell>
 
-      <TableCell>
+      {/* Строка — одна линия: второстепенное бледно через « · », а не второй строкой под главным. */}
+      <TableCell className="whitespace-nowrap">
         {/* Клик по клиенту отбирает вызовы по нему: разбор обращения начинается
             с одной строки и продолжается по всему клиенту (DESIGN.md). */}
         <button
@@ -385,24 +394,45 @@ function CallRow({
         >
           {call.client.name}
         </button>
-        <span className="block text-faint">{call.channel.name}</span>
+        <span className="text-faint"> · {call.channel.name}</span>
       </TableCell>
 
-      <TableCell>
+      <TableCell className="whitespace-nowrap">
         <span className="num">{call.destination}</span>
-        <span className="block text-faint">
+        <span className="text-faint">
+          {' · '}
           {call.operator?.name ?? 'оператор не определён'}
           {call.region !== null && ` · ${call.region}`}
         </span>
       </TableCell>
 
-      <TableCell>
+      {/* Длинное имя шлюза обрезается многоточием, целиком — в подсказке: таблица не уезжает вбок. */}
+      <TableCell
+        className="max-w-[280px] truncate"
+        title={
+          call.partner === null
+            ? undefined
+            : [
+                call.partner.name,
+                call.termination_kind === null
+                  ? null
+                  : TERMINATION_KIND_NAME[call.termination_kind],
+                call.gateway?.name,
+                call.sim?.msisdn,
+              ]
+                .filter(Boolean)
+                .join(' · ')
+        }
+      >
         {call.partner === null ? (
           <span className="text-faint">до выбора не дошло</span>
         ) : (
           <>
             {call.partner.name}
-            <span className="block text-faint">
+            <span className="text-faint">
+              {call.termination_kind !== null &&
+                ` · ${TERMINATION_KIND_NAME[call.termination_kind]}`}
+              {' · '}
               {call.gateway?.name ?? '—'}
               {call.sim !== null && ` · ${call.sim.msisdn}`}
             </span>
@@ -410,47 +440,51 @@ function CallRow({
         )}
       </TableCell>
 
-      <TableCell className="whitespace-normal">
+      <TableCell
+        className="max-w-[300px] truncate"
+        title={call.failure_reason === null ? undefined : FAILURE_REASON_FIX[call.failure_reason]}
+      >
         <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
           {CALL_STATUS_NAME[call.status]}
         </span>
         {call.failure_reason !== null && (
-          <span className="block pt-0.5" title={FAILURE_REASON_FIX[call.failure_reason]}>
+          <span
+            className="ml-2 cursor-help underline decoration-dotted underline-offset-4"
+            title={FAILURE_REASON_FIX[call.failure_reason]}
+          >
             {FAILURE_REASON_NAME[call.failure_reason]}
           </span>
         )}
       </TableCell>
 
-      <TableCell className="num text-right">
+      <TableCell className="num text-right whitespace-nowrap">
         {call.money === null ? (
           <span className="text-faint">—</span>
         ) : (
-          <>
+          <span
+            className="cursor-help"
+            title={`Списано с клиента ${money(call.money.client)}; партнёру ${money(call.money.partner)}; площадке ${money(call.money.margin)}`}
+          >
             {money(call.money.client)}
-            <span
-              className="block text-faint"
-              title="Списано с клиента; начислено партнёру; осталось площадке"
-            >
-              партнёру {money(call.money.partner)} · площадке {money(call.money.margin)}
-            </span>
-          </>
+            <span className="text-faint"> · {money(call.money.margin)}</span>
+          </span>
         )}
       </TableCell>
 
-      <TableCell className="num text-right">
-        {call.duration_seconds === null ? (
-          <span className="text-faint">—</span>
-        ) : (
-          duration(call.duration_seconds)
-        )}
-        {recordingId !== undefined && (
-          <span className="block pt-1">
+      <TableCell className="num text-right whitespace-nowrap">
+        <span className="inline-flex items-center justify-end gap-1">
+          {recordingId !== undefined && (
             <ListenButton
               recordingId={recordingId}
               subtitle={`${call.destination} · ${moment(call.started_at)}`}
             />
-          </span>
-        )}
+          )}
+          {call.duration_seconds === null ? (
+            <span className="text-faint">—</span>
+          ) : (
+            duration(call.duration_seconds)
+          )}
+        </span>
       </TableCell>
     </TableRow>
   );

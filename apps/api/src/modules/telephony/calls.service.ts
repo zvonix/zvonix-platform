@@ -12,7 +12,14 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { CALL_STATUSES, type CallFailureReason, type CallStatus, type Id } from '@zvonix/shared';
+import {
+  CALL_STATUSES,
+  terminationKindOf,
+  type CallFailureReason,
+  type CallStatus,
+  type Id,
+  type TerminationKind,
+} from '@zvonix/shared';
 import { BillingService } from '../billing/billing.service.js';
 import { CatalogService } from '../catalog/catalog.service.js';
 import {
@@ -40,6 +47,8 @@ export interface CallDetails {
   readonly partnerName: string | null;
   readonly partnerAlias: string | null;
   readonly gatewayName: string | null;
+  /** Через что ушёл вызов; пусто у отказа (ADR-0040). */
+  readonly terminationKind: TerminationKind | null;
   readonly simMsisdn: string | null;
 }
 
@@ -94,6 +103,7 @@ export class CallsService {
           partnerName: partner?.name ?? null,
           partnerAlias: partner?.displayName ?? null,
           gatewayName: row.gatewayName,
+          terminationKind: row.gatewayType === null ? null : terminationKindOf(row.gatewayType),
           simMsisdn: row.simMsisdn,
         };
       }),

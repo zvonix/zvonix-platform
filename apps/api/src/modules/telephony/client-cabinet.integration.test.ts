@@ -69,6 +69,7 @@ interface ClientCall {
   duration_seconds: number | null;
   channel: { id: string; name: string };
   operator: { id: string; name: string } | null;
+  termination_kind: string | null;
 }
 
 interface Account {
@@ -1108,7 +1109,9 @@ describe('свои вызовы', () => {
     const body = response.body;
     expect(body).not.toContain('partner');
     expect(body).not.toContain('gateway');
-    expect(body).not.toContain('sim');
+    // Способ «sim»/«sip» клиенту виден (владелец, 2026-11-14), сама карта — нет: ни поля, ни её номера.
+    expect(body).not.toMatch(/"sim(_card)?(_id)?"\s*:/u);
+    expect(body).not.toContain('msisdn');
     expect(body).not.toContain(partnerName);
 
     const calls = response.json<{ calls: ClientCall[]; total: number }>();
@@ -1117,6 +1120,7 @@ describe('свои вызовы', () => {
     expect(calls.calls[0]?.duration_seconds).toBe(60);
     expect(calls.calls[0]?.operator?.name).toBe(operatorName);
     expect(calls.calls[0]?.channel.id).toBe(rich.channel);
+    expect(calls.calls[0]?.termination_kind).toBe('sim');
   }, 120_000);
 
   it('чужих вызовов в списке нет', async () => {
