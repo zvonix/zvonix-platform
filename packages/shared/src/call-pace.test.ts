@@ -6,9 +6,11 @@ import {
   callRestingUntil,
   callRestWindowMs,
   callWarmupDailyLimit,
+  type CallPaceSettings,
   callWarmupDay,
   isPoorNumber,
   trunkSpacedUntil,
+  unlimitedPace,
   withoutRecommendedPace,
 } from './call-pace.js';
 import { awakeNumbers, jitteredPauseMs, paceJitter, sleepUntil } from './pace-jitter.js';
@@ -346,6 +348,41 @@ describe('номер партнёра со своими лимитами (ADR-01
       trunkCallsPerSecond: 1,
       poorAnswerPercent: 0,
       dailyVariationPercent: 0,
+    });
+  });
+});
+
+describe('безлимитный SIP-провайдер (ADR-0119)', () => {
+  it('ничего из рекомендованной работы: ни пределов, ни паузы, ни сна, ни шага транка', () => {
+    const settings: CallPaceSettings = {
+      warmupEnabled: true,
+      perHour: 20,
+      perDay: 150,
+      dailyVariationPercent: 30,
+      pauseSeconds: 30,
+      warmupPauseSeconds: 90,
+      distinctPerHour: 10,
+      distinctPerDay: 60,
+      sleepHours: 6,
+      poorAnswerPercent: 20,
+      brakeSuspensions: 3,
+      brakePercent: 50,
+      trunkCallsPerSecond: 1,
+    };
+    const unlimited = unlimitedPace(settings);
+    expect(callPace(unlimited, 3)).toMatchObject({
+      perHour: null,
+      perDay: null,
+      warmupDay: null,
+      distinctPerHour: null,
+      distinctPerDay: null,
+      pauseSeconds: null,
+    });
+    expect(unlimited).toMatchObject({
+      sleepHours: 0,
+      trunkCallsPerSecond: 0,
+      dailyVariationPercent: 0,
+      poorAnswerPercent: 0,
     });
   });
 });

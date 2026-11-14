@@ -312,12 +312,12 @@ export class RoutingService {
       destination,
     );
     // Номер клиента, который видит абонент (ADR-0108): исчерпал предел — SIP-провайдеры с ним больше не звонят,
-    // вызов идёт через SIM, где абонент видит номер SIM.
+    // вызов идёт через SIM, где абонент видит номер SIM. Безлимитного провайдера (ADR-0119) этот предел не касается.
     const callerIdSpent = await this.pace.callerIdExceeded(channel.callerId, at);
     const ordered = withinLimits.filter(
       ({ candidate }) =>
         !screen.exhausted.has(pacedNumberOf(candidate).id) &&
-        !(callerIdSpent && candidate.kind === 'sip'),
+        !(callerIdSpent && candidate.kind === 'sip' && !candidate.trunk.unlimited),
     );
     if (ordered.length === 0) {
       // Отдельная причина: «все номера исчерпали квоты» и «SIM нет вовсе» — разные разговоры с партнёром. И не

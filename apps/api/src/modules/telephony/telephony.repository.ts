@@ -763,6 +763,9 @@ export class TelephonyRepository {
       outboundSecret: string | null;
       maxConcurrentCalls: number;
       numbersCount: number;
+      /** Безлимит и запрос на него (ADR-0119): меняет только служба, по решению человека. */
+      unlimited: boolean;
+      unlimitedRequestedAt: Date | null;
     }>,
   ): Promise<SipTrunkRow | undefined> {
     try {

@@ -16,6 +16,7 @@ import {
   isIdleNumber,
   isPoorNumber,
   trunkSpacedUntil,
+  unlimitedPace,
   withoutRecommendedPace,
   type CallPace,
   type CallPaceSettings,
@@ -46,6 +47,8 @@ export interface PacedNumber {
   readonly operatorId: string | null;
   /** Чей номер: партнёр выбирает, работают ли его номера по рекомендациям площадки (ADR-0117). */
   readonly partnerId: Id<'partner'>;
+  /** Безлимитный SIP-провайдер (ADR-0119): ограничения площадки на номер не действуют. У SIM — никогда. */
+  readonly unlimited: boolean;
 }
 
 /** Пределы номера и израсходованное за скользящие час и сутки. */
@@ -93,6 +96,7 @@ export function pacedSim(sim: SimCardRow): PacedNumber {
     numbers: 1,
     operatorId: sim.operatorId,
     partnerId: sim.partnerId,
+    unlimited: false,
   };
 }
 
@@ -104,6 +108,7 @@ export function pacedTrunk(row: { gateway: GatewayRow; trunk: SipTrunkRow }): Pa
     numbers: row.trunk.numbersCount,
     operatorId: null,
     partnerId: row.gateway.partnerId,
+    unlimited: row.trunk.unlimited,
   };
 }
 
@@ -160,9 +165,14 @@ function paceOf(
   recommendedBraked: boolean,
   recommended: boolean,
 ): NumberPace {
-  // Партнёр выключил рекомендации (ADR-0117): только пауза и сон; автоторможение — тоже часть рекомендаций.
-  const settings = recommended ? recommendedSettings : withoutRecommendedPace(recommendedSettings);
-  const braked = recommended && recommendedBraked;
+  // Безлимит от администратора (ADR-0119) — ничего; партнёр выключил рекомендации (ADR-0117) — только пауза и сон.
+  // Автоторможение — тоже часть рекомендаций.
+  const settings = number.unlimited
+    ? unlimitedPace(recommendedSettings)
+    : recommended
+      ? recommendedSettings
+      : withoutRecommendedPace(recommendedSettings);
+  const braked = recommended && !number.unlimited && recommendedBraked;
   const warmupDay = callWarmupDay(number.warmupStartedAt, attempts.lastAt, now);
   const poor = isPoorNumber(attempts.day, attempts.realAnsweredDay, settings.poorAnswerPercent);
   // Сон (ADR-0107, ADR-0108): у каждого номера свои часы, и у транка — у каждого его номера. Сутки считаются на все

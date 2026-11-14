@@ -13,7 +13,7 @@
  * у партнёра — без модерации, но только с внешним адресом, а узел выбирает площадка.
  */
 
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Cabinets, Roles } from '../../http/auth.guard.js';
@@ -21,7 +21,12 @@ import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
 import type { Principal } from '../identity/identity.service.js';
-import { createSipTrunkSchema, partnerSipTrunkSchema, updateSipTrunkSchema } from './schemas.js';
+import {
+  createSipTrunkSchema,
+  partnerSipTrunkSchema,
+  trunkUnlimitedSchema,
+  updateSipTrunkSchema,
+} from './schemas.js';
 import { TelephonyService } from './telephony.service.js';
 import type { GatewayRow, SipTrunkRow } from './telephony.repository.js';
 
@@ -48,6 +53,10 @@ interface SipTrunkView {
   readonly max_concurrent_calls: number;
   /** Номеров у провайдера: на них делится рекомендованная работа (ADR-0105). */
   readonly numbers_count: number;
+  /** Безлимит от администратора (ADR-0119): ограничения площадки на номер не действуют. */
+  readonly unlimited: boolean;
+  /** Партнёр попросил безлимит, решения ещё нет; пусто — не просил или решено. */
+  readonly unlimited_requested_at: string | null;
   readonly created_at: string;
 }
 
@@ -109,6 +118,45 @@ export class SipTrunkController {
       parseId(id, 'gateway'),
       trunkChanges(body),
       parseId(actor.userId, 'user'),
+      actor.role,
+    );
+    return { trunk: toTrunkView(updated) };
+  }
+
+  /**
+   * Администратор выдаёт или снимает безлимит
+   * ([ADR-0119](../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)). Отказ на запрос
+   * партнёра — тот же вызов с `false`: запрос решён.
+   */
+  @Roles('admin')
+  @Put('sip-trunks/:id/unlimited')
+  async setUnlimited(
+    @Param('id') id: string,
+    @Body(zodBody(trunkUnlimitedSchema)) body: z.infer<typeof trunkUnlimitedSchema>,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ trunk: SipTrunkView }> {
+    const updated = await this.telephony.setTrunkUnlimited(
+      parseId(id, 'gateway'),
+      body.unlimited,
+      parseId(actor.userId, 'user'),
+      actor.role,
+    );
+    return { trunk: toTrunkView(updated) };
+  }
+
+  /** Партнёр просит безлимит для своего провайдера (ADR-0119); решает администратор. */
+  @Cabinets('partner')
+  @Post('partner/sip-trunks/:id/unlimited-request')
+  @HttpCode(200)
+  async requestUnlimited(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ trunk: SipTrunkView }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const updated = await this.telephony.requestOwnTrunkUnlimited(
+      parseId(id, 'gateway'),
+      partner.id,
+      actor.userId,
       actor.role,
     );
     return { trunk: toTrunkView(updated) };
@@ -189,6 +237,8 @@ function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): SipTrunk
     has_secret: row.trunk.outboundSecret !== null,
     max_concurrent_calls: row.trunk.maxConcurrentCalls,
     numbers_count: row.trunk.numbersCount,
+    unlimited: row.trunk.unlimited,
+    unlimited_requested_at: row.trunk.unlimitedRequestedAt?.toISOString() ?? null,
     created_at: row.gateway.createdAt.toISOString(),
   };
 }

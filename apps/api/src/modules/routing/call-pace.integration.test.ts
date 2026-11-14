@@ -752,6 +752,39 @@ describe('автоторможение оператора, шаг SIP-прова
     });
     expect(await gatewayOf((await route(channel, destination)).callId)).toBe(trunk);
   });
+
+  it('безлимит (ADR-0119): шаг, пауза, пределы и номер клиента провайдера не держат; каналы — держат', async () => {
+    await settings({
+      'calls.trunk_calls_per_second': 1,
+      'calls.pause_seconds': 600,
+      'calls.recommended_per_hour': 1,
+      'calls.caller_id_per_hour': 1,
+    });
+    const { operator, channel, destination } = await scenario();
+    const trunk = await createTrunkPartner(operator);
+    await withDatabase(async (execute) => {
+      await execute(sql`update channels set caller_id = '74950003344' where id = ${channel}`);
+    });
+
+    const first = await route(channel, destination);
+    expect(await gatewayOf(first.callId)).toBe(trunk);
+    expect((await route(channel, destination)).reason).toBe('numbers_exhausted');
+
+    const granted = await api().inject({
+      method: 'PUT',
+      url: `/sip-trunks/${trunk}/unlimited`,
+      headers: auth(),
+      payload: { unlimited: true },
+    });
+    expect(granted.statusCode).toBe(200);
+    // Каналов у провайдера пять: один занят первым вызовом, четыре проходят подряд, шестой — нет.
+    for (let index = 0; index < 4; index += 1) {
+      const next = await route(channel, destination);
+      expect(next.outcome).toBe('routed');
+      expect(await gatewayOf(next.callId)).toBe(trunk);
+    }
+    expect((await route(channel, destination)).outcome).not.toBe('routed');
+  });
 });
 
 describe('партнёр выбирает: рекомендации площадки или свои лимиты (ADR-0117)', () => {

@@ -652,6 +652,13 @@
       "when": 1794488270808,
       "tag": "0092_partners_calls_recommended",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1794632731346,
+      "tag": "0093_sip_trunks_unlimited",
+      "breakpoints": true
     }
   ]
 }

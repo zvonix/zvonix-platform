@@ -183,6 +183,10 @@ interface TrunkView {
   /** Номеров у провайдера (ADR-0105). */
   readonly numbers_count: number;
   readonly on_node: boolean;
+  /** Безлимит от администратора (ADR-0119): ограничения площадки на номер не действуют. */
+  readonly unlimited: boolean;
+  /** Партнёр попросил безлимит, решения ещё нет; пусто — не просил или решено. */
+  readonly unlimited_requested_at: string | null;
   readonly pace?: NumberPaceView;
 }
 
@@ -732,6 +736,8 @@ function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): TrunkVie
     max_concurrent_calls: row.trunk.maxConcurrentCalls,
     numbers_count: row.trunk.numbersCount,
     on_node: row.gateway.nodeId !== null,
+    unlimited: row.trunk.unlimited,
+    unlimited_requested_at: row.trunk.unlimitedRequestedAt?.toISOString() ?? null,
   };
 }
 

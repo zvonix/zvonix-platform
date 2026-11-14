@@ -157,7 +157,8 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 
 Транк в `gateways` не попадает, хотя в базе это тоже шлюз: портов и SIM у него нет,
 а есть адрес провайдера. У транка в `trunks`: `id`, `name`, `status`, `suspended_by` (как у шлюза), `tariff_id`,
-`proxy_host`, `registers_outbound`, `outbound_username`, `has_secret`, `max_concurrent_calls`, `numbers_count`, `on_node`, `pace`.
+`proxy_host`, `registers_outbound`, `outbound_username`, `has_secret`, `max_concurrent_calls`, `numbers_count`, `on_node`,
+`unlimited`, `unlimited_requested_at` ([ADR-0119](../adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)), `pace`.
 
 **`pace` — прогрев и рекомендованная работа номера** (у SIM и у транка, только в этом списке;
 [ADR-0105](../adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)): `{ "warmup_day", "per_hour", "per_day",
@@ -227,6 +228,13 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 
 Поля как у `PATCH /sip-trunks/:id` ([telephony.md](telephony.md)): «поля нет» — «не трогать». Новый адрес проверяется
 так же, как при заведении. Чужой — `404`, удалённый — `409`.
+
+### `POST /partner/sip-trunks/:id/unlimited-request`
+
+Партнёр просит безлимит для своего провайдера ([ADR-0119](../adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)).
+Тела нет. `200` → `{ "trunk": … }` с `unlimited_requested_at`. Повтор и запрос уже безлимитного ничего не меняют.
+Чужой — `404`, удалённый — `409`. Журнал `sip_trunk.unlimited_requested`. Решает администратор —
+`PUT /sip-trunks/:id/unlimited` ([telephony.md](telephony.md)); выдать безлимит себе партнёр не может.
 
 ### `POST /partner/sip-trunks/:id/test-call`
 

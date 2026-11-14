@@ -93,6 +93,10 @@ export interface Trunk {
   /** Номеров у провайдера: на них делится рекомендованная работа (ADR-0105). */
   readonly numbers_count: number;
   readonly on_node: boolean;
+  /** Безлимит от администратора (ADR-0119): прогрева, пределов, сна и пауз площадки нет. */
+  readonly unlimited: boolean;
+  /** Безлимит запрошен и ждёт решения; пусто — не просили или решено. */
+  readonly unlimited_requested_at: string | null;
   readonly pace?: NumberPaceView;
 }
 

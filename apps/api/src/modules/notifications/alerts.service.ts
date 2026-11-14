@@ -18,7 +18,7 @@ import { Money } from '@zvonix/shared';
 import type { PublicUser } from '../identity/identity.service.js';
 import { IdentityService } from '../identity/identity.service.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
-import type { ClientId } from '../billing/billing.repository.js';
+import type { ClientId, PartnerId } from '../billing/billing.repository.js';
 import { BillingService } from '../billing/billing.service.js';
 import { MailService } from '../mail/mail.service.js';
 import { MessagesService } from '../messaging/messages.service.js';
@@ -34,6 +34,7 @@ import {
   QualityService,
   type QualityView,
 } from '../telephony/quality.service.js';
+import { TelephonyService } from '../telephony/telephony.service.js';
 import { CertificateStatusService } from '../updates/certificate-status.service.js';
 import { GithubTokenStatusService } from '../updates/github-token-status.service.js';
 
@@ -89,6 +90,7 @@ export class AlertsService {
     private readonly messages: MessagesService,
     private readonly certificate: CertificateStatusService,
     private readonly githubToken: GithubTokenStatusService,
+    private readonly telephony: TelephonyService,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('alerts');
@@ -247,6 +249,12 @@ export class AlertsService {
       alerts.push(...(await this.suspensionBurstAlerts(now)));
     } catch (cause) {
       this.logger.error('Тревоги: снятые за отказы SIM партнёров не прочитаны', cause);
+    }
+
+    try {
+      alerts.push(...(await this.unlimitedRequestAlerts()));
+    } catch (cause) {
+      this.logger.error('Тревоги: запросы безлимита не прочитаны', cause);
     }
 
     try {
@@ -441,6 +449,39 @@ export class AlertsService {
       });
     }
     return alerts;
+  }
+
+  /**
+   * Партнёр просит безлимит для SIP-провайдера
+   * ([ADR-0119](../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)): решить может только
+   * администратор, и пока он не решит, письмо повторяется раз в `REPEAT_HOURS`.
+   */
+  private async unlimitedRequestAlerts(): Promise<Alert[]> {
+    const alerts: Alert[] = [];
+    for (const { gateway, trunk } of await this.telephony.trunksAwaitingUnlimited()) {
+      const partner = await this.partnerName(gateway.partnerId);
+      alerts.push({
+        kind: `alert_trunk_unlimited:${gateway.id}`,
+        subject: `Zvonix: партнёр ${partner} просит безлимит для SIP-провайдера «${gateway.name}»`,
+        body: [
+          `Партнёр ${partner} просит безлимит для SIP-провайдера «${gateway.name}» (${trunk.proxyHost}).`,
+          '',
+          'Безлимит снимает у провайдера прогрев, пределы в час и в сутки, сон и паузу между звонками; остаются его каналы и лимиты партнёра и клиентов. Выдавайте, если провайдер действительно пропускает любой поток.',
+          'Решение — в карточке партнёра, раздел SIP-провайдеров: «Выдать безлимит» или «Отклонить».',
+        ].join('\n'),
+      });
+    }
+    return alerts;
+  }
+
+  /** Имя партнёра для письма; не нашлось — письмо всё равно уходит. */
+  private async partnerName(partnerId: PartnerId): Promise<string> {
+    try {
+      const partner = await this.billing.requirePartner(partnerId);
+      return `«${partner.name}»`;
+    } catch {
+      return 'без названия';
+    }
   }
 
   /** Имя клиента для письма; не нашлось — письмо всё равно уходит. */

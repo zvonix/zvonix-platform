@@ -2762,3 +2762,58 @@ describe('партнёр выбирает, как звонят его карты
     }
   }, 60_000);
 });
+
+describe('безлимит SIP-провайдера: просит партнёр, решает администратор (ADR-0119)', () => {
+  const request = (trunkId: string, bearer: string) =>
+    api().inject({
+      method: 'POST',
+      url: `/partner/sip-trunks/${trunkId}/unlimited-request`,
+      headers: as(bearer),
+    });
+  const decide = (trunkId: string, unlimited: boolean, headers: Record<string, string>) =>
+    api().inject({
+      method: 'PUT',
+      url: `/sip-trunks/${trunkId}/unlimited`,
+      headers,
+      payload: { unlimited },
+    });
+  const mineTrunk = async () =>
+    (await get('/partner/equipment', as(mine.token)))
+      .json<{
+        trunks: { id: string; unlimited: boolean; unlimited_requested_at: string | null }[];
+      }>()
+      .trunks.find((trunk) => trunk.id === myTrunk);
+
+  it('свой — просит, чужой — 404; выдать себе партнёр не может; решение стирает запрос и пишется в журнал', async () => {
+    expect(await mineTrunk()).toMatchObject({ unlimited: false, unlimited_requested_at: null });
+
+    expect((await request(myTrunk, neighbour.token)).statusCode).toBe(404);
+    const asked = await request(myTrunk, mine.token);
+    expect(asked.statusCode).toBe(200);
+    const askedAt = (await mineTrunk())?.unlimited_requested_at;
+    expect(askedAt).not.toBeNull();
+    // Повтор не сдвигает время первого запроса.
+    await request(myTrunk, mine.token);
+    expect((await mineTrunk())?.unlimited_requested_at).toBe(askedAt);
+
+    // Ни партнёр, ни поддержка выдать безлимит не могут.
+    expect([401, 403, 404]).toContain((await decide(myTrunk, true, as(mine.token))).statusCode);
+
+    const granted = await decide(myTrunk, true, auth());
+    expect(granted.statusCode).toBe(200);
+    expect(await mineTrunk()).toMatchObject({ unlimited: true, unlimited_requested_at: null });
+    // Уже безлимит — просить нечего, ничего не меняется.
+    await request(myTrunk, mine.token);
+    expect((await mineTrunk())?.unlimited_requested_at).toBeNull();
+
+    const audit = (await get(`/audit?entityId=${myTrunk}`)).json<{
+      entries: { action: string; after: Record<string, unknown> | null }[];
+    }>().entries;
+    expect(audit.map((entry) => entry.action)).toEqual(
+      expect.arrayContaining(['sip_trunk.unlimited_requested', 'sip_trunk.unlimited_set']),
+    );
+
+    expect((await decide(myTrunk, false, auth())).statusCode).toBe(200);
+    expect(await mineTrunk()).toMatchObject({ unlimited: false, unlimited_requested_at: null });
+  }, 60_000);
+});
