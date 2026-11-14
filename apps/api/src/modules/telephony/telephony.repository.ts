@@ -787,14 +787,19 @@ export class TelephonyRepository {
    */
   async recordTrunkLinks(
     nodeId: Id<'node'>,
-    links: readonly { name: string; state: string; status: string }[],
+    links: readonly { name: string; state: string; status: string; failure?: number | undefined }[],
     at: Date,
   ): Promise<number> {
     let recorded = 0;
     for (const link of links) {
       const rows = await this.db
         .update(sipTrunks)
-        .set({ linkState: link.state, linkStatus: link.status, linkReportedAt: at })
+        .set({
+          linkState: link.state,
+          linkStatus: link.status,
+          linkFailure: link.failure ?? null,
+          linkReportedAt: at,
+        })
         .where(
           sql`${sipTrunks.gatewayId} = (select ${gateways.id} from ${gateways} where ${gateways.sipUsername} = ${link.name} and ${gateways.nodeId} = ${nodeId} and ${gateways.type} = 'sip_trunk')`,
         )

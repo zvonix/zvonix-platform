@@ -474,7 +474,37 @@ describe('связь узла с провайдером (ADR-0121)', () => {
     const own = listed
       .json<{ trunks: (Trunk & { link: { state: string; status: string } | null })[] }>()
       .trunks.find((row) => row.id === trunk.id);
-    expect(own?.link).toMatchObject({ state: 'FAIL_WAIT', status: 'DOWN' });
+    // Старый узел кода отказа не шлёт — пусто, а не ошибка.
+    expect(own?.link).toMatchObject({ state: 'FAIL_WAIT', status: 'DOWN', failure: null });
+  }, 120_000);
+
+  it('код последнего отказа регистрации — виден у транка; следующее сообщение без кода его стирает', async () => {
+    const status = (failure?: number) =>
+      api().inject({
+        method: 'POST',
+        url: '/node/sip-gateways/status',
+        headers: asNode(),
+        payload: {
+          gateways: [
+            {
+              name: trunk.sip_username,
+              state: 'TRYING',
+              status: 'DOWN',
+              ...(failure === undefined ? {} : { failure }),
+            },
+          ],
+        },
+      });
+    const link = async () =>
+      (await get(`/sip-trunks?partnerId=${partnerId}`))
+        .json<{ trunks: (Trunk & { link: { failure: number | null } | null })[] }>()
+        .trunks.find((row) => row.id === trunk.id)?.link;
+
+    expect((await status(908)).statusCode).toBe(200);
+    expect((await link())?.failure).toBe(908);
+    expect((await status()).statusCode).toBe(200);
+    expect((await link())?.failure).toBeNull();
+    expect((await status(42)).statusCode).toBe(400);
   }, 120_000);
 
   it('человек сообщить состояние не может', async () => {

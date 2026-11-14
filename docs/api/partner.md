@@ -161,7 +161,7 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 `unlimited`, `unlimited_requested_at` ([ADR-0119](../adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)), `has_price` — есть ли
 цена «через SIP» в тарифе транка: без неё клиенты через него не звонят
 ([ADR-0120](../adr/0120-poryadok-otdelnyh-sim-i-sip-u-klienta.md)), `link` — связь узла с провайдером `{ state, status,
-reported_at }` или `null` ([ADR-0121](../adr/0121-svyaz-uzla-s-sip-provayderom.md)), `pace`.
+failure, reported_at }` или `null` ([ADR-0121](../adr/0121-svyaz-uzla-s-sip-provayderom.md)), `pace`.
 
 **`pace` — прогрев и рекомендованная работа номера** (у SIM и у транка, только в этом списке;
 [ADR-0105](../adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)): `{ "warmup_day", "per_hour", "per_day",

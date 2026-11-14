@@ -680,6 +680,13 @@
       "when": 1794676975637,
       "tag": "0096_sip_trunks_link",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1794688088606,
+      "tag": "0097_sip_trunks_link_failure",
+      "breakpoints": true
     }
   ]
 }

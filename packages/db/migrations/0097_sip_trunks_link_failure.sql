@@ -1,0 +1,1 @@
+ALTER TABLE "sip_trunks" ADD COLUMN "link_failure" integer;
