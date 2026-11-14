@@ -61,15 +61,16 @@ export function PortRow({
         {port.sim === null ? (
           <span className="text-faint">—</span>
         ) : (
-          <>
+          // Одной строкой: переключатель, связь, темп — строка таблицы не раздувается в столбик.
+          <div className="flex items-center gap-3 whitespace-nowrap">
             {/*
               Подтверждение оператора площадкой партнёру ничего не даёт и ничего от него
               не требует (владелец, 2026-09-25) — здесь только состояние карты.
             */}
             <SimSwitch sim={port.sim} />
-            {port.sim.poor_connection === true && <PoorConnection block />}
-            <NumberPace pace={port.sim.pace} block />
-          </>
+            {port.sim.poor_connection === true && <PoorConnection />}
+            <NumberPace pace={port.sim.pace} />
+          </div>
         )}
         {/*
           Состояние слота сообщает оборудование; «не опрошен» и «свободен» партнёру ничего

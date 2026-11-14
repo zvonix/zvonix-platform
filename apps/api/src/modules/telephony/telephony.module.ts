@@ -11,6 +11,9 @@ import { CallsService } from './calls.service.js';
 import { CdrController } from './cdr.controller.js';
 import { ClientApiCallsController } from './client-api.controller.js';
 import { ClientReportController } from './client-report.controller.js';
+import { ClientRoutesController } from './client-routes.controller.js';
+import { ClientRoutesService } from './client-routes.service.js';
+import { RoutePrioritiesRepository } from './route-priorities.repository.js';
 import { CdrService } from './cdr.service.js';
 import { NodeDirectoryController } from './node-directory.controller.js';
 import { PartnerEquipmentController } from './partner-equipment.controller.js';
@@ -53,6 +56,7 @@ import { LimitOwnersService } from './limit-owners.service.js';
     LimitController,
     ClientLimitsController,
     PartnerCallDistributionController,
+    ClientRoutesController,
   ],
   providers: [
     TelephonyService,
@@ -68,6 +72,8 @@ import { LimitOwnersService } from './limit-owners.service.js';
     RegistrationsService,
     LimitOwnersService,
     CallPaceService,
+    ClientRoutesService,
+    RoutePrioritiesRepository,
   ],
   // Понадобится маршрутизации: она отбирает шлюзы и читает правила канала.
   // `CdrService` — ради уборки вызовов без CDR: она нужна и маршрутизации на пути

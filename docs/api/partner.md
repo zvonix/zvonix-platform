@@ -158,7 +158,9 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 Транк в `gateways` не попадает, хотя в базе это тоже шлюз: портов и SIM у него нет,
 а есть адрес провайдера. У транка в `trunks`: `id`, `name`, `status`, `suspended_by` (как у шлюза), `tariff_id`,
 `proxy_host`, `registers_outbound`, `outbound_username`, `has_secret`, `max_concurrent_calls`, `numbers_count`, `on_node`,
-`unlimited`, `unlimited_requested_at` ([ADR-0119](../adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)), `pace`.
+`unlimited`, `unlimited_requested_at` ([ADR-0119](../adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)), `has_price` — есть ли
+цена «через SIP» в тарифе транка: без неё клиенты через него не звонят
+([ADR-0120](../adr/0120-poryadok-otdelnyh-sim-i-sip-u-klienta.md)), `pace`.
 
 **`pace` — прогрев и рекомендованная работа номера** (у SIM и у транка, только в этом списке;
 [ADR-0105](../adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)): `{ "warmup_day", "per_hour", "per_day",

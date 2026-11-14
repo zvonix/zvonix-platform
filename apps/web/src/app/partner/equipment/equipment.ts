@@ -97,6 +97,8 @@ export interface Trunk {
   readonly unlimited: boolean;
   /** Безлимит запрошен и ждёт решения; пусто — не просили или решено. */
   readonly unlimited_requested_at: string | null;
+  /** Есть ли цена «через SIP» в тарифе провайдера: без неё клиенты через него не звонят (ADR-0120). */
+  readonly has_price: boolean;
   readonly pace?: NumberPaceView;
 }
 

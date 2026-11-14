@@ -14,12 +14,13 @@
  */
 
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Put, Query } from '@nestjs/common';
-import { parseId } from '@zvonix/shared';
+import { internal, parseId } from '@zvonix/shared';
 import type { z } from 'zod';
 import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import { BillingService } from '../billing/billing.service.js';
+import { TariffService } from '../catalog/tariff.service.js';
 import type { Principal } from '../identity/identity.service.js';
 import {
   createSipTrunkSchema,
@@ -57,6 +58,8 @@ interface SipTrunkView {
   readonly unlimited: boolean;
   /** Партнёр попросил безлимит, решения ещё нет; пусто — не просил или решено. */
   readonly unlimited_requested_at: string | null;
+  /** Есть ли цена «через SIP» в тарифе транка: без неё клиенты через него не звонят (ADR-0120, п. 9). */
+  readonly has_price: boolean;
   readonly created_at: string;
 }
 
@@ -65,7 +68,28 @@ export class SipTrunkController {
   constructor(
     private readonly telephony: TelephonyService,
     private readonly billing: BillingService,
+    private readonly tariffs: TariffService,
   ) {}
+
+  private async views(
+    rows: readonly { gateway: GatewayRow; trunk: SipTrunkRow }[],
+  ): Promise<SipTrunkView[]> {
+    const priced = await this.tariffs.hasPrices(
+      rows.map(({ gateway }) => ({
+        partnerId: gateway.partnerId,
+        tariffId: gateway.tariffId,
+        terminationKind: 'sip',
+      })),
+      new Date(),
+    );
+    return rows.map((row, index) => toTrunkView(row, priced[index] === true));
+  }
+
+  private async view(row: { gateway: GatewayRow; trunk: SipTrunkRow }): Promise<SipTrunkView> {
+    const [view] = await this.views([row]);
+    if (view === undefined) throw internal('Вид транка не собран');
+    return view;
+  }
 
   @Roles('admin')
   @Post('sip-trunks')
@@ -88,7 +112,7 @@ export class SipTrunkController {
       parseId(actor.userId, 'user'),
       actor.role,
     );
-    return { trunk: toTrunkView(created) };
+    return { trunk: await this.view(created) };
   }
 
   @Roles('admin', 'support')
@@ -97,7 +121,7 @@ export class SipTrunkController {
     const rows = await this.telephony.listTrunks(
       partnerId === undefined || partnerId === '' ? undefined : parseId(partnerId, 'partner'),
     );
-    return { trunks: rows.map(toTrunkView) };
+    return { trunks: await this.views(rows) };
   }
 
   /**
@@ -120,7 +144,7 @@ export class SipTrunkController {
       parseId(actor.userId, 'user'),
       actor.role,
     );
-    return { trunk: toTrunkView(updated) };
+    return { trunk: await this.view(updated) };
   }
 
   /**
@@ -141,7 +165,7 @@ export class SipTrunkController {
       parseId(actor.userId, 'user'),
       actor.role,
     );
-    return { trunk: toTrunkView(updated) };
+    return { trunk: await this.view(updated) };
   }
 
   /** Партнёр просит безлимит для своего провайдера (ADR-0119); решает администратор. */
@@ -159,7 +183,7 @@ export class SipTrunkController {
       actor.userId,
       actor.role,
     );
-    return { trunk: toTrunkView(updated) };
+    return { trunk: await this.view(updated) };
   }
 
   /** Партнёр заводит своего провайдера (ADR-0100). Включает его потом сам — `POST /partner/gateways/:id/status`. */
@@ -184,7 +208,7 @@ export class SipTrunkController {
       actor.userId,
       actor.role,
     );
-    return { trunk: toTrunkView(created) };
+    return { trunk: await this.view(created) };
   }
 
   @Cabinets('partner')
@@ -202,7 +226,7 @@ export class SipTrunkController {
       actor.userId,
       actor.role,
     );
-    return { trunk: toTrunkView(updated) };
+    return { trunk: await this.view(updated) };
   }
 }
 
@@ -222,7 +246,10 @@ function trunkChanges(
   };
 }
 
-function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): SipTrunkView {
+function toTrunkView(
+  row: { gateway: GatewayRow; trunk: SipTrunkRow },
+  hasPrice: boolean,
+): SipTrunkView {
   return {
     id: row.gateway.id,
     partner_id: row.gateway.partnerId,
@@ -239,6 +266,7 @@ function toTrunkView(row: { gateway: GatewayRow; trunk: SipTrunkRow }): SipTrunk
     numbers_count: row.trunk.numbersCount,
     unlimited: row.trunk.unlimited,
     unlimited_requested_at: row.trunk.unlimitedRequestedAt?.toISOString() ?? null,
+    has_price: hasPrice,
     created_at: row.gateway.createdAt.toISOString(),
   };
 }

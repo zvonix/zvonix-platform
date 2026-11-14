@@ -372,6 +372,75 @@ export class TariffService {
   }
 
   /**
+   * Есть ли у маршрута хоть одна действующая цена своего способа в своём тарифе (ADR-0056). Без неё через маршрут
+   * не звонят вовсе (ADR-0040), и партнёру это говорится прямо
+   * ([ADR-0120](../../../../../docs/adr/0120-poryadok-otdelnyh-sim-i-sip-u-klienta.md), п. 9). Ответ — по позиции.
+   */
+  async hasPrices(routes: readonly RateRequest[], at: Date): Promise<boolean[]> {
+    if (routes.length === 0) return [];
+    const partnerIds = [...new Set(routes.map((route) => route.partnerId))];
+    const defaults = await this.repository.defaultTariffs(partnerIds);
+    const rates = await this.repository.listEffectiveRates(partnerIds, undefined, at);
+    const priced = new Set(
+      rates.flatMap((rate) => {
+        const tariffId = rate.tariffId ?? defaults.get(rate.partnerId);
+        return tariffId === undefined ? [] : [`${tariffId}:${rate.terminationKind}`];
+      }),
+    );
+    return routes.map((route) => {
+      const tariffId = route.tariffId ?? defaults.get(route.partnerId);
+      return tariffId !== undefined && priced.has(`${tariffId}:${route.terminationKind}`);
+    });
+  }
+
+  /**
+   * Во что клиенту обходится каждый маршрут — одна SIM или один SIP-провайдер
+   * ([ADR-0120](../../../../../docs/adr/0120-poryadok-otdelnyh-sim-i-sip-u-klienta.md)): диапазон эталонного вызова
+   * по направлениям **его** тарифа и способа, с наценкой клиента. Тариф без своего — тариф партнёра по умолчанию
+   * (ADR-0056). Ответ — по позиции запроса; пусто — цены нет, и звонить через маршрут нельзя.
+   */
+  async routePrices(
+    clientId: Id<'client'>,
+    routes: readonly RateRequest[],
+    seconds: number,
+    at: Date,
+  ): Promise<(Omit<OfferPrice, 'partnerId' | 'terminationKind'> | undefined)[]> {
+    if (routes.length === 0) return [];
+    const commission = await this.repository.findCommissionRule(clientId, at, 'call');
+    if (commission === undefined) {
+      throw notFound('Нет действующего правила наценки', { details: { client_id: clientId } });
+    }
+    const rule = toCommissionRule(commission);
+    const partnerIds = [...new Set(routes.map((route) => route.partnerId))];
+    const defaults = await this.repository.defaultTariffs(partnerIds);
+    const rates = await this.repository.listEffectiveRates(partnerIds, undefined, at);
+
+    const byTariff = new Map<string, MoneyAmount[]>();
+    for (const rate of rates) {
+      // Строка без тарифа — давняя цена тарифа по умолчанию (ADR-0056).
+      const tariffId = rate.tariffId ?? defaults.get(rate.partnerId);
+      if (tariffId === undefined) continue;
+      const key = `${tariffId}:${rate.terminationKind}`;
+      const cost = chargeForCall(seconds, toTariffRule(rate), rule).clientAmount;
+      const seen = byTariff.get(key);
+      if (seen === undefined) byTariff.set(key, [cost]);
+      else seen.push(cost);
+    }
+
+    return routes.map((route) => {
+      const tariffId = route.tariffId ?? defaults.get(route.partnerId);
+      if (tariffId === undefined) return undefined;
+      const costs = byTariff.get(`${tariffId}:${route.terminationKind}`);
+      if (costs === undefined) return undefined;
+      return {
+        minPrice: costs.reduce((low, cost) => (cost < low ? cost : low)),
+        maxPrice: costs.reduce((high, cost) => (cost > high ? cost : high)),
+        directions: costs.length,
+      };
+    });
+  }
+
+  /**
    * Из чего складывается цена — по каждому направлению каждого предложения.
    *
    * Диапазон в `offerPrices` отвечает «кто дешевле», а этот список — «почему столько».

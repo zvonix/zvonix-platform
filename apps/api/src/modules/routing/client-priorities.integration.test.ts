@@ -322,3 +322,156 @@ describe('приоритеты партнёров у клиента: звонк�
     expect(messages.json<{ priorities: unknown[] }>().priorities).toEqual([]);
   }, 120_000);
 });
+
+interface RouteView {
+  readonly route_id: string;
+  readonly kind: string;
+  readonly alias_id: string;
+  readonly number: number;
+  readonly min_price: string;
+  readonly configured: boolean;
+  readonly priority: number | null;
+}
+
+const setRoutes = (
+  clientToken: string,
+  entries: { routeId: string; kind?: string; priority: number | null }[],
+) =>
+  api().inject({
+    method: 'PUT',
+    url: '/client/route-priorities',
+    headers: bearer(clientToken),
+    payload: { priorities: entries.map((entry) => ({ kind: 'sim', ...entry })) },
+  });
+
+describe('порядок отдельных SIM у клиента (ADR-0120)', () => {
+  it('цифры отдельных SIM вперемешку между партнёрами', async () => {
+    const operator = await operatorId();
+    const first = await createPartner(operator, 2, '1');
+    const second = await createPartner(operator, 1, '2');
+    const { channel, destination, clientToken } = await createChannel(operator);
+    const [a1 = '', a2 = ''] = first.sims;
+    const [b1 = ''] = second.sims;
+
+    const put = await setRoutes(clientToken, [
+      { routeId: a2, priority: 1 },
+      { routeId: b1, priority: 2 },
+      { routeId: a1, priority: 3 },
+    ]);
+    expect(put.statusCode).toBe(200);
+    expect(await preview(channel, destination)).toEqual([a2, b1, a1]);
+  }, 120_000);
+
+  it('цифра SIM главнее цифры партнёра; пусто — как у партнёра', async () => {
+    const operator = await operatorId();
+    const partner = await createPartner(operator, 3, '1');
+    const other = await createPartner(operator, 1, '1');
+    const { channel, destination, clientToken } = await createChannel(operator);
+    const [s1 = '', s2 = '', s3 = ''] = partner.sims;
+    await setClientList(clientToken, [
+      { aliasId: await aliasOf(partner.id), priority: 2 },
+      { aliasId: await aliasOf(other.id), priority: 1 },
+    ]);
+    await setRoutes(clientToken, [{ routeId: s3, priority: 1 }]);
+
+    const order = await preview(channel, destination);
+    // SIM 3 со своей единицей идёт вместе с другим партнёром (тоже 1), остальные карты — по цифре партнёра.
+    expect(order.slice(0, 2).sort()).toEqual([s3, other.sims[0]].sort());
+    expect(order.slice(2).sort()).toEqual([s1, s2].sort());
+  }, 120_000);
+
+  it('«не использовать» у SIM исключает её, а цифра SIM действует и при «не использовать» у партнёра', async () => {
+    const operator = await operatorId();
+    const partner = await createPartner(operator, 3, '1');
+    const { channel, destination, clientToken } = await createChannel(operator);
+    const [s1 = '', s2 = '', s3 = ''] = partner.sims;
+
+    await setRoutes(clientToken, [{ routeId: s1, priority: null }]);
+    const without = await preview(channel, destination);
+    expect(without).not.toContain(s1);
+    expect(without.sort()).toEqual([s2, s3].sort());
+
+    await setClientList(clientToken, [{ aliasId: await aliasOf(partner.id), priority: null }]);
+    await setRoutes(clientToken, [{ routeId: s2, priority: 1 }]);
+    expect(await preview(channel, destination)).toEqual([s2]);
+  }, 120_000);
+
+  it('список маршрутов: номер внутри партнёра, цена, своя цифра; без номера карты; журнал', async () => {
+    const operator = await operatorId();
+    const partner = await createPartner(operator, 2, '1.5');
+    const { clientToken } = await createChannel(operator);
+    const [s1 = '', s2 = ''] = partner.sims;
+    await setRoutes(clientToken, [{ routeId: s2, priority: 4 }]);
+
+    const response = await api().inject({
+      method: 'GET',
+      url: '/client/routes',
+      headers: bearer(clientToken),
+    });
+    expect(response.statusCode).toBe(200);
+    const alias = await aliasOf(partner.id);
+    const own = response
+      .json<{ routes: RouteView[] }>()
+      .routes.filter((route) => route.alias_id === alias);
+    expect(own.map((route) => [route.route_id, route.kind, route.number])).toEqual([
+      [s1, 'sim', 1],
+      [s2, 'sim', 2],
+    ]);
+    expect(own[0]).toMatchObject({ configured: false, priority: null, min_price: '1.5' });
+    expect(own[1]).toMatchObject({ configured: true, priority: 4 });
+    // Номера карт клиенту не уходят (ADR-0014).
+    const numbers = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select msisdn from sim_cards where partner_id = ${partner.id}`,
+      );
+      return result.rows.map((row) => (row as { msisdn: string }).msisdn);
+    });
+    for (const msisdn of numbers) expect(response.body).not.toContain(msisdn);
+    expect(response.body).not.toContain('msisdn');
+
+    const audited = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select count(*)::int as n from audit_log where action = 'client_route_priorities.set'`,
+      );
+      return (result.rows[0] as { n: number }).n;
+    });
+    expect(audited).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('чужая, несуществующая и повторённая SIM — отказ, список прежний', async () => {
+    const operator = await operatorId();
+    const partner = await createPartner(operator, 1, '1');
+    const { clientToken } = await createChannel(operator);
+    const [s1 = ''] = partner.sims;
+    await setRoutes(clientToken, [{ routeId: s1, priority: 1 }]);
+
+    expect(
+      (
+        await setRoutes(clientToken, [
+          { routeId: '00000000-0000-7000-8000-000000000000', priority: 1 },
+        ])
+      ).statusCode,
+    ).toBe(404);
+    // Карта есть, но названа провайдером — такого маршрута нет.
+    expect(
+      (await setRoutes(clientToken, [{ routeId: s1, kind: 'sip', priority: 1 }])).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await setRoutes(clientToken, [
+          { routeId: s1, priority: 1 },
+          { routeId: s1, priority: 2 },
+        ])
+      ).statusCode,
+    ).toBe(400);
+    const listed = await api().inject({
+      method: 'GET',
+      url: '/client/routes',
+      headers: bearer(clientToken),
+    });
+    const row = listed
+      .json<{ routes: RouteView[] }>()
+      .routes.find((route) => route.route_id === s1);
+    expect(row).toMatchObject({ configured: true, priority: 1 });
+  }, 120_000);
+});
