@@ -1,5 +1,6 @@
 'use client';
 
+import { ArrowUpFromLine } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
@@ -14,6 +15,7 @@ import {
   type SipAccount,
 } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ApiError, request } from '@/lib/api';
@@ -736,16 +738,21 @@ export function RemoveSim({ portId }: { portId: string }) {
 
   return (
     <div className="flex flex-col gap-1">
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={remove.isPending}
-        onClick={() => {
-          remove.mutate();
-        }}
-      >
-        Вынуть
-      </Button>
+      {/* Значком, как тестовый звонок и настройки рядом: слова в строке таблицы растягивали её. */}
+      <WithTooltip label="Вынуть карту из порта">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="size-7"
+          aria-label="Вынуть карту из порта"
+          disabled={remove.isPending}
+          onClick={() => {
+            remove.mutate();
+          }}
+        >
+          <ArrowUpFromLine aria-hidden className="size-4" />
+        </Button>
+      </WithTooltip>
       {error !== undefined && <ErrorNote error={error} />}
     </div>
   );

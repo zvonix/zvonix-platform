@@ -13,6 +13,7 @@ import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
 import { TestCallButton } from '@/components/test-call';
 import { NumberPace, type NumberPaceView } from '@/components/number-pace';
+import { TrunkPresence, type TrunkLink } from '@/components/presence';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
 import { Button } from '@/components/ui/button';
 import {
@@ -51,6 +52,7 @@ interface Trunk {
   /** Партнёр попросил безлимит, решения нет; пусто — не просил или решено. */
   readonly unlimited_requested_at: string | null;
   readonly has_price: boolean;
+  readonly link: TrunkLink | null;
   readonly pace?: NumberPaceView;
 }
 
@@ -223,6 +225,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                     >
                       {GATEWAY_STATUS_NAME[trunk.status]}
                     </span>
+                    <TrunkPresence link={trunk.link} now={Date.now()} />
                     {trunk.suspended_by !== null && (
                       <span className="text-muted-foreground">
                         {GATEWAY_SUSPENDED_BY_NAME[trunk.suspended_by]}

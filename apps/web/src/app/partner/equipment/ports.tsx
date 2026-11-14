@@ -88,7 +88,7 @@ export function PortRow({
         )}
       </TableCell>
       <TableCell>
-        <div className="flex items-start justify-end gap-2">
+        <div className="flex items-center justify-end gap-1">
           {port.sim === null ? (
             <InsertSim portId={port.id} portNumber={port.port_number} spare={spare} />
           ) : (

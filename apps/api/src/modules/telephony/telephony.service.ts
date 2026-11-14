@@ -1604,6 +1604,15 @@ export class TelephonyService {
    * ([ADR-0119](../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)). Повтор ничего не меняет:
    * время первого запроса остаётся, по нему администратор видит, как долго ждут.
    */
+  /** Связь узла с его провайдерами (ADR-0121): узел присылает её с пульсом. */
+  async recordTrunkLinks(
+    nodeId: Id<'node'>,
+    links: readonly { name: string; state: string; status: string }[],
+    at: Date,
+  ): Promise<number> {
+    return this.repository.recordTrunkLinks(nodeId, links, at);
+  }
+
   async requestOwnTrunkUnlimited(
     gatewayId: GatewayId,
     partnerId: PartnerId,

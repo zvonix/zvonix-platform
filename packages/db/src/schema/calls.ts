@@ -96,6 +96,16 @@ export const calls = pgTable(
     /** Фактическая длительность разговора в секундах. Пусто, пока вызов не завершён. */
     durationSeconds: integer(),
 
+    /**
+     * Чем закончился набор — со слов узла: `GATEWAY_DOWN`, `USER_BUSY`, `NO_ANSWER`. Пусто, пока нет CDR.
+     * Разбор «почему не соединилось» без него невозможен: причина отказа (`failure_reason`) — решение площадки
+     * до набора, а это — ответ сети после.
+     */
+    endCause: text(),
+
+    /** Код и текст SIP-ответа шлюза или провайдера: «503 Service Unavailable». Пусто — ответа не было. */
+    endSip: text(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

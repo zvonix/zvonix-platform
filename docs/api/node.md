@@ -47,6 +47,13 @@ SIP-транки, привязанные к этому узлу ([ADR-0039](../a
 
 Ответ JSON — для будущего агента узла. Нынешний узел берёт тот же список готовым файлом.
 
+## `POST /node/sip-gateways/status` — ключ узла
+
+Связь узла с SIP-провайдерами ([ADR-0121](../adr/0121-svyaz-uzla-s-sip-provayderom.md)). Пульс раз в 30 с по каждому
+транку из файла sofia-gateway: `{ "gateways": [ { "name": "gw-…", "state": "REGED", "status": "UP" } ] }` — как их пишет
+`sofia status gateway` (до 500 строк). Записываются только транки этого узла; чужое имя ничего не меняет.
+`200` → `{ "recorded": 1 }`.
+
 ## `GET /node/sip-gateways.xml` — ключ узла
 
 Те же транки готовым файлом FreeSWITCH ([ADR-0118](../adr/0118-uzel-zabiraet-tranki-gotovym-xml.md)).

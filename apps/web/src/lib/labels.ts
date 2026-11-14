@@ -610,6 +610,43 @@ export const TEST_CALL_STATUS_TEXT: Record<Exclude<TestCallStatus, 'failed'>, st
 };
 
 /**
+ * Коды отбоя FreeSWITCH по-русски (владелец, 2026-11-14: «GATEWAY_DOWN — по-русски нельзя писать?»).
+ * Код остаётся в подсказке: по нему разбирают с провайдером, а человеку нужен смысл.
+ */
+const END_CAUSE_NAME: Record<string, string> = {
+  GATEWAY_DOWN: 'провайдер недоступен — узел не подключён к нему',
+  USER_NOT_REGISTERED: 'шлюз не на связи с площадкой',
+  SUBSCRIBER_ABSENT: 'абонент или линия не в сети',
+  USER_BUSY: 'занято',
+  NO_ANSWER: 'не ответили',
+  NO_USER_RESPONSE: 'абонент не отвечает',
+  CALL_REJECTED: 'отклонён провайдером или оператором',
+  UNALLOCATED_NUMBER: 'номера не существует',
+  NO_ROUTE_DESTINATION: 'нет пути до номера',
+  INVALID_NUMBER_FORMAT: 'неверный формат номера',
+  NORMAL_TEMPORARY_FAILURE: 'временный сбой сети',
+  NETWORK_OUT_OF_ORDER: 'сеть недоступна',
+  DESTINATION_OUT_OF_ORDER: 'абонент недоступен',
+  RECOVERY_ON_TIMER_EXPIRE: 'провайдер не ответил вовремя',
+  ORIGINATOR_CANCEL: 'звонящий положил трубку',
+  NORMAL_CLEARING: 'обычное завершение',
+  INCOMPATIBLE_DESTINATION: 'провайдер не принял формат звонка',
+  MEDIA_TIMEOUT: 'пропал звук',
+  INVALID_GATEWAY: 'провайдер не заведён на узле',
+  SERVICE_UNAVAILABLE: 'сервис недоступен',
+  BEARERCAPABILITY_NOTAVAIL: 'провайдер не принял звонок',
+  FACILITY_REJECTED: 'провайдер отклонил услугу',
+  EXCHANGE_ROUTING_ERROR: 'ошибка маршрута у провайдера',
+  ALLOTTED_TIMEOUT: 'вышло время ожидания',
+  LOSE_RACE: 'ответил другой маршрут',
+};
+
+/** Код отбоя по-русски; неизвестный — как есть, с пометкой «код». */
+export function endCauseName(cause: string): string {
+  return END_CAUSE_NAME[cause] ?? `код ${cause}`;
+}
+
+/**
  * Почему тестовый звонок не прошёл — **по участку обрыва, без догадок**.
  *
  * Раньше код отбоя FreeSWITCH переводился в причину «на глаз»: `NORMAL_TEMPORARY_FAILURE`
@@ -632,7 +669,9 @@ export function testCallFailureText(call: {
   }
   const answer =
     call.sip_status === null
-      ? `код ${cause === '' ? 'неизвестен' : cause}`
+      ? cause === ''
+        ? 'причина неизвестна'
+        : endCauseName(cause)
       : `${call.sip_status}${call.sip_phrase === null ? '' : ` ${call.sip_phrase}`}`;
   if (call.rang) {
     return `Шлюз принял звонок и набирал номер, но сеть оператора отказала. Ответ шлюза: ${answer}.`;

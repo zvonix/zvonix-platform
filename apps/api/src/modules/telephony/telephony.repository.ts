@@ -782,6 +782,29 @@ export class TelephonyRepository {
   }
 
   /**
+   * Связь узла с провайдерами — со слов узла (ADR-0121). Обновляются только транки **этого** узла: имя чужого
+   * транка в сообщении ничего не меняет. Возвращает, сколько записано.
+   */
+  async recordTrunkLinks(
+    nodeId: Id<'node'>,
+    links: readonly { name: string; state: string; status: string }[],
+    at: Date,
+  ): Promise<number> {
+    let recorded = 0;
+    for (const link of links) {
+      const rows = await this.db
+        .update(sipTrunks)
+        .set({ linkState: link.state, linkStatus: link.status, linkReportedAt: at })
+        .where(
+          sql`${sipTrunks.gatewayId} = (select ${gateways.id} from ${gateways} where ${gateways.sipUsername} = ${link.name} and ${gateways.nodeId} = ${nodeId} and ${gateways.type} = 'sip_trunk')`,
+        )
+        .returning({ id: sipTrunks.gatewayId });
+      recorded += rows.length;
+    }
+    return recorded;
+  }
+
+  /**
    * Транки, годные принять вызов на этом узле.
    *
    * **Отбор по узлу обязателен**, в отличие от SIM: к провайдеру регистрируемся мы,

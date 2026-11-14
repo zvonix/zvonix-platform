@@ -413,6 +413,9 @@ describe('вызовы партнёра страницами', () => {
       'destination',
       'duration_seconds',
       'earned',
+      // Итог набора со слов узла (ADR-0121): про железо партнёра, не про клиента.
+      'end_cause',
+      'end_sip',
       'gateway_id',
       'id',
       'operator_id',

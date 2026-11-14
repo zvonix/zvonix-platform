@@ -369,6 +369,28 @@ describe('несостоявшийся разговор', () => {
     });
     expect(stored).toBe(expected);
   });
+
+  it('итог набора и ответ провайдера сохраняются: GATEWAY_DOWN вместо общего NORMAL_CLEARING', async () => {
+    const env = await scenario();
+    const uuid = await startCall(env.channel, env.destination);
+
+    await sendCdr(uuid, {
+      billsec: '0',
+      hangup_cause: 'NORMAL_CLEARING',
+      originate_disposition: 'GATEWAY_DOWN',
+      sip_invite_failure_status: '503',
+      sip_invite_failure_phrase: 'Service Unavailable',
+      answer_stamp: '0000-00-00 00:00:00',
+    });
+
+    const stored = await withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select end_cause, end_sip from calls where external_id = ${uuid}`,
+      );
+      return result.rows[0] as { end_cause: string; end_sip: string };
+    });
+    expect(stored).toEqual({ end_cause: 'GATEWAY_DOWN', end_sip: '503 Service Unavailable' });
+  });
 });
 
 describe('поведение узла задаётся кодом ответа', () => {

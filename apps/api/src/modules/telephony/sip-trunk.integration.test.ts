@@ -453,3 +453,37 @@ describe('цена провайдера и маршрут у клиента (ADR
     expect(routes.some((route) => route.routeId === view.id)).toBe(false);
   }, 120_000);
 });
+
+describe('связь узла с провайдером (ADR-0121)', () => {
+  it('узел сообщает состояние — администратор видит его у транка; чужое имя ничего не меняет', async () => {
+    const report = await api().inject({
+      method: 'POST',
+      url: '/node/sip-gateways/status',
+      headers: asNode(),
+      payload: {
+        gateways: [
+          { name: trunk.sip_username, state: 'FAIL_WAIT', status: 'DOWN' },
+          { name: 'gw-nobody', state: 'REGED', status: 'UP' },
+        ],
+      },
+    });
+    expect(report.statusCode).toBe(200);
+    expect(report.json<{ recorded: number }>().recorded).toBe(1);
+
+    const listed = await get(`/sip-trunks?partnerId=${partnerId}`);
+    const own = listed
+      .json<{ trunks: (Trunk & { link: { state: string; status: string } | null })[] }>()
+      .trunks.find((row) => row.id === trunk.id);
+    expect(own?.link).toMatchObject({ state: 'FAIL_WAIT', status: 'DOWN' });
+  }, 120_000);
+
+  it('человек сообщить состояние не может', async () => {
+    const response = await api().inject({
+      method: 'POST',
+      url: '/node/sip-gateways/status',
+      headers: auth(),
+      payload: { gateways: [{ name: trunk.sip_username, state: 'REGED', status: 'UP' }] },
+    });
+    expect([401, 403]).toContain(response.statusCode);
+  }, 120_000);
+});

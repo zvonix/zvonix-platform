@@ -160,7 +160,8 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 `proxy_host`, `registers_outbound`, `outbound_username`, `has_secret`, `max_concurrent_calls`, `numbers_count`, `on_node`,
 `unlimited`, `unlimited_requested_at` ([ADR-0119](../adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)), `has_price` — есть ли
 цена «через SIP» в тарифе транка: без неё клиенты через него не звонят
-([ADR-0120](../adr/0120-poryadok-otdelnyh-sim-i-sip-u-klienta.md)), `pace`.
+([ADR-0120](../adr/0120-poryadok-otdelnyh-sim-i-sip-u-klienta.md)), `link` — связь узла с провайдером `{ state, status,
+reported_at }` или `null` ([ADR-0121](../adr/0121-svyaz-uzla-s-sip-provayderom.md)), `pace`.
 
 **`pace` — прогрев и рекомендованная работа номера** (у SIM и у транка, только в этом списке;
 [ADR-0105](../adr/0105-progrev-i-rekomendovannaya-rabota-nomera.md)): `{ "warmup_day", "per_hour", "per_day",
@@ -412,9 +413,13 @@ SIP-провайдера (транк) партнёр заводит **сам** (
 {
   "id": "…", "destination": "79001234567", "status": "completed",
   "sim_card_id": "…", "gateway_id": "…", "operator_id": "…",
-  "duration_seconds": 62, "started_at": "…"
+  "duration_seconds": 62, "started_at": "…",
+  "end_cause": "GATEWAY_DOWN", "end_sip": "503 Service Unavailable"
 }
 ```
+
+`end_cause` и `end_sip` — чем закончился набор со слов узла и что ответил шлюз или провайдер; `null`, пока нет CDR
+([ADR-0121](../adr/0121-svyaz-uzla-s-sip-provayderom.md)).
 
 Вызовы, прошедшие через железо партнёра, — по ним он сверяется со счётом своего
 оператора. Роли `admin` и `support` тот же обработчик отдаёт вызовы названного

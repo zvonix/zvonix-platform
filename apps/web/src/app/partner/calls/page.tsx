@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CALL_STATUSES, type CallStatus } from '@zvonix/shared';
 import Link from 'next/link';
 import { Suspense } from 'react';
-import { ListenButton, useListenable } from '@/components/call-recording';
+import { EndCause, ListenButton, useListenable } from '@/components/call-recording';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ExportButton } from '@/components/export-button';
@@ -55,6 +55,8 @@ interface PartnerCall {
   readonly duration_seconds: number | null;
   /** Начислено партнёру за вызов, ₽; пусто — начисления не было. */
   readonly earned: string | null;
+  readonly end_cause: string | null;
+  readonly end_sip: string | null;
   readonly started_at: string;
 }
 
@@ -274,10 +276,11 @@ function PartnerCalls() {
                     )}
                   </TableCell>
 
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
                       {CALL_STATUS_NAME[call.status]}
                     </span>
+                    <EndCause cause={call.end_cause} sip={call.end_sip} status={call.status} />
                   </TableCell>
 
                   <TableCell className="num text-right">

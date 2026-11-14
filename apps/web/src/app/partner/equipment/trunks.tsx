@@ -7,10 +7,11 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
 import { NumberPace } from '@/components/number-pace';
+import { TrunkPresence } from '@/components/presence';
 import { TariffSelect } from '@/components/tariff-select';
 import { TestCallButton } from '@/components/test-call';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
-import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import {
   Table,
   TableBody,
@@ -103,6 +104,7 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
                   {/* В строку, с переносом только когда не хватает ширины: строка таблицы не раздувается в столбик. */}
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [&>*]:whitespace-nowrap">
                     <TrunkStatus trunk={trunk} />
+                    <TrunkPresence link={trunk.link} now={Date.now()} />
                     {trunk.unlimited ? null : <NumberPace pace={trunk.pace} />}
                     <TrunkUnlimited trunk={trunk} />
                     {!trunk.has_price && (
@@ -176,35 +178,22 @@ function TrunkStatus({ trunk }: { trunk: Trunk }) {
     );
   }
 
+  // Переключателем, как у карты (владелец, 2026-11-15: «почему всё разное»): включён — вызовы идут, выключен вами —
+  // нет; идущие разговоры не рвутся.
+  const on = trunk.status === 'active';
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        {badge}
-        {trunk.status === 'active' ? (
-          <ConfirmAction
-            label="Выключить"
-            title={`Выключить провайдера «${trunk.name}»`}
-            consequence={
-              <p>
-                Через провайдера перестанут идти вызовы. Идущие разговоры не рвутся. Включить
-                обратно можно здесь же.
-              </p>
-            }
-            confirmLabel="Выключить"
-            onConfirm={() => change.mutateAsync('suspended')}
-          />
-        ) : (
-          <Button
-            size="sm"
-            disabled={change.isPending}
-            onClick={() => {
-              change.mutate('active');
-            }}
-          >
-            Включить
-          </Button>
-        )}
-      </div>
+      <label className="inline-flex cursor-pointer items-center gap-2">
+        <Switch
+          checked={on}
+          disabled={change.isPending}
+          aria-label={`Провайдер «${trunk.name}» ${on ? 'включён' : 'выключен'}`}
+          onCheckedChange={(checked) => {
+            change.mutate(checked ? 'active' : 'suspended');
+          }}
+        />
+        <span className={on ? '' : 'text-muted-foreground'}>{gatewayStateName(trunk)}</span>
+      </label>
       {error !== undefined && <ErrorNote error={error} />}
     </div>
   );
