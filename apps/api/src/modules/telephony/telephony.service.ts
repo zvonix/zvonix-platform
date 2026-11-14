@@ -1600,6 +1600,80 @@ export class TelephonyService {
   }
 
   /**
+   * Партнёр просит безлимит для своего провайдера
+   * ([ADR-0119](../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)). Повтор ничего не меняет:
+   * время первого запроса остаётся, по нему администратор видит, как долго ждут.
+   */
+  async requestOwnTrunkUnlimited(
+    gatewayId: GatewayId,
+    partnerId: PartnerId,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
+    const found = await this.repository.findTrunk(gatewayId);
+    if (found === undefined || found.gateway.partnerId !== partnerId) {
+      throw notFound('SIP-провайдер не найден');
+    }
+    if (found.gateway.status === 'retired') throw conflict('SIP-провайдер удалён');
+    if (found.trunk.unlimited || found.trunk.unlimitedRequestedAt !== null) return found;
+
+    const updated = await this.repository.updateTrunk(gatewayId, {
+      unlimitedRequestedAt: new Date(),
+    });
+    if (updated === undefined) throw notFound('SIP-провайдер не найден');
+    await this.audit.record({
+      action: 'sip_trunk.unlimited_requested',
+      entityType: 'gateway',
+      entityId: gatewayId,
+      actorUserId,
+      actorRole,
+      before: toUnlimitedAudit(found.trunk),
+      after: toUnlimitedAudit(updated),
+    });
+    return { gateway: found.gateway, trunk: updated };
+  }
+
+  /**
+   * Администратор выдаёт или снимает безлимит (ADR-0119). Запрос партнёра этим решён — и выдачей, и отказом.
+   */
+  async setTrunkUnlimited(
+    gatewayId: GatewayId,
+    unlimited: boolean,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
+    const before = await this.repository.findTrunk(gatewayId);
+    if (before === undefined) throw notFound('Транк не найден');
+
+    const updated = await this.repository.updateTrunk(gatewayId, {
+      unlimited,
+      unlimitedRequestedAt: null,
+    });
+    if (updated === undefined) throw notFound('Транк не найден');
+    await this.audit.record({
+      action: 'sip_trunk.unlimited_set',
+      entityType: 'gateway',
+      entityId: gatewayId,
+      actorUserId,
+      actorRole,
+      before: toUnlimitedAudit(before.trunk),
+      after: toUnlimitedAudit(updated),
+    });
+    return { gateway: before.gateway, trunk: updated };
+  }
+
+  /** Провайдеры, чей запрос безлимита ждёт решения, с партнёром — для письма администраторам. */
+  async trunksAwaitingUnlimited(): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }[]> {
+    const rows = await this.repository.listTrunks();
+    return rows.filter(
+      (row) =>
+        row.trunk.unlimitedRequestedAt !== null &&
+        !row.trunk.unlimited &&
+        row.gateway.status !== 'retired',
+    );
+  }
+
+  /**
    * Транки, которые узел обязан поднять, — **с расшифрованными паролями**.
    *
    * Единственное место, где пароль провайдера покидает базу в открытом виде, и уходит
@@ -2386,6 +2460,13 @@ function channelVariables(channel: ChannelRow): DirectoryUser['variables'] {
  * Пароля провайдера здесь нет ни в каком виде — остаётся факт, что он задан. Журнал
  * читают через месяцы и не всегда те, кому этот пароль предназначен.
  */
+function toUnlimitedAudit(trunk: SipTrunkRow): Record<string, unknown> {
+  return {
+    unlimited: trunk.unlimited,
+    unlimited_requested_at: trunk.unlimitedRequestedAt?.toISOString() ?? null,
+  };
+}
+
 function toTrunkAudit(trunk: SipTrunkRow): Record<string, unknown> {
   return {
     proxy_host: trunk.proxyHost,

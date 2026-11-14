@@ -128,6 +128,21 @@ export function withoutRecommendedPace(settings: CallPaceSettings): CallPaceSett
   };
 }
 
+/**
+ * Настройки безлимитного SIP-провайдера ([ADR-0119](../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)):
+ * ничего из рекомендованной работы — ни пределов, ни сна, ни паузы, ни ровного шага. Автоторможение выключает
+ * вызывающий. Ёмкость держат каналы провайдера и лимиты людей, а не площадка.
+ */
+export function unlimitedPace(settings: CallPaceSettings): CallPaceSettings {
+  return {
+    ...withoutRecommendedPace(settings),
+    pauseSeconds: 0,
+    warmupPauseSeconds: 0,
+    sleepHours: 0,
+    trunkCallsPerSecond: 0,
+  };
+}
+
 /** Окно автоторможения: снятия старше этого номера оператора уже не тормозят. */
 export const CALL_BRAKE_DAYS = 7;
 

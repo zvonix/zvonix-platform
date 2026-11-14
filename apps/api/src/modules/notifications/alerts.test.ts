@@ -41,6 +41,10 @@ interface Setup {
     comment: string | null;
     createdAt: Date;
   }[];
+  unlimitedRequests?: {
+    gateway: { id: string; name: string; partnerId: string };
+    trunk: { proxyHost: string };
+  }[];
 }
 
 function build(setup: Setup) {
@@ -68,7 +72,10 @@ function build(setup: Setup) {
       gateways: () => Promise.resolve(setup.gateways ?? []),
     } as never,
     { list: () => Promise.resolve({ rows: setup.payments ?? [], total: 0 }) } as never,
-    { clientWithBalance: () => Promise.resolve({ name: 'Такси Ромашка' }) } as never,
+    {
+      clientWithBalance: () => Promise.resolve({ name: 'Такси Ромашка' }),
+      requirePartner: () => Promise.resolve({ name: 'Связь-Плюс' }),
+    } as never,
     {
       lowDisk: () => Promise.resolve(setup.lowDisk ?? []),
       strained: () => Promise.resolve(setup.strained ?? []),
@@ -81,6 +88,7 @@ function build(setup: Setup) {
       status: () => Promise.resolve({ state: 'ok', domain: 'cp.zvonix.com', ...setup.certificate }),
     } as never,
     { status: () => Promise.resolve({ state: 'ok', ...setup.githubToken }) } as never,
+    { trunksAwaitingUnlimited: () => Promise.resolve(setup.unlimitedRequests ?? []) } as never,
     logger(),
   );
   return { service, enqueue };
@@ -125,6 +133,27 @@ describe('тревоги администраторам', () => {
     const first = (enqueue.mock.calls[0] as unknown as [{ subject: string; kind: string }])[0];
     expect(first.subject).toContain('Москва-1');
     expect(first.kind).toBe('alert_node:n1');
+  });
+
+  it('партнёр просит безлимит SIP-провайдера — письмо по каждому провайдеру (ADR-0119)', async () => {
+    const { service, enqueue } = build({
+      admins: [confirmed],
+      unlimitedRequests: [
+        {
+          gateway: { id: 'gw-1', name: 'plusofon', partnerId: 'p-1' },
+          trunk: { proxyHost: 'sip.plusofon.ru' },
+        },
+      ],
+    });
+
+    expect(await service.notify(NOW)).toBe(1);
+    const sent = (
+      enqueue.mock.calls[0] as unknown as [{ subject: string; kind: string; body: string }]
+    )[0];
+    expect(sent.kind).toBe('alert_trunk_unlimited:gw-1');
+    expect(sent.subject).toContain('«Связь-Плюс»');
+    expect(sent.subject).toContain('«plusofon»');
+    expect(sent.body).toContain('Выдать безлимит');
   });
 
   it('администратору с неподтверждённой почтой не пишет', async () => {

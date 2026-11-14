@@ -106,7 +106,8 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
                 </TableCell>
                 <TableCell className="whitespace-normal">
                   <TrunkStatus trunk={trunk} />
-                  <NumberPace pace={trunk.pace} block />
+                  {trunk.unlimited ? null : <NumberPace pace={trunk.pace} block />}
+                  <TrunkUnlimited trunk={trunk} />
                 </TableCell>
                 <TableCell>
                   <TrunkActions trunk={trunk} />
@@ -199,6 +200,60 @@ function TrunkStatus({ trunk }: { trunk: Trunk }) {
       </div>
       {error !== undefined && <ErrorNote error={error} />}
     </div>
+  );
+}
+
+/**
+ * Безлимит провайдера ([ADR-0119](../../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)):
+ * партнёр только просит, выдаёт администратор площадки.
+ */
+function TrunkUnlimited({ trunk }: { trunk: Trunk }) {
+  const refresh = useRefresh();
+  const ask = useMutation({
+    mutationFn: () =>
+      request<unknown>(`/partner/sip-trunks/${trunk.id}/unlimited-request`, { method: 'POST' }),
+    onSuccess: refresh,
+  });
+
+  if (trunk.unlimited) {
+    return (
+      <span
+        className="block text-ok"
+        title="Площадка выдала безлимит: у провайдера нет прогрева, пределов в час и в сутки, сна и пауз между звонками. Держат только его каналы и ваши лимиты"
+      >
+        безлимит
+      </span>
+    );
+  }
+  if (trunk.unlimited_requested_at !== null) {
+    return (
+      <span className="block text-muted-foreground">безлимит запрошен — ждёт решения площадки</span>
+    );
+  }
+  return (
+    <ConfirmAction
+      label="Запросить безлимит"
+      title={`Безлимит для провайдера «${trunk.name}»`}
+      consequence={
+        <>
+          <p>
+            Площадка бережёт номера: прогрев, пределы в час и в сутки, сон, паузы между звонками.
+            Если провайдер пропускает любой поток и сам отвечает за свои номера, эти ограничения ему
+            не нужны.
+          </p>
+          <p>
+            Запрос уйдёт администратору площадки. Одновременных звонков всё равно будет не больше,
+            чем каналов у провайдера ({trunk.max_concurrent_calls}).
+          </p>
+        </>
+      }
+      confirmLabel="Отправить запрос"
+      tone="neutral"
+      variant="ghost"
+      size="xs"
+      className="mt-1"
+      onConfirm={() => ask.mutateAsync()}
+    />
   );
 }
 

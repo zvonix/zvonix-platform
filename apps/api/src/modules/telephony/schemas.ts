@@ -591,6 +591,9 @@ export const partnerSipTrunkSchema = z
   .object(sipTrunkFields)
   .refine(trunkCredentials.check, { message: trunkCredentials.message });
 
+/** Решение администратора о безлимите SIP-провайдера (ADR-0119). */
+export const trunkUnlimitedSchema = z.object({ unlimited: z.boolean() }).strict();
+
 /**
  * Правка транка. Все поля необязательны, «поля нет» означает «не трогать».
  *

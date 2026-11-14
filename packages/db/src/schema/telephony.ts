@@ -639,6 +639,15 @@ export const sipTrunks = pgTable(
     /** Начало прогрева транка — как у SIM (ADR-0105). */
     warmupStartedAt: timestamptz(),
 
+    /**
+     * Безлимит ([ADR-0119](../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)): ограничения
+     * площадки на номер не действуют — ни прогрева, ни пределов, ни сна, ни паузы. Выдаёт только администратор.
+     */
+    unlimited: boolean().notNull().default(false),
+
+    /** Партнёр попросил безлимит и решения ещё нет; решение администратора стирает. */
+    unlimitedRequestedAt: timestamptz(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

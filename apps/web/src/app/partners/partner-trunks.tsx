@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/table';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
+import { moment } from '@/lib/format';
 import { atMost } from '@/lib/wait';
 import { GATEWAY_STATUS_NAME, GATEWAY_SUSPENDED_BY_NAME, usableTone } from '@/lib/labels';
 
@@ -45,6 +46,10 @@ interface Trunk {
   readonly max_concurrent_calls: number;
   /** Номеров у провайдера (ADR-0105). */
   readonly numbers_count: number;
+  /** Безлимит (ADR-0119): ограничения площадки на номер не действуют. */
+  readonly unlimited: boolean;
+  /** Партнёр попросил безлимит, решения нет; пусто — не просил или решено. */
+  readonly unlimited_requested_at: string | null;
   readonly pace?: NumberPaceView;
 }
 
@@ -222,7 +227,8 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                         {GATEWAY_SUSPENDED_BY_NAME[trunk.suspended_by]}
                       </span>
                     )}
-                    <NumberPace pace={trunk.pace} block />
+                    {trunk.unlimited ? null : <NumberPace pace={trunk.pace} block />}
+                    <TrunkUnlimited trunk={trunk} canChange={canChange} onDone={refresh} />
                     {canChange && (
                       <TrunkStatus
                         // Новый выбор после смены состояния: прежний мог совпасть с новым.
@@ -349,4 +355,98 @@ function TrunkStatus({
       )}
     </div>
   );
+}
+
+/**
+ * Безлимит провайдера ([ADR-0119](../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)):
+ * решает только администратор — выдаёт по запросу партнёра или сам, отклоняет, снимает.
+ */
+function TrunkUnlimited({
+  trunk,
+  canChange,
+  onDone,
+}: {
+  trunk: Trunk;
+  canChange: boolean;
+  onDone: () => Promise<void>;
+}) {
+  const decide = useMutation({
+    mutationFn: (unlimited: boolean) =>
+      request<unknown>(`/sip-trunks/${trunk.id}/unlimited`, {
+        method: 'PUT',
+        body: { unlimited },
+      }),
+    onSuccess: onDone,
+  });
+  const grant = (
+    <ConfirmAction
+      label="Выдать безлимит"
+      title={`Безлимит для провайдера «${trunk.name}»`}
+      consequence={
+        <p>
+          У провайдера не будет прогрева, пределов в час и в сутки, сна, пауз между звонками и
+          ровного шага. Одновременных звонков — не больше его каналов ({trunk.max_concurrent_calls}
+          ); лимиты партнёра и клиентов действуют. Снять можно в любой момент.
+        </p>
+      }
+      confirmLabel="Выдать безлимит"
+      tone="neutral"
+      size="xs"
+      onConfirm={() => decide.mutateAsync(true)}
+    />
+  );
+
+  if (trunk.unlimited) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-ok">безлимит</span>
+        {canChange && (
+          <ConfirmAction
+            label="Снять безлимит"
+            title={`Снять безлимит у провайдера «${trunk.name}»`}
+            consequence={
+              <p>
+                К провайдеру вернутся рекомендованная работа площадки: прогрев, пределы, сон и
+                паузы. Часть вызовов пойдёт через другие номера или не пройдёт.
+              </p>
+            }
+            confirmLabel="Снять безлимит"
+            variant="ghost"
+            size="xs"
+            onConfirm={() => decide.mutateAsync(false)}
+          />
+        )}
+      </div>
+    );
+  }
+  if (trunk.unlimited_requested_at !== null) {
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <span className="rounded-sm bg-warn-soft px-1.5 py-0.5 text-warn">
+          просит безлимит с {moment(trunk.unlimited_requested_at)}
+        </span>
+        {canChange && (
+          <div className="flex flex-wrap gap-1">
+            {grant}
+            <ConfirmAction
+              label="Отклонить"
+              title={`Отклонить безлимит для провайдера «${trunk.name}»`}
+              consequence={
+                <p>
+                  Провайдер продолжит работать с ограничениями площадки. Партнёр сможет попросить
+                  снова.
+                </p>
+              }
+              confirmLabel="Отклонить"
+              tone="neutral"
+              variant="ghost"
+              size="xs"
+              onConfirm={() => decide.mutateAsync(false)}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+  return canChange ? grant : null;
 }
