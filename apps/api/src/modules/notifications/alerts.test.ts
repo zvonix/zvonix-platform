@@ -147,7 +147,9 @@ describe('тревоги администраторам', () => {
     });
 
     expect(await service.notify(NOW)).toBe(1);
-    const sent = (enqueue.mock.calls[0] as unknown as [{ subject: string; kind: string; body: string }])[0];
+    const sent = (
+      enqueue.mock.calls[0] as unknown as [{ subject: string; kind: string; body: string }]
+    )[0];
     expect(sent.kind).toBe('alert_trunk_unlimited:gw-1');
     expect(sent.subject).toContain('«Связь-Плюс»');
     expect(sent.subject).toContain('«plusofon»');
