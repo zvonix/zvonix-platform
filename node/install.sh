@@ -702,15 +702,24 @@ fi
 rm -f "\$GW_NEW"
 # Связь с провайдерами (ADR-0121): по каждому транку из файла — состояние регистрации и годность, как их видит
 # sofia. Без этого «провайдер не принимает звонки» было видно только по GATEWAY_DOWN в отказах. В сообщение идут
-# только имя, состояние и годность — ни адреса, ни учётных данных. FreeSWITCH не ответил — не шлём ничего.
+# только имя, состояние, годность и код последнего отказа — ни адреса, ни учётных данных.
+# FreeSWITCH не ответил — не шлём ничего.
 if [ -f "\$GW_FILE" ]; then
   LINKS=""
+  # Последний отказ регистрации — код ответа провайдера (403 — пароль, 404 — нет записи; 908 — провайдер не
+  # ответил вовсе). sofia status его не показывает, а журнал пишет строкой «<имя> Failed Registration [<код>]»
+  # (sofia_reg.c, REG_STATE_FAILED). Без кода «не на связи» не отличить «неверный пароль» от «нас не пускают».
+  FS_LOG="\$("${FS_CLI}" -x 'global_getvar log_dir' 2>/dev/null | tr -d '\r\n')/freeswitch.log"
+  REG_FAILS=""
+  [ -r "\$FS_LOG" ] && REG_FAILS="\$(tail -n 20000 "\$FS_LOG" 2>/dev/null | grep -F ' Failed Registration [')"
   for NAME in \$(sed -n 's/^<gateway name="\([A-Za-z0-9._-]*\)".*/\1/p' "\$GW_FILE"); do
     GWS="\$("${FS_CLI}" -x "sofia status gateway \$NAME" 2>/dev/null)"
     ST="\$(printf '%s\n' "\$GWS" | awk '\$1=="State" {print \$2; exit}' | tr -cd 'A-Z_')"
     SS="\$(printf '%s\n' "\$GWS" | awk '\$1=="Status" {print \$2; exit}' | tr -cd 'A-Z_')"
     [ -n "\$ST" ] && [ -n "\$SS" ] || continue
-    LINKS="\${LINKS}\${LINKS:+,}{\"name\":\"\$NAME\",\"state\":\"\$ST\",\"status\":\"\$SS\"}"
+    FC="\$(printf '%s\n' "\$REG_FAILS" | grep -F " \$NAME Failed Registration [" | tail -n 1 \
+      | sed -n 's/.* Failed Registration \[\([0-9]\{3\}\)\].*/\1/p')"
+    LINKS="\${LINKS}\${LINKS:+,}{\"name\":\"\$NAME\",\"state\":\"\$ST\",\"status\":\"\$SS\"\${FC:+,\"failure\":\$FC}}"
   done
   [ -n "\$LINKS" ] && printf '{"gateways":[%s]}' "\$LINKS" \
     | curl -fsS --max-time 10 -K "${NODE_ETC}/sip-gateways-status.curl" \

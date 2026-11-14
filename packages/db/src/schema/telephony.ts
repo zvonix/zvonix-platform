@@ -700,6 +700,12 @@ export const sipTrunks = pgTable(
     linkState: text(),
     linkStatus: text(),
     linkReportedAt: timestamptz(),
+    /**
+     * Код последнего отказа регистрации по журналу узла (ADR-0121, «Причина отказа»): ответ провайдера — 403, 404…
+     * либо 908 — провайдер не ответил вовсе (так FreeSWITCH зовёт истёкшее ожидание). Пусто — отказов в журнале нет
+     * или узел старый и кода не шлёт.
+     */
+    linkFailure: integer(),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),

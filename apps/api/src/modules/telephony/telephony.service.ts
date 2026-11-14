@@ -1607,7 +1607,7 @@ export class TelephonyService {
   /** Связь узла с его провайдерами (ADR-0121): узел присылает её с пульсом. */
   async recordTrunkLinks(
     nodeId: Id<'node'>,
-    links: readonly { name: string; state: string; status: string }[],
+    links: readonly { name: string; state: string; status: string; failure?: number | undefined }[],
     at: Date,
   ): Promise<number> {
     return this.repository.recordTrunkLinks(nodeId, links, at);

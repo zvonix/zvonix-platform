@@ -62,7 +62,7 @@ GOIP регистрируется у нас и потому значится в 
 `200` → `{ "trunks": [ … ] }`. У каждого — `pace`, пределы номера сейчас (см. «Прогрев и рекомендованная работа
 номера» ниже), `unlimited` и `unlimited_requested_at` (ниже, «Безлимит»), `has_price` — есть ли цена «через SIP»
 в тарифе транка; без неё вызовов клиентов он не получает ([ADR-0120](../adr/0120-poryadok-otdelnyh-sim-i-sip-u-klienta.md)).
-Там же `link` — связь узла с провайдером `{ state, status, reported_at }` или `null`
+Там же `link` — связь узла с провайдером `{ state, status, failure, reported_at }` или `null`
 ([ADR-0121](../adr/0121-svyaz-uzla-s-sip-provayderom.md)). Те же поля — в ответе каждого обработчика, отдающего
 `{ "trunk": … }`.
 

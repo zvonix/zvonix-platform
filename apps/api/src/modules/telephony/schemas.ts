@@ -659,6 +659,8 @@ export const trunkLinksSchema = z.object({
         name: z.string().trim().min(1).max(64),
         state: z.string().trim().min(1).max(32),
         status: z.string().trim().min(1).max(32),
+        /** Код последнего отказа регистрации из журнала узла; старый узел его не шлёт. */
+        failure: z.number().int().min(100).max(999).optional(),
       }),
     )
     .max(500),

@@ -46,6 +46,8 @@ export function Presence({ connection }: { connection: DeviceConnection }) {
 export interface TrunkLink {
   readonly state: string;
   readonly status: string;
+  /** Код последнего отказа регистрации (403, 404…; 908 — провайдер не ответил); пусто — отказов нет. */
+  readonly failure?: number | null;
   readonly reported_at: string;
 }
 
@@ -71,10 +73,50 @@ const LINK_STATE_NAME: Record<string, string> = {
  * пароле он отказал бы (FAIL_WAIT), а здесь запрос регистрации остаётся без ответа (владелец, 2026-11-15, plusofon).
  */
 function linkStateName(link: TrunkLink): string {
+  if (link.status !== 'UP' && link.failure != null) {
+    return failureName(link.failure).short;
+  }
   if (link.status !== 'UP' && (link.state === 'TRYING' || link.state === 'REGISTER')) {
     return 'провайдер не отвечает на регистрацию';
   }
   return LINK_STATE_NAME[link.state] ?? link.state;
+}
+
+/**
+ * Отказ регистрации словами: коротко — в строку, что делать — в подсказку (владелец, 2026-11-15: «неправильный пароль
+ * или нет связи совсем — нельзя узнать и вывести?»). 908 — так FreeSWITCH зовёт истёкшее ожидание ответа.
+ */
+function failureName(code: number): { short: string; hint: string } {
+  switch (code) {
+    case 401:
+    case 403:
+    case 407:
+      return {
+        short: 'неверный логин или пароль',
+        hint: 'Проверьте логин и пароль в настройках провайдера',
+      };
+    case 404:
+      return {
+        short: 'нет такой учётной записи',
+        hint: 'Провайдер не знает этот логин — проверьте его в настройках провайдера',
+      };
+    case 408:
+    case 908:
+      return {
+        short: 'провайдер не отвечает',
+        hint: 'Узел отправляет провайдеру запрос и не получает ответа. Проверьте у провайдера, разрешён ли адрес узла и не заблокирован ли он',
+      };
+    case 503:
+      return {
+        short: 'провайдер временно недоступен',
+        hint: 'Узел повторит регистрацию через 30 секунд',
+      };
+    default:
+      return {
+        short: `провайдер отказал, код ${String(code)}`,
+        hint: 'Код ответа провайдера — уточните его значение у провайдера',
+      };
+  }
 }
 
 /**
@@ -99,7 +141,14 @@ export function TrunkPresence({ link, now }: { link: TrunkLink | null; now: numb
       title={
         link === null
           ? 'Узел сообщает о связи с провайдерами каждые 30 секунд — после обновления узла'
-          : `${state ?? link.state} · ${link.status === 'UP' ? 'вызовы принимает' : 'вызовы не принимает'} · сведения ${moment(link.reported_at)}`
+          : [
+              state ?? link.state,
+              link.status === 'UP' ? 'вызовы принимает' : 'вызовы не принимает',
+              ...(link.status !== 'UP' && link.failure != null
+                ? [`${failureName(link.failure).hint} (код ${String(link.failure)})`]
+                : []),
+              `сведения ${moment(link.reported_at)}`,
+            ].join(' · ')
       }
     >
       <span aria-hidden className={`size-2 rounded-full ${online ? 'bg-ok' : 'bg-warn'}`} />
