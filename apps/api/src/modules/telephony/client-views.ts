@@ -16,6 +16,7 @@ import {
   type CallStatus,
   type ChannelStatus,
   type ChannelSuspendedBy,
+  type TerminationKind,
 } from '@zvonix/shared';
 import type { ClientFailureReason } from '@zvonix/shared';
 import type { ChannelActivity } from './call.repository.js';
@@ -78,6 +79,8 @@ export interface ClientCallView {
   readonly region: string | null;
   readonly channel: { id: string; name: string };
   readonly operator: { id: string; name: string } | null;
+  /** Через что ушёл вызов — SIM или SIP; пусто у отказа. Способ, а не партнёр (ADR-0014). */
+  readonly termination_kind: TerminationKind | null;
 }
 
 export function toClientChannelView(
@@ -124,5 +127,6 @@ export function toClientCallView(row: CallDetails): ClientCallView {
       call.operatorId === null || row.operatorName === null
         ? null
         : { id: call.operatorId, name: row.operatorName },
+    termination_kind: row.terminationKind,
   };
 }

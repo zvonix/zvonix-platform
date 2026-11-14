@@ -1,7 +1,12 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { CALL_STATUSES, type CallStatus, type ClientFailureReason } from '@zvonix/shared';
+import {
+  CALL_STATUSES,
+  type CallStatus,
+  type ClientFailureReason,
+  type TerminationKind,
+} from '@zvonix/shared';
 import { Suspense } from 'react';
 import { ListenButton, useListenable } from '@/components/call-recording';
 import { ConsoleShell } from '@/components/console-shell';
@@ -29,11 +34,13 @@ import {
   callTone,
   CLIENT_FAILURE_REASON_FIX,
   CLIENT_FAILURE_REASON_NAME,
+  TERMINATION_KIND_MEANING,
+  TERMINATION_KIND_NAME,
 } from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
 
 const PAGE_SIZE = 50;
-const COLUMNS = 6;
+const COLUMNS = 7;
 
 /** Сколько цифр должно быть набрано, чтобы номер имело смысл искать. */
 const MSISDN_DIGITS = 10;
@@ -55,6 +62,8 @@ interface Call {
   readonly region: string | null;
   readonly channel: { id: string; name: string };
   readonly operator: { id: string; name: string } | null;
+  /** Через что ушёл вызов — SIM или SIP; пусто у отказа. */
+  readonly termination_kind: TerminationKind | null;
 }
 
 export default function MyCallsPage() {
@@ -100,6 +109,8 @@ function MyCalls() {
   });
 
   const recordings = useListenable((list.data?.calls ?? []).map((call) => call.id));
+  // Линия одна — колонка повторяла бы её имя в каждой строке; она нужна, когда линий несколько.
+  const manyLines = (channels.data?.length ?? 0) > 1;
 
   return (
     <div className="flex flex-col gap-3">
@@ -181,6 +192,7 @@ function MyCalls() {
                   'Когда',
                   'Линия',
                   'Куда',
+                  'Через что',
                   'Оператор',
                   'Регион',
                   'Итог',
@@ -192,6 +204,9 @@ function MyCalls() {
                   moment(call.started_at),
                   call.channel.name,
                   call.destination,
+                  call.termination_kind === null
+                    ? ''
+                    : TERMINATION_KIND_NAME[call.termination_kind],
                   call.operator?.name,
                   call.region,
                   CALL_STATUS_NAME[call.status],
@@ -234,8 +249,9 @@ function MyCalls() {
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Когда</TableHead>
-              <TableHead className="h-8">Линия</TableHead>
+              {manyLines && <TableHead className="h-8">Линия</TableHead>}
               <TableHead className="h-8">Куда</TableHead>
+              <TableHead className="h-8">Через что</TableHead>
               <TableHead className="h-8">Итог</TableHead>
               <TableHead className="h-8 text-right">Стоимость</TableHead>
               <TableHead className="h-8 text-right">Длительность</TableHead>
@@ -265,14 +281,30 @@ function MyCalls() {
                   <span className="num text-muted-foreground">{moment(call.started_at)}</span>
                 </TableCell>
 
-                <TableCell>{call.channel.name}</TableCell>
+                {manyLines && <TableCell>{call.channel.name}</TableCell>}
 
-                <TableCell>
+                {/* Одной строкой: номер, затем оператор и регион бледно — строка не раздувается в две. */}
+                <TableCell className="whitespace-nowrap">
                   <span className="num">{call.destination}</span>
-                  <span className="block text-faint">
+                  <span className="text-faint">
+                    {' · '}
                     {call.operator?.name ?? 'оператор не определён'}
                     {call.region !== null && ` · ${call.region}`}
                   </span>
+                </TableCell>
+
+                <TableCell
+                  title={
+                    call.termination_kind === null
+                      ? undefined
+                      : TERMINATION_KIND_MEANING[call.termination_kind]
+                  }
+                >
+                  {call.termination_kind === null ? (
+                    <span className="text-faint">—</span>
+                  ) : (
+                    TERMINATION_KIND_NAME[call.termination_kind]
+                  )}
                 </TableCell>
 
                 <TableCell className="whitespace-nowrap">
@@ -294,29 +326,21 @@ function MyCalls() {
                   {call.cost === null ? <span className="text-faint">—</span> : money(call.cost)}
                 </TableCell>
 
-                <TableCell className="num text-right">
-                  {call.duration_seconds === null ? (
-                    <span className="text-faint">—</span>
-                  ) : (
-                    duration(call.duration_seconds)
-                  )}
-                  {recordings.has(call.id) ? (
-                    <span className="block pt-1">
+                <TableCell className="num text-right whitespace-nowrap">
+                  {/* Длительность и значок записи — в одну строку; нет записи — значка нет. */}
+                  <span className="inline-flex items-center justify-end gap-1">
+                    {recordings.has(call.id) && (
                       <ListenButton
                         recordingId={recordings.get(call.id) ?? ''}
                         subtitle={`${call.destination} · ${moment(call.started_at)}`}
                       />
-                    </span>
-                  ) : (
-                    call.status === 'completed' && (
-                      <span
-                        className="block text-faint"
-                        title="Запись появляется через минуту после разговора"
-                      >
-                        записи нет
-                      </span>
-                    )
-                  )}
+                    )}
+                    {call.duration_seconds === null ? (
+                      <span className="text-faint">—</span>
+                    ) : (
+                      duration(call.duration_seconds)
+                    )}
+                  </span>
                 </TableCell>
               </TableRow>
             ))}

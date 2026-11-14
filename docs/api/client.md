@@ -154,9 +154,13 @@
   "duration_seconds": null, "started_at": "…", "answered_at": null, "ended_at": "…",
   "region": "Республика Татарстан", "cost": "1.25",
   "channel":  { "id": "…", "name": "Диспетчерская" },
-  "operator": { "id": "…", "name": "ПАО «МегаФон»" }
+  "operator": { "id": "…", "name": "ПАО «МегаФон»" },
+  "termination_kind": "sip"
 }
 ```
+
+`termination_kind` — через что ушёл вызов: `sim` или `sip`; `null` у отказа. Способ, а не партнёр: кто это, клиент
+по-прежнему не видит (ADR-0014).
 
 `cost` — сколько списано с клиента за вызов (по его проводке), рублями строкой; `null` — списания не было (отказ, ноль секунд) ([ADR-0070](../adr/0070-zapis-vseh-razgovorov.md)).
 

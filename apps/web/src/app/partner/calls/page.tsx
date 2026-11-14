@@ -263,10 +263,11 @@ function PartnerCalls() {
 
                   <TableCell className="num">{call.destination}</TableCell>
 
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     {gateway?.name ?? trunk ?? <span className="text-faint">—</span>}
                     {sim !== undefined && (
-                      <span className="num block text-faint">
+                      <span className="num text-faint">
+                        {' · '}
                         {sim.msisdn}
                         {sim.operator_name !== null && ` · ${sim.operator_name}`}
                       </span>
@@ -287,20 +288,20 @@ function PartnerCalls() {
                     )}
                   </TableCell>
 
-                  <TableCell className="num text-right">
-                    {call.duration_seconds === null ? (
-                      <span className="text-faint">—</span>
-                    ) : (
-                      duration(call.duration_seconds)
-                    )}
-                    {recordings.has(call.id) && (
-                      <span className="block pt-1">
+                  <TableCell className="num text-right whitespace-nowrap">
+                    <span className="inline-flex items-center justify-end gap-1">
+                      {recordings.has(call.id) && (
                         <ListenButton
                           recordingId={recordings.get(call.id) ?? ''}
                           subtitle={`${call.destination} · ${moment(call.started_at)}`}
                         />
-                      </span>
-                    )}
+                      )}
+                      {call.duration_seconds === null ? (
+                        <span className="text-faint">—</span>
+                      ) : (
+                        duration(call.duration_seconds)
+                      )}
+                    </span>
                   </TableCell>
 
                   <TableCell className="text-right">

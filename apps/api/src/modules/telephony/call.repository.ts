@@ -12,6 +12,7 @@ import {
   OPEN_CALL_STATUSES,
   type CallFailureReason,
   type CallStatus,
+  type GatewayType,
   type Id,
   type CallDestination,
 } from '@zvonix/shared';
@@ -104,6 +105,8 @@ export interface CallWithContext {
   readonly clientId: Id<'client'>;
   readonly channelName: string;
   readonly gatewayName: string | null;
+  /** Тип шлюза: через что ушёл вызов — SIM или SIP-провайдер. Пусто у отказа. */
+  readonly gatewayType: GatewayType | null;
   readonly partnerId: Id<'partner'> | null;
   readonly simMsisdn: string | null;
 }
@@ -510,6 +513,7 @@ export class CallRepository {
         clientId: channels.clientId,
         channelName: channels.name,
         gatewayName: gateways.name,
+        gatewayType: gateways.type,
         partnerId: gateways.partnerId,
         simMsisdn: simCards.msisdn,
       })

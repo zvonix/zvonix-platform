@@ -1,5 +1,6 @@
 'use client';
 
+import { Play } from 'lucide-react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { FormDialog } from '@/components/form-dialog';
@@ -50,10 +51,12 @@ export function ListenButton({
 }) {
   return (
     <FormDialog
-      label="Прослушать"
+      // Значок, а не подпись: кнопка стоит в каждой строке списка вызовов, и слово растягивало строку.
+      label={<Play className="size-3.5" aria-hidden />}
+      tooltip="Прослушать запись"
       title="Запись разговора"
-      variant="outline"
-      size="xs"
+      variant="ghost"
+      size="icon-xs"
       {...(subtitle === undefined ? {} : { description: subtitle })}
     >
       <Player recordingId={recordingId} />
