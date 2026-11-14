@@ -67,13 +67,24 @@ const LINK_STATE_NAME: Record<string, string> = {
 };
 
 /**
+ * Состояние словами. «Регистрируется» при неготовом транке — это не «вот-вот», а «провайдер молчит»: при неверном
+ * пароле он отказал бы (FAIL_WAIT), а здесь запрос регистрации остаётся без ответа (владелец, 2026-11-15, plusofon).
+ */
+function linkStateName(link: TrunkLink): string {
+  if (link.status !== 'UP' && (link.state === 'TRYING' || link.state === 'REGISTER')) {
+    return 'провайдер не отвечает на регистрацию';
+  }
+  return LINK_STATE_NAME[link.state] ?? link.state;
+}
+
+/**
  * На связи ли узел с SIP-провайдером — так же, как шлюз: точка и слово (владелец, 2026-11-15: «показать коннект
  * есть к SIP-провайдеру»). Не на связи — узел не отправит провайдеру ни одного вызова; почему — словами рядом.
  */
 export function TrunkPresence({ link, now }: { link: TrunkLink | null; now: number }) {
   const fresh = link !== null && now - Date.parse(link.reported_at) < LINK_FRESH_MS;
   const online = fresh && link.status === 'UP';
-  const state = link === null ? undefined : (LINK_STATE_NAME[link.state] ?? link.state);
+  const state = link === null ? undefined : linkStateName(link);
   const text =
     link === null
       ? 'узел ещё не сообщал'
@@ -88,7 +99,7 @@ export function TrunkPresence({ link, now }: { link: TrunkLink | null; now: numb
       title={
         link === null
           ? 'Узел сообщает о связи с провайдерами каждые 30 секунд — после обновления узла'
-          : `${state ?? link.state} · ${link.status} · сведения ${moment(link.reported_at)}`
+          : `${state ?? link.state} · ${link.status === 'UP' ? 'вызовы принимает' : 'вызовы не принимает'} · сведения ${moment(link.reported_at)}`
       }
     >
       <span aria-hidden className={`size-2 rounded-full ${online ? 'bg-ok' : 'bg-warn'}`} />
