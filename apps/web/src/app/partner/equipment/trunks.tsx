@@ -7,7 +7,7 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
 import { NumberPace } from '@/components/number-pace';
-import { TariffSelect, useTariffName } from '@/components/tariff-select';
+import { TariffSelect } from '@/components/tariff-select';
 import { TestCallButton } from '@/components/test-call';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
 import { Button } from '@/components/ui/button';
@@ -52,9 +52,6 @@ export function AddTrunk() {
 }
 
 export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
-  const tariffName = useTariffName();
-  const fallback = tariffName(null);
-
   return (
     <section aria-labelledby="trunks" className="flex flex-col gap-2">
       <h3 id="trunks" className="font-semibold">
@@ -94,9 +91,9 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
                 <TableCell>
                   <TariffSelect
                     value={trunk.tariff_id}
-                    inherited={
-                      fallback === undefined ? 'по умолчанию' : `по умолчанию — ${fallback}`
-                    }
+                    inheritedId={null}
+                    inheritedFrom="тариф по умолчанию"
+                    kind="sip"
                     endpoint={`/partner/gateways/${trunk.id}/tariff`}
                     label={`Тариф провайдера «${trunk.name}»`}
                     invalidate={[EQUIPMENT_KEY, PARTNER_RATES_KEY]}

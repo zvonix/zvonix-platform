@@ -5,7 +5,7 @@ import { NumberPace } from '@/components/number-pace';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { PORT_STATE_NAME } from '@/lib/labels';
 import { TestCallButton } from '@/components/test-call';
-import { TariffSelect, useTariffName } from '@/components/tariff-select';
+import { TariffSelect } from '@/components/tariff-select';
 import { PARTNER_RATES_KEY } from '@/lib/tariffs';
 import { Presence } from '@/components/presence';
 import { EQUIPMENT_KEY, type Gateway, type Port, type Sim } from './equipment';
@@ -114,12 +114,12 @@ export function PortRow({
  * GOIP и меняется у каждой SIM»). Куда карта звонит, решает её тариф.
  */
 function SimTariff({ gateway, sim }: { gateway: Gateway; sim: Sim }) {
-  const nameOf = useTariffName();
-  const inherited = nameOf(gateway.tariff_id);
   return (
     <TariffSelect
       value={sim.tariff_id}
-      inherited={inherited === undefined ? 'как у шлюза' : `как у шлюза — ${inherited}`}
+      inheritedId={gateway.tariff_id}
+      inheritedFrom="тариф шлюза"
+      kind="sim"
       endpoint={`/partner/sim-cards/${sim.id}/tariff`}
       label={`Тариф карты ${sim.msisdn}`}
       invalidate={[EQUIPMENT_KEY, PARTNER_RATES_KEY]}

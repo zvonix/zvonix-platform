@@ -16,9 +16,11 @@
 
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@nestjs/common';
 import {
+  internal,
   Money,
   parseId,
   permissionDenied,
+  terminationKindsOf,
   REFERENCE_CALL_SECONDS,
   type Id,
   type Rounding,
@@ -164,10 +166,10 @@ export class PartnerPricesController {
   async setRate(
     @CurrentUser() actor: Principal,
     @Body(zodBody(partnerOwnRateSchema)) body: z.infer<typeof partnerOwnRateSchema>,
-  ): Promise<{ rate: RateView }> {
+  ): Promise<{ rate: RateView; rates: RateView[] }> {
     const partner = await this.editablePartner(actor);
 
-    const row = await this.tariffs.addPartnerRate(
+    const rows = await this.tariffs.addPartnerRates(
       {
         partnerId: partner.id,
         tariffId:
@@ -175,7 +177,7 @@ export class PartnerPricesController {
             ? (await this.tariffs.defaultTariff(partner.id)).id
             : parseId(body.tariffId, 'partnerTariff'),
         operatorId: body.operatorId == null ? null : parseId(body.operatorId, 'operator'),
-        terminationKind: body.terminationKind,
+        terminationKind: 'sim',
         region: body.region ?? null,
         pricePerMinute: body.pricePerMinute,
         billingIncrementSeconds: body.billingIncrementSeconds,
@@ -184,11 +186,15 @@ export class PartnerPricesController {
         rounding: body.rounding,
         effectiveFrom: new Date(),
       },
+      terminationKindsOf(body.terminationKind),
       actor.userId,
       actor.role,
     );
+    const [first] = rows;
+    if (first === undefined) throw internal('Цена не записана');
 
-    return { rate: toRateView(row) };
+    // `rate` — первая строка, как было; `rates` — все (у «SIM и SIP» их две).
+    return { rate: toRateView(first), rates: rows.map(toRateView) };
   }
 
   /** Новый тариф — пустой: цены в него добавляются так же, как в тариф по умолчанию. */

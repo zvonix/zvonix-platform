@@ -2,8 +2,9 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  RATE_TERMINATION_CHOICES,
   ROUNDING_MODES,
-  TERMINATION_KINDS,
+  type RateTerminationChoice,
   type Rounding,
   type TerminationKind,
 } from '@zvonix/shared';
@@ -24,7 +25,7 @@ import { useOperators } from '@/lib/dictionaries';
 import { moment } from '@/lib/format';
 import { ROUNDING_NAME } from '@/lib/labels';
 import { money, numberFromInput } from '@/lib/money';
-import { TERMINATION_KIND_NAME } from '@/lib/labels';
+import { RATE_TERMINATION_CHOICE_NAME, TERMINATION_KIND_NAME } from '@/lib/labels';
 
 interface Rate {
   readonly id: string;
@@ -194,7 +195,7 @@ interface RateDraft {
   readonly tariffId?: string;
   /** `null` — цена на все операторы. */
   readonly operatorId: string | null;
-  readonly terminationKind: TerminationKind;
+  readonly terminationKind: RateTerminationChoice;
   readonly region?: string;
   readonly pricePerMinute: string;
   readonly connectionFee: string;
@@ -214,7 +215,7 @@ function NewRateForm({
   const operators = useOperators();
   const [tariffId, setTariffId] = useState('');
   const [operatorId, setOperatorId] = useState(ALL_OPERATORS);
-  const [terminationKind, setTerminationKind] = useState<TerminationKind>('sim');
+  const [terminationKind, setTerminationKind] = useState<RateTerminationChoice>('both');
   const [region, setRegion] = useState('');
   const [pricePerMinute, setPricePerMinute] = useState('');
   const [connectionFee, setConnectionFee] = useState('0');
@@ -286,20 +287,19 @@ function NewRateForm({
 
       <DialogField label="Через что">
         {/*
-          Способ терминации — измерение цены, а не свойство железа (ADR-0040):
-          внутри своей сети SIM почти бесплатна, транзит платный всегда. Одна цена
-          на оба означала бы, что партнёр не может назвать настоящую ни для одного.
+          Способ терминации — измерение цены (ADR-0040): у SIM и транка цена может быть разной. «SIM и SIP» —
+          одна цена на оба, две строки в тарифе (владелец, 2026-11-14).
         */}
         <select
           value={terminationKind}
           onChange={(event) => {
-            setTerminationKind(event.target.value as TerminationKind);
+            setTerminationKind(event.target.value as RateTerminationChoice);
           }}
           className="h-9 rounded-md border border-input bg-transparent px-2"
         >
-          {TERMINATION_KINDS.map((kind) => (
+          {RATE_TERMINATION_CHOICES.map((kind) => (
             <option key={kind} value={kind}>
-              {TERMINATION_KIND_NAME[kind]}
+              {RATE_TERMINATION_CHOICE_NAME[kind]}
             </option>
           ))}
         </select>

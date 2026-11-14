@@ -14,6 +14,7 @@ import {
   chargeForCall,
   conflict,
   DomainError,
+  internal,
   maxCharge,
   Money,
   notFound,
@@ -538,6 +539,26 @@ export class TariffService {
     actorUserId: Id<'user'>,
     actorRole: UserRole,
   ): Promise<PartnerRateRow> {
+    const [row] = await this.addPartnerRates(
+      draft,
+      [draft.terminationKind],
+      actorUserId,
+      actorRole,
+    );
+    if (row === undefined) throw internal('Цена не записана');
+    return row;
+  }
+
+  /**
+   * Одна цена на несколько способов (SIM и SIP разом): по строке на способ, **одной транзакцией** — у партнёра не
+   * должно остаться цены на SIM без цены на SIP, если одна из двух не прошла коридор.
+   */
+  async addPartnerRates(
+    base: Parameters<TariffRepository['insertPartnerRate']>[0],
+    kinds: readonly TerminationKind[],
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<PartnerRateRow[]> {
     // Всё одной транзакцией: запирание направлений, проверка тарифа и коридора,
     // вставка и запись в журнал.
     //
@@ -549,40 +570,45 @@ export class TariffService {
     // спор «кто поднял цену и когда» разбирается по нему, и цена без записи в журнале —
     // цена без автора.
     return this.repository.pool.transaction(async (tx) => {
-      await this.repository.lockOperatorTariffs(draft.operatorId, tx);
+      await this.repository.lockOperatorTariffs(base.operatorId, tx);
       // Тариф чужого партнёра — не его цена: проверка в той же транзакции, что вставка.
-      const tariff = await this.repository.findTariff(draft.tariffId, tx);
-      if (tariff?.partnerId !== draft.partnerId) {
-        throw notFound('Тариф не найден', { details: { tariff_id: draft.tariffId } });
+      const tariff = await this.repository.findTariff(base.tariffId, tx);
+      if (tariff?.partnerId !== base.partnerId) {
+        throw notFound('Тариф не найден', { details: { tariff_id: base.tariffId } });
       }
-      await this.assertWithinBand(draft, tx);
+      const rows: PartnerRateRow[] = [];
+      for (const terminationKind of kinds) {
+        const draft = { ...base, terminationKind };
+        await this.assertWithinBand(draft, tx);
 
-      const row = await this.repository.insertPartnerRate(draft, tx);
-      await this.audit.record(
-        {
-          action: 'partner_rate.added',
-          entityType: 'partner_rate',
-          entityId: row.id,
-          actorUserId,
-          actorRole,
-          after: {
-            partner_id: row.partnerId,
-            tariff_id: row.tariffId,
-            tariff_name: tariff.name,
-            operator_id: row.operatorId,
-            termination_kind: row.terminationKind,
-            region: row.region,
-            price_per_minute: row.pricePerMinute.toString(),
-            billing_increment_seconds: row.billingIncrementSeconds,
-            minimum_duration_seconds: row.minimumDurationSeconds,
-            connection_fee: row.connectionFee.toString(),
-            rounding: row.rounding,
-            effective_from: row.effectiveFrom.toISOString(),
+        const row = await this.repository.insertPartnerRate(draft, tx);
+        await this.audit.record(
+          {
+            action: 'partner_rate.added',
+            entityType: 'partner_rate',
+            entityId: row.id,
+            actorUserId,
+            actorRole,
+            after: {
+              partner_id: row.partnerId,
+              tariff_id: row.tariffId,
+              tariff_name: tariff.name,
+              operator_id: row.operatorId,
+              termination_kind: row.terminationKind,
+              region: row.region,
+              price_per_minute: row.pricePerMinute.toString(),
+              billing_increment_seconds: row.billingIncrementSeconds,
+              minimum_duration_seconds: row.minimumDurationSeconds,
+              connection_fee: row.connectionFee.toString(),
+              rounding: row.rounding,
+              effective_from: row.effectiveFrom.toISOString(),
+            },
           },
-        },
-        tx,
-      );
-      return row;
+          tx,
+        );
+        rows.push(row);
+      }
+      return rows;
     });
   }
 

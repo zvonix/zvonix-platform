@@ -556,6 +556,37 @@ describe('партнёр назначает себе цену', () => {
     expect(error.details.max_price).toBe('5');
   }, 60_000);
 
+  it('«SIM и SIP» — одна цена на оба способа, две строки одной транзакцией', async () => {
+    const response = await post(
+      '/partner/rates',
+      { operatorId: silentOperatorId, terminationKind: 'both', pricePerMinute: '3' },
+      as(mine.token),
+    );
+    expect(response.statusCode).toBe(201);
+    const created = response.json<{
+      rates: { termination_kind: string; price_per_minute: string }[];
+    }>();
+    expect(created.rates.map((rate) => rate.termination_kind).sort()).toEqual(['sim', 'sip']);
+    expect(created.rates.every((rate) => rate.price_per_minute === '3')).toBe(true);
+
+    const body = (await get('/partner/rates', as(mine.token))).json<RatesResponse>();
+    const own = body.rates.filter((rate) => rate.operator_id === silentOperatorId);
+    expect(own.find((rate) => rate.termination_kind === 'sip')?.price_per_minute).toBe('3');
+    expect(own.find((rate) => rate.termination_kind === 'sim')?.price_per_minute).toBe('3');
+  }, 60_000);
+
+  it('«SIM и SIP» вне коридора — ни одной строки', async () => {
+    const before = (await get('/partner/rates', as(mine.token))).json<RatesResponse>().rates.length;
+    const response = await post(
+      '/partner/rates',
+      { operatorId: operatorId, terminationKind: 'both', pricePerMinute: '99' },
+      as(mine.token),
+    );
+    expect(response.statusCode).toBe(400);
+    const after = (await get('/partner/rates', as(mine.token))).json<RatesResponse>().rates.length;
+    expect(after).toBe(before);
+  }, 60_000);
+
   it('коридор не обходится платой за соединение', async () => {
     // Цена за минуту внутри коридора, а вызов в 60 секунд стоит куда больше верхней
     // границы: коридор меряет стоимость эталонного вызова, а не одно из пяти чисел.

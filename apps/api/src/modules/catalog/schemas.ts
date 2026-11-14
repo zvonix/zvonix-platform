@@ -6,6 +6,7 @@ import {
   COMMISSION_MAX_BASIS_POINTS,
   COMMISSION_PRODUCTS,
   Money,
+  RATE_TERMINATION_CHOICES,
   ROUNDING_MODES,
   TERMINATION_KINDS,
   type MoneyAmount,
@@ -130,9 +131,9 @@ export const addPartnerRateSchema = z.object({
    *
    * Умолчание `sim` — не удобство, а совместимость: на момент появления поля другого
    * способа не существует, и обработчик без него продолжает работать как прежде.
-   * Появится транк — цену ему назовут явно.
+   * Появится транк — цену ему назовут явно. `both` — одна цена и для SIM, и для SIP: две строки одной транзакцией.
    */
-  terminationKind: z.enum(TERMINATION_KINDS).default('sim'),
+  terminationKind: z.enum(RATE_TERMINATION_CHOICES).default('sim'),
 
   /** Регион назначения. Пусто — тариф на любой регион. */
   region: z.string().trim().min(2, 'слишком короткий').max(100, 'слишком длинный').optional(),
@@ -184,7 +185,7 @@ export const addPartnerRateSchema = z.object({
  */
 export const partnerOwnRateSchema = addPartnerRateSchema
   .omit({ partnerId: true, effectiveFrom: true })
-  .extend({ terminationKind: z.enum(TERMINATION_KINDS) });
+  .extend({ terminationKind: z.enum(RATE_TERMINATION_CHOICES) });
 
 /** Имя тарифа партнёра (ADR-0056): то, что партнёр выбирает у шлюза и SIM. */
 const tariffName = z.string().trim().min(1, 'не может быть пустым').max(60, 'не длиннее 60 знаков');
