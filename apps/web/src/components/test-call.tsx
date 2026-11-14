@@ -51,11 +51,14 @@ function paths(scope: TestCallScope, subject: TestCallSubject) {
 export function TestCallButton({
   scope,
   subject,
-  compact = false,
+  compact = true,
 }: {
   scope: TestCallScope;
   subject: TestCallSubject;
-  /** Значок с подсказкой вместо подписи — для строки таблицы (DESIGN.md, «Кнопки-значки»). */
+  /**
+   * Значок с подсказкой (по умолчанию) или подпись. В строках таблиц — всегда значок, одинаково у SIM и SIP
+   * (владелец, 2026-11-15: «почему всё разное — делать значками, а не словами»).
+   */
   compact?: boolean;
 }) {
   const [callId, setCallId] = useState<string | undefined>(undefined);

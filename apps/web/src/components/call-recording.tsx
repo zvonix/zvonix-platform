@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { request } from '@/lib/api';
+import { endCauseName } from '@/lib/labels';
 
 interface Listenable {
   readonly call_id: string;
@@ -111,5 +112,29 @@ function Player({ recordingId }: { recordingId: string }) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Почему не соединилось — со слов узла, по-русски; код и ответ провайдера — в подсказке. У состоявшегося вызова
+ * не показывается: «обычное завершение» в каждой строке — шум.
+ */
+export function EndCause({
+  cause,
+  sip,
+  status,
+}: {
+  cause: string | null;
+  sip: string | null;
+  status: string;
+}) {
+  if (cause === null || status === 'completed') return null;
+  return (
+    <span
+      className="ml-2 cursor-help text-muted-foreground underline decoration-dotted underline-offset-4"
+      title={`Код узла: ${cause}${sip === null ? '' : `; ответ: ${sip}`}`}
+    >
+      {endCauseName(cause)}
+    </span>
   );
 }

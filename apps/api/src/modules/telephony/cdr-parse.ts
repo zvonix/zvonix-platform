@@ -42,6 +42,12 @@ export interface ParsedCdr {
   readonly sipPhrase: string | undefined;
   /** Когда шлюз сообщил, что набирает (`180`/`183`). Пусто — до набора не дошло. */
   readonly progressAt: Date | undefined;
+  /**
+   * Почему не соединилось исходящее плечо — то, что узел услышал от шлюза или провайдера: `GATEWAY_DOWN`,
+   * `USER_BUSY`, `CALL_REJECTED`. У плеча A причина отбоя часто общая (`NORMAL_CLEARING`), а настоящая — в итоге
+   * набора (`originate_disposition`, `last_bridge_hangup_cause`).
+   */
+  readonly endCause: string;
 }
 
 export class CdrParseError extends Error {
@@ -84,7 +90,18 @@ export function parseCdr(body: unknown): ParsedCdr {
     sipStatus: text(source['sip_invite_failure_status']) ?? text(source['sip_term_status']),
     sipPhrase: text(source['sip_invite_failure_phrase']) ?? text(source['sip_term_phrase']),
     progressAt: stamp(source['progress_stamp']) ?? stamp(source['progress_media_stamp']),
+    endCause:
+      meaningful(text(source['originate_disposition'])) ??
+      meaningful(text(source['last_bridge_hangup_cause'])) ??
+      meaningful(text(source['bridge_hangup_cause'])) ??
+      text(source['hangup_cause']) ??
+      'UNSPECIFIED',
   };
+}
+
+/** Итог набора, который ничего не объясняет, — пропускается в пользу следующего источника. */
+function meaningful(cause: string | undefined): string | undefined {
+  return cause === undefined || cause === 'SUCCESS' || cause === 'NONE' ? undefined : cause;
 }
 
 /**

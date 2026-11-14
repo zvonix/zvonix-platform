@@ -666,6 +666,20 @@
       "when": 1794652089204,
       "tag": "0094_client_route_priorities",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1794676801016,
+      "tag": "0095_calls_end_cause",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1794676975637,
+      "tag": "0096_sip_trunks_link",
+      "breakpoints": true
     }
   ]
 }

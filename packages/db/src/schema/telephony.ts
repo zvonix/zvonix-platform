@@ -692,6 +692,15 @@ export const sipTrunks = pgTable(
     /** Партнёр попросил безлимит и решения ещё нет; решение администратора стирает. */
     unlimitedRequestedAt: timestamptz(),
 
+    /**
+     * Связь узла с провайдером — со слов узла, раз в пульс: состояние регистрации sofia-gateway (`REGED`, `FAIL_WAIT`,
+     * `NOREG`…) и годность (`UP`/`DOWN`). `DOWN` — узел не отправит провайдеру ни одного вызова (`GATEWAY_DOWN`).
+     * Пусто — узел ещё не сообщал. Старое сообщение — узел молчит, связь неизвестна.
+     */
+    linkState: text(),
+    linkStatus: text(),
+    linkReportedAt: timestamptz(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

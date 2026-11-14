@@ -647,3 +647,19 @@ export const registrationsReportSchema = z.object({
     .max(MAX_REPORTED_REGISTRATIONS, 'неправдоподобно много регистраций')
     .optional(),
 });
+
+/**
+ * Связь узла с провайдерами (ADR-0121): имя sofia-gateway (`gw-…`), состояние регистрации и годность — как их пишет
+ * `sofia status gateway`. Значения не перечисляются: FreeSWITCH добавляет новые, а узел передаёт как есть.
+ */
+export const trunkLinksSchema = z.object({
+  gateways: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(64),
+        state: z.string().trim().min(1).max(32),
+        status: z.string().trim().min(1).max(32),
+      }),
+    )
+    .max(500),
+});

@@ -10,11 +10,13 @@
 
 import { Body, Controller, Get, Header, HttpCode, Inject, Post } from '@nestjs/common';
 import { parseId } from '@zvonix/shared';
+import type { z } from 'zod';
 import { Machine } from '../../http/auth.guard.js';
 import { CurrentMachine } from '../../http/request-context.js';
 import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import { zodBody } from '../../http/zod.pipe.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
-import { directoryRequestSchema } from './schemas.js';
+import { directoryRequestSchema, trunkLinksSchema } from './schemas.js';
 import { sipGatewaysXml } from './sip-gateways-xml.js';
 import { TelephonyService } from './telephony.service.js';
 
@@ -55,6 +57,26 @@ export class NodeDirectoryController {
    * Ответ JSON — для будущего агента узла. Нынешний узел берёт тот же список готовым файлом,
    * `GET /node/sip-gateways.xml` ниже.
    */
+  /**
+   * Связь узла с провайдерами ([ADR-0121](../../../../../docs/adr/0121-svyaz-uzla-s-sip-provayderom.md)): узел раз в пульс
+   * присылает по каждому sofia-gateway состояние регистрации и годность. Без этого «провайдер не принимает звонки»
+   * было видно только по `GATEWAY_DOWN` в отказах.
+   */
+  @Machine('node')
+  @Post('sip-gateways/status')
+  @HttpCode(200)
+  async sipGatewaysStatus(
+    @CurrentMachine() machine: MachinePrincipal,
+    @Body(zodBody(trunkLinksSchema)) body: z.infer<typeof trunkLinksSchema>,
+  ): Promise<{ recorded: number }> {
+    const recorded = await this.telephony.recordTrunkLinks(
+      parseId(machine.ownerId, 'node'),
+      body.gateways,
+      new Date(),
+    );
+    return { recorded };
+  }
+
   @Machine('node')
   @Get('sip-gateways')
   async sipGateways(@CurrentMachine() machine: MachinePrincipal): Promise<{

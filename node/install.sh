@@ -646,6 +646,9 @@ install -d -m 0700 "$NODE_ETC"
 # SIP-провайдеры партнёров (ADR-0118, GET /node/sip-gateways.xml): тот же ключ, другой адрес.
 ( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/sip-gateways.xml"\n' \
   "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/sip-gateways.curl" )
+# Связь с SIP-провайдерами (ADR-0121, POST /node/sip-gateways/status): тот же ключ, другой адрес.
+( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/sip-gateways/status"\n' \
+  "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/sip-gateways-status.curl" )
 
 cat >/usr/local/sbin/zvonix-heartbeat <<HEARTBEAT
 #!/bin/sh
@@ -697,6 +700,22 @@ if curl -fsS --max-time 10 -K "${NODE_ETC}/sip-gateways.curl" -o "\$GW_NEW" 2>/d
   fi
 fi
 rm -f "\$GW_NEW"
+# Связь с провайдерами (ADR-0121): по каждому транку из файла — состояние регистрации и годность, как их видит
+# sofia. Без этого «провайдер не принимает звонки» было видно только по GATEWAY_DOWN в отказах. В сообщение идут
+# только имя, состояние и годность — ни адреса, ни учётных данных. FreeSWITCH не ответил — не шлём ничего.
+if [ -f "\$GW_FILE" ]; then
+  LINKS=""
+  for NAME in \$(sed -n 's/^<gateway name="\([A-Za-z0-9._-]*\)".*/\1/p' "\$GW_FILE"); do
+    GWS="\$("${FS_CLI}" -x "sofia status gateway \$NAME" 2>/dev/null)"
+    ST="\$(printf '%s\n' "\$GWS" | awk '\$1=="State" {print \$2; exit}' | tr -cd 'A-Z_')"
+    SS="\$(printf '%s\n' "\$GWS" | awk '\$1=="Status" {print \$2; exit}' | tr -cd 'A-Z_')"
+    [ -n "\$ST" ] && [ -n "\$SS" ] || continue
+    LINKS="\${LINKS}\${LINKS:+,}{\"name\":\"\$NAME\",\"state\":\"\$ST\",\"status\":\"\$SS\"}"
+  done
+  [ -n "\$LINKS" ] && printf '{"gateways":[%s]}' "\$LINKS" \
+    | curl -fsS --max-time 10 -K "${NODE_ETC}/sip-gateways-status.curl" \
+        -H 'Content-Type: application/json' --data-binary @- >/dev/null 2>&1 || true
+fi
 # Кто вошёл на узел (ADR-0114). Площадка ходит в ESL только на своей машине и об узле на отдельном
 # сервере узнаёт лишь так; без этого вошедший GOIP в кабинете «не на связи». Поля url, token, hostname
 # и metadata площадке не нужны — вырезаются, чтобы список влезал в предел тела. FreeSWITCH не ответил —

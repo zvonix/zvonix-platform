@@ -31,6 +31,9 @@ interface PartnerCallView {
   readonly operator_id: string | null;
   readonly duration_seconds: number | null;
   readonly started_at: string;
+  /** Чем закончился набор — код узла (`GATEWAY_DOWN`) и ответ его шлюза; пусто, пока нет CDR. */
+  readonly end_cause: string | null;
+  readonly end_sip: string | null;
 }
 
 @Controller()
@@ -116,5 +119,7 @@ function toPartnerCallView(row: CallRow): PartnerCallView {
     operator_id: row.operatorId,
     duration_seconds: row.durationSeconds,
     started_at: row.startedAt.toISOString(),
+    end_cause: row.endCause,
+    end_sip: row.endSip,
   };
 }

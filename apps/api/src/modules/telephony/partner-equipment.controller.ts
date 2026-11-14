@@ -190,6 +190,8 @@ interface TrunkView {
   readonly unlimited_requested_at: string | null;
   /** Есть ли цена «через SIP» в тарифе транка: без неё клиенты через него не звонят (ADR-0120, п. 9). */
   readonly has_price: boolean;
+  /** Связь узла с провайдером (ADR-0121); пусто — узел ещё не сообщал. */
+  readonly link: { state: string; status: string; reported_at: string } | null;
   readonly pace?: NumberPaceView;
 }
 
@@ -767,6 +769,16 @@ function toTrunkView(
     unlimited: row.trunk.unlimited,
     unlimited_requested_at: row.trunk.unlimitedRequestedAt?.toISOString() ?? null,
     has_price: hasPrice,
+    link:
+      row.trunk.linkReportedAt === null ||
+      row.trunk.linkState === null ||
+      row.trunk.linkStatus === null
+        ? null
+        : {
+            state: row.trunk.linkState,
+            status: row.trunk.linkStatus,
+            reported_at: row.trunk.linkReportedAt.toISOString(),
+          },
   };
 }
 

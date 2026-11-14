@@ -46,6 +46,9 @@ interface CallView {
   /** Через что ушёл вызов — SIM или SIP; пусто у отказа. */
   readonly termination_kind: TerminationKind | null;
   readonly sim: { id: string; msisdn: string } | null;
+  /** Чем закончился набор — код узла и ответ шлюза или провайдера; пусто, пока нет CDR. */
+  readonly end_cause: string | null;
+  readonly end_sip: string | null;
 }
 
 interface SummaryView {
@@ -194,6 +197,8 @@ function toCallView(row: CallDetails): CallView {
         ? null
         : { id: call.gatewayId, name: row.gatewayName },
     termination_kind: row.terminationKind,
+    end_cause: call.endCause,
+    end_sip: call.endSip,
     sim:
       call.simCardId === null || row.simMsisdn === null
         ? null

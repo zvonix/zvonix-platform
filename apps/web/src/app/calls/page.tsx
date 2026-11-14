@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CALL_FAILURE_REASONS, CALL_STATUSES } from '@zvonix/shared';
 import type { CallFailureReason, CallStatus, TerminationKind } from '@zvonix/shared';
 import { Suspense, useState } from 'react';
-import { ListenButton, useListenable } from '@/components/call-recording';
+import { EndCause, ListenButton, useListenable } from '@/components/call-recording';
 import { ConsoleShell } from '@/components/console-shell';
 import { ExportButton } from '@/components/export-button';
 import { FilterInput } from '@/components/filter-input';
@@ -65,6 +65,8 @@ interface Call {
   /** Через что ушёл вызов — SIM или SIP; пусто у отказа. */
   readonly termination_kind: TerminationKind | null;
   readonly sim: { id: string; msisdn: string } | null;
+  readonly end_cause: string | null;
+  readonly end_sip: string | null;
 }
 
 export default function CallsPage() {
@@ -455,6 +457,7 @@ function CallRow({
             {FAILURE_REASON_NAME[call.failure_reason]}
           </span>
         )}
+        <EndCause cause={call.end_cause} sip={call.end_sip} status={call.status} />
       </TableCell>
 
       <TableCell className="num text-right whitespace-nowrap">

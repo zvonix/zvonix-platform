@@ -101,6 +101,14 @@ export class CdrService {
       answeredAt: cdr.answeredAt ?? null,
       endedAt: cdr.endedAt ?? new Date(),
       durationSeconds: 0,
+      ...endOf(cdr),
+    });
+    // Без этой строки разбор «почему не соединилось» шёл вслепую: причина была только у узла.
+    this.logger.info('Вызов не состоялся', {
+      call_id: call.id,
+      status,
+      end_cause: cdr.endCause,
+      end_sip: endOf(cdr).endSip,
     });
     if (updated === undefined) throw notFound('Вызов не найден');
     return updated;
@@ -192,6 +200,7 @@ export class CdrService {
     }
 
     const updated = await this.calls.setStatus(call.id, 'completed', {
+      ...endOf(cdr),
       answeredAt: cdr.answeredAt ?? null,
       endedAt: cdr.endedAt ?? new Date(),
       durationSeconds: cdr.billableSeconds,
@@ -240,4 +249,15 @@ export class CdrService {
     }
     return closed;
   }
+}
+
+/** Итог набора для записи в вызов (ADR-0003: причины — как есть, без перевода). */
+function endOf(cdr: ParsedCdr): { endCause: string; endSip: string | null } {
+  return {
+    endCause: cdr.endCause.slice(0, 64),
+    endSip:
+      cdr.sipStatus === undefined
+        ? null
+        : `${cdr.sipStatus}${cdr.sipPhrase === undefined ? '' : ` ${cdr.sipPhrase}`}`.slice(0, 120),
+  };
 }

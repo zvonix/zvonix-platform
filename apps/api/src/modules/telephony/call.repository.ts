@@ -478,6 +478,8 @@ export class CallRepository {
       answeredAt?: Date | null;
       endedAt?: Date | null;
       durationSeconds?: number | null;
+      endCause?: string | null;
+      endSip?: string | null;
     } = {},
   ): Promise<CallRow | undefined> {
     try {

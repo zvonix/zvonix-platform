@@ -1,3 +1,4 @@
+import type { TrunkLink } from '@/components/presence';
 /**
  * Оборудование партнёра — вид ответа `GET /partner/equipment`.
  *
@@ -99,6 +100,8 @@ export interface Trunk {
   readonly unlimited_requested_at: string | null;
   /** Есть ли цена «через SIP» в тарифе провайдера: без неё клиенты через него не звонят (ADR-0120). */
   readonly has_price: boolean;
+  /** Связь узла с провайдером (ADR-0121); пусто — узел ещё не сообщал. */
+  readonly link: TrunkLink | null;
   readonly pace?: NumberPaceView;
 }
 
