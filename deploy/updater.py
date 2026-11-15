@@ -462,6 +462,10 @@ PG_BIN_DIR = os.environ.get('ZVONIX_PG_BIN_DIR', '')
 # Имя рабочей базы — из окружения только ради репетиции на настоящей PostgreSQL рядом с рабочей: на сервере оно всегда `zvonix`.
 LIVE_DB = os.environ.get('ZVONIX_LIVE_DB', 'zvonix')
 DB_OWNER = os.environ.get('ZVONIX_DB_OWNER', 'zvonix')
+# Сколько ждать, пока отключённый сеанс действительно закроется, мс. pg_terminate_backend без срока только посылает
+# сигнал: следующий же RENAME застаёт сеанс живым — «database is being accessed by other users», и восстановление
+# срывается (так упала сборка v0.1.190 в CI). Со сроком (PostgreSQL 14+) функция ждёт выхода процесса.
+TERMINATE_WAIT_MS = 10000
 VERIFY_DB = LIVE_DB + '_verify'
 # Копия для скачивания кладётся в exports/ владельцем кабинета: API отдаёт файл и сам его удаляет.
 EXPORT_OWNER = os.environ.get('ZVONIX_EXPORT_OWNER', 'zvonix')
@@ -874,7 +878,7 @@ def default_migrate_command(release_dir, target_db):
 def swap_back(journal, current_name, saved_name):
     """Вернуть прежнюю базу под рабочее имя. Возвращает True, если получилось."""
     steps = [f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS false',
-             f"select pg_terminate_backend(pid) from pg_stat_activity where datname = '{LIVE_DB}' and pid <> pg_backend_pid()",
+             f"select pg_terminate_backend(pid, {TERMINATE_WAIT_MS}) from pg_stat_activity where datname = '{LIVE_DB}' and pid <> pg_backend_pid()",
              f'ALTER DATABASE {LIVE_DB} RENAME TO {current_name}',
              # Отложенная база остаётся доступной: в неё можно заглянуть и забрать данные вручную.
              f'ALTER DATABASE {current_name} WITH ALLOW_CONNECTIONS true',
@@ -982,7 +986,7 @@ def restore_locked(target, path, journal):
     journal.line('6/7 Базы меняются местами: прежняя сохраняется как ' + replaced)
     swapped = True
     for statement in (f'ALTER DATABASE {LIVE_DB} WITH ALLOW_CONNECTIONS false',
-                      f"select pg_terminate_backend(pid) from pg_stat_activity where datname = '{LIVE_DB}' and pid <> pg_backend_pid()",
+                      f"select pg_terminate_backend(pid, {TERMINATE_WAIT_MS}) from pg_stat_activity where datname = '{LIVE_DB}' and pid <> pg_backend_pid()",
                       f'ALTER DATABASE {LIVE_DB} RENAME TO {replaced}'):
         code, output = psql_admin(statement)
         if code != 0:
