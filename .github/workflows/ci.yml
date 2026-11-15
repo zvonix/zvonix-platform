@@ -79,8 +79,12 @@ jobs:
       # (tests/updater-restore-postgres.test.ts) падала, хотя на сервере версии совпадают (2026-11-15, выпуск v0.1.190).
       - name: Программы PostgreSQL 16
         run: |
+          # В новом образе 16-й в штатных пакетах нет — ставится из хранилища PostgreSQL (PGDG).
           if [ ! -x /usr/lib/postgresql/16/bin/pg_restore ]; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-common
+            sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+            sudo apt-get install -y -qq postgresql-client-16
           fi
           /usr/lib/postgresql/16/bin/pg_restore --version
           echo "ZVONIX_TEST_PG_BIN=/usr/lib/postgresql/16/bin" >>"$GITHUB_ENV"
