@@ -74,6 +74,21 @@ jobs:
       - name: Установка зависимостей
         run: pnpm install --frozen-lockfile
 
+      # Программы PostgreSQL — той же версии, что база (16, как на сервере). В PATH образа Ubuntu теперь клиент новее:
+      # его pg_dump пишет в копию `SET transaction_timeout`, которого 16-я не знает, и проверка восстановления
+      # (tests/updater-restore-postgres.test.ts) падала, хотя на сервере версии совпадают (2026-11-15, выпуск v0.1.190).
+      - name: Программы PostgreSQL 16
+        run: |
+          # В новом образе 16-й в штатных пакетах нет — ставится из хранилища PostgreSQL (PGDG).
+          if [ ! -x /usr/lib/postgresql/16/bin/pg_restore ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq postgresql-common
+            sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+            sudo apt-get install -y -qq postgresql-client-16
+          fi
+          /usr/lib/postgresql/16/bin/pg_restore --version
+          echo "ZVONIX_TEST_PG_BIN=/usr/lib/postgresql/16/bin" >>"$GITHUB_ENV"
+
       # Браузер для сквозных проверок кабинета. Без него шаг «Кабинет в браузере»
       # отчитается «НЕ ВЫПОЛНЕН» — и проверка, ради которой CI и заведён, молча
       # перестанет что-либо проверять. `--with-deps` ставит системные библиотеки,
