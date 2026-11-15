@@ -463,8 +463,8 @@ PG_BIN_DIR = os.environ.get('ZVONIX_PG_BIN_DIR', '')
 LIVE_DB = os.environ.get('ZVONIX_LIVE_DB', 'zvonix')
 DB_OWNER = os.environ.get('ZVONIX_DB_OWNER', 'zvonix')
 # Сколько ждать, пока отключённый сеанс действительно закроется, мс. pg_terminate_backend без срока только посылает
-# сигнал: следующий же RENAME застаёт сеанс живым — «database is being accessed by other users», и восстановление
-# срывается (так упала сборка v0.1.190 в CI). Со сроком (PostgreSQL 14+) функция ждёт выхода процесса.
+# сигнал, и следующий же RENAME может застать сеанс живым — «database is being accessed by other users». Со сроком
+# (PostgreSQL 14+) функция ждёт выхода процесса.
 TERMINATE_WAIT_MS = 10000
 VERIFY_DB = LIVE_DB + '_verify'
 # Копия для скачивания кладётся в exports/ владельцем кабинета: API отдаёт файл и сам его удаляет.
