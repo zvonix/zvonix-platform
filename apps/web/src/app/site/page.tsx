@@ -134,7 +134,7 @@ export default async function HomePage() {
 
       <Section
         title="Сообщения — как обычные SMS"
-        lead="Ваша система отправляет сообщение так же, как SMS: по протоколу SMPP или по HTTP API. Zvonix доставляет его в мессенджер (сейчас MAX; другие мессенджеры и SMS подключаются)."
+        lead="Ваша система отправляет сообщение так же, как SMS: по протоколу SMPP или по HTTP API. Zvonix доставляет его в мессенджер (сейчас MAX)."
       >
         <FeatureGrid>
           <Feature title="Протокол SMS (SMPP)">

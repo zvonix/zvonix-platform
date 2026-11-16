@@ -13,8 +13,7 @@ export function SiteFooter({ info }: { info: SiteInfo }) {
             Zvonix
           </a>
           <p className="max-w-xs text-muted-foreground">
-            Звонки и сообщения в одном месте: терминация через GSM-шлюзы партнёров и сообщения в
-            мессенджерах.
+            Звонки через SIM-карты партнёров и сообщения в мессенджерах — в одном месте.
           </p>
         </div>
 

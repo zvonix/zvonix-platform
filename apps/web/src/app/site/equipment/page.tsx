@@ -7,7 +7,7 @@ export const revalidate = 60;
 export const metadata: Metadata = {
   title: 'Подключение оборудования',
   description:
-    'Что нужно партнёру: GOIP-шлюз, телефон Android или свой SIP-провайдер. Подключение из кабинета, проверка «на связи», тестовый звонок.',
+    'Что нужно партнёру: GOIP-шлюз или свой SIP-провайдер. Подключение из кабинета, проверка «на связи», тестовый звонок.',
 };
 
 export default async function EquipmentPage() {
@@ -26,11 +26,7 @@ export default async function EquipmentPage() {
             Один вход на шлюз или свой вход у каждой линии (Config by Line). Кабинет показывает
             настройки шлюза по шагам.
           </Feature>
-          <Feature title="Телефон Android" delay={60}>
-            Один слот под SIM. На линии, где клиенту нужна запись разговора, вызовы через телефон не
-            идут: на Android она недоступна.
-          </Feature>
-          <Feature title="Свой SIP-провайдер" delay={120}>
+          <Feature title="Свой SIP-провайдер" delay={60}>
             Адрес, логин и пароль из кабинета провайдера. Адрес — только внешний.
           </Feature>
         </FeatureGrid>
