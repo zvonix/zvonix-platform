@@ -17,7 +17,7 @@ export default async function PartnersPage() {
       <PageHeader
         eyebrow="Партнёрам"
         title="Загрузите свои SIM и зарабатывайте на каждом вызове"
-        lead="Вы подключаете GSM-шлюзы и SIM, задаёте свою цену, а площадка приводит клиентов и считает деньги по каждому разговору."
+        lead="Вы подключаете GSM-шлюзы и SIM, задаёте свою цену, а Zvonix приводит клиентов и считает деньги по каждому разговору."
       />
 
       <Section title="Как подключиться">
@@ -25,7 +25,7 @@ export default async function PartnersPage() {
           items={[
             {
               title: 'Зарегистрируйтесь',
-              text: 'Подтвердите почту; к работе партнёр допускается по правилам площадки.',
+              text: 'Подтвердите почту; к работе партнёр допускается по правилам сервиса.',
             },
             {
               title: 'Подключите оборудование',
@@ -69,12 +69,12 @@ export default async function PartnersPage() {
         lead="Вы видите свои вызовы и свои деньги, но не имена и цены клиентов."
       >
         <p className="max-w-2xl text-muted-foreground">
-          Площадка распределяет трафик по цене, лимитам и приоритетам клиентов; вам остаётся
+          Zvonix распределяет трафик по цене, лимитам и приоритетам клиентов; вам остаётся
           поддерживать оборудование и цену.
         </p>
       </Section>
 
-      <CallToAction cabinetUrl={info.cabinetUrl} />
+      <CallToAction cabinetUrl={info.cabinetUrl} partner />
     </>
   );
 }

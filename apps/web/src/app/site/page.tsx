@@ -16,7 +16,7 @@ export default async function HomePage() {
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-20 pt-16 md:pt-24 lg:grid-cols-[1.15fr_1fr]">
           <div className="flex flex-col gap-6">
             <span className="text-xs font-semibold uppercase tracking-widest text-primary">
-              Площадка терминации
+              Сервис звонков и сообщений
             </span>
             <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-balance md:text-6xl">
               Звонки и сообщения в одном месте
@@ -70,12 +70,12 @@ export default async function HomePage() {
 
       <Section
         title="Для кого"
-        lead="Две стороны одной площадки: кто звонит и кто принимает вызов на свою SIM."
+        lead="Две стороны одного сервиса: кто звонит и кто принимает вызов на свою SIM."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <Reveal>
             <a
-              href="/clients"
+              href="/calls"
               className="site-lift group flex h-full flex-col gap-3 rounded-xl border border-primary/40 bg-primary/10 p-6 hover:border-primary"
             >
               <span className="flex size-11 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -83,7 +83,7 @@ export default async function HomePage() {
               </span>
               <h3 className="text-xl font-semibold">Компаниям и сервисам</h3>
               <p className="text-muted-foreground">
-                Звонки и уведомления вашим клиентам через одну площадку: доставка, такси, магазины,
+                Звонки и уведомления вашим клиентам через один сервис: доставка, такси, магазины,
                 салоны. Вы видите цену, ставите лимиты и сами решаете, через кого звонить в первую
                 очередь.
               </p>
@@ -134,7 +134,7 @@ export default async function HomePage() {
 
       <Section
         title="Сообщения — как обычные SMS"
-        lead="Ваша система отправляет сообщение так же, как SMS: по протоколу SMPP или по HTTP API. Площадка доставляет его в мессенджер (сейчас MAX; другие мессенджеры и SMS подключаются)."
+        lead="Ваша система отправляет сообщение так же, как SMS: по протоколу SMPP или по HTTP API. Zvonix доставляет его в мессенджер (сейчас MAX; другие мессенджеры и SMS подключаются)."
       >
         <FeatureGrid>
           <Feature title="Протокол SMS (SMPP)">
@@ -153,7 +153,7 @@ export default async function HomePage() {
         </FeatureGrid>
       </Section>
 
-      <Section title="Что есть на площадке">
+      <Section title="Что есть в Zvonix">
         <FeatureGrid>
           <Feature title="Прозрачная цена">
             Цена зависит от направления. Тариф посекундный или поминутный — это видно до звонка.
@@ -162,12 +162,12 @@ export default async function HomePage() {
             Минуты в сутки и в месяц, частота звонков с одной SIM, порядок партнёров цифрами 1–99.
           </Feature>
           <Feature title="Запись разговоров" delay={120}>
-            Записи хранятся на площадке, слушать их можно по временным ссылкам; каждое прослушивание
+            Записи хранятся в Zvonix, слушать их можно по временным ссылкам; каждое прослушивание
             остаётся в журнале.
           </Feature>
           <Feature title="Каналы сообщений">
-            Через аккаунты партнёров или через бота площадки; отправка из кабинета, по HTTP API или
-            по SMPP — с одной ценой, лимитами и возвратом.
+            Через аккаунты партнёров или через бота Zvonix; отправка из кабинета, по HTTP API или по
+            SMPP — с одной ценой, лимитами и возвратом.
           </Feature>
           <Feature title="Отчёты и акт" delay={60}>
             Вызовы с причинами отказов, итоги за период, акт за месяц с остатком на начало и конец,

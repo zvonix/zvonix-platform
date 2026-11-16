@@ -5,8 +5,9 @@ import { getSiteInfo } from '../site-data';
 export const revalidate = 60;
 
 export const metadata: Metadata = {
-  title: 'Интеграция',
-  description: 'Подключение по HTTP API и SMPP: вызовы, баланс, отправка сообщений.',
+  title: 'Подключение',
+  description:
+    'Подключение клиента: линия SIP для АТС, HTTP API и SMPP — вызовы, баланс, отправка сообщений.',
 };
 
 const EXAMPLE = `curl https://<кабинет>/api/v1/balance \\
@@ -22,12 +23,30 @@ export default async function IntegrationPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Интеграция"
+        eyebrow="Клиентам · подключение"
         title="Подключите свою систему за вечер"
-        lead="Ключ выпускается в кабинете. Всё, что видно в кабинете, доступно и по API."
+        lead="Линия для АТС, ключ API и вход SMPP выдаются в кабинете."
       />
 
-      <Section title="Что доступно">
+      <Section
+        title="Линия SIP для вашей АТС"
+        lead="Линию вы заводите в кабинете сами, до пяти линий. Работает сразу."
+      >
+        <FeatureGrid>
+          <Feature title="Вход">
+            Сервер, порт 5060 (UDP или TCP), имя и пароль. Пароль показывается один раз; потеряли —
+            выпустите новый.
+          </Feature>
+          <Feature title="Кодеки" delay={60}>
+            PCMA, PCMU, G.729.
+          </Feature>
+          <Feature title="Номер" delay={120}>
+            В формате +7…, 8… или 10 цифр. Кабинет показывает, подключена ли линия.
+          </Feature>
+        </FeatureGrid>
+      </Section>
+
+      <Section title="API и SMPP">
         <FeatureGrid>
           <Feature title="HTTP API">
             Список вызовов и карточка вызова, баланс, отправка и статусы сообщений. Доступ — по
