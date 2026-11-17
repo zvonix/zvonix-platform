@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { CLIENT_STATUSES, type ClientStatus } from '@zvonix/shared';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { Choice } from '@/components/choice';
@@ -210,12 +210,12 @@ function ClientsTable() {
                       <MoneyOperation
                         path={`/clients/${client.id}/deposit`}
                         label="Пополнить"
+                        icon={<Wallet aria-hidden className="size-4" />}
                         title={`Пополнить счёт «${client.name}»`}
                         description="Деньги появятся на остатке сразу и станут доступны для звонков и сообщений MAX."
                         reasonPlaceholder="Платёжное поручение № 42 от 07.09.2026"
                         balanceName="Остаток"
                         doneText="Проведено"
-                        variant="outline"
                         invalidate={['clients']}
                         reasonOptional
                       />

@@ -55,11 +55,12 @@ export function StatusDot({
   phoneDot?: boolean;
 }) {
   const dot = <span aria-hidden className={`size-2 shrink-0 rounded-full ${DOT[tone]}`} />;
-  const hasReason = reason !== undefined && reason !== '';
+  const why = reason ?? '';
+  const hasReason = why !== '';
   if (dotOnly) {
     return (
       <TipTrigger
-        tip={hasReason ? `${label}: ${reason ?? ''}` : label}
+        tip={hasReason ? `${label}: ${why}` : label}
         className="inline-flex size-6 items-center justify-center"
       >
         {dot}
@@ -74,10 +75,10 @@ export function StatusDot({
     </>
   );
   if (!hasReason && !phoneDot) return <span className={className}>{body}</span>;
-  const full = hasReason ? `${label}: ${reason ?? ''}` : label;
+  const full = hasReason ? `${label}: ${why}` : label;
   return (
     <TipTrigger
-      tip={phoneDot ? full : (reason ?? '')}
+      tip={phoneDot ? full : why}
       label={full}
       className={
         phoneDot ? `${className} min-h-6 min-w-6 justify-center md:justify-start` : className
@@ -93,6 +94,33 @@ export function HintText({ label, reason }: { label: string; reason: string }) {
   return (
     <TipTrigger tip={reason} label={`${label}: ${reason}`} className="num whitespace-nowrap">
       {label}
+    </TipTrigger>
+  );
+}
+
+/**
+ * Имя или текст, обрезанный по ширине столбца, — целиком и с подробностями в подсказке (почта и телефон заявителя,
+ * модель шлюза, комментарий линии). В отличие от `title`, открывается нажатием на телефоне и с клавиатуры.
+ * `width` — класс наибольшей ширины (`max-w-56`).
+ */
+export function ClippedText({
+  text,
+  hint,
+  width = 'max-w-56',
+}: {
+  text: string;
+  /** Что показать в подсказке; пусто — сам текст целиком. */
+  hint?: string | null | undefined;
+  width?: string;
+}) {
+  const tip = hint === undefined || hint === null || hint === '' ? text : hint;
+  return (
+    <TipTrigger
+      tip={tip}
+      label={tip === text ? text : `${text}: ${tip}`}
+      className={`inline-block truncate text-left align-bottom ${width}`}
+    >
+      {text}
     </TipTrigger>
   );
 }

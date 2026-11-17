@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
-import { StatusDot } from '@/components/status-dot';
+import { ClippedText, StatusDot } from '@/components/status-dot';
 import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
@@ -241,9 +241,7 @@ function Section({
               <TableRow key={key}>
                 <TableCell>
                   <span className="inline-flex items-center gap-2 whitespace-nowrap">
-                    <span className="max-w-56 truncate" title={hint ?? title}>
-                      {title}
-                    </span>
+                    <ClippedText text={title} hint={hint} />
                     {note !== undefined && <StatusDot tone="crit" label={note} />}
                   </span>
                 </TableCell>

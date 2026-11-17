@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ClippedText } from '@/components/status-dot';
 import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
@@ -138,9 +139,7 @@ export function BlockedNumbers() {
                 <TableCell className="num">{rule.prefix}</TableCell>
                 {/* Основание — в одну строку, целиком в подсказке (DESIGN.md, «Таблица»). */}
                 <TableCell>
-                  <span className="block max-w-[360px] truncate" title={rule.note}>
-                    {rule.note}
-                  </span>
+                  <ClippedText text={rule.note} width="max-w-[360px]" />
                 </TableCell>
                 <TableCell className={WIDE_ONLY}>
                   <span className="num text-muted-foreground">{moment(rule.created_at)}</span>

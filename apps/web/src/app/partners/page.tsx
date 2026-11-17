@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { PARTNER_STATUSES } from '@zvonix/shared';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { Choice } from '@/components/choice';
@@ -221,12 +221,12 @@ function PartnerLine({ partner, canChange }: { partner: PartnerRow; canChange: b
             <MoneyOperation
               path={`/partners/${partner.id}/deposit`}
               label="Пополнить"
+              icon={<Wallet aria-hidden className="size-4" />}
               title={`Пополнить счёт партнёра «${partner.name}»`}
               description="Сумма добавится к тому, что причитается партнёру."
               reasonPlaceholder="Премия, возмещение, исправление"
               balanceName="Причитается"
               doneText="Проведено"
-              variant="outline"
               invalidate={['partners']}
               reasonOptional
             />

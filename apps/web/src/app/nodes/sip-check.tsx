@@ -27,24 +27,6 @@ export interface SipCheck {
   } | null;
 }
 
-/** Короткая отметка для строки списка: видно, что не так, не открывая окна. */
-export function SipCheckBadge({ check }: { check: SipCheck | null }) {
-  if (check === null) return null;
-  const [tone, text] = BADGE[check.verdict];
-  return <span className={`block ${tone}`}>{text}</span>;
-}
-
-const BADGE: Record<SipCheck['verdict'], readonly [string, string]> = {
-  ok: ['text-ok', '✓ DNS верно'],
-  mismatch: ['text-crit', '✗ запись ведёт не туда'],
-  missing: ['text-crit', '✗ записи DNS нет'],
-  ip: ['text-muted-foreground', 'IP — лучше имя'],
-  ip_mismatch: ['text-crit', '✗ не адрес узла'],
-  none: ['text-warn', 'адрес не задан'],
-  unverifiable: ['text-muted-foreground', 'проверить не с чем'],
-  error: ['text-warn', 'DNS не ответил'],
-};
-
 /**
  * Что показала проверка — словами, и что сделать, если не так.
  *

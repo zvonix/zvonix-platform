@@ -1,7 +1,9 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
+import { MailCheck } from 'lucide-react';
 import { ConfirmAction } from '@/components/confirm-action';
+import { ROW_ICON } from '@/components/table-parts';
 import { request } from '@/lib/api';
 
 /**
@@ -11,13 +13,29 @@ import { request } from '@/lib/api';
  * Через подтверждение с последствием: без подтверждённого адреса вход не открывается
  * и заявка не одобряется, и эта кнопка снимает защиту. Обновляет и заявки, и учётные
  * записи — признак виден в обоих списках.
+ *
+ * `icon` — значком в строке таблицы (DESIGN.md, «Таблица»); в окне правки записи — словами.
  */
-export function ConfirmEmailButton({ userId, email }: { userId: string; email: string }) {
+export function ConfirmEmailButton({
+  userId,
+  email,
+  icon = false,
+}: {
+  userId: string;
+  email: string;
+  icon?: boolean;
+}) {
   const queryClient = useQueryClient();
 
   return (
     <ConfirmAction
-      label="Подтвердить почту"
+      {...(icon
+        ? {
+            label: <MailCheck aria-hidden className="size-4" />,
+            tooltip: 'Подтвердить почту',
+            ...ROW_ICON,
+          }
+        : { label: 'Подтвердить почту', size: 'xs' as const })}
       title={`Подтвердить адрес ${email} вручную`}
       consequence={
         <>
@@ -30,7 +48,6 @@ export function ConfirmEmailButton({ userId, email }: { userId: string; email: s
       }
       confirmLabel="Подтвердить адрес"
       tone="neutral"
-      size="xs"
       onConfirm={async () => {
         await request<unknown>(`/users/${userId}/email/confirm`, { method: 'POST' });
         await Promise.all([

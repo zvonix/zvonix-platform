@@ -10,7 +10,7 @@ import { ConfirmEmailButton } from '@/components/confirm-email-button';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { PageNav } from '@/components/page-nav';
-import { StatusDot, toneOf } from '@/components/status-dot';
+import { ClippedText, StatusDot, toneOf } from '@/components/status-dot';
 import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { Input } from '@/components/ui/input';
@@ -232,15 +232,11 @@ function ApplicationRow({
   return (
     <TableRow>
       <TableCell>
-        <span className="inline-block max-w-56 truncate align-bottom" title={contacts}>
-          {application.applicant.full_name}
-        </span>
+        <ClippedText text={application.applicant.full_name} hint={contacts} />
       </TableCell>
       <TableCell>{CABINET_KIND_NAME[application.cabinet]}</TableCell>
       <TableCell className={WIDE_ONLY}>
-        <span className="inline-block max-w-[360px] truncate align-bottom" title={answers}>
-          {answers}
-        </span>
+        <ClippedText text={answers} width="max-w-[360px]" />
       </TableCell>
       <TableCell>
         {unconfirmed ? (
@@ -271,6 +267,7 @@ function ApplicationRow({
               <ConfirmEmailButton
                 userId={application.applicant.id}
                 email={application.applicant.email}
+                icon
               />
             )}
             <ConfirmAction

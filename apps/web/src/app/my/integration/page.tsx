@@ -7,7 +7,7 @@ import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Hint } from '@/components/hint';
 import { OneTimeSecret } from '@/components/one-time-secret';
-import { StatusDot } from '@/components/status-dot';
+import { ClippedText, StatusDot } from '@/components/status-dot';
 import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import { Trash2 } from 'lucide-react';
@@ -167,9 +167,7 @@ function Integration() {
               <TableRow key={key.id} className={key.revoked_at === null ? '' : 'opacity-60'}>
                 {/* В одну линию: длинное назначение и список адресов обрезаются, целиком — в подсказке. */}
                 <TableCell>
-                  <span className="inline-block max-w-56 truncate align-bottom" title={key.label}>
-                    {key.label}
-                  </span>
+                  <ClippedText text={key.label} />
                 </TableCell>
                 <TableCell className="num select-all" translate="no">
                   {key.key_id}

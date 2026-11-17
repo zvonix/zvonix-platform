@@ -18,7 +18,7 @@ import { ErrorNote } from '@/components/error-note';
 import { FilterInput } from '@/components/filter-input';
 import { FormDialog } from '@/components/form-dialog';
 import { PageNav } from '@/components/page-nav';
-import { StatusDot, toneOf } from '@/components/status-dot';
+import { ClippedText, StatusDot, toneOf } from '@/components/status-dot';
 import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { Button } from '@/components/ui/button';
@@ -266,15 +266,11 @@ function RowGroup({
         <span className="num">{user.email}</span>
       </TableCell>
       <TableCell className={WIDE_ONLY}>
-        <span className="inline-block max-w-48 truncate align-bottom" title={user.full_name}>
-          {user.full_name}
-        </span>
+        <ClippedText text={user.full_name} width="max-w-48" />
       </TableCell>
       <TableCell className={WIDE_ONLY}>
         {/* Название карточки бывает любой длины: без предела оно растягивало таблицу. */}
-        <span className="inline-block max-w-[200px] truncate align-bottom" title={role}>
-          {role}
-        </span>
+        <ClippedText text={role} width="max-w-[200px]" />
       </TableCell>
       <TableCell>
         {/* Закрытый после неудачных попыток вход важнее состояния записи: человек не войдёт сейчас. */}
@@ -324,7 +320,7 @@ function RowGroup({
             />
           )}
           {canChange && user.email_confirmed_at === null && (
-            <ConfirmEmailButton userId={user.id} email={user.email} />
+            <ConfirmEmailButton userId={user.id} email={user.email} icon />
           )}
           {changeable && (
             <FormDialog
