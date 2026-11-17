@@ -111,7 +111,7 @@ export function PortRow({
 }
 
 /** «4/14» с подсказкой; прогретый номер — пусто. */
-export function WarmupCell({ sim }: { sim: Sim | null }) {
+function WarmupCell({ sim }: { sim: Sim | null }) {
   const warmup = sim === null || sim.status !== 'active' ? null : warmupCell(sim.pace);
   return warmup === null ? null : <HintText label={warmup.label} reason={warmup.reason} />;
 }

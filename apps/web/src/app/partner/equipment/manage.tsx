@@ -400,7 +400,7 @@ export function DeleteGateway({ gateway, onDeleted }: { gateway: Gateway; onDele
  * Отключённое автоматом — карта, шлюз или SIP-провайдер (ADR-0100): что сделать и кнопка «Включить». Включит API только
  * после удачного тестового звонка, сделанного позже отключения; иначе отказ с той же подсказкой виден здесь же.
  */
-export function AfterTestCall({
+function AfterTestCall({
   badge,
   label,
   hint,
