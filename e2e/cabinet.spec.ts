@@ -445,7 +445,15 @@ test.describe('сообщения MAX (ADR-0071)', () => {
     await partner.goto('/partner/max-distribution');
     await partner.getByRole('radio', { name: /По весам/u }).check();
     await expect(partner.getByLabel(/Вес аккаунта «Основной»/u)).toBeVisible();
+    // Перезагрузка — только после ответа на сохранение: иначе она обгоняет запрос, и режим не успевает записаться
+    // (так тест падал в CI 2026-11-17).
+    const saved = partner.waitForResponse(
+      (response) =>
+        response.url().includes('/partner/distribution/messages') &&
+        response.request().method() === 'PUT',
+    );
     await partner.getByRole('button', { name: 'Сохранить' }).click();
+    expect((await saved).ok()).toBe(true);
     await partner.reload();
     await expect(partner.getByRole('radio', { name: /По весам/u })).toBeChecked();
 
