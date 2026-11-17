@@ -232,6 +232,10 @@ failure, reported_at }` или `null` ([ADR-0121](../adr/0121-svyaz-uzla-s-sip-p
 Поля как у `PATCH /sip-trunks/:id` ([telephony.md](telephony.md)): «поля нет» — «не трогать». Новый адрес проверяется
 так же, как при заведении. Чужой — `404`, удалённый — `409`.
 
+### `GET /partner/sip-trunks/:id/secret`
+
+Сохранённый пароль своего провайдера — как `GET /sip-trunks/:id/secret` ([telephony.md](telephony.md)). Чужой — `404`.
+
 ### `POST /partner/sip-trunks/:id/unlimited-request`
 
 Партнёр просит безлимит для своего провайдера ([ADR-0119](../adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)).

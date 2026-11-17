@@ -603,6 +603,8 @@ export const trunkUnlimitedSchema = z.object({ unlimited: z.boolean() }).strict(
  */
 export const updateSipTrunkSchema = z
   .object({
+    /** Название провайдера в кабинете (владелец, 2026-11-17: «где в настройках менять название»). */
+    name: name.optional(),
     proxyHost: z
       .string()
       .trim()

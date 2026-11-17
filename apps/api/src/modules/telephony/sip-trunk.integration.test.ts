@@ -63,6 +63,7 @@ async function get(url: string, headers = auth()) {
 
 interface Trunk {
   id: string;
+  name: string;
   sip_username: string;
   status: string;
   has_secret: boolean;
@@ -550,5 +551,38 @@ describe('проверка связи с провайдером (ADR-0122)', () 
   it('несуществующий провайдер — 404', async () => {
     const missing = await post('/sip-trunks/00000000-0000-7000-8000-000000000000/check', {});
     expect(missing.statusCode).toBe(404);
+  }, 120_000);
+});
+
+describe('название провайдера меняется в настройках', () => {
+  it('новое название видно в списке, пустое — отказ', async () => {
+    const renamed = await patch(`/sip-trunks/${trunk.id}`, { name: 'Провайдер переименован' });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json<{ trunk: Trunk }>().trunk.name).toBe('Провайдер переименован');
+    const listed = await get(`/sip-trunks?partnerId=${partnerId}`);
+    expect(listed.json<{ trunks: Trunk[] }>().trunks.find((row) => row.id === trunk.id)?.name).toBe(
+      'Провайдер переименован',
+    );
+    expect((await patch(`/sip-trunks/${trunk.id}`, { name: ' ' })).statusCode).toBe(400);
+  }, 120_000);
+});
+
+describe('пароль провайдера показывается по запросу', () => {
+  it('администратор видит сохранённый пароль, показ — в журнале', async () => {
+    expect(
+      (await patch(`/sip-trunks/${trunk.id}`, { outboundSecret: 'новый-пароль-1' })).statusCode,
+    ).toBe(200);
+    const shown = await get(`/sip-trunks/${trunk.id}/secret`);
+    expect(shown.statusCode).toBe(200);
+    expect(shown.json()).toEqual({ password: 'новый-пароль-1' });
+    const viewed = await withDatabase((execute) =>
+      execute(
+        sql`select count(*)::int as n from audit_log where action = 'sip_trunk.secret_viewed' and entity_id = ${trunk.id}`,
+      ),
+    );
+    expect((viewed.rows[0] as { n: number }).n).toBeGreaterThan(0);
+    expect((await get('/sip-trunks/00000000-0000-7000-8000-000000000000/secret')).statusCode).toBe(
+      404,
+    );
   }, 120_000);
 });

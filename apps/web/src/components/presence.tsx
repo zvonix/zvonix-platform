@@ -127,21 +127,19 @@ export function TrunkPresence({ link, now }: { link: TrunkLink | null; now: numb
   const fresh = link !== null && now - Date.parse(link.reported_at) < LINK_FRESH_MS;
   const online = fresh && link.status === 'UP';
   const state = link === null ? undefined : linkStateName(link);
-  const text =
-    link === null
-      ? 'узел ещё не сообщал'
-      : !fresh
-        ? 'нет сведений от узла'
-        : online
-          ? 'на связи'
-          : `не на связи · ${state ?? ''}`;
+  // В строке таблицы — два слова, причина — в подсказке (владелец, 2026-11-17: «в таблицах много ненужной информации,
+  // всё в несколько строк»).
+  const text = link === null || !fresh ? 'нет сведений' : online ? 'на связи' : 'не на связи';
   return (
     <span
-      className={`inline-flex items-center gap-1.5 ${online ? 'text-ok' : 'text-warn'}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap ${online ? 'text-ok' : 'text-warn'}`}
       title={
         link === null
-          ? 'Узел сообщает о связи с провайдерами каждые 30 секунд — после обновления узла'
+          ? 'Узел ещё не сообщал о связи с провайдером: он сообщает каждые 30 секунд, если провайдер включён'
           : [
+              ...(fresh
+                ? []
+                : ['Сведения устарели — узел молчит или провайдер выключен. Последние']),
               state ?? link.state,
               link.status === 'UP' ? 'вызовы принимает' : 'вызовы не принимает',
               ...(link.status !== 'UP' && link.failure != null

@@ -296,6 +296,11 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                         <EditTrunkForm
                           trunk={trunk}
                           onSave={(changes) => update.mutateAsync({ id: trunk.id, changes })}
+                          revealSecret={() =>
+                            request<{ password: string | null }>(
+                              `/sip-trunks/${trunk.id}/secret`,
+                            ).then((reply) => reply.password)
+                          }
                         />
                       </FormDialog>
                       {trunk.status !== 'retired' && (
