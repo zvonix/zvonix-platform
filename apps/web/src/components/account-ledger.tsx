@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { TransactionKind } from '@zvonix/shared';
 import { useState } from 'react';
 import { PageNav } from '@/components/page-nav';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -86,14 +87,14 @@ export function AccountLedger({ source, account }: { source: string; account: Le
         </p>
       )}
 
-      <div className="max-w-[900px] rounded-md border border-border bg-card">
+      <div className={`max-w-[900px] ${TABLE_FRAME}`}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
-              <TableHead className="h-8">Что произошло</TableHead>
-              <TableHead className="h-8">Основание</TableHead>
-              <TableHead className="h-8 text-right">Сумма</TableHead>
+              <TableHead className={HEAD}>Когда</TableHead>
+              <TableHead className={HEAD}>Что произошло</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Основание</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Сумма</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -113,43 +114,52 @@ export function AccountLedger({ source, account }: { source: string; account: Le
               </TableRow>
             )}
 
-            {list.data?.entries.map((entry) => (
-              <TableRow key={entry.seq}>
-                <TableCell>
-                  <span className="num text-muted-foreground">{moment(entry.created_at)}</span>
-                </TableCell>
-                <TableCell>
-                  {transactionName(
-                    account,
-                    entry.kind,
-                    entry.reference_type,
-                    isNegative(entry.amount),
-                  )}
-                </TableCell>
-                <TableCell className="whitespace-normal">
-                  {entry.description}
-                  {/*
-                    Ссылка на породившее событие: по вызову разбирают спор о списании.
-                    Ссылка на самого клиента или партнёра здесь не показывается — эта лента и так его,
-                    и повторять его идентификатор в каждой строке значит прятать за шумом
-                    те ссылки, ради которых столбец и заведён.
-                  */}
-                  {entry.reference_id !== null &&
-                    entry.reference_type !== null &&
-                    !SELF_REFERENCES.has(entry.reference_type) && (
-                      <span className="num block text-faint">
-                        {REFERENCE_NAME[entry.reference_type] ?? entry.reference_type}{' '}
-                        {entry.reference_id}
-                      </span>
+            {list.data?.entries.map((entry) => {
+              /*
+                Ссылка на породившее событие: по вызову разбирают спор о списании. Она — в подсказке у основания,
+                а не второй строкой (строка таблицы — одна линия). Ссылка на самого клиента или партнёра не
+                показывается — эта лента и так его, и повторять его идентификатор в каждой строке значит прятать
+                за шумом те ссылки, ради которых столбец и заведён.
+              */
+              const reference =
+                entry.reference_id !== null &&
+                entry.reference_type !== null &&
+                !SELF_REFERENCES.has(entry.reference_type)
+                  ? `${REFERENCE_NAME[entry.reference_type] ?? entry.reference_type} ${entry.reference_id}`
+                  : undefined;
+              return (
+                <TableRow key={entry.seq}>
+                  <TableCell>
+                    <span className="num text-muted-foreground">{moment(entry.created_at)}</span>
+                  </TableCell>
+                  <TableCell>
+                    {transactionName(
+                      account,
+                      entry.kind,
+                      entry.reference_type,
+                      isNegative(entry.amount),
                     )}
-                </TableCell>
-                <TableCell className="num text-right">
-                  <span className={isNegative(entry.amount) ? 'text-crit' : 'text-ok'}>
-                    {money(entry.amount)}
-                  </span>
-                </TableCell>
-              </TableRow>
-            ))}
+                  </TableCell>
+                  <TableCell className={WIDE_ONLY}>
+                    <span
+                      className="inline-block max-w-80 truncate align-bottom"
+                      title={
+                        reference === undefined
+                          ? entry.description
+                          : `${entry.description}\n${reference}`
+                      }
+                    >
+                      {entry.description}
+                    </span>
+                  </TableCell>
+                  <TableCell className={NUM}>
+                    <span className={isNegative(entry.amount) ? 'text-crit' : 'text-ok'}>
+                      {money(entry.amount)}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

@@ -6,6 +6,8 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Fragment, useMemo, useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -361,11 +363,11 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8 w-8">
+              <TableHead className={`${HEAD} w-8`}>
                 <input
                   type="checkbox"
                   aria-label="Выбрать всех показанных"
@@ -375,21 +377,25 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                   }}
                 />
               </TableHead>
-              <TableHead className="h-8">Маршрут</TableHead>
-              {product === 'calls' && <TableHead className="h-8">Через что</TableHead>}
-              <TableHead className="h-8 text-right">
+              <TableHead className={HEAD}>Маршрут</TableHead>
+              {product === 'calls' && (
+                <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Через что</TableHead>
+              )}
+              <TableHead className={`${HEAD} text-right`}>
                 {product === 'calls' ? 'Цена за вызов' : 'Цена за сообщение'}
               </TableHead>
-              {calls && <TableHead className="h-8">Записи</TableHead>}
-              {calls && <TableHead className="h-8">Подходит</TableHead>}
-              <TableHead className="h-8">Очерёдность</TableHead>
+              {calls && <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Записи</TableHead>}
+              {calls && <TableHead className={HEAD}>Подходит</TableHead>}
+              <TableHead className={HEAD}>Очерёдность</TableHead>
+              {/* «не использовать» было подписью флажка в каждой строке — оно в заголовке столбца. */}
+              <TableHead className={`${HEAD} w-px whitespace-nowrap`}>Не использовать</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loaded && shown.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell
-                  colSpan={calls ? 7 : 5}
+                  colSpan={calls ? 8 : 5}
                   className="whitespace-normal text-muted-foreground"
                 >
                   {all.length === 0 ? 'Маршрутов пока нет.' : 'Никого не нашли: измените запрос.'}
@@ -420,10 +426,12 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                     </TableCell>
                     <TableCell>
                       {own.length > 0 ? (
+                        // Сколько у партнёра SIM или SIP — подсказкой к названию: хвост « · 3 SIM» растягивал строку.
                         <button
                           type="button"
-                          className="flex items-center gap-1 text-left"
+                          className="flex items-center gap-1 text-left whitespace-nowrap"
                           aria-expanded={open}
+                          title={`${String(own.length)} ${offer.offer === 'message' ? '' : TERMINATION_KIND_NAME[offer.offer]} — по отдельности`}
                           onClick={() => {
                             const next = new Set(expanded);
                             if (open) next.delete(key);
@@ -433,18 +441,14 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                         >
                           <Chevron className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                           {offer.name}
-                          <span className="text-muted-foreground">
-                            · {String(own.length)}{' '}
-                            {offer.offer === 'message' ? '' : TERMINATION_KIND_NAME[offer.offer]}
-                          </span>
                         </button>
                       ) : (
-                        offer.name
+                        <span className="whitespace-nowrap">{offer.name}</span>
                       )}
                     </TableCell>
                     {product === 'calls' && (
                       <TableCell
-                        className="text-muted-foreground"
+                        className={`text-muted-foreground ${WIDE_ONLY}`}
                         title={
                           offer.offer === 'message'
                             ? undefined
@@ -454,9 +458,11 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                         {offer.offer === 'message' ? '' : TERMINATION_KIND_NAME[offer.offer]}
                       </TableCell>
                     )}
-                    <TableCell className="num text-right">{offer.price ?? '—'}</TableCell>
+                    <TableCell className={`${NUM} whitespace-nowrap`}>
+                      {offer.price ?? '—'}
+                    </TableCell>
                     {calls && (
-                      <TableCell>
+                      <TableCell className={`whitespace-nowrap ${WIDE_ONLY}`}>
                         {offer.listens === true ? (
                           'слушает'
                         ) : (
@@ -472,31 +478,29 @@ export function Priorities({ product }: { product: 'calls' | 'messages' }) {
                       />
                     )}
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          aria-label={`Очерёдность: ${offer.name}`}
-                          className="num w-[70px]"
-                          inputMode="numeric"
-                          autoComplete="off"
-                          placeholder="—"
-                          disabled={!loaded || value === BANNED}
-                          value={value === BANNED ? '' : value}
-                          onChange={(event) => {
-                            change([key], event.target.value.trim());
-                          }}
-                        />
-                        <label className="flex items-center gap-1 text-muted-foreground">
-                          <input
-                            type="checkbox"
-                            checked={value === BANNED}
-                            disabled={!loaded}
-                            onChange={(event) => {
-                              change([key], event.target.checked ? BANNED : '');
-                            }}
-                          />
-                          не использовать
-                        </label>
-                      </div>
+                      <Input
+                        aria-label={`Очерёдность: ${offer.name}`}
+                        className="num h-7 w-[70px]"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder="—"
+                        disabled={!loaded || value === BANNED}
+                        value={value === BANNED ? '' : value}
+                        onChange={(event) => {
+                          change([key], event.target.value.trim());
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <input
+                        type="checkbox"
+                        aria-label={`Не использовать: ${offer.name}`}
+                        checked={value === BANNED}
+                        disabled={!loaded}
+                        onChange={(event) => {
+                          change([key], event.target.checked ? BANNED : '');
+                        }}
+                      />
                     </TableCell>
                   </TableRow>
                   {open &&
@@ -592,21 +596,28 @@ function FitCell({
   banned: boolean;
   requirements: CallRequirements | undefined;
 }) {
+  // Точкой и словом, причина — в подсказке (DESIGN.md, «Таблица»): «нет: дороже вашего предела, слушает записи»
+  // переносило строку.
   if (banned) {
-    return <TableCell className="text-muted-foreground">не используется</TableCell>;
+    return (
+      <TableCell>
+        <StatusDot tone="off" label="не используется" />
+      </TableCell>
+    );
   }
   const { reasons, partial } = mismatch(offer, requirements);
   return (
-    <TableCell className="whitespace-normal">
+    <TableCell>
       {reasons.length > 0 ? (
-        <span className="text-warn">нет: {reasons.join(', ')}</span>
+        <StatusDot tone="warn" label="нет" reason={reasons.join(', ')} />
       ) : partial ? (
-        <span title="На части направлений цена выше вашего предела — туда звонки этим маршрутом не пойдут">
-          <span className="text-ok">да</span>
-          <span className="text-muted-foreground">, кроме дорогих направлений</span>
-        </span>
+        <StatusDot
+          tone="ok"
+          label="да, кроме дорогих"
+          reason="на части направлений цена выше вашего предела — туда звонки этим маршрутом не пойдут"
+        />
       ) : (
-        <span className="text-ok">да</span>
+        <StatusDot tone="ok" label="да" />
       )}
     </TableCell>
   );
@@ -650,24 +661,28 @@ function RouteRow({
         />
       </TableCell>
       <TableCell className="pl-8">
-        {TERMINATION_KIND_NAME[route.kind]} {String(route.number)}
-        {fresh && <span className="ml-2 text-xs text-primary">новый</span>}
-        {!route.available && (
-          <span
-            className="ml-2 text-xs text-muted-foreground"
-            title="Партнёр выключил его или он не на связи: звонки через него сейчас не идут"
-          >
-            сейчас не звонит
-          </span>
-        )}
+        <span className="inline-flex items-center gap-2 whitespace-nowrap">
+          {TERMINATION_KIND_NAME[route.kind]} {String(route.number)}
+          {fresh && <span className="text-xs text-primary">новый</span>}
+          {!route.available && (
+            <StatusDot
+              tone="off"
+              label="не звонит"
+              reason="партнёр выключил его или он не на связи — звонки через него сейчас не идут"
+            />
+          )}
+        </span>
       </TableCell>
-      <TableCell className="text-muted-foreground" title={TERMINATION_KIND_MEANING[route.kind]}>
+      <TableCell
+        className={`text-muted-foreground ${WIDE_ONLY}`}
+        title={TERMINATION_KIND_MEANING[route.kind]}
+      >
         {TERMINATION_KIND_NAME[route.kind]}
       </TableCell>
-      <TableCell className="num text-right">
+      <TableCell className={`${NUM} whitespace-nowrap`}>
         {priceRange(route.min_price, route.max_price)}
       </TableCell>
-      <TableCell>
+      <TableCell className={`whitespace-nowrap ${WIDE_ONLY}`}>
         {route.listens_to_recordings ? (
           'слушает'
         ) : (
@@ -676,32 +691,30 @@ function RouteRow({
       </TableCell>
       <FitCell offer={routeAsOffer(route)} banned={banned} requirements={requirements} />
       <TableCell>
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label={`Очерёдность: ${name}`}
-            className="num w-[70px]"
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder={inherited === '' || inherited === BANNED ? '—' : inherited}
-            title="Пусто — как у партнёра"
-            disabled={!loaded || value === BANNED}
-            value={value === BANNED ? '' : value}
-            onChange={(event) => {
-              onChange(event.target.value.trim());
-            }}
-          />
-          <label className="flex items-center gap-1 text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={value === BANNED}
-              disabled={!loaded}
-              onChange={(event) => {
-                onChange(event.target.checked ? BANNED : '');
-              }}
-            />
-            не использовать
-          </label>
-        </div>
+        <Input
+          aria-label={`Очерёдность: ${name}`}
+          className="num h-7 w-[70px]"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder={inherited === '' || inherited === BANNED ? '—' : inherited}
+          title="Пусто — как у партнёра"
+          disabled={!loaded || value === BANNED}
+          value={value === BANNED ? '' : value}
+          onChange={(event) => {
+            onChange(event.target.value.trim());
+          }}
+        />
+      </TableCell>
+      <TableCell className="text-center">
+        <input
+          type="checkbox"
+          aria-label={`Не использовать: ${name}`}
+          checked={value === BANNED}
+          disabled={!loaded}
+          onChange={(event) => {
+            onChange(event.target.checked ? BANNED : '');
+          }}
+        />
       </TableCell>
     </TableRow>
   );

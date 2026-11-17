@@ -13,6 +13,8 @@ import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
+import { StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -323,17 +325,17 @@ function CallsView() {
         </p>
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
-              <TableHead className="h-8">Клиент и канал</TableHead>
-              <TableHead className="h-8">Куда</TableHead>
-              <TableHead className="h-8">Через кого</TableHead>
-              <TableHead className="h-8">Итог</TableHead>
-              <TableHead className="h-8 text-right">Деньги</TableHead>
-              <TableHead className="h-8 text-right">Длительность</TableHead>
+              <TableHead className={HEAD}>Когда</TableHead>
+              <TableHead className={HEAD}>Клиент и канал</TableHead>
+              <TableHead className={HEAD}>Куда</TableHead>
+              <TableHead className={HEAD}>Через кого</TableHead>
+              <TableHead className={HEAD}>Итог</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Деньги</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Длительность</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -442,25 +444,21 @@ function CallRow({
         )}
       </TableCell>
 
-      <TableCell
-        className="max-w-[300px] truncate"
-        title={call.failure_reason === null ? undefined : FAILURE_REASON_FIX[call.failure_reason]}
-      >
-        <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
-          {CALL_STATUS_NAME[call.status]}
-        </span>
-        {call.failure_reason !== null && (
-          <span
-            className="ml-2 cursor-help underline decoration-dotted underline-offset-4"
-            title={FAILURE_REASON_FIX[call.failure_reason]}
-          >
-            {FAILURE_REASON_NAME[call.failure_reason]}
-          </span>
-        )}
+      {/* Итог — точкой и словом; почему не состоялся и что делать — в подсказке (DESIGN.md, «Таблица»). */}
+      <TableCell className="max-w-[300px] truncate">
+        <StatusDot
+          tone={toneOf(callTone(call.status))}
+          label={CALL_STATUS_NAME[call.status]}
+          reason={
+            call.failure_reason === null
+              ? undefined
+              : `${FAILURE_REASON_NAME[call.failure_reason]}. ${FAILURE_REASON_FIX[call.failure_reason]}`
+          }
+        />
         <EndCause cause={call.end_cause} sip={call.end_sip} status={call.status} />
       </TableCell>
 
-      <TableCell className="num text-right whitespace-nowrap">
+      <TableCell className={`${NUM} whitespace-nowrap`}>
         {call.money === null ? (
           <span className="text-faint">—</span>
         ) : (
@@ -474,7 +472,7 @@ function CallRow({
         )}
       </TableCell>
 
-      <TableCell className="num text-right whitespace-nowrap">
+      <TableCell className={`${NUM} whitespace-nowrap`}>
         <span className="inline-flex items-center justify-end gap-1">
           {recordingId !== undefined && (
             <ListenButton

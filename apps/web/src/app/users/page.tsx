@@ -8,6 +8,7 @@ import {
   type UserRole,
   type UserStatus,
 } from '@zvonix/shared';
+import { Power } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { Choice } from '@/components/choice';
 import { ConfirmAction } from '@/components/confirm-action';
@@ -17,6 +18,8 @@ import { ErrorNote } from '@/components/error-note';
 import { FilterInput } from '@/components/filter-input';
 import { FormDialog } from '@/components/form-dialog';
 import { PageNav } from '@/components/page-nav';
+import { StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { Button } from '@/components/ui/button';
 import { DialogClose } from '@/components/ui/dialog';
@@ -182,19 +185,21 @@ function UsersTable() {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Адрес</TableHead>
-              <TableHead className="h-8">Имя</TableHead>
-              <TableHead className="h-8">Роль</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Адрес подтверждён</TableHead>
-              <TableHead className="h-8">Второй фактор</TableHead>
-              <TableHead className="h-8">Последний вход</TableHead>
-              <TableHead className="h-8">Создана</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Адрес</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Имя</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Роль</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Адрес подтверждён</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Второй фактор</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Последний вход</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Создана</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -256,76 +261,95 @@ function RowGroup({
 
   return (
     <TableRow>
+      {/* Ячейка адреса — только адрес: по нему строку находят и сквозные проверки. */}
       <TableCell>
         <span className="num">{user.email}</span>
-        {locked && (
-          <span className="ml-2 rounded-sm bg-crit-soft px-1 text-crit">
-            вход закрыт до {moment(user.locked_until)}
-          </span>
-        )}
       </TableCell>
-      <TableCell>{user.full_name}</TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
+        <span className="inline-block max-w-48 truncate align-bottom" title={user.full_name}>
+          {user.full_name}
+        </span>
+      </TableCell>
+      <TableCell className={WIDE_ONLY}>
         {/* Название карточки бывает любой длины: без предела оно растягивало таблицу. */}
-        <span className="block max-w-[200px] truncate" title={role}>
+        <span className="inline-block max-w-[200px] truncate align-bottom" title={role}>
           {role}
         </span>
       </TableCell>
       <TableCell>
-        <span className={`rounded-sm px-1.5 py-0.5 ${statusTone(user.status)}`}>
-          {STATUS_NAME[user.status]}
-        </span>
+        {/* Закрытый после неудачных попыток вход важнее состояния записи: человек не войдёт сейчас. */}
+        {locked ? (
+          <StatusDot
+            tone="crit"
+            label="вход закрыт"
+            reason={`после неудачных попыток, до ${moment(user.locked_until)}`}
+            phoneDot
+          />
+        ) : (
+          <StatusDot
+            tone={toneOf(statusTone(user.status))}
+            label={STATUS_NAME[user.status]}
+            phoneDot
+          />
+        )}
       </TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         {user.email_confirmed_at === null ? (
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-warn">нет</span>
-            {canChange && <ConfirmEmailButton userId={user.id} email={user.email} />}
-          </span>
+          <StatusDot
+            tone="warn"
+            label="нет"
+            reason="человек не перешёл по ссылке из письма; подтвердить вручную — кнопкой справа"
+          />
         ) : (
           <span className="num text-muted-foreground">{moment(user.email_confirmed_at)}</span>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         {user.totp_enabled ? 'включён' : <span className="text-muted-foreground">нет</span>}
       </TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         <span className="num text-muted-foreground">{moment(user.last_login_at)}</span>
       </TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         <span className="num text-muted-foreground">{moment(user.created_at)}</span>
       </TableCell>
-      <TableCell className="whitespace-normal">
-        {canChange && self && (
-          <span className="text-muted-foreground">
-            ваша запись — состояние меняет другой администратор
-          </span>
-        )}
-        {canChange && !self && user.status === 'disabled' && (
-          <span className="text-muted-foreground">закрыта навсегда</span>
-        )}
-        {changeable && (
-          <FormDialog
-            label="Изменить"
-            variant="outline"
-            title={`Состояние учётной записи ${user.email}`}
-            description={
-              <>
-                Сейчас — {STATUS_NAME[user.status].toLowerCase()}. Действие попадает в журнал вместе
-                с тем, что было до.
-              </>
-            }
-            open={open}
-            onOpenChange={setOpen}
-          >
-            <StatusChoice
-              user={user}
-              onDone={() => {
-                setOpen(false);
-              }}
+      <TableCell>
+        {/* Закрытая навсегда — видно в «Состоянии», действий у неё нет. */}
+        <RowActions>
+          {canChange && self && (
+            <StatusDot
+              tone="off"
+              label="ваша запись"
+              reason="состояние меняет другой администратор"
             />
-          </FormDialog>
-        )}
+          )}
+          {canChange && user.email_confirmed_at === null && (
+            <ConfirmEmailButton userId={user.id} email={user.email} />
+          )}
+          {changeable && (
+            <FormDialog
+              label={<Power aria-hidden className="size-4" />}
+              tooltip="Изменить"
+              {...ROW_ICON}
+              title={`Состояние учётной записи ${user.email}`}
+              description={
+                <>
+                  Сейчас — {STATUS_NAME[user.status].toLowerCase()}. Действие попадает в журнал
+                  вместе с тем, что было до.
+                </>
+              }
+              open={open}
+              onOpenChange={setOpen}
+            >
+              <StatusChoice
+                user={user}
+                onDone={() => {
+                  setOpen(false);
+                }}
+              />
+            </FormDialog>
+          )}
+        </RowActions>
       </TableCell>
     </TableRow>
   );

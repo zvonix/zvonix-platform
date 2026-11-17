@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { ChannelStatus, ChannelSuspendedBy } from '@zvonix/shared';
+import { StatusDot } from '@/components/status-dot';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
 
@@ -69,6 +70,37 @@ export function ownedByClient(channel: Pick<Channel, 'status' | 'suspended_by'>)
   );
 }
 
+/** Что значит состояние и кто может его сменить — подсказкой к точке в таблице линий. */
+function channelStateReason(channel: Pick<Channel, 'status' | 'suspended_by'>): string | undefined {
+  switch (channel.status) {
+    case 'active':
+      return undefined;
+    case 'pending':
+      return 'линию ещё не включила площадка — звонить по ней пока нельзя';
+    case 'suspended':
+      return channel.suspended_by === 'client'
+        ? 'вызовы не идут; включить можно на странице линии'
+        : 'вызовы не идут; включить её может только площадка — напишите в поддержку';
+    case 'closed':
+      return 'линия удалена навсегда';
+  }
+}
+
+/**
+ * Состояние линии в строке таблицы — точкой и словами, без плашки
+ * ([DESIGN.md](../../../../../../docs/DESIGN.md), «Таблица»).
+ */
+export function StateDot({ channel }: { channel: Pick<Channel, 'status' | 'suspended_by'> }) {
+  return (
+    <StatusDot
+      tone={channel.status === 'active' ? 'ok' : 'warn'}
+      label={channelStateName(channel)}
+      reason={channelStateReason(channel)}
+    />
+  );
+}
+
+/** Состояние меткой — в шапке страницы одной линии (DESIGN.md, «Окно, страница или панель», исключение). */
 export function StateBadge({ channel }: { channel: Pick<Channel, 'status' | 'suspended_by'> }) {
   return (
     <span
@@ -85,24 +117,29 @@ export function StateBadge({ channel }: { channel: Pick<Channel, 'status' | 'sus
  */
 export function ConnectionState({ channel }: { channel: Channel }) {
   if (channel.status !== 'active') return <span className="text-faint">—</span>;
+  // Одной строкой: адрес программы и время последнего вызова — в подсказке к точке (DESIGN.md, «Таблица»).
   if (channel.connection.connected) {
     return (
-      <span className="flex flex-col">
-        <span className="text-ok">Подключена</span>
-        {channel.connection.address !== null && (
-          <span className="num text-faint" translate="no">
-            {channel.connection.address}
-          </span>
-        )}
-      </span>
+      <StatusDot
+        tone="ok"
+        label="Подключена"
+        reason={
+          channel.connection.address === null
+            ? undefined
+            : `адрес программы ${channel.connection.address}`
+        }
+      />
     );
   }
   return (
-    <span className="flex flex-col">
-      <span className="text-warn">Не подключена</span>
-      {channel.last_call_at != null && (
-        <span className="text-faint">вызов {moment(channel.last_call_at)}</span>
-      )}
-    </span>
+    <StatusDot
+      tone="warn"
+      label="Не подключена"
+      reason={
+        channel.last_call_at == null
+          ? undefined
+          : `последний вызов ${moment(channel.last_call_at)} — программа без подключения всё равно звонит`
+      }
+    />
   );
 }

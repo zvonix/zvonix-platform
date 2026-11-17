@@ -1,12 +1,14 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -102,14 +104,16 @@ export function BlockedNumbers() {
 
       {!canChange && <ReadOnly what="запреты" />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Префикс</TableHead>
-              <TableHead className="h-8">Почему</TableHead>
-              <TableHead className="h-8">Добавлен</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Префикс</TableHead>
+              <TableHead className={HEAD}>Почему</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Добавлен</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -132,28 +136,37 @@ export function BlockedNumbers() {
             {list.data?.rules.map((rule) => (
               <TableRow key={rule.id}>
                 <TableCell className="num">{rule.prefix}</TableCell>
-                <TableCell className="whitespace-normal">{rule.note}</TableCell>
+                {/* Основание — в одну строку, целиком в подсказке (DESIGN.md, «Таблица»). */}
                 <TableCell>
+                  <span className="block max-w-[360px] truncate" title={rule.note}>
+                    {rule.note}
+                  </span>
+                </TableCell>
+                <TableCell className={WIDE_ONLY}>
                   <span className="num text-muted-foreground">{moment(rule.created_at)}</span>
                 </TableCell>
                 <TableCell>
                   {canChange && (
-                    <ConfirmAction
-                      label="Снять запрет"
-                      title={`Снять запрет на ${rule.prefix}`}
-                      consequence={
-                        <>
-                          <p>
-                            Вызовы на номера, начинающиеся с{' '}
-                            <span className="num">{rule.prefix}</span>, снова пойдут — и за них
-                            снова будут списываться деньги.
-                          </p>
-                          <p>Основание запрета: {rule.note}</p>
-                        </>
-                      }
-                      confirmLabel="Снять запрет"
-                      onConfirm={() => unblock.mutateAsync(rule.id)}
-                    />
+                    <RowActions>
+                      <ConfirmAction
+                        label={<Trash2 aria-hidden className="size-4" />}
+                        tooltip="Снять запрет"
+                        {...ROW_ICON}
+                        title={`Снять запрет на ${rule.prefix}`}
+                        consequence={
+                          <>
+                            <p>
+                              Вызовы на номера, начинающиеся с{' '}
+                              <span className="num">{rule.prefix}</span>, снова пойдут — и за них
+                              снова будут списываться деньги.
+                            </p>
+                            <p>Основание запрета: {rule.note}</p>
+                          </>
+                        }
+                        confirmLabel="Снять запрет"
+                        onConfirm={() => unblock.mutateAsync(rule.id)}
+                      />
+                    </RowActions>
                   )}
                 </TableCell>
               </TableRow>

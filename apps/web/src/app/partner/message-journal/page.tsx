@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
+import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
 import {
   JournalFilters,
   JournalPages,
@@ -107,14 +108,14 @@ function Journal() {
         }}
       />
       {error !== undefined && <ErrorNote error={error} />}
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Принято</TableHead>
-              <TableHead className="h-8">Аккаунт</TableHead>
+              <TableHead className={HEAD}>Принято</TableHead>
+              <TableHead className={HEAD}>Аккаунт</TableHead>
               <StageHeads />
-              <TableHead className="h-8 text-right">Начислено</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Начислено</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -137,9 +138,11 @@ function Journal() {
                 <TableCell>
                   <span className="num text-muted-foreground">{moment(message.created_at)}</span>
                 </TableCell>
-                <TableCell>{accountName(message.account_id)}</TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {accountName(message.account_id)}
+                </TableCell>
                 <StageCells message={message} />
-                <TableCell className="num text-right">{money(message.earned)}</TableCell>
+                <TableCell className={NUM}>{money(message.earned)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

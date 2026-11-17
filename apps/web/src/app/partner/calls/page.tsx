@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CALL_STATUSES, type CallStatus } from '@zvonix/shared';
 import Link from 'next/link';
 import { Suspense } from 'react';
-import { EndCause, ListenButton, useListenable } from '@/components/call-recording';
+import { Flag } from 'lucide-react';
+import { ListenButton, useListenable } from '@/components/call-recording';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ExportButton } from '@/components/export-button';
@@ -14,6 +15,8 @@ import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
+import { HintText, StatusDot, toneOf } from '@/components/status-dot';
+import { NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -26,7 +29,7 @@ import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
 import { money } from '@/lib/money';
-import { CALL_STATUS_NAME, callTone } from '@/lib/labels';
+import { CALL_STATUS_NAME, callTone, endCauseName } from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
 import {
   EQUIPMENT_KEY,
@@ -208,17 +211,19 @@ function PartnerCalls() {
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
+              <TableHead className={`h-8 ${WIDE_ONLY}`}>Когда</TableHead>
               <TableHead className="h-8">Куда</TableHead>
-              <TableHead className="h-8">Через что</TableHead>
+              <TableHead className={`h-8 ${WIDE_ONLY}`}>Через что</TableHead>
               <TableHead className="h-8">Итог</TableHead>
               <TableHead className="h-8 text-right">Начислено</TableHead>
-              <TableHead className="h-8 text-right">Длительность</TableHead>
-              <TableHead className="h-8" />
+              <TableHead className={`h-8 text-right ${WIDE_ONLY}`}>Длительность</TableHead>
+              <TableHead className="h-8 w-px">
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -259,31 +264,25 @@ function PartnerCalls() {
 
               return (
                 <TableRow key={call.id}>
-                  <TableCell className="num text-muted-foreground">
+                  <TableCell className={`num text-muted-foreground ${WIDE_ONLY}`}>
                     {moment(call.started_at)}
                   </TableCell>
 
                   <TableCell className="num">{call.destination}</TableCell>
 
-                  <TableCell className="whitespace-nowrap">
-                    {gateway?.name ?? trunk ?? <span className="text-faint">—</span>}
-                    {sim !== undefined && (
-                      <span className="num text-faint">
-                        {' · '}
-                        {sim.msisdn}
-                        {sim.operator_name !== null && ` · ${sim.operator_name}`}
-                      </span>
-                    )}
+                  <TableCell className={WIDE_ONLY}>
+                    <Through name={gateway?.name ?? trunk} sim={sim} />
                   </TableCell>
 
-                  <TableCell className="whitespace-nowrap">
-                    <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
-                      {CALL_STATUS_NAME[call.status]}
-                    </span>
-                    <EndCause cause={call.end_cause} sip={call.end_sip} status={call.status} />
+                  <TableCell>
+                    <StatusDot
+                      tone={toneOf(callTone(call.status))}
+                      label={CALL_STATUS_NAME[call.status]}
+                      reason={endReason(call)}
+                    />
                   </TableCell>
 
-                  <TableCell className="num text-right">
+                  <TableCell className={NUM}>
                     {call.earned === null ? (
                       <span className="text-faint">—</span>
                     ) : (
@@ -291,24 +290,24 @@ function PartnerCalls() {
                     )}
                   </TableCell>
 
-                  <TableCell className="num text-right whitespace-nowrap">
-                    <span className="inline-flex items-center justify-end gap-1">
+                  <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                    {call.duration_seconds === null ? (
+                      <span className="text-faint">—</span>
+                    ) : (
+                      duration(call.duration_seconds)
+                    )}
+                  </TableCell>
+
+                  <TableCell>
+                    <RowActions>
                       {recordings.has(call.id) && (
                         <ListenButton
                           recordingId={recordings.get(call.id) ?? ''}
                           subtitle={`${call.destination} · ${moment(call.started_at)}`}
                         />
                       )}
-                      {call.duration_seconds === null ? (
-                        <span className="text-faint">—</span>
-                      ) : (
-                        duration(call.duration_seconds)
-                      )}
-                    </span>
-                  </TableCell>
-
-                  <TableCell className="text-right">
-                    <WrongNetwork call={call} />
+                      <WrongNetwork call={call} />
+                    </RowActions>
                   </TableCell>
                 </TableRow>
               );
@@ -318,6 +317,24 @@ function PartnerCalls() {
       </div>
     </div>
   );
+}
+
+/**
+ * Шлюз или SIP-провайдер, через который прошёл вызов; номер карты и её оператор — в подсказке, чтобы строка
+ * оставалась в одну линию ([DESIGN.md](../../../../../docs/DESIGN.md), «Таблица»).
+ */
+function Through({ name, sim }: { name: string | undefined; sim: Sim | undefined }) {
+  if (name === undefined) return <span className="text-faint">—</span>;
+  if (sim === undefined) return <span className="whitespace-nowrap">{name}</span>;
+  const operator = sim.operator_name === null ? '' : `, ${sim.operator_name}`;
+  return <HintText label={name} reason={`SIM ${sim.msisdn}${operator}`} />;
+}
+
+/** Почему вызов не состоялся — подсказкой у точки итога, с кодом узла для разбора. */
+function endReason(call: PartnerCall): string | undefined {
+  if (call.end_cause === null || call.status === 'completed') return undefined;
+  const sip = call.end_sip === null ? '' : `; ответ: ${call.end_sip}`;
+  return `${endCauseName(call.end_cause)} (код узла: ${call.end_cause}${sip})`;
 }
 
 /**
@@ -355,8 +372,9 @@ function WrongNetwork({ call }: { call: PartnerCall }) {
 
   return (
     <ConfirmAction
-      label="Ушёл не в мою сеть"
-      size="xs"
+      label={<Flag aria-hidden className="size-4" />}
+      tooltip="Ушёл не в мою сеть"
+      {...ROW_ICON}
       tone="neutral"
       title={`Вызов на ${call.destination} ушёл не в вашу сеть`}
       consequence={

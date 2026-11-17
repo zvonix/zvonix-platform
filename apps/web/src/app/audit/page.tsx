@@ -2,12 +2,15 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { UserRole } from '@zvonix/shared';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { PeriodInput } from '@/components/period-input';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -155,15 +158,17 @@ function AuditTable() {
         </p>
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
-              <TableHead className="h-8">Действие</TableHead>
-              <TableHead className="h-8">Над чем</TableHead>
-              <TableHead className="h-8">Кто</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Когда</TableHead>
+              <TableHead className={HEAD}>Действие</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Над чем</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Кто</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -227,37 +232,53 @@ function EntryRows({
         <TableCell>
           <span className="num">{entry.action}</span>
         </TableCell>
-        <TableCell>
+        <TableCell className={WIDE_ONLY}>
           {/* Клик по объекту отбирает журнал по нему: показатель без раскрытия —
               признак поверхностной системы (DESIGN.md). */}
           <button
             type="button"
             onClick={onFilterEntity}
             className="num min-h-6 text-left text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            title={entry.entity_id ?? undefined}
           >
+            {/* Идентификатор — в подсказке: строка в одну линию (DESIGN.md, «Таблица»); он же виден в отборе. */}
             {entry.entity_type}
-            {entry.entity_id !== null && (
-              <span className="block text-faint">{entry.entity_id}</span>
-            )}
           </button>
         </TableCell>
-        <TableCell>
+        <TableCell className={WIDE_ONLY}>
           {entry.actor === null ? (
             <span className="text-muted-foreground">платформа</span>
           ) : (
-            <>
-              <span className="num">{entry.actor.email}</span>
-              <span className="block text-faint">
-                {entry.actor.full_name}
-                {entry.actor_role !== null && ` · ${ROLE_NAME[entry.actor_role]}`}
-              </span>
-            </>
+            <span
+              className="num cursor-help"
+              title={[
+                entry.actor.full_name,
+                entry.actor_role === null ? null : ROLE_NAME[entry.actor_role],
+              ]
+                .filter(Boolean)
+                .join(', ')}
+            >
+              {entry.actor.email}
+            </span>
           )}
         </TableCell>
         <TableCell>
-          <Button variant="outline" size="sm" onClick={onToggle} aria-expanded={open}>
-            {open ? 'Свернуть' : 'Раскрыть'}
-          </Button>
+          <RowActions>
+            <WithTooltip label={open ? 'Свернуть' : 'Раскрыть'}>
+              <Button
+                {...ROW_ICON}
+                onClick={onToggle}
+                aria-expanded={open}
+                aria-label={open ? 'Свернуть' : 'Раскрыть'}
+              >
+                {open ? (
+                  <ChevronUp aria-hidden className="size-4" />
+                ) : (
+                  <ChevronDown aria-hidden className="size-4" />
+                )}
+              </Button>
+            </WithTooltip>
+          </RowActions>
         </TableCell>
       </TableRow>
 

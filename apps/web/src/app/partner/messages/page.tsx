@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
-import { Mail, Settings2, Trash2 } from 'lucide-react';
+import { Mail, QrCode, Settings2, Trash2 } from 'lucide-react';
 import {
   AccountLimitsCell,
   AccountRestCell,
@@ -15,7 +15,9 @@ import {
 import { Hint } from '@/components/hint';
 import { WARMUP_DAYS } from '@zvonix/shared';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -117,23 +119,27 @@ function Accounts() {
             </Hint>
           </div>
 
-          <div className="rounded-lg border border-border bg-card">
+          <div className={TABLE_FRAME}>
             <Table>
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">
-                  <TableHead className="h-8">Аккаунт</TableHead>
-                  <TableHead className="h-8">Состояние</TableHead>
-                  <TableHead className="h-8">Пауза</TableHead>
-                  <TableHead className="h-8">Тариф</TableHead>
-                  <TableHead className="h-8">Лимиты</TableHead>
-                  <TableHead className="h-8">Прогрев</TableHead>
-                  <TableHead className="h-8" />
+                  <TableHead className={HEAD}>Аккаунт</TableHead>
+                  <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Номер</TableHead>
+                  <TableHead className={HEAD}>Состояние</TableHead>
+                  <TableHead className={HEAD}>Пауза</TableHead>
+                  <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Тариф</TableHead>
+                  <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Цена</TableHead>
+                  <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Лимиты</TableHead>
+                  <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Прогрев</TableHead>
+                  <TableHead className={`${HEAD} w-px`}>
+                    <span className="sr-only">Действия</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {list.data?.accounts.length === 0 && (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={7} className="whitespace-normal text-muted-foreground">
+                    <TableCell colSpan={9} className="whitespace-normal text-muted-foreground">
                       Аккаунтов пока нет. Добавьте первый и войдите в него по QR-коду.
                     </TableCell>
                   </TableRow>
@@ -208,35 +214,40 @@ function AccountRow({
   const needsLogin = account.status === 'pending' || account.status === 'unavailable';
 
   return (
+    // Строка в одну линию (DESIGN.md, «Таблица»): номер аккаунта и цена — своими столбцами, которые на телефоне
+    // прячутся, а не второй строкой под названием и хвостом « · » у тарифа.
     <TableRow>
-      <TableCell>
-        {account.label}
-        <span className="num block text-faint">
-          {account.phone ?? 'номер появится после входа'}
-        </span>
+      <TableCell className="whitespace-nowrap">{account.label}</TableCell>
+
+      <TableCell className={`num ${WIDE_ONLY}`}>
+        {account.phone ?? <span className="text-faint">после входа</span>}
       </TableCell>
 
-      <TableCell className="whitespace-normal">
-        <MessengerAccountStatus status={account.status} reason={account.state_reason} />
-        {account.price === null && account.status === 'active' && (
-          <span className="block pt-0.5 text-warn">
-            Создайте тариф — без него сообщения не идут
-          </span>
-        )}
+      <TableCell>
+        <MessengerAccountStatus
+          status={account.status}
+          reason={account.state_reason}
+          note={
+            account.price === null && account.status === 'active'
+              ? 'Создайте тариф — без него сообщения не идут.'
+              : undefined
+          }
+        />
       </TableCell>
 
       <TableCell>
         <AccountRestCell rest={account.rest} />
       </TableCell>
 
-      <TableCell>
+      <TableCell className={`whitespace-nowrap ${WIDE_ONLY}`}>
         <AccountTariffName account={account} />
-        {account.price !== null && (
-          <span className="num text-muted-foreground"> · {money(account.price)}</span>
-        )}
       </TableCell>
 
-      <TableCell>
+      <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+        {account.price === null ? <span className="text-faint">—</span> : money(account.price)}
+      </TableCell>
+
+      <TableCell className={WIDE_ONLY}>
         <AccountLimitsCell
           recommended={account.recommended}
           perMinute={account.limit_per_minute}
@@ -245,18 +256,20 @@ function AccountRow({
         />
       </TableCell>
 
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         <WarmupCell enabled={account.warmup_enabled} day={account.warmup_day} days={WARMUP_DAYS} />
       </TableCell>
 
-      {/* Действия значками с подсказкой (владелец, 2026-10-23); «Войти по QR» — словами: это главный шаг отключённого аккаунта.
+      {/* Действия значками с подсказкой (владелец, 2026-10-23), «Войти по QR» — тоже значком, QR-кодом (2026-11-17).
           «Удалить» — внутри «Настроек»: удаляют редко, а рядом с «Тестом» её легко задеть. */}
-      <TableCell className="text-right">
-        <span className="inline-flex items-center justify-end gap-1">
+      <TableCell>
+        <RowActions>
           {needsLogin && (
-            <Button variant="outline" size="xs" onClick={onQr}>
-              Войти по QR
-            </Button>
+            <WithTooltip label="Войти по QR">
+              <Button {...ROW_ICON} aria-label="Войти по QR" onClick={onQr}>
+                <QrCode aria-hidden className="size-4" />
+              </Button>
+            </WithTooltip>
           )}
           {account.status === 'active' && (
             <FormDialog
@@ -264,9 +277,7 @@ function AccountRow({
               tooltip="Пробное сообщение"
               title={`Пробное сообщение через «${account.label}»`}
               description="Бесплатно, до семи в сутки на аккаунт. Уходит именно через этот аккаунт."
-              variant="ghost"
-              size="icon-xs"
-              className="size-7"
+              {...ROW_ICON}
             >
               <TestMessageForm account={account} />
             </FormDialog>
@@ -275,9 +286,7 @@ function AccountRow({
             label={<Settings2 aria-hidden className="size-4" />}
             tooltip="Настройки аккаунта"
             title={`Аккаунт «${account.label}»`}
-            variant="ghost"
-            size="icon-xs"
-            className="size-7"
+            {...ROW_ICON}
           >
             <AccountSettingsForm account={account} />
             <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
@@ -303,7 +312,7 @@ function AccountRow({
               />
             </div>
           </FormDialog>
-        </span>
+        </RowActions>
       </TableCell>
     </TableRow>
   );

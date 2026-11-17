@@ -5,6 +5,7 @@ import type { PaymentStatus } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { StatusDot, toneOf } from '@/components/status-dot';
 import { Input } from '@/components/ui/input';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
@@ -162,9 +163,10 @@ export function TopUp() {
             >
               <span className="num text-muted-foreground">{moment(payment.created_at)}</span>
               <span className="num w-[110px] font-semibold">{money(payment.amount)}</span>
-              <span className={`rounded-md px-2 py-0.5 ${PAYMENT_STATUS_TONE[payment.status]}`}>
-                {PAYMENT_STATUS_NAME[payment.status]}
-              </span>
+              <StatusDot
+                tone={toneOf(PAYMENT_STATUS_TONE[payment.status])}
+                label={PAYMENT_STATUS_NAME[payment.status]}
+              />
               <span className="num text-muted-foreground">№ {numberOf(payment.id)}</span>
               {payment.status === 'succeeded' && payment.received_amount !== null && (
                 <span>зачислено {money(payment.received_amount)}</span>

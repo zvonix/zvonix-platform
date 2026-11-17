@@ -1,9 +1,12 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Check } from 'lucide-react';
 import { useState } from 'react';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -78,20 +81,23 @@ export function OperatorList() {
           {operators.error.message}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <div className={TABLE_FRAME}>
           <Table>
             <TableHeader>
               <TableRow className="text-muted-foreground hover:bg-transparent">
-                <TableHead className="h-8">Оператор</TableHead>
-                <TableHead className="h-8">Сеть</TableHead>
-                <TableHead className="h-8">MNC</TableHead>
-                <TableHead className="h-8">Запись</TableHead>
+                <TableHead className={HEAD}>Оператор</TableHead>
+                <TableHead className={HEAD}>Сеть</TableHead>
+                <TableHead className={`${HEAD} ${WIDE_ONLY}`}>MNC</TableHead>
+                <TableHead className={HEAD}>Запись</TableHead>
+                <TableHead className={`${HEAD} w-px`}>
+                  <span className="sr-only">Действия</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.length === 0 && (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={4} className="text-muted-foreground">
+                  <TableCell colSpan={5} className="text-muted-foreground">
                     Ничего не нашлось.
                   </TableCell>
                 </TableRow>
@@ -106,14 +112,23 @@ export function OperatorList() {
                         ? `виртуальный, сеть ${hostName(operator, operators.data)}`
                         : 'своя'}
                   </TableCell>
-                  <TableCell className="num">{operator.mnc ?? '—'}</TableCell>
+                  <TableCell className={`num ${WIDE_ONLY}`}>{operator.mnc ?? '—'}</TableCell>
+                  {/* Пишется только то, что требует внимания: подтверждённая запись — пустая ячейка (DESIGN.md, «Таблица»). */}
                   <TableCell>
-                    {operator.verified_at !== null ? (
-                      'подтверждена'
-                    ) : canChange ? (
-                      <VerifyOperator operator={operator} hosts={hosts} />
-                    ) : (
-                      <span className="text-warn">не подтверждена</span>
+                    {operator.verified_at === null && (
+                      <StatusDot
+                        tone="warn"
+                        label="не подтверждена"
+                        reason="По оператору не звонят, и цену на него партнёр не назначит"
+                        phoneDot
+                      />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {operator.verified_at === null && canChange && (
+                      <RowActions>
+                        <VerifyOperator operator={operator} hosts={hosts} />
+                      </RowActions>
                     )}
                   </TableCell>
                 </TableRow>
@@ -142,10 +157,11 @@ function VerifyOperator({ operator, hosts }: { operator: Operator; hosts: readon
 
   return (
     <FormDialog
-      label="Подтвердить"
+      label={<Check aria-hidden className="size-4" />}
+      tooltip="Подтвердить"
+      {...ROW_ICON}
       title={`Подтвердить «${operator.name}»`}
       description="Действие попадёт в журнал с вашим именем."
-      variant="outline"
     >
       <VerifyForm
         operator={operator}

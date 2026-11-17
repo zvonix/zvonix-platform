@@ -1,6 +1,6 @@
 'use client';
 
-import { Hint } from '@/components/hint';
+import { HintText, StatusDot, toneOf } from '@/components/status-dot';
 import {
   MESSENGER_ACCOUNT_REASON_ACTION,
   MESSENGER_ACCOUNT_REASON_MEANING,
@@ -10,17 +10,19 @@ import {
 } from '@/lib/labels';
 
 /**
- * Состояние аккаунта MAX: цветная метка и «?» с объяснением, что это значит и что делать. Партнёру причина
- * подсказывает следующий шаг; сотруднику — где искать (`staff`).
+ * Состояние аккаунта MAX: точка и слово, в подсказке — что это значит и что делать. Партнёру причина подсказывает
+ * следующий шаг; сотруднику — где искать (`staff`). `note` дописывается в подсказку (время сверки с провайдером).
  */
 export function MessengerAccountStatus({
   status,
   reason,
   staff = false,
+  note,
 }: {
   status: string;
   reason: string | null;
   staff?: boolean;
+  note?: string | undefined;
 }) {
   const name = MESSENGER_ACCOUNT_STATUS_NAME[status] ?? status;
   const meaning =
@@ -28,22 +30,16 @@ export function MessengerAccountStatus({
       ? MESSENGER_ACCOUNT_REASON_MEANING[reason]
       : undefined) ?? MESSENGER_ACCOUNT_STATUS_MEANING[status];
   const action = reason === null ? undefined : MESSENGER_ACCOUNT_REASON_ACTION[reason];
+  const tip = [meaning, staff ? action?.staff : action?.partner, note]
+    .filter((part): part is string => part !== undefined && part !== '')
+    .join(' ');
 
   return (
-    <span className="inline-flex items-center gap-1">
-      <span className={`rounded-md px-2 py-0.5 whitespace-nowrap ${messengerAccountTone(status)}`}>
-        {name}
-      </span>
-      {meaning !== undefined && (
-        <Hint label={`Что значит «${name}»`}>
-          <p className="font-semibold">{name}</p>
-          <p className="pt-1">{meaning}</p>
-          {action !== undefined && (
-            <p className="pt-2 text-muted-foreground">{staff ? action.staff : action.partner}</p>
-          )}
-        </Hint>
-      )}
-    </span>
+    <StatusDot
+      tone={toneOf(messengerAccountTone(status))}
+      label={name}
+      reason={tip === '' ? undefined : tip}
+    />
   );
 }
 
@@ -62,9 +58,9 @@ export type AccountRest =
   { readonly reason: keyof typeof REST_NAME; readonly until: string } | null | undefined;
 
 /**
- * Ячейка «Пауза»: «до 16:42 · лимит в час», сколько осталось — в подсказке; паузы нет — прочерк (владелец, 2026-10-23: время и
- * причина в одну строку, без второй строки «через 12 мин»). Окна лимитов скользящие — время посчитано сервером по самому раннему
- * сообщению в окне.
+ * Ячейка «Пауза»: «до 16:42», причина и сколько осталось — в подсказке; паузы нет — прочерк (владелец, 2026-11-17:
+ * строка таблицы — одна линия, подробности в подсказке). Окна лимитов скользящие — время посчитано сервером по самому
+ * раннему сообщению в окне.
  */
 export function AccountRestCell({ rest }: { rest: AccountRest }) {
   if (rest === null || rest === undefined) return <span className="text-faint">—</span>;
@@ -81,15 +77,17 @@ export function AccountRestCell({ rest }: { rest: AccountRest }) {
       ? `через ${String(minutes)} мин`
       : `через ${String(Math.floor(minutes / 60))} ч ${String(minutes % 60)} мин`;
   return (
-    <span className="text-warn" title={`Снова отправляет ${left}`}>
-      до <span className="num">{time}</span> · {REST_NAME[rest.reason]}
-    </span>
+    <StatusDot
+      tone="warn"
+      label={`до ${time}`}
+      reason={`${REST_NAME[rest.reason]}; снова отправляет ${left}`}
+    />
   );
 }
 
 /**
- * Ячейка «Лимиты»: при рекомендованной работе — «71 в сутки» и метка «реком.» (темп задаёт площадка, ADR-0090), иначе
- * «в минуту / в час / в сутки сейчас» числами; расшифровка — в подсказке.
+ * Ячейка «Лимиты»: при рекомендованной работе — «71 в сутки» (темп задаёт площадка, ADR-0090), иначе «в минуту / в час /
+ * в сутки сейчас» числами; расшифровка и пометка о рекомендованной работе — в подсказке.
  */
 export function AccountLimitsCell({
   recommended,
@@ -105,18 +103,17 @@ export function AccountLimitsCell({
   const value = (limit: number | null): string => (limit === null ? '—' : String(limit));
   if (recommended) {
     return (
-      <span title="Рекомендованная работа: темп и лимиты задаёт площадка, лимиты тарифа не применяются. Число — сколько можно за сутки сейчас">
-        <span className="mr-1.5 rounded bg-muted px-1 py-px text-xs text-muted-foreground">
-          реком.
-        </span>
-        <span className="num">{value(perDay)}</span> в сутки
-      </span>
+      <HintText
+        label={`${value(perDay)} в сутки`}
+        reason="Рекомендованная работа: темп и лимиты задаёт площадка, лимиты тарифа не применяются. Число — сколько можно за сутки сейчас"
+      />
     );
   }
   return (
-    <span className="num" title="В минуту / в час / в сутки сейчас">
-      {value(perMinute)} / {value(perHour)} / {value(perDay)}
-    </span>
+    <HintText
+      label={`${value(perMinute)} / ${value(perHour)} / ${value(perDay)}`}
+      reason="В минуту / в час / в сутки сейчас"
+    />
   );
 }
 
@@ -135,7 +132,7 @@ export function WarmupCell({
   const current = day + 1;
   return (
     <span
-      className="inline-flex items-center gap-2"
+      className="inline-flex items-center gap-2 whitespace-nowrap"
       title={`Автопрогрев: ${String(current)}-е сутки из ${String(days)}`}
     >
       <span

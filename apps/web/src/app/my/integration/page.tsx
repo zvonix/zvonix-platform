@@ -7,7 +7,10 @@ import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Hint } from '@/components/hint';
 import { OneTimeSecret } from '@/components/one-time-secret';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
+import { Trash2 } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -20,7 +23,7 @@ import { request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
 import { moment } from '@/lib/format';
 
-const COLUMNS = 5;
+const COLUMNS = 6;
 
 interface ApiKey {
   readonly id: string;
@@ -128,15 +131,18 @@ function Integration() {
         </Hint>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Назначение</TableHead>
-              <TableHead className="h-8">Имя</TableHead>
-              <TableHead className="h-8">Адреса</TableHead>
-              <TableHead className="h-8">Обращались</TableHead>
-              <TableHead className="h-8 text-right">Действие</TableHead>
+              <TableHead className={HEAD}>Назначение</TableHead>
+              <TableHead className={HEAD}>Имя</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Адреса</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Обращались</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -159,25 +165,44 @@ function Integration() {
 
             {keys.data?.keys.map((key) => (
               <TableRow key={key.id} className={key.revoked_at === null ? '' : 'opacity-60'}>
-                <TableCell className="whitespace-normal">{key.label}</TableCell>
+                {/* В одну линию: длинное назначение и список адресов обрезаются, целиком — в подсказке. */}
+                <TableCell>
+                  <span className="inline-block max-w-56 truncate align-bottom" title={key.label}>
+                    {key.label}
+                  </span>
+                </TableCell>
                 <TableCell className="num select-all" translate="no">
                   {key.key_id}
                 </TableCell>
-                <TableCell className="num whitespace-normal">
+                <TableCell className={`num ${WIDE_ONLY}`}>
                   {key.allowed_ips.length === 0 ? (
                     <span className="text-muted-foreground">откуда угодно</span>
                   ) : (
-                    key.allowed_ips.join(', ')
+                    <span
+                      className="inline-block max-w-56 truncate align-bottom"
+                      title={key.allowed_ips.join(', ')}
+                    >
+                      {key.allowed_ips.join(', ')}
+                    </span>
                   )}
                 </TableCell>
-                <TableCell className="num text-muted-foreground">
+                <TableCell className={`num text-muted-foreground ${WIDE_ONLY}`}>
                   {key.last_used_at === null ? 'ни разу' : moment(key.last_used_at)}
                 </TableCell>
-                <TableCell className="text-right">
-                  {key.revoked_at === null ? (
-                    <RevokeKey apiKey={key} onRevoked={refresh} />
-                  ) : (
-                    <span className="text-muted-foreground">отозван {moment(key.revoked_at)}</span>
+                <TableCell>
+                  {key.revoked_at !== null && (
+                    <StatusDot
+                      tone="off"
+                      label="отозван"
+                      reason={`${moment(key.revoked_at)}; доступа к /v1 по нему нет`}
+                    />
+                  )}
+                </TableCell>
+                <TableCell>
+                  {key.revoked_at === null && (
+                    <RowActions>
+                      <RevokeKey apiKey={key} onRevoked={refresh} />
+                    </RowActions>
                   )}
                 </TableCell>
               </TableRow>
@@ -273,7 +298,9 @@ function RevokeKey({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: () => Pro
 
   return (
     <ConfirmAction
-      label="Отозвать"
+      label={<Trash2 aria-hidden className="size-4" />}
+      tooltip="Отозвать"
+      {...ROW_ICON}
       title={`Отозвать ключ «${apiKey.label}»`}
       consequence={
         <>

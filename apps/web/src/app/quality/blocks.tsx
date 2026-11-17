@@ -10,6 +10,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { request } from '@/lib/api';
 
 /**
@@ -117,25 +119,28 @@ export function Blocks() {
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">{label}</TableHead>
-              <TableHead className="h-8 text-right">Попыток</TableHead>
+              <TableHead className={HEAD}>{label}</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Попыток</TableHead>
               <TableHead
-                className="h-8 text-right"
+                className={`${HEAD} text-right`}
                 title="Разговор от 5 секунд: короче оператор видит как недозвон"
               >
                 Ответов
               </TableHead>
-              <TableHead className="h-8 text-right" title="Ответили, но разговор короче 5 секунд">
+              <TableHead
+                className={`${HEAD} text-right ${WIDE_ONLY}`}
+                title="Ответили, но разговор короче 5 секунд"
+              >
                 Коротких
               </TableHead>
-              <TableHead className="h-8 text-right">Снято SIM</TableHead>
-              <TableHead className="h-8 text-right">Снято шлюзов</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Снято SIM</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Снято шлюзов</TableHead>
               <TableHead
-                className="h-8 text-right"
+                className={`${HEAD} text-right`}
                 title="Снятых порогом отказов SIM и шлюзов на 1000 попыток; при меньше 100 попыток — рано судить"
               >
                 На 1000 попыток
@@ -159,36 +164,35 @@ export function Blocks() {
             )}
             {rows.map((row) => (
               <TableRow key={row.id}>
+                {/* «Тормозит» — точкой у названия, пояснение в подсказке: строка в одну линию (DESIGN.md, «Таблица»). */}
                 <TableCell>
-                  {row.name}
-                  {group === 'operators' && braked.has(row.id) && (
-                    <span
-                      className="text-warn"
-                      title="За 7 суток сняли несколько SIM этого оператора: все его номера звонят реже, пока снятия не уйдут за 7 суток"
-                    >
-                      {' · '}тормозит
-                    </span>
-                  )}
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                    {row.name}
+                    {group === 'operators' && braked.has(row.id) && (
+                      <StatusDot
+                        tone="warn"
+                        label="Тормозит"
+                        reason="За 7 суток сняли несколько SIM этого оператора: все его номера звонят реже, пока снятия не уйдут за 7 суток"
+                        dotOnly
+                      />
+                    )}
+                  </span>
                 </TableCell>
-                <TableCell className="num text-right">{row.attempts}</TableCell>
-                <TableCell className="num text-right">
-                  {share(row.real_answered, row.attempts)}
-                </TableCell>
-                <TableCell className="num text-right">
+                <TableCell className={NUM}>{row.attempts}</TableCell>
+                <TableCell className={NUM}>{share(row.real_answered, row.attempts)}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
                   {share(row.short_answered, row.attempts)}
                 </TableCell>
-                <TableCell
-                  className={`num text-right ${row.sims_suspended > 0 ? 'text-warn' : ''}`}
-                >
+                <TableCell className={`${NUM} ${row.sims_suspended > 0 ? 'text-warn' : ''}`}>
                   {row.sims_suspended}
                 </TableCell>
                 <TableCell
-                  className={`num text-right ${row.gateways_suspended > 0 ? 'text-warn' : ''}`}
+                  className={`${NUM} ${WIDE_ONLY} ${row.gateways_suspended > 0 ? 'text-warn' : ''}`}
                 >
                   {group === 'operators' ? '—' : row.gateways_suspended}
                 </TableCell>
                 <TableCell
-                  className={`num text-right ${row.per_thousand !== null && row.per_thousand > 0 ? 'font-semibold text-crit' : ''}`}
+                  className={`${NUM} ${row.per_thousand !== null && row.per_thousand > 0 ? 'font-semibold text-crit' : ''}`}
                 >
                   {row.per_thousand === null ? '—' : row.per_thousand.toFixed(1).replace('.', ',')}
                 </TableCell>

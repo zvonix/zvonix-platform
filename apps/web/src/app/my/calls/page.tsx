@@ -17,6 +17,8 @@ import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
+import { HintText, StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -40,7 +42,7 @@ import {
 import { useUrlState } from '@/lib/url-state';
 
 const PAGE_SIZE = 50;
-const COLUMNS = 7;
+const COLUMNS = 8;
 
 /** Сколько цифр должно быть набрано, чтобы номер имело смысл искать. */
 const MSISDN_DIGITS = 10;
@@ -244,17 +246,20 @@ function MyCalls() {
         </p>
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
-              {manyLines && <TableHead className="h-8">Линия</TableHead>}
-              <TableHead className="h-8">Куда</TableHead>
-              <TableHead className="h-8">Через что</TableHead>
-              <TableHead className="h-8">Итог</TableHead>
-              <TableHead className="h-8 text-right">Стоимость</TableHead>
-              <TableHead className="h-8 text-right">Длительность</TableHead>
+              <TableHead className={HEAD}>Когда</TableHead>
+              {manyLines && <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Линия</TableHead>}
+              <TableHead className={HEAD}>Куда</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Через что</TableHead>
+              <TableHead className={HEAD}>Итог</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Стоимость</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Длительность</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -281,19 +286,22 @@ function MyCalls() {
                   <span className="num text-muted-foreground">{moment(call.started_at)}</span>
                 </TableCell>
 
-                {manyLines && <TableCell>{call.channel.name}</TableCell>}
+                {manyLines && (
+                  <TableCell className={`whitespace-nowrap ${WIDE_ONLY}`}>
+                    {call.channel.name}
+                  </TableCell>
+                )}
 
-                {/* Одной строкой: номер, затем оператор и регион бледно — строка не раздувается в две. */}
-                <TableCell className="whitespace-nowrap">
-                  <span className="num">{call.destination}</span>
-                  <span className="text-faint">
-                    {' · '}
-                    {call.operator?.name ?? 'оператор не определён'}
-                    {call.region !== null && ` · ${call.region}`}
-                  </span>
+                {/* Номер, а оператор и регион — в подсказке к нему: строка в одну линию без хвоста « · ». */}
+                <TableCell>
+                  <HintText
+                    label={call.destination}
+                    reason={`${call.operator?.name ?? 'оператор не определён'}${call.region === null ? '' : `, ${call.region}`}`}
+                  />
                 </TableCell>
 
                 <TableCell
+                  className={WIDE_ONLY}
                   title={
                     call.termination_kind === null
                       ? undefined
@@ -307,40 +315,45 @@ function MyCalls() {
                   )}
                 </TableCell>
 
-                <TableCell className="whitespace-nowrap">
-                  <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
-                    {CALL_STATUS_NAME[call.status]}
-                  </span>
-                  {/* Причина — коротко рядом с итогом; что делать — в подсказке: строка не раздувается. */}
-                  {call.failure_reason !== null && (
-                    <span
-                      className="ml-2 cursor-help underline decoration-dotted underline-offset-4"
-                      title={CLIENT_FAILURE_REASON_FIX[call.failure_reason]}
-                    >
-                      {CLIENT_FAILURE_REASON_NAME[call.failure_reason]}
-                    </span>
-                  )}
+                {/* Клиенту причина отказа важнее слова «Не состоялся» (DESIGN.md, «Три аудитории»): она и стоит у
+                    точки, а что сделать — в подсказке. */}
+                <TableCell>
+                  <StatusDot
+                    tone={toneOf(callTone(call.status))}
+                    label={
+                      call.failure_reason === null
+                        ? CALL_STATUS_NAME[call.status]
+                        : CLIENT_FAILURE_REASON_NAME[call.failure_reason]
+                    }
+                    reason={
+                      call.failure_reason === null
+                        ? undefined
+                        : `${CALL_STATUS_NAME[call.status]}. ${CLIENT_FAILURE_REASON_FIX[call.failure_reason]}`
+                    }
+                  />
                 </TableCell>
 
-                <TableCell className="num text-right">
+                <TableCell className={NUM}>
                   {call.cost === null ? <span className="text-faint">—</span> : money(call.cost)}
                 </TableCell>
 
-                <TableCell className="num text-right whitespace-nowrap">
-                  {/* Длительность и значок записи — в одну строку; нет записи — значка нет. */}
-                  <span className="inline-flex items-center justify-end gap-1">
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {call.duration_seconds === null ? (
+                    <span className="text-faint">—</span>
+                  ) : (
+                    duration(call.duration_seconds)
+                  )}
+                </TableCell>
+
+                <TableCell>
+                  <RowActions>
                     {recordings.has(call.id) && (
                       <ListenButton
                         recordingId={recordings.get(call.id) ?? ''}
                         subtitle={`${call.destination} · ${moment(call.started_at)}`}
                       />
                     )}
-                    {call.duration_seconds === null ? (
-                      <span className="text-faint">—</span>
-                    ) : (
-                      duration(call.duration_seconds)
-                    )}
-                  </span>
+                  </RowActions>
                 </TableCell>
               </TableRow>
             ))}

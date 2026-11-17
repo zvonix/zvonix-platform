@@ -6,6 +6,11 @@ import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
 import { SmppEvents } from '@/components/smpp-events';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import { Button } from '@/components/ui/button';
+import { WithTooltip } from '@/components/ui/tooltip';
+import { Power, ScrollText } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -136,80 +141,91 @@ function SmppConnections() {
   return (
     <section aria-label="Подключения по SMPP" className="flex flex-col gap-2">
       <h2 className="font-semibold">Подключения клиентов</h2>
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Клиент</TableHead>
-              <TableHead className="h-8">Имя входа</TableHead>
-              <TableHead className="h-8">Адреса</TableHead>
-              <TableHead className="h-8">Был на связи</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8" />
+              <TableHead className={HEAD}>Клиент</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Имя входа</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Адреса</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Был на связи</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {accounts.map((account) => (
               <TableRow key={account.client_id}>
                 <TableCell>{account.client_name ?? account.client_id}</TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   <span className="num">{account.system_id}</span>
                 </TableCell>
-                <TableCell className="text-muted-foreground">
+                <TableCell className={`text-muted-foreground ${WIDE_ONLY}`}>
                   {account.allowed_ips.length === 0
                     ? 'любые'
                     : `ограничены: ${String(account.allowed_ips.length)}`}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {account.online.length > 0 ? (
-                    <span className="text-ok" title={account.online.map((s) => s.ip).join(', ')}>
-                      сейчас на связи
-                    </span>
+                    <StatusDot
+                      tone="ok"
+                      label="сейчас на связи"
+                      reason={account.online.map((s) => s.ip).join(', ')}
+                    />
                   ) : (
                     <span className="num text-muted-foreground">
                       {moment(account.last_bind_at)}
                     </span>
                   )}
                 </TableCell>
-                <TableCell className={account.enabled ? 'text-ok' : 'text-warn'}>
-                  {account.enabled ? 'Включено' : 'Отключено'}
+                <TableCell>
+                  {/* Слово остаётся и у «Включено»: рубильника в строке нет, состояние читается только здесь. */}
+                  <StatusDot
+                    tone={account.enabled ? 'ok' : 'warn'}
+                    label={account.enabled ? 'Включено' : 'Отключено'}
+                  />
                 </TableCell>
-                <TableCell className="text-right">
-                  <span className="inline-flex items-center gap-2">
+                <TableCell>
+                  <RowActions>
                     {/* Журнал подключения — и поддержке: «подключается ли программа клиента» (ADR-0096). */}
                     <FormDialog
-                      label="Журнал"
+                      label={<ScrollText aria-hidden className="size-4" />}
+                      tooltip="Журнал"
+                      {...ROW_ICON}
                       title={`Журнал SMPP: ${account.client_name ?? account.system_id}`}
-                      variant="outline"
-                      size="xs"
                     >
                       <SmppEvents url={`/smpp/accounts/${account.client_id}/events`} />
                     </FormDialog>
                     {canChange &&
                       (account.enabled ? (
                         <ConfirmAction
-                          label="Отключить"
+                          label={<Power aria-hidden className="size-4" />}
+                          tooltip="Отключить"
+                          {...ROW_ICON}
                           title={`Отключить SMPP клиента «${account.client_name ?? account.system_id}»`}
                           consequence="Новые подключения клиента будут отклоняться, пока вы не включите его снова. Открытые сессии доживут до разрыва."
                           confirmLabel="Отключить"
-                          size="xs"
                           onConfirm={() =>
                             toggle.mutateAsync({ clientId: account.client_id, enabled: false })
                           }
                         />
                       ) : (
-                        <button
-                          type="button"
-                          disabled={toggle.isPending}
-                          onClick={() => {
-                            toggle.mutate({ clientId: account.client_id, enabled: true });
-                          }}
-                          className="min-h-7 rounded-md border border-border px-2 hover:bg-muted"
-                        >
-                          Включить
-                        </button>
+                        <WithTooltip label="Включить">
+                          <Button
+                            {...ROW_ICON}
+                            aria-label="Включить"
+                            disabled={toggle.isPending}
+                            onClick={() => {
+                              toggle.mutate({ clientId: account.client_id, enabled: true });
+                            }}
+                          >
+                            <Power aria-hidden className="size-4" />
+                          </Button>
+                        </WithTooltip>
                       ))}
-                  </span>
+                  </RowActions>
                 </TableCell>
               </TableRow>
             ))}

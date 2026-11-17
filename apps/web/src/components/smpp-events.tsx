@@ -3,6 +3,8 @@
 import { useQuery } from '@tanstack/react-query';
 import type { SmppBindMode, SmppEventKind } from '@zvonix/shared';
 import { ErrorNote } from '@/components/error-note';
+import { HintText, StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -82,46 +84,64 @@ export function SmppEvents({ url, platform = false }: { url: string; platform?: 
     );
   }
   return (
-    <div
-      className={`${platform ? 'max-h-[32rem]' : 'max-h-80'} overflow-auto rounded-lg border border-border`}
-    >
+    <div className={`${TABLE_FRAME} ${platform ? 'max-h-[32rem]' : 'max-h-80'} overflow-y-auto`}>
       <Table>
         <TableHeader>
           <TableRow className="text-muted-foreground hover:bg-transparent">
-            <TableHead className="h-8">Когда</TableHead>
-            {platform && <TableHead className="h-8">Кто</TableHead>}
-            <TableHead className="h-8">Что</TableHead>
-            <TableHead className="h-8">Адрес</TableHead>
+            <TableHead className={HEAD}>Когда</TableHead>
+            {platform && <TableHead className={HEAD}>Кто</TableHead>}
+            <TableHead className={HEAD}>Что</TableHead>
+            <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Раз</TableHead>
+            <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Адрес</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {events.data.events.map((event) => (
-            <TableRow key={`${event.first_at}-${event.kind}-${event.result}-${event.ip}`}>
-              <TableCell className="num text-muted-foreground">{moment(event.last_at)}</TableCell>
-              {platform && (
+          {events.data.events.map((event) => {
+            // Итог коротко, подробность после двоеточия и режим входа — в подсказке (строка — одна линия).
+            const [label = event.result, detail] = (
+              RESULT_NAME[event.result] ?? event.result
+            ).split(': ');
+            const reason = [
+              detail,
+              event.kind === 'bind' && event.mode !== null
+                ? `режим: ${MODE_NAME[event.mode]}`
+                : undefined,
+            ]
+              .filter((part): part is string => part !== undefined)
+              .join('; ');
+            return (
+              <TableRow key={`${event.first_at}-${event.kind}-${event.result}-${event.ip}`}>
+                <TableCell className="num text-muted-foreground">{moment(event.last_at)}</TableCell>
+                {platform && (
+                  <TableCell>
+                    {event.client_name ?? (
+                      <span className="num text-warn">{event.system_id ?? '—'}</span>
+                    )}
+                  </TableCell>
+                )}
                 <TableCell>
-                  {event.client_name ?? (
-                    <span className="num text-warn">{event.system_id ?? '—'}</span>
+                  <StatusDot
+                    tone={event.result === 'ok' ? 'ok' : 'warn'}
+                    label={label}
+                    reason={reason === '' ? undefined : reason}
+                  />
+                </TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {event.count > 1 ? (
+                    <HintText
+                      label={String(event.count)}
+                      reason={`Первый раз ${moment(event.first_at)}`}
+                    />
+                  ) : (
+                    '1'
                   )}
                 </TableCell>
-              )}
-              <TableCell className="whitespace-normal">
-                <span className={event.result === 'ok' ? 'text-ok' : 'text-warn'}>
-                  {RESULT_NAME[event.result] ?? event.result}
-                </span>
-                {event.kind === 'bind' && event.mode !== null && (
-                  <span className="text-muted-foreground"> · {MODE_NAME[event.mode]}</span>
-                )}
-                {event.count > 1 && (
-                  <span className="text-muted-foreground">
-                    {' '}
-                    · {String(event.count)} раз с {moment(event.first_at)}
-                  </span>
-                )}
-              </TableCell>
-              <TableCell className="num text-muted-foreground">{event.ip}</TableCell>
-            </TableRow>
-          ))}
+                <TableCell className={`num text-muted-foreground ${WIDE_ONLY}`}>
+                  {event.ip}
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>

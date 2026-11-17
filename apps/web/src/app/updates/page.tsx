@@ -1,11 +1,15 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CircleArrowUp, ScrollText, Undo2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
+import { StatusDot, type StatusTone } from '@/components/status-dot';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
+import { WithTooltip } from '@/components/ui/tooltip';
 import {
   Table,
   TableBody,
@@ -116,10 +120,10 @@ const STATUS_NAME: Record<Status, string> = {
   failed: 'Не удалось',
 };
 
-const STATUS_TONE: Record<Status, string> = {
-  running: 'text-warn',
-  succeeded: 'text-ok',
-  failed: 'text-crit',
+const STATUS_TONE: Record<Status, StatusTone> = {
+  running: 'warn',
+  succeeded: 'ok',
+  failed: 'crit',
 };
 
 const runTitle = (run: { action: Action; tag: string | null }): string =>
@@ -343,15 +347,17 @@ function Updates() {
       {data.runs.length > 0 && (
         <section aria-label="История" className="flex flex-col gap-2">
           <h2 className="font-semibold">История</h2>
-          <div className="rounded-lg border border-border bg-card">
+          <div className={TABLE_FRAME}>
             <Table>
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">
-                  <TableHead className="h-8">Начато</TableHead>
-                  <TableHead className="h-8">Что</TableHead>
-                  <TableHead className="hidden h-8 sm:table-cell">Кто</TableHead>
-                  <TableHead className="h-8">Итог</TableHead>
-                  <TableHead className="h-8" />
+                  <TableHead className={HEAD}>Начато</TableHead>
+                  <TableHead className={HEAD}>Что</TableHead>
+                  <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Кто</TableHead>
+                  <TableHead className={HEAD}>Итог</TableHead>
+                  <TableHead className={`${HEAD} w-px`}>
+                    <span className="sr-only">Действия</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -361,23 +367,25 @@ function Updates() {
                       <span className="num text-muted-foreground">{moment(run.started_at)}</span>
                     </TableCell>
                     <TableCell>{runTitle(run)}</TableCell>
-                    <TableCell className="hidden text-muted-foreground sm:table-cell">
-                      {run.by}
+                    <TableCell className={`text-muted-foreground ${WIDE_ONLY}`}>{run.by}</TableCell>
+                    <TableCell>
+                      <StatusDot tone={STATUS_TONE[run.status]} label={STATUS_NAME[run.status]} />
                     </TableCell>
-                    <TableCell className={STATUS_TONE[run.status]}>
-                      {STATUS_NAME[run.status]}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        aria-pressed={shown === run.id}
-                        onClick={() => {
-                          setWatched(run.id);
-                        }}
-                      >
-                        Журнал
-                      </Button>
+                    <TableCell>
+                      <RowActions>
+                        <WithTooltip label="Журнал">
+                          <Button
+                            {...ROW_ICON}
+                            aria-label="Журнал"
+                            aria-pressed={shown === run.id}
+                            onClick={() => {
+                              setWatched(run.id);
+                            }}
+                          >
+                            <ScrollText aria-hidden className="size-4" />
+                          </Button>
+                        </WithTooltip>
+                      </RowActions>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -413,39 +421,45 @@ function ReleaseTable({
   onDeploy: (tag: string) => Promise<unknown>;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div className={TABLE_FRAME}>
       <Table>
         <TableHeader>
           <TableRow className="text-muted-foreground hover:bg-transparent">
-            <TableHead className="h-8">Выпуск</TableHead>
-            <TableHead className="h-8">Дата</TableHead>
-            <TableHead className="hidden h-8 sm:table-cell">Что нового</TableHead>
-            <TableHead className="h-8" />
+            <TableHead className={HEAD}>Выпуск</TableHead>
+            <TableHead className={HEAD}>Дата</TableHead>
+            <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Что нового</TableHead>
+            <TableHead className={`${HEAD} w-px`}>
+              <span className="sr-only">Действия</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {releases.map((release) => (
             <TableRow key={release.tag}>
               <TableCell>
-                <span className="num font-semibold">{release.tag}</span>
-                {release.prerelease && <span className="ml-2 text-warn">пробный</span>}
+                <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                  <span className="num font-semibold">{release.tag}</span>
+                  {release.prerelease && <StatusDot tone="warn" label="пробный" />}
+                </span>
               </TableCell>
               <TableCell>
                 <span className="num text-muted-foreground">{moment(release.published_at)}</span>
               </TableCell>
               <TableCell
-                className="hidden max-w-md truncate text-muted-foreground sm:table-cell"
+                className={`max-w-md truncate text-muted-foreground ${WIDE_ONLY}`}
                 title={release.notes}
               >
                 {summary(release.notes)}
               </TableCell>
-              <TableCell className="text-right">
-                <ReleaseAction
-                  release={release}
-                  returning={isReturn(release.tag)}
-                  busy={busy}
-                  onDeploy={onDeploy}
-                />
+              <TableCell>
+                <RowActions>
+                  <ReleaseAction
+                    release={release}
+                    returning={isReturn(release.tag)}
+                    busy={busy}
+                    onDeploy={onDeploy}
+                  />
+                </RowActions>
               </TableCell>
             </TableRow>
           ))}
@@ -469,12 +483,19 @@ function ReleaseAction({
   const label = returning ? 'Вернуться' : 'Обновить';
   return (
     <ConfirmAction
-      label={label}
+      label={
+        returning ? (
+          <Undo2 aria-hidden className="size-4" />
+        ) : (
+          <CircleArrowUp aria-hidden className="size-4" />
+        )
+      }
+      tooltip={label}
+      {...ROW_ICON}
       title={`${returning ? 'Вернуться на' : 'Обновить площадку до'} ${release.tag}`}
       consequence={returning ? RETURN_CONSEQUENCE : UPDATE_CONSEQUENCE}
       confirmLabel={label}
       tone={returning ? 'danger' : 'neutral'}
-      size="xs"
       disabled={busy}
       onConfirm={() => onDeploy(release.tag)}
     />
@@ -668,7 +689,9 @@ function RunConsole({ runId }: { runId: string }) {
     <section aria-label="Ход обновления" className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="font-semibold">{run === null ? 'Ход обновления' : runTitle(run)}</h2>
-        {run !== null && <span className={STATUS_TONE[run.status]}>{STATUS_NAME[run.status]}</span>}
+        {run !== null && (
+          <StatusDot tone={STATUS_TONE[run.status]} label={STATUS_NAME[run.status]} />
+        )}
         {reconnecting && <span className="text-warn">связь с площадкой прервалась — ждём её</span>}
         {sawRunning &&
           run?.status === 'succeeded' &&

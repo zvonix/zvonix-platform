@@ -5,6 +5,15 @@ import type { ReactNode } from 'react';
 import { OneTimeSecret } from '@/components/one-time-secret';
 import { SipServer } from '@/components/sip-server';
 import { CopyButton } from '@/components/copy-button';
+import { HEAD, TABLE_FRAME } from '@/components/table-parts';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 export interface SipAccount {
   readonly username: string;
@@ -123,50 +132,57 @@ export function LineCredentials({
         </span>
         <SipServer server={server} />
       </p>
-      <div className="overflow-x-auto">
-        {/* Без переносов: разорванный логин или пароль переписывают с ошибкой. */}
-        <table className="w-full text-left whitespace-nowrap">
-          <thead className="text-muted-foreground">
-            <tr>
-              <th className="pr-4 font-normal">Линия</th>
-              <th className="pr-4 font-normal">Authentication ID, Phone Number</th>
-              <th className="pr-4 font-normal">Password</th>
-              <th className="font-normal">Routing Prefix</th>
-            </tr>
-          </thead>
-          <tbody>
+      {/* Без переносов: разорванный логин или пароль переписывают с ошибкой. */}
+      <div className={TABLE_FRAME}>
+        <Table>
+          <TableHeader>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              {/* «Line N» в строке — как в веб-интерфейсе GOIP: по этой подписи линию и ищут там. */}
+              <TableHead className={`${HEAD} w-px`}>Линия</TableHead>
+              <TableHead className={HEAD}>Authentication ID, Phone Number</TableHead>
+              <TableHead className={HEAD}>Password</TableHead>
+              <TableHead className={HEAD}>Routing Prefix</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {lines.map((line) => (
-              <tr key={line.port_id}>
-                <td className="num pr-4">Line {line.port_number}</td>
-                <td className="pr-4">
-                  <span className="num select-all">{line.username}</span>
-                  <CopyButton
-                    value={line.username}
-                    label={`Скопировать Authentication ID линии ${String(line.port_number)}`}
-                  />
-                </td>
-                <td className="pr-4">
+              <TableRow key={line.port_id}>
+                <TableCell className="num">Line {line.port_number}</TableCell>
+                <TableCell>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="num select-all">{line.username}</span>
+                    <CopyButton
+                      value={line.username}
+                      label={`Скопировать Authentication ID линии ${String(line.port_number)}`}
+                    />
+                  </span>
+                </TableCell>
+                <TableCell>
                   {/*
                     Кнопкой, а не выделением мышью: выделение рвало пароль, и в GOIP попадала его часть —
                     «неверный пароль» при верных настройках (владелец, 2026-11-12).
                   */}
-                  <span className="num select-all">{line.password}</span>
-                  <CopyButton
-                    value={line.password}
-                    label={`Скопировать пароль линии ${String(line.port_number)}`}
-                  />
-                </td>
-                <td>
-                  <span className="num select-all">{goipLinePrefix(line.port_number)}</span>
-                  <CopyButton
-                    value={goipLinePrefix(line.port_number)}
-                    label={`Скопировать Routing Prefix линии ${String(line.port_number)}`}
-                  />
-                </td>
-              </tr>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="num select-all">{line.password}</span>
+                    <CopyButton
+                      value={line.password}
+                      label={`Скопировать пароль линии ${String(line.port_number)}`}
+                    />
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="num select-all">{goipLinePrefix(line.port_number)}</span>
+                    <CopyButton
+                      value={goipLinePrefix(line.port_number)}
+                      label={`Скопировать Routing Prefix линии ${String(line.port_number)}`}
+                    />
+                  </span>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
       {children}
     </OneTimeSecret>

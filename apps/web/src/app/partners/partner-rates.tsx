@@ -10,6 +10,7 @@ import {
 } from '@zvonix/shared';
 import { useState } from 'react';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -124,20 +125,20 @@ export function PartnerRates({ partnerId }: { partnerId: string }) {
         </p>
       )}
 
-      <div className="max-w-[900px] rounded-md border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Тариф</TableHead>
-              <TableHead className="h-8">Оператор</TableHead>
-              <TableHead className="h-8">Через что</TableHead>
-              <TableHead className="h-8">Регион</TableHead>
-              <TableHead className="h-8 text-right">За минуту</TableHead>
-              <TableHead className="h-8 text-right">За соединение</TableHead>
-              <TableHead className="h-8 text-right">Шаг</TableHead>
-              <TableHead className="h-8 text-right">Минимум</TableHead>
-              <TableHead className="h-8">Округление</TableHead>
-              <TableHead className="h-8">Действует с</TableHead>
+              <TableHead className={HEAD}>Тариф</TableHead>
+              <TableHead className={HEAD}>Оператор</TableHead>
+              <TableHead className={HEAD}>Через что</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Регион</TableHead>
+              <TableHead className={`${HEAD} text-right`}>За минуту</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>За соединение</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Шаг, с</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Минимум, с</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Округление</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Действует с</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -162,23 +163,23 @@ export function PartnerRates({ partnerId }: { partnerId: string }) {
                   )}
                 </TableCell>
                 <TableCell>{TERMINATION_KIND_NAME[rate.termination_kind]}</TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {rate.region ?? <span className="text-muted-foreground">все</span>}
                 </TableCell>
-                <TableCell className="num text-right">{money(rate.price_per_minute)}</TableCell>
-                <TableCell className="num text-right text-muted-foreground">
+                <TableCell className={NUM}>{money(rate.price_per_minute)}</TableCell>
+                <TableCell className={`${NUM} text-muted-foreground ${WIDE_ONLY}`}>
                   {money(rate.connection_fee)}
                 </TableCell>
-                <TableCell className="num text-right text-muted-foreground">
-                  {rate.billing_increment_seconds} с
+                <TableCell className={`${NUM} text-muted-foreground ${WIDE_ONLY}`}>
+                  {rate.billing_increment_seconds}
                 </TableCell>
-                <TableCell className="num text-right text-muted-foreground">
-                  {rate.minimum_duration_seconds} с
+                <TableCell className={`${NUM} text-muted-foreground ${WIDE_ONLY}`}>
+                  {rate.minimum_duration_seconds}
                 </TableCell>
-                <TableCell className="text-muted-foreground">
+                <TableCell className={`text-muted-foreground ${WIDE_ONLY}`}>
                   {ROUNDING_NAME[rate.rounding]}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   <span className="num text-muted-foreground">{moment(rate.effective_from)}</span>
                 </TableCell>
               </TableRow>

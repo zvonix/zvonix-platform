@@ -8,6 +8,7 @@ import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { HEAD, NUM, RowActions, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -109,7 +110,7 @@ function TariffCard({
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: PARTNER_RATES_KEY });
   const seconds = data.reference_call_seconds;
-  const columns = data.bands_enabled ? 7 : 6;
+  const columns = data.bands_enabled ? 9 : 8;
   // Общая цена — первой: исключения читаются относительно неё.
   const ordered = [...rates].sort(
     (left, right) => Number(left.operator_id !== null) - Number(right.operator_id !== null),
@@ -160,13 +161,17 @@ function TariffCard({
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Куда</TableHead>
-              <TableHead className="h-8">Через что</TableHead>
-              <TableHead className="h-8 text-right">За минуту</TableHead>
-              <TableHead className="h-8">Как считается</TableHead>
-              <TableHead className="h-8 text-right">Вызов {seconds} с</TableHead>
-              {data.bands_enabled && <TableHead className="h-8">Коридор</TableHead>}
-              <TableHead className="h-8">
+              <TableHead className={HEAD}>Куда</TableHead>
+              <TableHead className={HEAD}>Регион</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Через что</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>За минуту</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>За соединение</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Как считается</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Вызов {seconds} с</TableHead>
+              {data.bands_enabled && (
+                <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Коридор</TableHead>
+              )}
+              <TableHead className={`${HEAD} w-px`}>
                 <span className="sr-only">Действия</span>
               </TableHead>
             </TableRow>
@@ -181,7 +186,9 @@ function TariffCard({
             )}
             {ordered.map((rate) => (
               <TableRow key={rate.id}>
-                <TableCell>
+                {/* В одну линию (DESIGN.md, «Таблица»): регион и плата за соединение — своими столбцами, а не
+                    второй строкой; на телефоне остаются «куда», регион и цена эталонного вызова. */}
+                <TableCell className="whitespace-nowrap">
                   {rate.operator_id === null ? (
                     <span className="font-semibold">Все операторы</span>
                   ) : (
@@ -189,29 +196,38 @@ function TariffCard({
                       <span className="text-faint">оператор без названия</span>
                     ))
                   )}
-                  <span className="block text-faint">{rate.region ?? 'любой регион'}</span>
                 </TableCell>
-                <TableCell title={TERMINATION_KIND_MEANING[rate.termination_kind]}>
+                <TableCell className="whitespace-nowrap">
+                  {rate.region ?? <span className="text-faint">любой</span>}
+                </TableCell>
+                <TableCell
+                  className={WIDE_ONLY}
+                  title={TERMINATION_KIND_MEANING[rate.termination_kind]}
+                >
                   {TERMINATION_KIND_NAME[rate.termination_kind]}
                 </TableCell>
-                <TableCell className="num text-right">{money(rate.price_per_minute)}</TableCell>
-                <TableCell className="whitespace-normal">
-                  {billing(rate)}
-                  {rate.connection_fee !== '0' && (
-                    <span className="block text-muted-foreground">
-                      плюс {money(rate.connection_fee)} за соединение
-                    </span>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {money(rate.price_per_minute)}
+                </TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {rate.connection_fee === '0' ? (
+                    <span className="text-faint">—</span>
+                  ) : (
+                    money(rate.connection_fee)
                   )}
                 </TableCell>
+                <TableCell className={`whitespace-nowrap ${WIDE_ONLY}`}>{billing(rate)}</TableCell>
                 {/*
                   Стоимость эталонного вызова, а не цена за минуту: тариф — это пять чисел,
                   и сравнивать их одним из них нельзя. С коридором сравнивается именно она.
                 */}
-                <TableCell className="num text-right font-semibold">
+                <TableCell className={`${NUM} font-semibold`}>
                   {money(rate.reference_cost)}
                 </TableCell>
                 {data.bands_enabled && (
-                  <TableCell className={rate.within_band ? 'num' : 'num text-warn'}>
+                  <TableCell
+                    className={`num whitespace-nowrap ${rate.within_band ? '' : 'text-warn'} ${WIDE_ONLY}`}
+                  >
                     {rate.band === null ? (
                       <span className="text-faint">не задан</span>
                     ) : (
@@ -219,14 +235,16 @@ function TariffCard({
                     )}
                   </TableCell>
                 )}
-                <TableCell className="text-right">
-                  <SetPrice
-                    tariff={tariff}
-                    rates={rates}
-                    rate={rate}
-                    operators={data.operators}
-                    bandsEnabled={data.bands_enabled}
-                  />
+                <TableCell>
+                  <RowActions>
+                    <SetPrice
+                      tariff={tariff}
+                      rates={rates}
+                      rate={rate}
+                      operators={data.operators}
+                      bandsEnabled={data.bands_enabled}
+                    />
+                  </RowActions>
                 </TableCell>
               </TableRow>
             ))}

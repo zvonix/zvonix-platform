@@ -7,7 +7,10 @@ import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
-import { Trash2 } from 'lucide-react';
+import { Play, Trash2 } from 'lucide-react';
+import { HintText } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import { WithTooltip } from '@/components/ui/tooltip';
 import {
   AccountLimitsCell,
   AccountRestCell,
@@ -156,17 +159,17 @@ function MessagingView() {
       )}
 
       <h2 className="font-semibold">Аккаунты партнёров</h2>
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Партнёр</TableHead>
-              <TableHead className="h-8">Аккаунт</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Пауза</TableHead>
-              <TableHead className="h-8 text-right">Цена</TableHead>
-              <TableHead className="h-8">Лимиты</TableHead>
-              <TableHead className="h-8">
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Партнёр</TableHead>
+              <TableHead className={HEAD}>Аккаунт</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={HEAD}>Пауза</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Цена</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Лимиты</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>
                 <span className="inline-flex items-center gap-1">
                   Прогрев
                   <Hint label="Что такое автопрогрев">
@@ -180,7 +183,9 @@ function MessagingView() {
                   </Hint>
                 </span>
               </TableHead>
-              <TableHead className="h-8" />
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -200,52 +205,40 @@ function MessagingView() {
             )}
             {list.data?.accounts.map((account) => (
               <TableRow key={account.id}>
-                <TableCell>{account.partner_name}</TableCell>
+                <TableCell className={WIDE_ONLY}>{account.partner_name}</TableCell>
                 <TableCell>
-                  {account.label}
-                  <span className="num block text-faint">{account.phone ?? '—'}</span>
+                  {/* Номер — в подсказке: строка таблицы одна линия (DESIGN.md, «Таблица»). */}
+                  <span
+                    className="inline-block max-w-48 truncate align-bottom"
+                    title={`${account.label}, номер ${account.phone ?? 'не известен'}`}
+                  >
+                    {account.label}
+                  </span>
                 </TableCell>
                 <TableCell>
+                  {/* Время сверки с провайдером — в подсказке состояния, а не второй строкой. */}
                   <MessengerAccountStatus
                     status={account.status}
                     reason={account.state_reason}
                     staff
+                    note={
+                      account.state_checked_at === null
+                        ? undefined
+                        : `Сверено с провайдером ${moment(account.state_checked_at)}.`
+                    }
                   />
-                  {/* Время сверки — мелкой строкой под состоянием, а не отдельным столбцом: таблица влезает в 1280. */}
-                  {account.state_checked_at !== null && (
-                    <span
-                      className="num block text-xs text-faint"
-                      title={`Сверено с провайдером ${moment(account.state_checked_at)}`}
-                    >
-                      сверено {checkedAt(account.state_checked_at)}
-                    </span>
-                  )}
                 </TableCell>
                 <TableCell>
-                  <span className="inline-flex items-center gap-2">
-                    <AccountRestCell rest={account.rest} />
-                    {account.paused_until !== null && canChange && (
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        disabled={resume.isPending}
-                        onClick={() => {
-                          resume.mutate(account.id);
-                        }}
-                      >
-                        Снять паузу
-                      </Button>
-                    )}
-                  </span>
+                  <AccountRestCell rest={account.rest} />
                 </TableCell>
-                <TableCell className="num text-right">
+                <TableCell className={`num text-right ${WIDE_ONLY}`}>
                   {account.price === null ? (
                     <span className="text-faint">не задана</span>
                   ) : (
                     money(account.price)
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   <AccountLimitsCell
                     recommended={account.recommended}
                     perMinute={account.limit_per_minute}
@@ -253,9 +246,9 @@ function MessagingView() {
                     perDay={account.daily_limit_now}
                   />
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {/* Прогрев одной строкой: где он, на какой день и выключатель (владелец: «прогрев где-то непонятно где»). */}
-                  <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
                     {canChange && (
                       <Switch
                         aria-label={`Автопрогрев аккаунта «${account.label}»`}
@@ -273,24 +266,38 @@ function MessagingView() {
                     />
                   </span>
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell>
                   {canChange && (
-                    <ConfirmAction
-                      label={<Trash2 aria-hidden className="size-4" />}
-                      tooltip="Удалить аккаунт"
-                      variant="ghost"
-                      className="size-7 text-crit"
-                      title={`Удалить аккаунт «${account.label}» партнёра ${account.partner_name}`}
-                      consequence={
-                        <p>
-                          Аккаунт перестанет принимать сообщения, подключение у провайдера будет
-                          удалено. Вернуть нельзя.
-                        </p>
-                      }
-                      confirmLabel="Удалить"
-                      size="icon-xs"
-                      onConfirm={() => retire.mutateAsync(account.id)}
-                    />
+                    <RowActions>
+                      {account.paused_until !== null && (
+                        <WithTooltip label="Снять паузу">
+                          <Button
+                            {...ROW_ICON}
+                            aria-label="Снять паузу"
+                            disabled={resume.isPending}
+                            onClick={() => {
+                              resume.mutate(account.id);
+                            }}
+                          >
+                            <Play aria-hidden className="size-4" />
+                          </Button>
+                        </WithTooltip>
+                      )}
+                      <ConfirmAction
+                        label={<Trash2 aria-hidden className="size-4" />}
+                        tooltip="Удалить аккаунт"
+                        {...ROW_ICON}
+                        title={`Удалить аккаунт «${account.label}» партнёра ${account.partner_name}`}
+                        consequence={
+                          <p>
+                            Аккаунт перестанет принимать сообщения, подключение у провайдера будет
+                            удалено. Вернуть нельзя.
+                          </p>
+                        }
+                        confirmLabel="Удалить"
+                        onConfirm={() => retire.mutateAsync(account.id)}
+                      />
+                    </RowActions>
                   )}
                 </TableCell>
               </TableRow>
@@ -414,16 +421,16 @@ function RecentMessages() {
         </label>
       </JournalFilters>
       {error !== undefined && <ErrorNote error={error} />}
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Принято</TableHead>
-              <TableHead className="h-8">Кому</TableHead>
+              <TableHead className={HEAD}>Принято</TableHead>
+              <TableHead className={HEAD}>Кому</TableHead>
               <StageHeads />
-              <TableHead className="h-8 text-right">Клиент</TableHead>
-              <TableHead className="h-8 text-right">Партнёру</TableHead>
-              <TableHead className="h-8 text-right">Площадке</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Клиент</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Партнёру</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Площадке</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -437,19 +444,27 @@ function RecentMessages() {
             {list.data?.messages.map((message) => (
               <TableRow key={message.id}>
                 <TableCell>
-                  <span className="num text-muted-foreground">{moment(message.created_at)}</span>
-                  {/* Сколько раз пробовали отправить — по нему и «ушло» видно, где сообщение ждало. */}
-                  {message.attempts > 1 && (
-                    <span className="block text-faint">попыток {String(message.attempts)}</span>
+                  {/* Сколько раз пробовали отправить — в подсказке: по нему и «ушло» видно, где сообщение ждало. */}
+                  {message.attempts > 1 ? (
+                    <HintText
+                      label={moment(message.created_at)}
+                      reason={`Попыток отправить: ${String(message.attempts)}`}
+                    />
+                  ) : (
+                    <span className="num text-muted-foreground">{moment(message.created_at)}</span>
                   )}
                 </TableCell>
                 <TableCell>
                   <span className="num">{message.to}</span>
                 </TableCell>
                 <StageCells message={message} />
-                <TableCell className="num text-right">{money(message.money.client)}</TableCell>
-                <TableCell className="num text-right">{money(message.money.partner)}</TableCell>
-                <TableCell className="num text-right">{money(message.money.margin)}</TableCell>
+                <TableCell className={NUM}>{money(message.money.client)}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {money(message.money.partner)}
+                </TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {money(message.money.margin)}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -555,15 +570,4 @@ function ManualForm() {
       </DialogField>
     </DialogForm>
   );
-}
-
-/** Время сверки коротко: сегодня — только часы и минуты, раньше — ещё и число; полностью — в подсказке. */
-function checkedAt(iso: string): string {
-  const at = new Date(iso);
-  const today = at.toDateString() === new Date().toDateString();
-  return at.toLocaleString('ru-RU', {
-    hour: '2-digit',
-    minute: '2-digit',
-    ...(today ? {} : { day: 'numeric', month: 'short' }),
-  });
 }

@@ -5,6 +5,7 @@ import type { TerminationKind } from '@zvonix/shared';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { Hint } from '@/components/hint';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -18,7 +19,7 @@ import { useOperators } from '@/lib/dictionaries';
 import { TERMINATION_KIND_MEANING, TERMINATION_KIND_NAME } from '@/lib/labels';
 import { money } from '@/lib/money';
 
-const COLUMNS = 6;
+const COLUMNS = 8;
 
 interface Tariff {
   readonly alias_id: string;
@@ -91,16 +92,18 @@ function MyPrices() {
         </p>
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Предложение</TableHead>
-              <TableHead className="h-8">Направление</TableHead>
-              <TableHead className="h-8">Как считается время</TableHead>
-              <TableHead className="h-8 text-right">За соединение</TableHead>
-              <TableHead className="h-8 text-right">За минуту</TableHead>
-              <TableHead className="h-8 text-right">Вызов 15 / 30 / 60 с</TableHead>
+              <TableHead className={HEAD}>Предложение</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Через что</TableHead>
+              <TableHead className={HEAD}>Направление</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Регион</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Как считается время</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>За соединение</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>За минуту</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Вызов 15 / 30 / 60 с</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -125,29 +128,34 @@ function MyPrices() {
               <TableRow
                 key={`${row.alias_id}:${row.termination_kind}:${row.operator_id}:${row.region ?? ''}`}
               >
-                <TableCell>
-                  {row.display_name}
-                  <span
-                    className="block text-faint"
-                    title={TERMINATION_KIND_MEANING[row.termination_kind]}
-                  >
-                    {TERMINATION_KIND_NAME[row.termination_kind]}
-                  </span>
+                {/* Способ и регион — своими столбцами, а не второй строкой под названием (DESIGN.md, «Таблица»). */}
+                <TableCell className="whitespace-nowrap">{row.display_name}</TableCell>
+
+                <TableCell
+                  className={`whitespace-nowrap ${WIDE_ONLY}`}
+                  title={TERMINATION_KIND_MEANING[row.termination_kind]}
+                >
+                  {TERMINATION_KIND_NAME[row.termination_kind]}
                 </TableCell>
 
-                <TableCell>
+                <TableCell className="whitespace-nowrap">
                   {operators.nameOf(row.operator_id) ?? (
                     <span className="num text-faint">{row.operator_id}</span>
                   )}
-                  <span className="block text-faint">{row.region ?? 'любой регион'}</span>
                 </TableCell>
 
-                <TableCell className="whitespace-normal">{billing(row)}</TableCell>
+                <TableCell className={`whitespace-nowrap ${WIDE_ONLY}`}>
+                  {row.region ?? <span className="text-faint">любой</span>}
+                </TableCell>
 
-                <TableCell className="num text-right">{money(row.connection_fee)}</TableCell>
-                <TableCell className="num text-right">{money(row.price_per_minute)}</TableCell>
+                <TableCell className={`whitespace-nowrap ${WIDE_ONLY}`}>{billing(row)}</TableCell>
 
-                <TableCell className="num text-right">
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{money(row.connection_fee)}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {money(row.price_per_minute)}
+                </TableCell>
+
+                <TableCell className={`${NUM} whitespace-nowrap`}>
                   {row.examples.map((example) => money(example.amount)).join(' / ')}
                 </TableCell>
               </TableRow>

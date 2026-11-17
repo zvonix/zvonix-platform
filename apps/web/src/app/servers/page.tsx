@@ -226,13 +226,13 @@ function ServerCard({
           <details>
             <summary className="cursor-pointer text-muted-foreground">Показать таблицей</summary>
             <div className="mt-2 max-h-64 overflow-auto">
-              <table className="num w-full text-left">
+              <table className="num w-full text-left whitespace-nowrap">
                 <thead className="sticky top-0 bg-card text-muted-foreground">
                   <tr>
-                    <th className="py-1 pr-3 font-normal">Время</th>
-                    <th className="py-1 pr-3 font-normal">Процессор</th>
-                    <th className="py-1 pr-3 font-normal">Память</th>
-                    <th className="py-1 font-normal">Диск</th>
+                    <th className="h-8 pr-3 font-normal">Время</th>
+                    <th className="h-8 pr-3 text-right font-normal">Процессор</th>
+                    <th className="h-8 pr-3 text-right font-normal">Память</th>
+                    <th className="h-8 text-right font-normal">Диск</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -241,10 +241,10 @@ function ServerCard({
                       <td className="py-1 pr-3 text-muted-foreground">
                         {formatTime(Date.parse(point.at))}
                       </td>
-                      <td className="pr-3">
+                      <td className="pr-3 text-right">
                         {String(usedPercent(point.load1, current.cpu_cores))} %
                       </td>
-                      <td className="pr-3">
+                      <td className="pr-3 text-right">
                         {String(
                           usedPercent(
                             current.mem_total_mb - point.mem_available_mb,
@@ -253,7 +253,7 @@ function ServerCard({
                         )}{' '}
                         %
                       </td>
-                      <td>
+                      <td className="text-right">
                         {String(
                           usedPercent(
                             current.disk_total_mb - point.disk_free_mb,
