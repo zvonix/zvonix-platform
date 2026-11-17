@@ -886,7 +886,7 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
 export function simState(
   sim: Sim,
   slot?: GatewayPortState,
-): { tone: StatusTone; label: string; reason?: string } {
+): { tone: StatusTone; label: string; reason?: string } | null {
   switch (sim.status) {
     case 'retired':
       return { tone: 'off', label: 'выведена' };
@@ -904,11 +904,8 @@ export function simState(
           'Много неудачных вызовов. Проверьте карту и сделайте с неё тестовый звонок — после удачного включите её значком справа.',
       };
     case 'paused':
-      return {
-        tone: 'off',
-        label: 'выключена',
-        reason: 'Вы выключили карту: она остаётся в линии с тарифом и не получает вызовов.',
-      };
+      // Выключена — видно по рубильнику; слово «выключена» в строке его только повторяло.
+      return null;
     case 'new':
       return {
         tone: 'off',
@@ -933,5 +930,6 @@ export function simState(
         'За последний час большинство вызовов сорвались в сети: проверьте баланс и блокировку SIM, сигнал, сам шлюз.',
     };
   }
-  return paceSummary(sim.pace) ?? { tone: 'ok', label: 'работает' };
+  // Всё в порядке — слов нет: что карта включена, показывает рубильник (владелец, 2026-11-17).
+  return paceSummary(sim.pace);
 }

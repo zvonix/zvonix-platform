@@ -18,7 +18,14 @@ export interface DeviceConnection {
  * (владелец, 2026-09-29: «на связи может писать другим цветом»). Слово остаётся: один цвет не читается
  * при нарушенном цветовосприятии. Стучится, но не вошло — подсказка про пароль: это самая частая причина.
  */
-export function Presence({ connection }: { connection: DeviceConnection }) {
+export function Presence({
+  connection,
+  dotOnly = false,
+}: {
+  connection: DeviceConnection;
+  /** Только точка, слово — в подсказке: в столбце, где связь повторяется в каждой строке. */
+  dotOnly?: boolean;
+}) {
   const online = connection.connected;
   const title = online
     ? [
@@ -38,6 +45,7 @@ export function Presence({ connection }: { connection: DeviceConnection }) {
       tone={online ? 'ok' : 'warn'}
       label={online ? 'на связи' : 'не на связи'}
       reason={title === '' ? undefined : title}
+      dotOnly={dotOnly}
     />
   );
 }

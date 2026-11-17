@@ -1,8 +1,9 @@
 'use client';
 
 import { goipLinePrefix, TESTABLE_SIM_STATUSES } from '@zvonix/shared';
+import { warmupCell } from '@/components/number-pace';
 import { RowActions, WIDE_ONLY } from '@/components/table-parts';
-import { StatusDot } from '@/components/status-dot';
+import { HintText, StatusDot } from '@/components/status-dot';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { TestCallButton } from '@/components/test-call';
 import { TariffSelect } from '@/components/tariff-select';
@@ -16,20 +17,27 @@ import { InsertSim, RemoveSim, SimActions, SimSwitch, simState } from './manage'
  * ([ADR-0054](../../../../../../docs/adr/0054-vhod-po-liniyam-goip.md), «Кабинет»):
  * две копии разошлись бы на первой же правке, и партнёр видел бы один порт по-разному.
  *
- * По стандарту таблицы ([DESIGN.md](../../../../../../docs/DESIGN.md), «Таблица»): строка в одну линию, состояние —
- * переключатель и одно слово с причиной в подсказке, действия — значками справа.
+ * По стандарту таблицы ([DESIGN.md](../../../../../../docs/DESIGN.md), «Таблица»): строка в одну линию, слово,
+ * одинаковое во всех строках, уходит в заголовок столбца («Префикс», «Прогрев»), состояние — только когда есть что
+ * сказать, рубильник и значки действий — в конце строки (владелец, 2026-11-17).
  */
 
 /** Столбцов у строки порта — для строк во всю ширину таблицы. */
-export const PORT_COLUMNS = 7;
+export const PORT_COLUMNS = 8;
 
-export function PortHeader() {
+/** Что в столбце линии: префикс при входе на шлюз, «Line N» и связь — при входе по линиям. */
+function lineHeader(gateway: Gateway): string {
+  return gateway.type === 'goip' && gateway.registration_mode === 'gateway' ? 'Префикс' : 'Линия';
+}
+
+export function PortHeader({ gateway }: { gateway: Gateway }) {
   return (
     <TableRow className="text-muted-foreground hover:bg-transparent">
-      <TableHead className="h-8 w-12">Порт</TableHead>
-      <TableHead className={`h-8 ${WIDE_ONLY}`}>Линия</TableHead>
+      <TableHead className="h-8 w-px">Порт</TableHead>
+      <TableHead className={`h-8 ${WIDE_ONLY}`}>{lineHeader(gateway)}</TableHead>
       <TableHead className="h-8">SIM-карта</TableHead>
       <TableHead className={`h-8 ${WIDE_ONLY}`}>Оператор</TableHead>
+      <TableHead className={`h-8 ${WIDE_ONLY}`}>Прогрев</TableHead>
       <TableHead className="h-8">Состояние</TableHead>
       <TableHead className={`h-8 w-44 ${WIDE_ONLY}`}>Тариф</TableHead>
       <TableHead className="h-8 w-px">
@@ -62,13 +70,10 @@ export function PortRow({
       <TableCell className={WIDE_ONLY}>
         {port.sim?.operator_name ?? <span className="text-faint">—</span>}
       </TableCell>
-      <TableCell>
-        {port.sim === null ? (
-          <span className="text-faint">—</span>
-        ) : (
-          <SimStateCell sim={port.sim} port={port} />
-        )}
+      <TableCell className={WIDE_ONLY}>
+        <WarmupCell sim={port.sim} />
       </TableCell>
+      <TableCell>{port.sim !== null && <SimStateCell sim={port.sim} port={port} />}</TableCell>
       <TableCell className={WIDE_ONLY}>
         {port.sim === null ? (
           <span className="text-faint">—</span>
@@ -90,6 +95,9 @@ export function PortRow({
                 />
               )}
               <RemoveSim portId={port.id} />
+              <span className="inline-flex md:ml-1.5">
+                <SimSwitch sim={port.sim} bare />
+              </span>
             </>
           )}
         </RowActions>
@@ -98,18 +106,21 @@ export function PortRow({
   );
 }
 
+/** «4/14» с подсказкой; прогретый номер — пусто. */
+export function WarmupCell({ sim }: { sim: Sim | null }) {
+  const warmup = sim === null || sim.status !== 'active' ? null : warmupCell(sim.pace);
+  return warmup === null ? null : <HintText label={warmup.label} reason={warmup.reason} />;
+}
+
 /**
- * Переключатель и одно слово: «работает», «прогрев 4/14», «предел суток», «выключена». Прогрев, пределы, сон
- * и состояние слота — в подсказке слова: раньше они шли хвостом «· прогрев 4/14 · 0 из 23 за сутки · спит до 16:37»
- * и растягивали строку (владелец, 2026-11-17).
+ * Только то, что мешает карте звонить: «предел суток», «спит до 17:26», «придержана». Включена ли карта, показывает
+ * рубильник в конце строки, прогрев — свой столбец; всё в порядке — ячейка пуста (владелец, 2026-11-17).
  */
 export function SimStateCell({ sim, port }: { sim: Sim; port?: Port }) {
-  const state = simState(sim, port?.state);
-  return (
-    <div className="flex items-center gap-2">
-      <SimSwitch sim={sim} bare />
-      <StatusDot tone={state.tone} label={state.label} reason={state.reason} />
-    </div>
+  // Вне порта карта вызовов не получает: прогрев, пределы и сон к ней не относятся.
+  const state = port === undefined && sim.status === 'active' ? null : simState(sim, port?.state);
+  return state === null ? null : (
+    <StatusDot tone={state.tone} label={state.label} reason={state.reason} phoneDot />
   );
 }
 
@@ -133,35 +144,30 @@ function SimTariff({ gateway, sim }: { gateway: Gateway; sim: Sim }) {
 
 /**
  * Как площадка выбирает эту линию. При входе на шлюз — префиксом, который вводится
- * в GOIP как `Routing Prefix` линии; при входе по линиям — её собственным входом,
- * и здесь важно одно: на связи ли она. Логин и пароль линии — в настройках линий
- * на странице шлюза, где устройство и настраивают.
+ * в GOIP как `Routing Prefix` линии (слово «префикс» — в заголовке столбца); при входе по линиям — её
+ * собственным входом, и здесь важно одно: на связи ли она — точкой, пояснение в подсказке. Логин и пароль
+ * линии — в настройках линий на странице шлюза, где устройство и настраивают.
  */
 function LineCell({ gateway, port }: { gateway: Gateway; port: Port }) {
   // У телефона слот один — выбирать нечего.
   if (gateway.type !== 'goip') return <span className="text-faint">—</span>;
 
   if (gateway.registration_mode === 'gateway') {
-    return (
-      <>
-        <span className="text-faint">префикс </span>
-        <span className="num select-all">{goipLinePrefix(port.port_number)}</span>
-      </>
-    );
+    return <span className="num select-all">{goipLinePrefix(port.port_number)}</span>;
   }
 
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex items-center gap-1">
       <span className="num">Line {port.port_number}</span>
       {port.sip_username === null ? (
         <StatusDot
           tone="warn"
           label="нет входа"
           reason="Линии ещё не выдан логин и пароль — выдайте их в настройках шлюза"
+          dotOnly
         />
       ) : (
-        // В строке важно «да или нет», адрес и время — подсказкой.
-        <Presence connection={port.connection} />
+        <Presence connection={port.connection} dotOnly />
       )}
     </span>
   );

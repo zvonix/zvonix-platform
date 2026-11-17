@@ -146,7 +146,7 @@ function LinesSection({ gateway, spare }: { gateway: Gateway; spare: readonly Si
         <div className="overflow-x-auto rounded-lg border border-border bg-card">
           <Table>
             <TableHeader>
-              <PortHeader />
+              <PortHeader gateway={gateway} />
             </TableHeader>
             <TableBody>
               {gateway.ports.map((port) => (

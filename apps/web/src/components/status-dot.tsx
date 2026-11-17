@@ -1,7 +1,7 @@
 'use client';
 
 import { Tooltip as TooltipPrimitive } from 'radix-ui';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 /** Цвет состояния: работает, требует внимания, авария, выключено или неважно сейчас. */
 export type StatusTone = 'ok' | 'warn' | 'crit' | 'off';
@@ -23,43 +23,98 @@ const TEXT: Record<StatusTone, string> = {
 /**
  * Состояние в строке таблицы — точка и одно-два слова, причина и подробности в подсказке
  * ([DESIGN.md](../../../../docs/DESIGN.md), «Таблица»; владелец, 2026-11-17: «много ненужной информации, всё в
- * несколько строк»). Слово остаётся рядом с точкой: один цвет не читается при нарушенном цветовосприятии.
+ * несколько строк»). Слово рядом с точкой — там, где состояние надо прочесть с первого взгляда.
  *
- * Подсказка открывается наведением, фокусом с клавиатуры **и нажатием** — на телефоне наведения нет, а причина
- * («неверный пароль») там нужнее всего. Без причины это простой текст, без лишней остановки `Tab`.
+ * `dotOnly` — одна точка, слово уходит в подсказку: для столбца, где повтор слова в каждой строке ничего не добавляет
+ * (связь линии; владелец, 2026-11-17: «не на связи помечать жёлтым значком, без надписи; при наведении — пояснение»).
+ * Тогда подсказка есть всегда, а цель нажатия — 24 px вокруг точки.
  */
 export function StatusDot({
   tone,
   label,
   reason,
+  dotOnly = false,
+  phoneDot = false,
 }: {
   tone: StatusTone;
   label: string;
   reason?: string | undefined;
+  dotOnly?: boolean;
+  /** На телефоне — только точка, слово в подсказке: иначе рубильник в конце строки уезжает за край. */
+  phoneDot?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const dot = <span aria-hidden className={`size-2 shrink-0 rounded-full ${DOT[tone]}`} />;
+  const hasReason = reason !== undefined && reason !== '';
+  if (dotOnly) {
+    return (
+      <TipTrigger
+        tip={hasReason ? `${label}: ${reason ?? ''}` : label}
+        className="inline-flex size-6 items-center justify-center"
+      >
+        {dot}
+      </TipTrigger>
+    );
+  }
+  const className = `inline-flex items-center gap-1.5 whitespace-nowrap ${TEXT[tone]}`;
   const body = (
     <>
-      <span aria-hidden className={`size-2 shrink-0 rounded-full ${DOT[tone]}`} />
-      {label}
+      {dot}
+      {phoneDot ? <span className="hidden md:inline">{label}</span> : label}
     </>
   );
-  const className = `inline-flex items-center gap-1.5 whitespace-nowrap ${TEXT[tone]}`;
-  if (reason === undefined || reason === '') return <span className={className}>{body}</span>;
+  if (!hasReason && !phoneDot) return <span className={className}>{body}</span>;
+  const full = hasReason ? `${label}: ${reason ?? ''}` : label;
+  return (
+    <TipTrigger
+      tip={phoneDot ? full : (reason ?? '')}
+      label={full}
+      className={
+        phoneDot ? `${className} min-h-6 min-w-6 justify-center md:justify-start` : className
+      }
+    >
+      {body}
+    </TipTrigger>
+  );
+}
 
+/** Короткий текст ячейки с пояснением в подсказке — «4/14» в столбце «Прогрев». */
+export function HintText({ label, reason }: { label: string; reason: string }) {
+  return (
+    <TipTrigger tip={reason} label={`${label}: ${reason}`} className="num whitespace-nowrap">
+      {label}
+    </TipTrigger>
+  );
+}
+
+/**
+ * Подсказка открывается наведением, фокусом с клавиатуры **и нажатием** — на телефоне наведения нет, а причина
+ * («неверный пароль») там нужнее всего.
+ */
+function TipTrigger({
+  tip,
+  label,
+  className,
+  children,
+}: {
+  tip: string;
+  label?: string;
+  className: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
   return (
     <TooltipPrimitive.Provider delayDuration={200}>
       <TooltipPrimitive.Root open={open} onOpenChange={setOpen}>
         <TooltipPrimitive.Trigger asChild>
           <button
             type="button"
-            aria-label={`${label}: ${reason}`}
+            aria-label={label ?? tip}
             className={`${className} cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-ring`}
             onClick={() => {
               setOpen((current) => !current);
             }}
           >
-            {body}
+            {children}
           </button>
         </TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>
@@ -68,7 +123,7 @@ export function StatusDot({
             collisionPadding={8}
             className="z-50 max-w-xs rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-card-foreground shadow-md"
           >
-            {reason}
+            {tip}
           </TooltipPrimitive.Content>
         </TooltipPrimitive.Portal>
       </TooltipPrimitive.Root>

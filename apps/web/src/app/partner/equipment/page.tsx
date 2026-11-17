@@ -30,7 +30,7 @@ import {
   type Gateway,
   type Sim,
 } from './equipment';
-import { AddGateway, SimActions } from './manage';
+import { AddGateway, SimActions, SimSwitch } from './manage';
 import { AddTrunk, TrunksSection } from './trunks';
 import { Presence } from '@/components/presence';
 import { PORT_COLUMNS, PoorConnection, PortHeader, PortRow, SimStateCell } from './ports';
@@ -166,6 +166,9 @@ function PartnerEquipment() {
                     <TableCell>
                       <RowActions>
                         <SimActions sim={sim} inPort={false} />
+                        <span className="inline-flex md:ml-1.5">
+                          <SimSwitch sim={sim} bare />
+                        </span>
                       </RowActions>
                     </TableCell>
                   </TableRow>
@@ -320,7 +323,7 @@ function GatewayCard({
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <PortHeader />
+                <PortHeader gateway={gateway} />
               </TableHeader>
               <TableBody>
                 {visible.map((port) => (

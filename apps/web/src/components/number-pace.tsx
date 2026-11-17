@@ -108,14 +108,30 @@ export function paceSummary(
       reason: `Пауза после звонка до ${CLOCK_SECONDS.format(new Date(pace.resting_until))}: живой человек не звонит без перерыва.${used}${warmup}`,
     };
   }
-  if (pace.warmup_day !== null) {
-    return {
-      tone: 'off',
-      label: `прогрев ${String(pace.warmup_day)}/${String(WARMUP_DAYS)}`,
-      reason: `Новый номер звонит понемногу, чтобы оператор не заблокировал его за массовые звонки: ${limits}. Каждые сутки больше, полностью — через ${String(WARMUP_DAYS)} суток.${used}`,
-    };
-  }
+  // Прогрев — своим столбцом (warmupCell): слово «прогрев» в каждой строке ничего не добавляло (владелец, 2026-11-17).
   return null;
+}
+
+/**
+ * Прогрев номера для своего столбца: «4/14» без слова, подробности — в подсказке. Пусто — номер прогрет или прогрев
+ * выключен.
+ */
+export function warmupCell(
+  pace: NumberPaceView | undefined,
+): { label: string; reason: string } | null {
+  if (pace === undefined || pace.warmup_day === null) return null;
+  const limits = [
+    pace.per_hour === null ? null : `в час до ${String(pace.per_hour)}`,
+    pace.per_day === null ? null : `в сутки до ${String(pace.per_day)}`,
+  ]
+    .filter((part) => part !== null)
+    .join(', ');
+  const used =
+    pace.per_day === null ? '' : ` Сегодня ${String(pace.used_day)} из ${String(pace.per_day)}.`;
+  return {
+    label: `${String(pace.warmup_day)}/${String(WARMUP_DAYS)}`,
+    reason: `Сутки прогрева ${String(pace.warmup_day)} из ${String(WARMUP_DAYS)}. Новый номер звонит понемногу, чтобы оператор не заблокировал его за массовые звонки: ${limits}. Каждые сутки больше.${used}`,
+  };
 }
 
 const CLOCK = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
