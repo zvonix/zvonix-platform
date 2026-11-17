@@ -70,7 +70,7 @@ export function BandViolations() {
         новой ценой партнёра, а не правкой старой. Сравнивается стоимость вызова в {seconds} секунд.
       </p>
 
-      <div className={`${TABLE_FRAME} max-w-[900px]`}>
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">

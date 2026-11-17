@@ -87,7 +87,7 @@ export function AccountLedger({ source, account }: { source: string; account: Le
         </p>
       )}
 
-      <div className={`max-w-[900px] ${TABLE_FRAME}`}>
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
