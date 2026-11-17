@@ -25,3 +25,12 @@ export const ROW_ICON = {
  * вбок). Ставится одинаково на заголовок и на ячейку столбца.
  */
 export const WIDE_ONLY = 'hidden md:table-cell';
+
+/** Обёртка таблицы — одна на кабинет: рамка, карточка, своя прокрутка вбок (страница вбок не едет никогда). */
+export const TABLE_FRAME = 'overflow-x-auto rounded-lg border border-border bg-card';
+
+/** Заголовок столбца — одной высоты во всех таблицах. */
+export const HEAD = 'h-8';
+
+/** Число, которое сравнивают по строкам (суммы, счётчики, проценты): моноширинно и вправо. */
+export const NUM = 'num text-right';

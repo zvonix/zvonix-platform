@@ -8,6 +8,13 @@
 
 ## Сейчас в работе
 
+- [ ] Единый стандарт таблиц во всех кабинетах ([DESIGN.md](docs/DESIGN.md), «Таблица»), ветка `feat/table-standard`:
+      - [x] стандарт и образец на «Оборудовании» партнёра; согласован с владельцем 2026-11-17
+      - [x] общие детали: `StatusDot`, `HintText`, `table-parts.tsx`, `StatusDialog` значком
+      - [ ] остальные таблицы админки, партнёра и клиента (кроме SIP-провайдеров)
+      - [ ] строка SIP-провайдера (`trunks.tsx`, `partner-trunks.tsx`) — после PR с окном его настроек
+      - [ ] снимки «было/стало» по экранам, verify, PR
+
 - [x] 4.140 (v0.1.171) Ровный темп номера и абоненты ([ADR-0106](docs/adr/0106-rovnyy-temp-nomera-i-abonenty.md)), ветка
       `feat/rovnyy-temp-nomera`:
       - [x] shared: `paceJitter`, пауза и абоненты в `callPace`; причина `recipient_limit`

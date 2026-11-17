@@ -6,6 +6,17 @@ import { useState, type ReactNode } from 'react';
 /** Цвет состояния: работает, требует внимания, авария, выключено или неважно сейчас. */
 export type StatusTone = 'ok' | 'warn' | 'crit' | 'off';
 
+/**
+ * Тон точки из классов прежней метки (`bg-ok-soft text-ok` из `lib/labels.ts`): помощники цвета состояния остаются
+ * одни на кабинет, а таблица рисует их точкой, а не плашкой.
+ */
+export function toneOf(classes: string): StatusTone {
+  if (classes.includes('text-ok')) return 'ok';
+  if (classes.includes('text-warn')) return 'warn';
+  if (classes.includes('text-crit')) return 'crit';
+  return 'off';
+}
+
 const DOT: Record<StatusTone, string> = {
   ok: 'bg-ok',
   warn: 'bg-warn',
