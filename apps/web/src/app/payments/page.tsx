@@ -2,11 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PAYMENT_STATUSES, type PaymentStatus } from '@zvonix/shared';
+import { Check, X } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { LiveSwitch } from '@/components/live-switch';
 import { Segmented } from '@/components/segmented';
+import { HintText, StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -94,16 +97,18 @@ function Payments() {
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
-              <TableHead className="h-8">Клиент</TableHead>
-              <TableHead className="h-8 text-right">Сумма</TableHead>
-              <TableHead className="h-8">Пометка</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8" />
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Когда</TableHead>
+              <TableHead className={HEAD}>Клиент</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Сумма</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Пометка</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -123,40 +128,51 @@ function Payments() {
             )}
             {list.data?.payments.map((payment) => (
               <TableRow key={payment.id}>
-                <TableCell className="num text-muted-foreground">
+                <TableCell className={`num text-muted-foreground ${WIDE_ONLY}`}>
                   {moment(payment.created_at)}
                 </TableCell>
                 <TableCell>{clients.nameOf(payment.client_id) ?? '…'}</TableCell>
-                <TableCell className="num text-right font-semibold">
-                  {money(payment.amount)}
+                {/*
+                  Строка в одну линию (DESIGN.md, «Таблица»): зачисленное иначе — в подсказке у суммы, номер заявки —
+                  у пометки, решение — у состояния.
+                */}
+                <TableCell className={`${NUM} font-semibold`}>
                   {payment.received_amount !== null &&
-                    payment.received_amount !== payment.amount && (
-                      <span className="block font-normal text-muted-foreground">
-                        зачислено {money(payment.received_amount)}
-                      </span>
-                    )}
-                </TableCell>
-                <TableCell className="whitespace-normal">
-                  <span className="num text-faint">№ {payment.id.slice(0, 8)}</span>
-                  {payment.comment !== null && <span className="block">{payment.comment}</span>}
-                  {payment.resolution_note !== null && (
-                    <span className="block text-muted-foreground">{payment.resolution_note}</span>
+                  payment.received_amount !== payment.amount ? (
+                    <HintText
+                      label={money(payment.amount)}
+                      reason={`Зачислено ${money(payment.received_amount)}`}
+                    />
+                  ) : (
+                    money(payment.amount)
                   )}
                 </TableCell>
-                <TableCell>
-                  <span className={`rounded-md px-2 py-0.5 ${PAYMENT_STATUS_TONE[payment.status]}`}>
-                    {PAYMENT_STATUS_NAME[payment.status]}
+                <TableCell className={WIDE_ONLY}>
+                  <span
+                    className="block max-w-[280px] truncate"
+                    title={`№ ${payment.id.slice(0, 8)}${payment.comment === null ? '' : `. ${payment.comment}`}`}
+                  >
+                    {payment.comment ?? (
+                      <span className="num text-faint">№ {payment.id.slice(0, 8)}</span>
+                    )}
                   </span>
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell>
+                  <StatusDot
+                    tone={toneOf(PAYMENT_STATUS_TONE[payment.status])}
+                    label={PAYMENT_STATUS_NAME[payment.status]}
+                    reason={payment.resolution_note ?? undefined}
+                  />
+                </TableCell>
+                <TableCell>
                   {canChange && payment.status === 'pending' && (
-                    <span className="flex justify-end gap-2">
+                    <RowActions>
                       <ConfirmPayment
                         payment={payment}
                         clientName={clients.nameOf(payment.client_id)}
                       />
                       <RejectPayment payment={payment} />
-                    </span>
+                    </RowActions>
                   )}
                 </TableCell>
               </TableRow>
@@ -206,10 +222,11 @@ function ConfirmPayment({
 
   return (
     <FormDialog
-      label="Подтвердить"
+      label={<Check aria-hidden className="size-4" />}
+      tooltip="Подтвердить"
+      {...ROW_ICON}
       title={`Зачислить на счёт «${clientName ?? 'клиента'}»`}
       description="Деньги появятся на остатке сразу. Отменить зачисление нельзя — только обратная операция."
-      size="xs"
       onOpenChange={(open) => {
         if (open) setAmount(payment.amount);
       }}
@@ -255,11 +272,11 @@ function RejectPayment({ payment }: { payment: Payment }) {
 
   return (
     <FormDialog
-      label="Отклонить"
+      label={<X aria-hidden className="size-4" />}
+      tooltip="Отклонить"
+      {...ROW_ICON}
       title={`Отклонить заявку на ${money(payment.amount)}`}
       description="Деньги не зачисляются. Причину увидит клиент."
-      variant="outline"
-      size="xs"
       onOpenChange={(open) => {
         if (open) setReason('');
       }}

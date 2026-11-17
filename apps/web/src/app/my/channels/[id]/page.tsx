@@ -19,6 +19,7 @@ import {
 } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -392,15 +393,16 @@ function SummaryTab({ channel }: { channel: Channel }) {
           {failed.message}
         </p>
       )}
-      <div className="max-w-2xl overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={`max-w-2xl ${TABLE_FRAME}`}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Период</TableHead>
-              <TableHead className="h-8 text-right">Вызовов</TableHead>
-              <TableHead className="h-8 text-right">Отвечено</TableHead>
-              <TableHead className="h-8 text-right">Минут</TableHead>
-              <TableHead className="h-8 text-right">Потрачено</TableHead>
+              <TableHead className={HEAD}>Период</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Вызовов</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Отвечено</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Отвечено, %</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Минут</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Потрачено</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -410,20 +412,25 @@ function SummaryTab({ channel }: { channel: Channel }) {
               const share = row === undefined ? undefined : asr(row);
               return (
                 <TableRow key={period.days}>
-                  <TableCell>{period.label}</TableCell>
-                  <TableCell className="num text-right">
+                  <TableCell className="whitespace-nowrap">{period.label}</TableCell>
+                  <TableCell className={NUM}>
                     {rows === undefined ? '…' : (row?.calls ?? 0)}
                   </TableCell>
-                  <TableCell className="num text-right">
+                  <TableCell className={NUM}>
                     {rows === undefined ? '…' : (row?.answered ?? 0)}
-                    {share !== undefined && (
-                      <span className="text-faint"> · {Math.round(share)}%</span>
+                  </TableCell>
+                  {/* Доля — своим столбцом, а не хвостом « · » у числа отвеченных. */}
+                  <TableCell className={NUM}>
+                    {share === undefined ? (
+                      <span className="text-faint">—</span>
+                    ) : (
+                      `${String(Math.round(share))}%`
                     )}
                   </TableCell>
-                  <TableCell className="num text-right">
+                  <TableCell className={NUM}>
                     {rows === undefined ? '…' : Math.round((row?.talk_seconds ?? 0) / 60)}
                   </TableCell>
-                  <TableCell className="num text-right">
+                  <TableCell className={NUM}>
                     {rows === undefined ? '…' : money(row?.spent ?? '0')}
                   </TableCell>
                 </TableRow>

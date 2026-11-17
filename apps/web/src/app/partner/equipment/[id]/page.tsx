@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { ConsoleShell } from '@/components/console-shell';
 import { Presence } from '@/components/presence';
 import { useTariffName } from '@/components/tariff-select';
+import { TABLE_FRAME } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableHeader } from '@/components/ui/table';
 import { GATEWAY_TYPE_NAME } from '@/lib/labels';
@@ -143,10 +144,10 @@ function LinesSection({ gateway, spare }: { gateway: Gateway; spare: readonly Si
           сколько слотов под SIM на корпусе.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <div className={TABLE_FRAME}>
           <Table>
             <TableHeader>
-              <PortHeader />
+              <PortHeader gateway={gateway} />
             </TableHeader>
             <TableBody>
               {gateway.ports.map((port) => (

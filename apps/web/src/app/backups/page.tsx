@@ -1,10 +1,14 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Download as DownloadIcon, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -252,15 +256,17 @@ function Backups() {
 
       {restoreRun !== undefined && <RestoreProgress id={restoreRun} onFinished={refresh} />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
-              <TableHead className="h-8">Откуда</TableHead>
-              <TableHead className="h-8 text-right">Размер</TableHead>
-              <TableHead className="h-8">Проверка</TableHead>
-              <TableHead className="h-8" />
+              <TableHead className={HEAD}>Когда</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Откуда</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Размер</TableHead>
+              <TableHead className={HEAD}>Проверка</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -274,53 +280,55 @@ function Backups() {
             {items.map((backup) => (
               <TableRow key={backup.id}>
                 <TableCell className="num">{moment(backup.created_at)}</TableCell>
-                <TableCell>{KIND_NAME[backup.kind]}</TableCell>
-                <TableCell className="num text-right">{size(backup.size)}</TableCell>
-                <TableCell className="whitespace-normal">
+                <TableCell className={WIDE_ONLY}>{KIND_NAME[backup.kind]}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{size(backup.size)}</TableCell>
+                {/* Состояние — точкой и словом; когда и что показала проверка — в подсказке (DESIGN.md, «Таблица»). */}
+                <TableCell>
                   {active.some(
                     (job) => job.target === backup.id && job.action === 'backup-verify',
                   ) ? (
-                    <span className="text-muted-foreground">идёт проверка…</span>
+                    <StatusDot tone="off" label="идёт проверка…" />
                   ) : backup.check === null ? (
-                    <span className="text-muted-foreground">не проверялась</span>
+                    <StatusDot tone="off" label="не проверялась" />
                   ) : backup.check.ok ? (
-                    <span className="text-ok">
-                      проверена · {ago(backup.check.at)}
-                      <span className="block text-muted-foreground">{backup.check.detail}</span>
-                    </span>
+                    <StatusDot
+                      tone="ok"
+                      label="проверена"
+                      reason={`${ago(backup.check.at)}. ${backup.check.detail}`}
+                    />
                   ) : (
-                    <span className="text-crit">
-                      не прошла проверку
-                      <span className="block text-muted-foreground">{backup.check.detail}</span>
-                    </span>
+                    <StatusDot tone="crit" label="не прошла" reason={backup.check.detail} />
                   )}
                 </TableCell>
-                <TableCell className="text-right">
-                  <span className="flex justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      disabled={busy !== undefined}
-                      onClick={() => {
-                        act.mutate({
-                          key: `verify:${backup.id}`,
-                          path: '/backups/verify',
-                          body: { id: backup.id },
-                          what: 'Проверка',
-                          done: 'Копия проверена.',
-                        });
-                      }}
-                    >
-                      {busy === `verify:${backup.id}` ? 'Проверяем…' : 'Проверить'}
-                    </Button>
+                <TableCell>
+                  <RowActions>
+                    <WithTooltip label="Проверить">
+                      <Button
+                        {...ROW_ICON}
+                        type="button"
+                        aria-label="Проверить"
+                        aria-busy={busy === `verify:${backup.id}`}
+                        disabled={busy !== undefined}
+                        onClick={() => {
+                          act.mutate({
+                            key: `verify:${backup.id}`,
+                            path: '/backups/verify',
+                            body: { id: backup.id },
+                            what: 'Проверка',
+                            done: 'Копия проверена.',
+                          });
+                        }}
+                      >
+                        <ShieldCheck aria-hidden className="size-4" />
+                      </Button>
+                    </WithTooltip>
                     <Download backup={backup} disabled={busy !== undefined} onDone={refresh} />
                     <Restore
                       backup={backup}
                       disabled={busy !== undefined || restoreRun !== undefined}
                       onStarted={setRestoreRun}
                     />
-                  </span>
+                  </RowActions>
                 </TableCell>
               </TableRow>
             ))}
@@ -343,11 +351,11 @@ function Download({
 }) {
   return (
     <FormDialog
-      label="Скачать"
+      label={<DownloadIcon aria-hidden className="size-4" />}
+      tooltip="Скачать"
+      {...ROW_ICON}
       title="Скачать копию"
       description={`${KIND_NAME[backup.kind]}, ${moment(backup.created_at)}`}
-      variant="outline"
-      size="xs"
       disabled={disabled}
     >
       <DialogForm
@@ -399,11 +407,11 @@ function Restore({
 
   return (
     <FormDialog
-      label="Восстановить"
+      label={<RotateCcw aria-hidden className="size-4" />}
+      tooltip="Восстановить"
+      {...ROW_ICON}
       title="Восстановить базу из копии"
       description={`${KIND_NAME[backup.kind]}, ${moment(backup.created_at)}`}
-      variant="outline"
-      size="xs"
       disabled={disabled}
     >
       <DialogForm

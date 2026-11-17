@@ -15,7 +15,10 @@ import {
   useJournalFilter,
   journalOutcome,
 } from '@/components/message-journal';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
+import { WithTooltip } from '@/components/ui/tooltip';
+import { MessageSquareText } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -235,21 +238,24 @@ export function SendMessages() {
         />
       )}
       {enabled && (
-        <div className="rounded-lg border border-border bg-card">
+        <div className={TABLE_FRAME}>
           <Table>
             <TableHeader>
               <TableRow className="text-muted-foreground hover:bg-transparent">
-                <TableHead className="h-8">Принято</TableHead>
-                <TableHead className="h-8">Кому</TableHead>
-                <TableHead className="h-8">Текст</TableHead>
+                <TableHead className={HEAD}>Принято</TableHead>
+                <TableHead className={HEAD}>Кому</TableHead>
+                <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Текст</TableHead>
                 <StageHeads />
-                <TableHead className="h-8 text-right">Стоимость</TableHead>
+                <TableHead className={`${HEAD} text-right`}>Стоимость</TableHead>
+                <TableHead className={`${HEAD} w-px`}>
+                  <span className="sr-only">Действия</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {list.data?.messages.length === 0 && (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={7} className="whitespace-normal text-muted-foreground">
+                  <TableCell colSpan={8} className="whitespace-normal text-muted-foreground">
                     {filter.status === '' && filter.from === '' && filter.to === ''
                       ? 'Сообщений пока нет.'
                       : 'По этому отбору сообщений нет.'}
@@ -267,7 +273,7 @@ export function SendMessages() {
                     <TableCell>
                       <span className="num">{message.to}</span>
                     </TableCell>
-                    <TableCell className="max-w-[320px]">
+                    <TableCell className={`max-w-[320px] ${WIDE_ONLY}`}>
                       <span className="block truncate" title={message.text}>
                         {message.status === 'refused' ? (
                           <span className="text-faint">текст не хранится</span>
@@ -277,24 +283,31 @@ export function SendMessages() {
                           message.text
                         )}
                       </span>
-                      {message.full_text !== null && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOpened(message.id);
-                          }}
-                          className="text-sm text-primary underline-offset-2 hover:underline"
-                        >
-                          Полный текст
-                        </button>
-                      )}
                     </TableCell>
                     <StageCells message={message} refundNote />
-                    <TableCell className="num text-right">
+                    <TableCell className={NUM}>
                       {message.cost === null ? (
                         <span className="text-faint">—</span>
                       ) : (
                         money(message.cost)
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {/* «Полный текст» — значком в конце строки, а не второй строкой под текстом. */}
+                      {message.full_text !== null && (
+                        <RowActions>
+                          <WithTooltip label="Полный текст">
+                            <Button
+                              {...ROW_ICON}
+                              aria-label="Полный текст"
+                              onClick={() => {
+                                setOpened(message.id);
+                              }}
+                            >
+                              <MessageSquareText aria-hidden className="size-4" />
+                            </Button>
+                          </WithTooltip>
+                        </RowActions>
                       )}
                     </TableCell>
                   </TableRow>

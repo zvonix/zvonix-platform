@@ -2,13 +2,17 @@
 
 import type { AccountRest } from '@/components/messenger-status';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Pencil, Star, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { Hint } from '@/components/hint';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
 import {
   Table,
@@ -406,15 +410,17 @@ export function MaxTariffs() {
       </div>
       {makeDefault.error instanceof ApiError && <ErrorNote error={makeDefault.error} />}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Тариф</TableHead>
-              <TableHead className="h-8 text-right">Цена за сообщение</TableHead>
-              <TableHead className="h-8">Лимиты</TableHead>
-              <TableHead className="h-8 text-right">Аккаунтов</TableHead>
-              <TableHead className="h-8" />
+              <TableHead className={HEAD}>Тариф</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Цена за сообщение</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Лимиты</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Аккаунтов</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -428,52 +434,55 @@ export function MaxTariffs() {
             )}
             {tariffs.map((tariff) => (
               <TableRow key={tariff.id}>
-                <TableCell>
+                <TableCell className="whitespace-nowrap">
                   {tariff.name}
+                  {/* Пометка словом, а не плашкой: чипов в таблицах нет (DESIGN.md, «Таблица»). */}
                   {tariff.is_default && (
-                    <span className="ml-2 rounded-md bg-muted px-1.5 py-0.5 text-xs">
-                      по умолчанию
-                    </span>
+                    <span className="ml-2 text-muted-foreground">по умолчанию</span>
                   )}
                 </TableCell>
-                <TableCell className="num text-right">{money(tariff.price)}</TableCell>
-                <TableCell className="num text-muted-foreground">
+                <TableCell className={NUM}>{money(tariff.price)}</TableCell>
+                <TableCell className={`num whitespace-nowrap text-muted-foreground ${WIDE_ONLY}`}>
                   {limitsText(tariff.limit_per_minute, tariff.limit_per_hour, tariff.limit_per_day)}
                 </TableCell>
-                <TableCell className="num text-right">{tariff.accounts}</TableCell>
-                <TableCell className="text-right">
-                  <span className="flex flex-wrap justify-end gap-2">
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{tariff.accounts}</TableCell>
+                <TableCell>
+                  <RowActions>
                     <FormDialog
-                      label="Изменить"
+                      label={<Pencil aria-hidden className="size-4" />}
+                      tooltip="Изменить"
+                      {...ROW_ICON}
                       title={`Тариф «${tariff.name}»`}
-                      variant="outline"
-                      size="xs"
                     >
                       <TariffForm tariff={tariff} />
                     </FormDialog>
                     {!tariff.is_default && (
-                      <button
-                        type="button"
-                        disabled={makeDefault.isPending}
-                        onClick={() => {
-                          makeDefault.mutate(tariff.id);
-                        }}
-                        className="min-h-7 rounded-md border border-border px-2 hover:bg-muted"
-                      >
-                        По умолчанию
-                      </button>
+                      <WithTooltip label="По умолчанию">
+                        <Button
+                          type="button"
+                          {...ROW_ICON}
+                          aria-label="По умолчанию"
+                          disabled={makeDefault.isPending}
+                          onClick={() => {
+                            makeDefault.mutate(tariff.id);
+                          }}
+                        >
+                          <Star aria-hidden className="size-4" />
+                        </Button>
+                      </WithTooltip>
                     )}
                     {!tariff.is_default && (
                       <ConfirmAction
-                        label="Удалить"
+                        label={<Trash2 aria-hidden className="size-4" />}
+                        tooltip="Удалить"
+                        {...ROW_ICON}
                         title={`Удалить тариф «${tariff.name}»`}
                         consequence="Тариф будет удалён. Аккаунты на нём остаться не должны: сначала назначьте им другой тариф."
                         confirmLabel="Удалить"
-                        size="xs"
                         onConfirm={() => remove.mutateAsync(tariff.id)}
                       />
                     )}
-                  </span>
+                  </RowActions>
                 </TableCell>
               </TableRow>
             ))}

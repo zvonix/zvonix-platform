@@ -5,7 +5,11 @@ import { useEffect, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
+import { WithTooltip } from '@/components/ui/tooltip';
+import { Power, RotateCcw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -125,18 +129,20 @@ function Accounts({ routes }: { routes: React.ReactNode }) {
       </div>
       {exclusion.error instanceof ApiError && <ErrorNote error={exclusion.error} />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="h-8">Маршрут</TableHead>
-              <TableHead className="h-8">Аккаунт</TableHead>
-              <TableHead className="h-8 text-right">Цена</TableHead>
-              <TableHead className="h-8">«СТОП»</TableHead>
-              <TableHead className="h-8">Рекомендованная работа</TableHead>
-              <TableHead className="h-8 text-right">Работает</TableHead>
-              <TableHead className="h-8">Подходит</TableHead>
-              <TableHead className="h-8"> </TableHead>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className={HEAD}>Маршрут</TableHead>
+              <TableHead className={`${HEAD} w-px`}>Аккаунт</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Цена</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>«СТОП»</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Рекомендованная работа</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Работает, сут</TableHead>
+              <TableHead className={HEAD}>Подходит</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -149,37 +155,50 @@ function Accounts({ routes }: { routes: React.ReactNode }) {
             )}
             {sorted.map((offer) => (
               <TableRow key={offer.id} className={fits(offer) ? undefined : 'opacity-70'}>
-                <TableCell>{offer.partner}</TableCell>
-                <TableCell>аккаунт {String(offer.number)}</TableCell>
-                <TableCell className="num text-right">{money(offer.price)}</TableCell>
-                <TableCell>
+                <TableCell className="whitespace-nowrap">{offer.partner}</TableCell>
+                {/* «аккаунт» было в каждой строке — оно в заголовке столбца (DESIGN.md, «Таблица»). */}
+                <TableCell className="num">{String(offer.number)}</TableCell>
+                <TableCell className={NUM}>{money(offer.price)}</TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {offer.stop_line ? 'есть' : <span className="text-muted-foreground">нет</span>}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {offer.recommended ? 'да' : <span className="text-muted-foreground">нет</span>}
                 </TableCell>
-                <TableCell className="num text-right">{String(offer.age_days)} сут</TableCell>
-                <TableCell className="whitespace-normal">
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{String(offer.age_days)}</TableCell>
+                <TableCell>
                   {offer.excluded ? (
-                    <span className="text-muted-foreground">отключён вами</span>
+                    <StatusDot
+                      tone="off"
+                      label="отключён вами"
+                      reason="сообщения через этот аккаунт не идут; вернуть — значком справа"
+                    />
                   ) : offer.reasons.length === 0 ? (
-                    <span className="text-ok">да</span>
+                    <StatusDot tone="ok" label="да" />
                   ) : (
-                    <span className="text-warn">нет: {offer.reasons.join(', ')}</span>
+                    <StatusDot tone="warn" label="нет" reason={offer.reasons.join(', ')} />
                   )}
                 </TableCell>
-                <TableCell className="w-px">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={exclusion.isPending}
-                    onClick={() => {
-                      exclusion.mutate({ id: offer.id, excluded: !offer.excluded });
-                    }}
-                  >
-                    {offer.excluded ? 'Вернуть' : 'Отключить'}
-                  </Button>
+                <TableCell>
+                  <RowActions>
+                    <WithTooltip label={offer.excluded ? 'Вернуть' : 'Отключить'}>
+                      <Button
+                        type="button"
+                        {...ROW_ICON}
+                        aria-label={offer.excluded ? 'Вернуть' : 'Отключить'}
+                        disabled={exclusion.isPending}
+                        onClick={() => {
+                          exclusion.mutate({ id: offer.id, excluded: !offer.excluded });
+                        }}
+                      >
+                        {offer.excluded ? (
+                          <RotateCcw aria-hidden className="size-4" />
+                        ) : (
+                          <Power aria-hidden className="size-4" />
+                        )}
+                      </Button>
+                    </WithTooltip>
+                  </RowActions>
                 </TableCell>
               </TableRow>
             ))}

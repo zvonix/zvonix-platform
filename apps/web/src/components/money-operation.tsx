@@ -1,8 +1,9 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { ROW_ICON } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import { request } from '@/lib/api';
 import { money, moneyFromInput, numberFromInput } from '@/lib/money';
@@ -38,6 +39,7 @@ export function MoneyOperation({
   variant,
   invalidate,
   reasonOptional = false,
+  icon,
 }: {
   /** Адрес действия: `/partners/<id>/payout`. */
   path: string;
@@ -55,6 +57,8 @@ export function MoneyOperation({
   invalidate: readonly string[];
   /** Основание можно не писать (пополнение): сервер запишет «Ручное пополнение». */
   reasonOptional?: boolean;
+  /** Значок вместо надписи — в строке таблицы (DESIGN.md, «Таблица»); надпись становится подсказкой. */
+  icon?: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState('');
@@ -89,10 +93,11 @@ export function MoneyOperation({
   return (
     <div className="flex flex-col gap-1">
       <FormDialog
-        label={label}
         title={title}
         description={description}
-        {...(variant === undefined ? {} : { variant })}
+        {...(icon === undefined
+          ? { label, ...(variant === undefined ? {} : { variant }) }
+          : { label: icon, tooltip: label, ...ROW_ICON })}
         onOpenChange={(open) => {
           if (open) setDone(undefined);
         }}

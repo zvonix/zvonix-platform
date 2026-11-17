@@ -6,6 +6,8 @@ import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { PeriodPicker } from '@/components/period-picker';
+import { ClippedText, StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -159,7 +161,8 @@ function ReportView() {
             what="Аккаунт"
             rows={report.data.accounts.map((row) => ({
               key: row.account_id,
-              title: `${row.label} · ${row.partner_name}`,
+              title: row.label,
+              hint: `Партнёр: ${row.partner_name}`,
               note: accountNote(row),
               row,
             }))}
@@ -183,20 +186,27 @@ function Section({
   rows,
   what,
 }: {
-  rows: { key: string; title: string; note?: string | undefined; row: Counts }[];
+  rows: {
+    key: string;
+    title: string;
+    /** Второстепенное о строке (чей аккаунт) — в подсказке у названия. */
+    hint?: string | undefined;
+    note?: string | undefined;
+    row: Counts;
+  }[];
   what: string;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-border bg-card">
+    <div className={TABLE_FRAME}>
       <Table>
         <TableHeader>
           <TableRow className="text-muted-foreground hover:bg-transparent">
-            <TableHead className="h-8">{what}</TableHead>
-            <TableHead className="h-8 text-right">Принято</TableHead>
-            <TableHead className="h-8 text-right">Доставлено</TableHead>
-            <TableHead className="h-8 text-right">Не отправлено</TableHead>
-            <TableHead className="h-8">Причины отказов</TableHead>
-            <TableHead className="h-8 text-right">Не прочитано</TableHead>
+            <TableHead className={HEAD}>{what}</TableHead>
+            <TableHead className={`${HEAD} text-right`}>Принято</TableHead>
+            <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Доставлено</TableHead>
+            <TableHead className={`${HEAD} text-right`}>Не отправлено</TableHead>
+            <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Причины отказов</TableHead>
+            <TableHead className={`${HEAD} text-right`}>Не прочитано</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -207,7 +217,7 @@ function Section({
               </TableCell>
             </TableRow>
           )}
-          {rows.map(({ key, title, note, row }) => {
+          {rows.map(({ key, title, hint, note, row }) => {
             const unread =
               row.settled < MIN_SETTLED
                 ? undefined
@@ -217,20 +227,28 @@ function Section({
               absent !== undefined && absent >= ABSENT_WARN && row.total >= MIN_SETTLED;
             return (
               <TableRow key={key}>
-                <TableCell className="whitespace-normal">
-                  {title}
-                  {note !== undefined && <span className="ml-2 text-crit">{note}</span>}
+                <TableCell>
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                    <ClippedText text={title} hint={hint} />
+                    {note !== undefined && <StatusDot tone="crit" label={note} />}
+                  </span>
                 </TableCell>
-                <TableCell className="num text-right">{row.total}</TableCell>
-                <TableCell className="num text-right">{row.delivered}</TableCell>
-                <TableCell className={`num text-right ${absentHigh ? 'text-warn' : ''}`}>
+                <TableCell className={NUM}>{row.total}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{row.delivered}</TableCell>
+                <TableCell className={`${NUM} ${absentHigh ? 'text-warn' : ''}`}>
                   {row.failed}
                 </TableCell>
-                <TableCell className="whitespace-normal text-muted-foreground">
-                  {reasons(row)}
+                <TableCell className={`text-muted-foreground ${WIDE_ONLY}`}>
+                  {/* Причины длинные — обрезаются, полностью в подсказке: строка одна линия. */}
+                  <span
+                    className="inline-block max-w-72 truncate align-bottom"
+                    title={reasons(row)}
+                  >
+                    {reasons(row)}
+                  </span>
                 </TableCell>
                 <TableCell
-                  className={`num text-right ${unread !== undefined && unread >= UNREAD_WARN ? 'text-warn' : ''}`}
+                  className={`${NUM} ${unread !== undefined && unread >= UNREAD_WARN ? 'text-warn' : ''}`}
                 >
                   {unread === undefined ? '—' : `${String(unread)} %`}
                 </TableCell>
@@ -280,18 +298,18 @@ function Journal({ journal }: { journal: Report['journal'] }) {
           {String(journal.blocked)}, сообщений {String(journal.sent_via_accounts)})
         </span>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Аккаунт</TableHead>
-              <TableHead className="h-8 text-right">Нет MAX</TableHead>
-              <TableHead className="h-8 text-right">Есть MAX</TableHead>
-              <TableHead className="h-8 text-right">Предел проверок</TableHead>
-              <TableHead className="h-8 text-right">Не удалось</TableHead>
-              <TableHead className="h-8 text-right">Блокировок</TableHead>
-              <TableHead className="h-8 text-right">Пауз</TableHead>
-              <TableHead className="h-8 text-right">Выходов</TableHead>
+              <TableHead className={HEAD}>Аккаунт</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Нет MAX</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Есть MAX</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Предел проверок</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Не удалось</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Блокировок</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Пауз</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Выходов</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -304,20 +322,29 @@ function Journal({ journal }: { journal: Report['journal'] }) {
             )}
             {journal.accounts.map((row) => (
               <TableRow key={row.account_id}>
-                <TableCell className="whitespace-normal">{`${row.label} · ${row.partner_name}`}</TableCell>
-                <TableCell className="num text-right">{row.checks.absent}</TableCell>
-                <TableCell className="num text-right">{row.checks.exists}</TableCell>
+                <TableCell>
+                  <span
+                    className="inline-block max-w-56 truncate align-bottom"
+                    title={`Партнёр: ${row.partner_name}`}
+                  >
+                    {row.label}
+                  </span>
+                </TableCell>
+                <TableCell className={NUM}>{row.checks.absent}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{row.checks.exists}</TableCell>
                 <TableCell
-                  className={`num text-right ${row.checks.limited > 0 ? 'text-warn' : ''}`}
+                  className={`${NUM} ${WIDE_ONLY} ${row.checks.limited > 0 ? 'text-warn' : ''}`}
                 >
                   {row.checks.limited}
                 </TableCell>
-                <TableCell className="num text-right">{row.checks.unknown}</TableCell>
-                <TableCell className={`num text-right ${row.blocked > 0 ? 'text-crit' : ''}`}>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{row.checks.unknown}</TableCell>
+                <TableCell className={`${NUM} ${row.blocked > 0 ? 'text-crit' : ''}`}>
                   {row.blocked}
                 </TableCell>
-                <TableCell className="num text-right">{row.health_paused}</TableCell>
-                <TableCell className="num text-right">{row.logged_out + row.suspended}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{row.health_paused}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {row.logged_out + row.suspended}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -358,15 +385,15 @@ function Routes({ rows }: { rows: readonly RouteRow[] }) {
           </p>
         </Hint>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="h-8">Клиент</TableHead>
-              <TableHead className="h-8 text-right">Людей</TableHead>
-              <TableHead className="h-8 text-right">В боте</TableHead>
-              <TableHead className="h-8 text-right">Через бота</TableHead>
-              <TableHead className="h-8 text-right">Через аккаунты</TableHead>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className={HEAD}>Клиент</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Людей</TableHead>
+              <TableHead className={`${HEAD} text-right`}>В боте</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Через бота</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Через аккаунты</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -380,15 +407,15 @@ function Routes({ rows }: { rows: readonly RouteRow[] }) {
             {rows.map((row) => (
               <TableRow key={row.client_id}>
                 <TableCell>{row.name}</TableCell>
-                <TableCell className="num text-right">{String(row.recipients)}</TableCell>
-                <TableCell className="num text-right">
+                <TableCell className={NUM}>{String(row.recipients)}</TableCell>
+                <TableCell className={`${NUM} whitespace-nowrap`}>
                   {String(row.in_bot)}{' '}
                   <span className="text-muted-foreground">
                     ({percentText(row.in_bot, row.recipients)})
                   </span>
                 </TableCell>
-                <TableCell className="num text-right">{String(row.via_bot)}</TableCell>
-                <TableCell className="num text-right">{String(row.via_accounts)}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{String(row.via_bot)}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{String(row.via_accounts)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

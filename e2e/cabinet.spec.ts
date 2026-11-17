@@ -152,7 +152,7 @@ test.describe('заявки', () => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/applications');
     const row = page.getByRole('row', { name: /Смирнов Олег Петрович/u });
-    await row.getByRole('button', { name: 'Одобрить' }).click();
+    await row.getByRole('button', { name: 'Одобрить', exact: true }).click();
 
     const dialog = page.getByRole('alertdialog');
     await dialog.getByLabel('Псевдоним для клиентов').fill('Партнёр 40');
@@ -166,8 +166,10 @@ test.describe('заявки', () => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/applications');
     const row = page.getByRole('row', { name: /Кузнецова Мария/u });
-    await expect(row.getByText('почта не подтверждена — одобрить пока нельзя')).toBeVisible();
-    await expect(row.getByRole('button', { name: 'Одобрить' })).toBeDisabled();
+    await expect(
+      row.getByRole('button', { name: /^почта не подтверждена: Одобрить пока нельзя/u }),
+    ).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Одобрить', exact: true })).toBeDisabled();
   });
 
   test('письмо не дошло — администратор подтверждает адрес вручную, и одобрить можно', async ({
@@ -181,8 +183,10 @@ test.describe('заявки', () => {
     await expect(dialog).toContainText('журнал');
     await dialog.getByRole('button', { name: 'Подтвердить адрес' }).click();
 
-    await expect(row.getByText('почта не подтверждена — одобрить пока нельзя')).toHaveCount(0);
-    await expect(row.getByRole('button', { name: 'Одобрить' })).toBeEnabled();
+    await expect(
+      row.getByRole('button', { name: /^почта не подтверждена: Одобрить пока нельзя/u }),
+    ).toHaveCount(0);
+    await expect(row.getByRole('button', { name: 'Одобрить', exact: true })).toBeEnabled();
   });
 });
 
@@ -1805,7 +1809,7 @@ test.describe('партнёр добавляет своё оборудовани
     await expect(page.getByText(`Входы линий шлюза «${gatewayName}»`)).toBeVisible();
     await closeSecret(page);
     await expect(page.getByRole('region', { name: gatewayName, exact: true })).toContainText(
-      'карт 0 из 4',
+      'карт 0/4',
     );
 
     await page.getByRole('link', { name: gatewayName, exact: true }).click();
@@ -1979,14 +1983,14 @@ test.describe('операторы связи (ADR-0053)', () => {
     await page.getByRole('link', { name: 'GOIP с префиксами' }).click();
 
     const lines = page.getByRole('region', { name: 'Линии и SIM-карты' });
-    await expect(lines.getByRole('row', { name: /^1 префикс 99001/u })).toBeVisible();
-    await expect(lines.getByRole('row', { name: /^2 префикс 99002/u })).toBeVisible();
+    await expect(lines.getByRole('row', { name: /^1 99001/u })).toBeVisible();
+    await expect(lines.getByRole('row', { name: /^2 99002/u })).toBeVisible();
 
     await page.getByRole('link', { name: 'Подключение GOIP' }).click();
     await expect(page.getByText('Single Server Mode')).toBeVisible();
     await expect(page.getByText('Match Callee')).toBeVisible();
     const prefixes = page.getByRole('table', { name: 'Префиксы линий' });
-    await expect(prefixes.getByRole('row', { name: 'Line 2 99002' })).toBeVisible();
+    await expect(prefixes.getByRole('row', { name: /^2 99002/u })).toBeVisible();
   });
 });
 
@@ -2106,10 +2110,9 @@ test.describe('оборудование одной таблицей, вход п
     await expect(toggle).not.toBeChecked();
     await toggle.click();
     await expect(toggle).toBeChecked();
-    await expect(group.getByText('Включена', { exact: true })).toBeVisible();
     await toggle.click();
+    // Слов «Включена/Выключена» в строке нет: это показывает сам рубильник (DESIGN.md, «Таблица»).
     await expect(toggle).not.toBeChecked();
-    await expect(group.getByText('Выключена вами', { exact: true })).toBeVisible();
     await expect(group.getByText('79135550001')).toBeVisible();
   });
 });

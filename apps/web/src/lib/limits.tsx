@@ -16,9 +16,11 @@ import {
   type LimitSetBy,
   type LimitWindow,
 } from '@zvonix/shared';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { ROW_ICON } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import { request } from './api';
 import { plural } from './format';
@@ -268,7 +270,12 @@ export function ChangeLimit({
   const [value, setValue] = useState(String(row.value));
   const number = Number(value);
   return (
-    <FormDialog label="Изменить" title="Изменить лимит" variant="outline" size="sm">
+    <FormDialog
+      label={<Pencil aria-hidden className="size-4" />}
+      tooltip="Изменить"
+      {...ROW_ICON}
+      title="Изменить лимит"
+    >
       <DialogForm
         submitLabel="Сохранить"
         canSubmit={Number.isInteger(number) && number >= 1 && number !== row.value}
@@ -308,7 +315,9 @@ export function RemoveLimit({
   const refresh = useRefresh(scope);
   return (
     <ConfirmAction
-      label="Удалить"
+      label={<Trash2 aria-hidden className="size-4" />}
+      tooltip="Удалить"
+      {...ROW_ICON}
       title="Удалить лимит"
       consequence={
         <p>

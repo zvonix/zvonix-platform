@@ -2,6 +2,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { APPLICATION_STATUSES, type ApplicationStatus, type Cabinet } from '@zvonix/shared';
+import { Check, X } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { Choice } from '@/components/choice';
 import { ConfirmAction } from '@/components/confirm-action';
@@ -9,6 +10,8 @@ import { ConfirmEmailButton } from '@/components/confirm-email-button';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { PageNav } from '@/components/page-nav';
+import { ClippedText, StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -134,16 +137,18 @@ function ApplicationsTable() {
       )}
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Заявитель</TableHead>
-              <TableHead className="h-8">Кабинет</TableHead>
-              <TableHead className="h-8">Анкета</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Подана</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Заявитель</TableHead>
+              <TableHead className={HEAD}>Кабинет</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Анкета</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Подана</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -219,49 +224,60 @@ function ApplicationRow({
   const phone =
     typeof application.answers['phone'] === 'string' ? application.answers['phone'] : '';
 
+  const unconfirmed = open && !application.applicant.email_confirmed;
+  // Почта и телефон — в подсказке к имени, анкета обрезается: строка в одну линию (DESIGN.md, «Таблица»).
+  const contacts = [application.applicant.email, phone].filter((part) => part !== '').join(', ');
+  const answers = answersLine(application);
+
   return (
     <TableRow>
-      <TableCell className="whitespace-normal">
-        <div>{application.applicant.full_name}</div>
-        <div className="num text-muted-foreground">{application.applicant.email}</div>
-        {phone !== '' && <div className="num text-muted-foreground">{phone}</div>}
+      <TableCell>
+        <ClippedText text={application.applicant.full_name} hint={contacts} />
       </TableCell>
       <TableCell>{CABINET_KIND_NAME[application.cabinet]}</TableCell>
-      <TableCell className="max-w-[360px] whitespace-normal">
-        {answersLine(application)}
-        {application.decision_note !== null && (
-          <div className="text-muted-foreground">Причина отказа: {application.decision_note}</div>
-        )}
+      <TableCell className={WIDE_ONLY}>
+        <ClippedText text={answers} width="max-w-64" />
       </TableCell>
       <TableCell>
-        <span className={`rounded-sm px-1.5 py-0.5 ${applicationTone(application.status)}`}>
-          {APPLICATION_STATUS_NAME[application.status]}
-        </span>
-        {open && !application.applicant.email_confirmed && (
-          <div className="flex flex-col items-start gap-1 pt-1">
-            <span className="text-warn">почта не подтверждена — одобрить пока нельзя</span>
-            {canChange && (
+        {unconfirmed ? (
+          <StatusDot
+            tone="warn"
+            label="почта не подтверждена"
+            reason="Одобрить пока нельзя: заявитель не перешёл по ссылке из письма. Если адрес проверен иначе — подтвердите его вручную значком справа."
+          />
+        ) : (
+          <StatusDot
+            tone={toneOf(applicationTone(application.status))}
+            label={APPLICATION_STATUS_NAME[application.status]}
+            reason={
+              application.decision_note === null
+                ? undefined
+                : `причина отказа — ${application.decision_note}`
+            }
+          />
+        )}
+      </TableCell>
+      <TableCell className={WIDE_ONLY}>
+        <span className="num text-muted-foreground">{moment(application.created_at)}</span>
+      </TableCell>
+      <TableCell>
+        {canChange && open && (
+          <RowActions>
+            {unconfirmed && (
               <ConfirmEmailButton
                 userId={application.applicant.id}
                 email={application.applicant.email}
+                icon
               />
             )}
-          </div>
-        )}
-      </TableCell>
-      <TableCell>
-        <span className="num text-muted-foreground">{moment(application.created_at)}</span>
-      </TableCell>
-      <TableCell className="whitespace-normal">
-        {canChange && open && (
-          <div className="flex flex-wrap gap-2">
             <ConfirmAction
-              label="Одобрить"
+              label={<Check aria-hidden className="size-4" />}
+              tooltip="Одобрить"
+              {...ROW_ICON}
               title={`Одобрить заявку: ${application.applicant.full_name}`}
               tone="neutral"
-              variant="default"
               disabled={!application.applicant.email_confirmed}
-              className={application.applicant.email_confirmed ? '' : 'cursor-not-allowed'}
+              className={`${ROW_ICON.className} ${application.applicant.email_confirmed ? '' : 'cursor-not-allowed'}`}
               confirmLabel="Одобрить и открыть кабинет"
               consequence={
                 application.cabinet === 'client' ? (
@@ -304,7 +320,9 @@ function ApplicationRow({
               )}
             </ConfirmAction>
             <ConfirmAction
-              label="Отказать"
+              label={<X aria-hidden className="size-4" />}
+              tooltip="Отказать"
+              {...ROW_ICON}
               title={`Отказать: ${application.applicant.full_name}`}
               confirmLabel="Отказать и отправить письмо"
               consequence={
@@ -334,7 +352,7 @@ function ApplicationRow({
                 />
               </div>
             </ConfirmAction>
-          </div>
+          </RowActions>
         )}
       </TableCell>
     </TableRow>

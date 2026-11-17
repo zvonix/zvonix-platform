@@ -13,6 +13,8 @@ import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
 import { PeriodInput } from '@/components/period-input';
+import { ClippedText, HintText, StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -323,17 +325,17 @@ function CallsView() {
         </p>
       )}
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Когда</TableHead>
-              <TableHead className="h-8">Клиент и канал</TableHead>
-              <TableHead className="h-8">Куда</TableHead>
-              <TableHead className="h-8">Через кого</TableHead>
-              <TableHead className="h-8">Итог</TableHead>
-              <TableHead className="h-8 text-right">Деньги</TableHead>
-              <TableHead className="h-8 text-right">Длительность</TableHead>
+              <TableHead className={HEAD}>Когда</TableHead>
+              <TableHead className={HEAD}>Клиент и канал</TableHead>
+              <TableHead className={HEAD}>Куда</TableHead>
+              <TableHead className={HEAD}>Через кого</TableHead>
+              <TableHead className={HEAD}>Итог</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Деньги</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Длительность</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -385,7 +387,7 @@ function CallRow({
         <span className="num text-muted-foreground">{moment(call.started_at)}</span>
       </TableCell>
 
-      {/* Строка — одна линия: второстепенное бледно через « · », а не второй строкой под главным. */}
+      {/* Строка — одна линия: второстепенное — в подсказке, а не хвостом « · » (DESIGN.md, «Таблица»). */}
       <TableCell className="whitespace-nowrap">
         {/* Клик по клиенту отбирает вызовы по нему: разбор обращения начинается
             с одной строки и продолжается по всему клиенту (DESIGN.md). */}
@@ -393,88 +395,72 @@ function CallRow({
           type="button"
           onClick={onFilterClient}
           className="text-left underline-offset-2 hover:underline"
+          title={`Канал «${call.channel.name}» — показать все вызовы клиента`}
         >
           {call.client.name}
         </button>
-        <span className="text-faint"> · {call.channel.name}</span>
       </TableCell>
 
       <TableCell className="whitespace-nowrap">
-        <span className="num">{call.destination}</span>
-        <span className="text-faint">
-          {' · '}
-          {call.operator?.name ?? 'оператор не определён'}
-          {call.region !== null && ` · ${call.region}`}
-        </span>
+        <HintText
+          label={call.destination}
+          reason={[call.operator?.name ?? 'оператор не определён', call.region]
+            .filter(Boolean)
+            .join(', ')}
+        />
       </TableCell>
 
       {/* Длинное имя шлюза обрезается многоточием, целиком — в подсказке: таблица не уезжает вбок. */}
-      <TableCell
-        className="max-w-[280px] truncate"
-        title={
-          call.partner === null
-            ? undefined
-            : [
-                call.partner.name,
-                call.termination_kind === null
-                  ? null
-                  : TERMINATION_KIND_NAME[call.termination_kind],
-                call.gateway?.name,
-                call.sim?.msisdn,
-              ]
-                .filter(Boolean)
-                .join(' · ')
-        }
-      >
+      <TableCell>
         {call.partner === null ? (
           <span className="text-faint">до выбора не дошло</span>
         ) : (
-          <>
-            {call.partner.name}
-            <span className="text-faint">
-              {call.termination_kind !== null &&
-                ` · ${TERMINATION_KIND_NAME[call.termination_kind]}`}
-              {' · '}
-              {call.gateway?.name ?? '—'}
-              {call.sim !== null && ` · ${call.sim.msisdn}`}
-            </span>
-          </>
+          <ClippedText
+            text={call.partner.name}
+            width="max-w-[220px]"
+            hint={[
+              call.partner.name,
+              call.termination_kind === null ? null : TERMINATION_KIND_NAME[call.termination_kind],
+              call.gateway?.name,
+              call.sim?.msisdn,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          />
         )}
       </TableCell>
 
-      <TableCell
-        className="max-w-[300px] truncate"
-        title={call.failure_reason === null ? undefined : FAILURE_REASON_FIX[call.failure_reason]}
-      >
-        <span className={`rounded-md px-2 py-0.5 ${callTone(call.status)}`}>
-          {CALL_STATUS_NAME[call.status]}
-        </span>
-        {call.failure_reason !== null && (
-          <span
-            className="ml-2 cursor-help underline decoration-dotted underline-offset-4"
-            title={FAILURE_REASON_FIX[call.failure_reason]}
-          >
-            {FAILURE_REASON_NAME[call.failure_reason]}
-          </span>
-        )}
+      {/* Итог — точкой и словом; почему не состоялся и что делать — в подсказке (DESIGN.md, «Таблица»). */}
+      <TableCell className="max-w-[300px] truncate">
+        <StatusDot
+          tone={toneOf(callTone(call.status))}
+          // Разбор вызовов: причина отказа видна сразу — словом у точки, что делать — в подсказке.
+          label={
+            call.failure_reason === null
+              ? CALL_STATUS_NAME[call.status]
+              : FAILURE_REASON_NAME[call.failure_reason]
+          }
+          reason={
+            call.failure_reason === null
+              ? undefined
+              : `${CALL_STATUS_NAME[call.status]}. ${FAILURE_REASON_FIX[call.failure_reason]}`
+          }
+        />
         <EndCause cause={call.end_cause} sip={call.end_sip} status={call.status} />
       </TableCell>
 
-      <TableCell className="num text-right whitespace-nowrap">
+      <TableCell className={`${NUM} whitespace-nowrap`}>
         {call.money === null ? (
           <span className="text-faint">—</span>
         ) : (
-          <span
-            className="cursor-help"
-            title={`Списано с клиента ${money(call.money.client)}; партнёру ${money(call.money.partner)}; площадке ${money(call.money.margin)}`}
-          >
-            {money(call.money.client)}
-            <span className="text-faint"> · {money(call.money.margin)}</span>
-          </span>
+          <HintText
+            label={money(call.money.client)}
+            reason={`Списано с клиента ${money(call.money.client)}; партнёру ${money(call.money.partner)}; площадке ${money(call.money.margin)}`}
+          />
         )}
       </TableCell>
 
-      <TableCell className="num text-right whitespace-nowrap">
+      <TableCell className={`${NUM} whitespace-nowrap`}>
         <span className="inline-flex items-center justify-end gap-1">
           {recordingId !== undefined && (
             <ListenButton

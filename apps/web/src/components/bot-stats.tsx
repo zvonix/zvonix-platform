@@ -9,6 +9,8 @@ import { FilterInput } from '@/components/filter-input';
 import { Hint } from '@/components/hint';
 import { PageNav } from '@/components/page-nav';
 import { PeriodPicker } from '@/components/period-picker';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -251,16 +253,16 @@ export function BotStats({ base }: { base: string }) {
             />
           </div>
         </div>
-        <div className="rounded-lg border border-border bg-card">
+        <div className={TABLE_FRAME}>
           <Table>
             <TableHeader>
               <TableRow className="text-muted-foreground hover:bg-transparent">
-                <TableHead className="h-8">Имя</TableHead>
-                <TableHead className="h-8">Номер</TableHead>
-                <TableHead className="h-8">С какого числа</TableHead>
-                <TableHead className="h-8">Состояние</TableHead>
-                <TableHead className="h-8 text-right">Сообщений</TableHead>
-                <TableHead className="h-8">Последнее</TableHead>
+                <TableHead className={HEAD}>Имя</TableHead>
+                <TableHead className={HEAD}>Номер</TableHead>
+                <TableHead className={`${HEAD} ${WIDE_ONLY}`}>С какого числа</TableHead>
+                <TableHead className={HEAD}>Состояние</TableHead>
+                <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Сообщений</TableHead>
+                <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Последнее</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -281,18 +283,17 @@ export function BotStats({ base }: { base: string }) {
                       <span className="num">{row.phone}</span>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={WIDE_ONLY}>
                     <span className="num text-muted-foreground">{moment(row.since)}</span>
                   </TableCell>
                   <TableCell>
-                    <span
-                      className={`rounded-md px-2 py-0.5 ${row.state === 'started' ? 'bg-ok-soft text-ok' : 'bg-muted text-muted-foreground'}`}
-                    >
-                      {row.state === 'started' ? 'Подписан' : 'Остановил'}
-                    </span>
+                    <StatusDot
+                      tone={row.state === 'started' ? 'ok' : 'off'}
+                      label={row.state === 'started' ? 'Подписан' : 'Остановил'}
+                    />
                   </TableCell>
-                  <TableCell className="num text-right">{String(row.messages)}</TableCell>
-                  <TableCell>
+                  <TableCell className={`${NUM} ${WIDE_ONLY}`}>{String(row.messages)}</TableCell>
+                  <TableCell className={WIDE_ONLY}>
                     <span className="num text-muted-foreground">
                       {row.last_message_at === null ? '—' : moment(row.last_message_at)}
                     </span>

@@ -2,10 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { COMMISSION_MAX_BASIS_POINTS, type CommissionProduct } from '@zvonix/shared';
+import { Pencil } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, FormDialog } from '@/components/form-dialog';
+import { StatusDot, type StatusTone } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import { DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -108,10 +111,10 @@ const since = (value: string): string =>
 const shareText = (basisPoints: string): string =>
   (Number(basisPoints) / 100).toString().replace('.', ',');
 
-const STATE_VIEW: Record<RuleState, { readonly label: string; readonly className: string }> = {
-  current: { label: 'Действует', className: 'text-ok' },
-  planned: { label: 'Начнёт действовать', className: 'text-warn' },
-  replaced: { label: 'Заменено', className: 'text-faint' },
+const STATE_VIEW: Record<RuleState, { readonly label: string; readonly tone: StatusTone }> = {
+  current: { label: 'Действует', tone: 'ok' },
+  planned: { label: 'Начнёт действовать', tone: 'warn' },
+  replaced: { label: 'Заменено', tone: 'off' },
 };
 
 /**
@@ -192,16 +195,20 @@ export function CommissionRules({ product }: { product: CommissionProduct }) {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">К кому относится</TableHead>
-              <TableHead className="h-8 text-right">Доля</TableHead>
-              <TableHead className="h-8 text-right">{text.fee}</TableHead>
-              <TableHead className="h-8">Действует с</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              {canChange && <TableHead className="h-8" />}
+              <TableHead className={HEAD}>К кому относится</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Доля</TableHead>
+              <TableHead className={`${HEAD} text-right`}>{text.fee}</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Действует с</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              {canChange && (
+                <TableHead className={`${HEAD} w-px`}>
+                  <span className="sr-only">Действия</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -224,19 +231,25 @@ export function CommissionRules({ product }: { product: CommissionProduct }) {
                     ))
                   )}
                 </TableCell>
-                <TableCell className="num text-right">
-                  {percent(rule.percent_basis_points)}
-                </TableCell>
-                <TableCell className="num text-right">{money(rule.fixed_fee)}</TableCell>
-                <TableCell>
+                <TableCell className={NUM}>{percent(rule.percent_basis_points)}</TableCell>
+                <TableCell className={NUM}>{money(rule.fixed_fee)}</TableCell>
+                <TableCell className={WIDE_ONLY}>
                   <span className="num text-muted-foreground">{since(rule.effective_from)}</span>
                 </TableCell>
-                <TableCell className={STATE_VIEW[state].className}>
-                  {STATE_VIEW[state].label}
+                <TableCell>
+                  <StatusDot
+                    tone={STATE_VIEW[state].tone}
+                    label={STATE_VIEW[state].label}
+                    phoneDot
+                  />
                 </TableCell>
                 {canChange && (
-                  <TableCell className="text-right">
-                    {state === 'current' && <EditRule product={product} rule={rule} />}
+                  <TableCell>
+                    {state === 'current' && (
+                      <RowActions>
+                        <EditRule product={product} rule={rule} />
+                      </RowActions>
+                    )}
                   </TableCell>
                 )}
               </TableRow>
@@ -253,11 +266,11 @@ function EditRule({ product, rule }: { product: CommissionProduct; rule: Commiss
   const [open, setOpen] = useState(false);
   return (
     <FormDialog
-      label="Изменить"
+      label={<Pencil aria-hidden className="size-4" />}
+      tooltip="Изменить"
+      {...ROW_ICON}
       title="Изменить правило наценки"
       description="Заводится новое правило на место действующего; прежнее остаётся в истории."
-      variant="outline"
-      size="sm"
       open={open}
       onOpenChange={setOpen}
     >

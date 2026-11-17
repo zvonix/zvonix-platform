@@ -5,6 +5,8 @@ import { useState } from 'react';
 import { ExportButton, type ExportTable } from '@/components/export-button';
 import { PageNav } from '@/components/page-nav';
 import { PeriodInput } from '@/components/period-input';
+import { StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD } from '@/components/table-parts';
 import { Switch } from '@/components/ui/switch';
 import { TableCell, TableHead } from '@/components/ui/table';
 import { moment } from '@/lib/format';
@@ -209,9 +211,9 @@ function delay(from: Date, to: Date): string {
 export function StageHeads() {
   return (
     <>
-      <TableHead className="h-8">Ушло</TableHead>
-      <TableHead className="h-8">Доставлено</TableHead>
-      <TableHead className="h-8">Прочитано</TableHead>
+      <TableHead className={HEAD}>Ушло</TableHead>
+      <TableHead className={HEAD}>Доставлено</TableHead>
+      <TableHead className={HEAD}>Прочитано</TableHead>
     </>
   );
 }
@@ -219,7 +221,7 @@ export function StageHeads() {
 /**
  * Ячейки «Ушло · Доставлено · Прочитано» вместо одного «Итога» (владелец, 2026-10-23: «видеть, когда отправлено, доставлено и
  * прочитано»). Состояние читается по тому, до какого столбца дошло время; полная дата и задержка от прошлого этапа — в подсказке.
- * Не отправлено — одна строка на три столбца с причиной; ещё не ушло — «в очереди» или «отправляется» в первом.
+ * Не отправлено — точка на три столбца, причина в подсказке; ещё не ушло — «в очереди» или «отправляется» в первом.
  */
 export function StageCells({
   message,
@@ -231,30 +233,31 @@ export function StageCells({
 }) {
   if (message.status === 'refused') {
     return (
-      <TableCell colSpan={3} className="whitespace-normal">
-        <span className="rounded-md bg-muted px-2 py-0.5 text-muted-foreground">
-          Отклонено при приёме
-        </span>
-        {message.failure_reason !== null && (
-          <span className="pl-2 text-muted-foreground">
-            {MESSAGE_REFUSAL_NAME[message.failure_reason] ?? message.failure_reason}
-          </span>
-        )}
+      <TableCell colSpan={3}>
+        <StatusDot
+          tone="off"
+          label="Отклонено при приёме"
+          reason={
+            message.failure_reason === null
+              ? undefined
+              : (MESSAGE_REFUSAL_NAME[message.failure_reason] ?? message.failure_reason)
+          }
+        />
       </TableCell>
     );
   }
   if (message.status === 'failed') {
     return (
-      <TableCell colSpan={3} className="whitespace-normal">
-        <span className={`rounded-md px-2 py-0.5 ${messageTone('failed')}`}>
-          {MESSAGE_STATUS_NAME['failed'] ?? 'Не отправлено'}
-        </span>
-        {message.failure_reason !== null && (
-          <span className="pl-2 text-muted-foreground">
-            {MESSAGE_FAILURE_NAME[message.failure_reason] ?? message.failure_reason}
-            {refundNote && '; деньги возвращены'}
-          </span>
-        )}
+      <TableCell colSpan={3}>
+        <StatusDot
+          tone={toneOf(messageTone('failed'))}
+          label={MESSAGE_STATUS_NAME['failed'] ?? 'Не отправлено'}
+          reason={
+            message.failure_reason === null
+              ? undefined
+              : `${MESSAGE_FAILURE_NAME[message.failure_reason] ?? message.failure_reason}${refundNote ? '; деньги возвращены' : ''}`
+          }
+        />
       </TableCell>
     );
   }
@@ -274,9 +277,10 @@ export function StageCells({
           return (
             <TableCell key={stage.after}>
               {waiting ? (
-                <span className={`rounded-md px-2 py-0.5 ${messageTone(message.status)}`}>
-                  {MESSAGE_STATUS_NAME[message.status] ?? message.status}
-                </span>
+                <StatusDot
+                  tone={toneOf(messageTone(message.status))}
+                  label={MESSAGE_STATUS_NAME[message.status] ?? message.status}
+                />
               ) : (
                 <span className="text-faint">—</span>
               )}

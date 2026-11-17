@@ -1555,6 +1555,7 @@ export class TelephonyService {
   async updateTrunk(
     gatewayId: GatewayId,
     changes: {
+      name?: string;
       proxyHost?: string;
       registersOutbound?: boolean;
       outboundUsername?: string | null;
@@ -1567,6 +1568,16 @@ export class TelephonyService {
   ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
     const before = await this.repository.findTrunk(gatewayId);
     if (before === undefined) throw notFound('Транк не найден');
+
+    // Название живёт у шлюза, остальное — у транка.
+    const gateway =
+      changes.name === undefined || changes.name === before.gateway.name
+        ? before.gateway
+        : await this.repository.setGatewayDetails(gatewayId, {
+            name: changes.name,
+            model: before.gateway.model,
+          });
+    if (gateway === undefined) throw notFound('Транк не найден');
 
     const updated = await this.repository.updateTrunk(gatewayId, {
       ...(changes.proxyHost === undefined ? {} : { proxyHost: changes.proxyHost }),
@@ -1592,18 +1603,13 @@ export class TelephonyService {
       entityId: gatewayId,
       actorUserId,
       actorRole,
-      before: toTrunkAudit(before.trunk),
-      after: toTrunkAudit(updated),
+      before: { name: before.gateway.name, ...toTrunkAudit(before.trunk) },
+      after: { name: gateway.name, ...toTrunkAudit(updated) },
     });
 
-    return { gateway: before.gateway, trunk: updated };
+    return { gateway, trunk: updated };
   }
 
-  /**
-   * Партнёр просит безлимит для своего провайдера
-   * ([ADR-0119](../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)). Повтор ничего не меняет:
-   * время первого запроса остаётся, по нему администратор видит, как долго ждут.
-   */
   /** Связь узла с его провайдерами (ADR-0121): узел присылает её с пульсом. */
   async recordTrunkLinks(
     nodeId: Id<'node'>,
@@ -1613,6 +1619,11 @@ export class TelephonyService {
     return this.repository.recordTrunkLinks(nodeId, links, at);
   }
 
+  /**
+   * Партнёр просит безлимит для своего провайдера
+   * ([ADR-0119](../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)). Повтор ничего не меняет:
+   * время первого запроса остаётся, по нему администратор видит, как долго ждут.
+   */
   async requestOwnTrunkUnlimited(
     gatewayId: GatewayId,
     partnerId: PartnerId,
@@ -1706,6 +1717,34 @@ export class TelephonyService {
       username: row.trunk.outboundUsername,
       password: this.openSecret(row.trunk.outboundSecret, row.gateway.id),
     }));
+  }
+
+  /**
+   * Пароль провайдера — показать в окне настроек (владелец, 2026-11-17: «кнопку показать пароль и при необходимости
+   * изменить»). Только по нажатию «показать», не в списке; каждый показ — в журнале. `partnerId` — из кабинета
+   * партнёра: чужой транк не находится.
+   */
+  async revealTrunkSecret(
+    gatewayId: GatewayId,
+    partnerId: PartnerId | undefined,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<string | null> {
+    const found = await this.repository.findTrunk(gatewayId);
+    if (found === undefined || (partnerId !== undefined && found.gateway.partnerId !== partnerId)) {
+      throw notFound('SIP-провайдер не найден');
+    }
+    const secret = this.openSecret(found.trunk.outboundSecret, gatewayId);
+    await this.audit.record({
+      action: 'sip_trunk.secret_viewed',
+      entityType: 'gateway',
+      entityId: gatewayId,
+      actorUserId,
+      actorRole,
+      before: null,
+      after: { has_secret: secret !== null },
+    });
+    return secret;
   }
 
   /** Пароль провайдера в базе — только зашифрованным. Пусто остаётся пустым. */

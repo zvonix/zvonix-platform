@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { LiveSwitch } from '@/components/live-switch';
 import { useLiveInterval } from '@/lib/live';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
@@ -18,6 +18,9 @@ import {
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { GATEWAY_TYPE_NAME, REGISTRATION_MODE_NAME } from '@/lib/labels';
+import { ROW_ICON, RowActions } from '@/components/table-parts';
+import { StatusDot } from '@/components/status-dot';
+import { Tooltip } from '@/components/ui/tooltip';
 import {
   EQUIPMENT_KEY,
   gatewayStateName,
@@ -30,7 +33,7 @@ import {
 import { AddGateway, SimActions, SimSwitch } from './manage';
 import { AddTrunk, TrunksSection } from './trunks';
 import { Presence } from '@/components/presence';
-import { PORT_COLUMNS, PoorConnection, PortHeader, PortRow } from './ports';
+import { PORT_COLUMNS, PoorConnection, PortHeader, PortRow, SimStateCell } from './ports';
 
 export default function PartnerEquipmentPage() {
   return (
@@ -135,8 +138,8 @@ function PartnerEquipment() {
             Карты вне шлюзов
           </h3>
           <p className="max-w-prose text-muted-foreground">
-            Вынутые из портов карты вызовов не получают. Вставить такую карту можно кнопкой
-            «Вставить SIM» у пустого порта в таблице выше.
+            Вынутые из портов карты вызовов не получают. Вставить такую карту можно значком «+» у
+            пустого порта в таблице выше.
           </p>
           <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <Table>
@@ -145,7 +148,9 @@ function PartnerEquipment() {
                   <TableHead className="h-8">Номер</TableHead>
                   <TableHead className="h-8">Оператор</TableHead>
                   <TableHead className="h-8">Состояние</TableHead>
-                  <TableHead className="h-8" />
+                  <TableHead className="h-8 w-px">
+                    <span className="sr-only">Действия</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -156,10 +161,15 @@ function PartnerEquipment() {
                       {sim.operator_name ?? <span className="text-faint">—</span>}
                     </TableCell>
                     <TableCell>
-                      <SimSwitch sim={sim} />
+                      <SimStateCell sim={sim} />
                     </TableCell>
                     <TableCell>
-                      <SimActions sim={sim} inPort={false} />
+                      <RowActions>
+                        <SimActions sim={sim} inPort={false} />
+                        <span className="inline-flex md:ml-1.5">
+                          <SimSwitch sim={sim} bare />
+                        </span>
+                      </RowActions>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -253,17 +263,22 @@ function GatewayCard({
       aria-label={gateway.name}
       className="overflow-hidden rounded-lg border border-border bg-card"
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-muted/40 px-3 py-2">
+      {/*
+        Шапка шлюза — тоже одна линия (DESIGN.md, «Таблица»): название, модель, состояние точкой и словом, карты,
+        настройки значком. Способ входа и «включён» — в подсказке состояния и в настройках шлюза.
+      */}
+      <div className="flex items-center gap-3 border-b border-border bg-muted/40 py-1.5 pr-2 pl-1">
         <Button
           variant="ghost"
-          size="xs"
+          size="icon-xs"
+          className="size-7"
           aria-expanded={expanded}
           aria-label={`${expanded ? 'Свернуть' : 'Раскрыть'} порты шлюза «${gateway.name}»`}
           onClick={onToggle}
         >
           <Chevron aria-hidden className="size-4" />
         </Button>
-        <h3 className="min-w-0 font-semibold [overflow-wrap:anywhere]">
+        <h3 className="min-w-0 truncate font-semibold" title={gateway.name}>
           <Link
             href={`/partner/equipment/${gateway.id}`}
             className="text-primary underline-offset-4 hover:underline"
@@ -271,26 +286,32 @@ function GatewayCard({
             {gateway.name}
           </Link>
         </h3>
-        <span className="text-muted-foreground">
-          {GATEWAY_TYPE_NAME[gateway.type]}
-          {gateway.model !== null && ` · ${gateway.model}`}
-          {gateway.type === 'goip' && ` · ${REGISTRATION_MODE_NAME[gateway.registration_mode]}`}
+        <span className="hidden shrink-0 text-muted-foreground sm:inline">
+          {gateway.model ?? GATEWAY_TYPE_NAME[gateway.type]}
         </span>
-        <span>
-          {gatewayStateName(gateway)}
-          {gateway.poor_connection === true && <PoorConnection />}
+        <span className="shrink-0">
+          <GatewayState gateway={gateway} />
         </span>
-        <Presence connection={gateway.connection} />
-        <span className="text-muted-foreground">
-          карт <span className="num">{filled.length}</span> из{' '}
-          <span className="num">{gateway.ports.length}</span>
+        {gateway.poor_connection === true && (
+          <span className="hidden shrink-0 sm:inline">
+            <PoorConnection />
+          </span>
+        )}
+        <span className="ml-auto shrink-0 text-muted-foreground">
+          карт{' '}
+          <span className="num text-foreground">
+            {filled.length}/{gateway.ports.length}
+          </span>
         </span>
-        <Link
-          href={`/partner/equipment/${gateway.id}`}
-          className="ml-auto text-primary underline-offset-4 hover:underline"
-        >
-          Настройки →
-        </Link>
+        <RowActions>
+          <Tooltip label="Настройки шлюза">
+            <Button {...ROW_ICON} asChild>
+              <Link href={`/partner/equipment/${gateway.id}`} aria-label="Настройки шлюза">
+                <Settings aria-hidden className="size-4" />
+              </Link>
+            </Button>
+          </Tooltip>
+        </RowActions>
       </div>
 
       {expanded &&
@@ -302,7 +323,7 @@ function GatewayCard({
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <PortHeader />
+                <PortHeader gateway={gateway} />
               </TableHeader>
               <TableBody>
                 {visible.map((port) => (
@@ -338,6 +359,47 @@ function GatewayCard({
         ))}
     </section>
   );
+}
+
+/**
+ * Состояние шлюза одним словом: включённый — на связи ли он; иначе — почему не работает. Способ входа и адрес —
+ * в подсказке и в настройках шлюза, а не в шапке.
+ */
+function GatewayState({ gateway }: { gateway: Gateway }) {
+  if (gateway.status === 'active' && gateway.suspended_by === null) {
+    return <Presence connection={gateway.connection} />;
+  }
+  const label = gatewayStateName(gateway).toLowerCase();
+  const mode =
+    gateway.type === 'goip' ? ` ${REGISTRATION_MODE_NAME[gateway.registration_mode]}.` : '';
+  if (gateway.status === 'pending') {
+    return (
+      <StatusDot
+        tone="warn"
+        label={label}
+        reason={`Шлюз ещё не включён: карты не получают вызовов. Включите его на странице шлюза.${mode}`}
+      />
+    );
+  }
+  if (gateway.suspended_by === 'platform') {
+    return (
+      <StatusDot
+        tone="crit"
+        label={label}
+        reason="Шлюз отключила площадка — напишите в поддержку"
+      />
+    );
+  }
+  if (gateway.suspended_by === 'failure_threshold') {
+    return (
+      <StatusDot
+        tone="warn"
+        label={label}
+        reason="Много неудачных вызовов подряд. Проверьте шлюз тестовым звонком и включите его на странице шлюза"
+      />
+    );
+  }
+  return <StatusDot tone="off" label={label} />;
 }
 
 /** Номера портов короткой записью: `2, 3, 5–8`. */

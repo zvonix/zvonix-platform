@@ -3,7 +3,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { ConsoleShell } from '@/components/console-shell';
 import { Hint } from '@/components/hint';
-import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { money } from '@/lib/money';
 
@@ -57,23 +65,38 @@ function MessagePrices() {
           </p>
         </Hint>
       </div>
-      <div className="rounded-lg border border-border bg-card">
+      {/* «за сообщение» и «в месяц» — заголовками столбцов, а не словами в каждой ячейке (DESIGN.md, «Таблица»). */}
+      <div className={TABLE_FRAME}>
         <Table>
+          <TableHeader>
+            <TableRow className="text-muted-foreground hover:bg-transparent">
+              <TableHead className={HEAD}>Как</TableHead>
+              <TableHead className={`${HEAD} text-right`}>За сообщение</TableHead>
+              <TableHead className={`${HEAD} text-right`}>В месяц</TableHead>
+            </TableRow>
+          </TableHeader>
           <TableBody>
             {viaAccounts !== null && (
               <TableRow>
-                <TableCell>Через аккаунты партнёров</TableCell>
-                <TableCell className="num text-right">{money(viaAccounts)} за сообщение</TableCell>
+                <TableCell className="whitespace-nowrap">Через аккаунты партнёров</TableCell>
+                <TableCell className={NUM}>{money(viaAccounts)}</TableCell>
+                <TableCell className={NUM}>
+                  <span className="text-faint">—</span>
+                </TableCell>
               </TableRow>
             )}
             {viaBot !== null && (
               <TableRow>
-                <TableCell>Через бота</TableCell>
-                <TableCell className="num text-right">
-                  {Number(viaBot.message_price) === 0
-                    ? 'бесплатно'
-                    : `${money(viaBot.message_price)} за сообщение`}
-                  {Number(viaBot.monthly_fee) === 0 ? '' : `, ${money(viaBot.monthly_fee)} в месяц`}
+                <TableCell className="whitespace-nowrap">Через бота</TableCell>
+                <TableCell className={NUM}>
+                  {Number(viaBot.message_price) === 0 ? 'бесплатно' : money(viaBot.message_price)}
+                </TableCell>
+                <TableCell className={NUM}>
+                  {Number(viaBot.monthly_fee) === 0 ? (
+                    <span className="text-faint">—</span>
+                  ) : (
+                    money(viaBot.monthly_fee)
+                  )}
                 </TableCell>
               </TableRow>
             )}

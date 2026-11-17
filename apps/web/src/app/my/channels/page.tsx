@@ -19,8 +19,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
 import { request } from '@/lib/api';
-import { CHANNELS_KEY, ConnectionState, StateBadge, useChannels, type Channel } from './channels';
+import { CHANNELS_KEY, ConnectionState, StateDot, useChannels, type Channel } from './channels';
 
 const COLUMNS = 4;
 
@@ -111,14 +112,14 @@ function MyChannels() {
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Линия</TableHead>
-              <TableHead className="h-8">Подключение</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8 text-right">Разговоров сейчас</TableHead>
+              <TableHead className={HEAD}>Линия</TableHead>
+              <TableHead className={HEAD}>Подключение</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Разговоров сейчас</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -140,26 +141,23 @@ function MyChannels() {
 
             {channels.map((channel) => (
               <TableRow key={channel.id}>
-                <TableCell className="max-w-72 whitespace-normal">
+                {/* Комментарий — подсказкой к названию, целиком он на странице линии: строка в одну линию. */}
+                <TableCell>
                   <Link
                     href={`/my/channels/${channel.id}`}
-                    className="font-medium text-primary underline-offset-4 hover:underline"
+                    title={channel.comment ?? undefined}
+                    className="inline-block max-w-72 truncate align-bottom font-medium text-primary underline-offset-4 hover:underline"
                   >
                     {channel.name}
                   </Link>
-                  {channel.comment !== null && (
-                    <span className="block truncate text-faint" title={channel.comment}>
-                      {channel.comment}
-                    </span>
-                  )}
                 </TableCell>
                 <TableCell>
                   <ConnectionState channel={channel} />
                 </TableCell>
                 <TableCell>
-                  <StateBadge channel={channel} />
+                  <StateDot channel={channel} />
                 </TableCell>
-                <TableCell className="num text-right">
+                <TableCell className={NUM}>
                   {channel.open_calls ?? 0}
                   {channel.max_concurrent_calls !== null && (
                     <span className="text-faint"> из {channel.max_concurrent_calls}</span>

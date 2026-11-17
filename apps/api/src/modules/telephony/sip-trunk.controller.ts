@@ -201,6 +201,39 @@ export class SipTrunkController {
     return this.checks.check(parseId(id, 'gateway'), partner.id);
   }
 
+  /** Пароль провайдера — по нажатию «показать» в окне настроек; показ — в журнале. */
+  @Roles('admin')
+  @Get('sip-trunks/:id/secret')
+  async secret(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ password: string | null }> {
+    const password = await this.telephony.revealTrunkSecret(
+      parseId(id, 'gateway'),
+      undefined,
+      parseId(actor.userId, 'user'),
+      actor.role,
+    );
+    return { password };
+  }
+
+  /** То же для своего провайдера из кабинета партнёра. */
+  @Cabinets('partner')
+  @Get('partner/sip-trunks/:id/secret')
+  async partnerSecret(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ password: string | null }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const password = await this.telephony.revealTrunkSecret(
+      parseId(id, 'gateway'),
+      partner.id,
+      parseId(actor.userId, 'user'),
+      actor.role,
+    );
+    return { password };
+  }
+
   /** Партнёр просит безлимит для своего провайдера (ADR-0119); решает администратор. */
   @Cabinets('partner')
   @Post('partner/sip-trunks/:id/unlimited-request')
@@ -268,6 +301,7 @@ function trunkChanges(
   body: z.infer<typeof updateSipTrunkSchema>,
 ): Parameters<TelephonyService['updateTrunk']>[1] {
   return {
+    ...(body.name === undefined ? {} : { name: body.name }),
     ...(body.proxyHost === undefined ? {} : { proxyHost: body.proxyHost }),
     ...(body.registersOutbound === undefined ? {} : { registersOutbound: body.registersOutbound }),
     ...(body.outboundUsername === undefined ? {} : { outboundUsername: body.outboundUsername }),

@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NODE_OFFLINE_AFTER_MS, type NodeStatus } from '@zvonix/shared';
+import { Settings, SquareTerminal, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
@@ -9,6 +10,8 @@ import { ErrorNote } from '@/components/error-note';
 import { DialogForm, FormDialog } from '@/components/form-dialog';
 import { OneTimeSecret } from '@/components/one-time-secret';
 import { ReadOnly } from '@/components/read-only';
+import { StatusDot, toneOf, type StatusTone } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -25,7 +28,7 @@ import { NODE_STATUS_MEANING, NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
 import { AllowedIpsField, parseAddresses } from './allowed-ips';
 import { NewNodeForm, type NodeDraft } from './new-node-form';
 import { NodeSettingsForm, type NodeSettingsDraft } from './node-settings';
-import { SipCheckBadge, type SipCheck } from './sip-check';
+import type { SipCheck } from './sip-check';
 
 const COLUMNS = 8;
 
@@ -199,18 +202,20 @@ function NodesView() {
         </OneTimeSecret>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Узел</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Адрес SIP</TableHead>
-              <TableHead className="h-8 text-right">Вызовов</TableHead>
-              <TableHead className="h-8">Последний отклик</TableHead>
-              <TableHead className="h-8">Агент</TableHead>
-              <TableHead className="h-8">Набор</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Узел</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={HEAD}>Адрес SIP</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Вызовов</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Последний отклик</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Агент</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Набор</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -271,46 +276,45 @@ function NodeRows({
 
   return (
     <TableRow>
+      {/* Имя машины — подсказкой у названия: строка таблицы в одну линию (DESIGN.md, «Таблица»). */}
       <TableCell>
-        {node.name}
-        <span className="num block text-faint" translate="no">
-          {node.hostname ?? 'машина не отвечала'}
-        </span>
+        <span title={node.hostname ?? 'машина не отвечала'}>{node.name}</span>
       </TableCell>
 
       <TableCell>
-        <span
-          className={`rounded-md px-2 py-0.5 ${nodeTone(node.status)}`}
-          title={NODE_STATUS_MEANING[node.status]}
-        >
-          {NODE_STATUS_NAME[node.status]}
-        </span>
+        <StatusDot
+          tone={toneOf(nodeTone(node.status))}
+          label={NODE_STATUS_NAME[node.status]}
+          reason={NODE_STATUS_MEANING[node.status]}
+          phoneDot
+        />
       </TableCell>
 
       <TableCell>
         {node.sip_address === null ? (
           // Без адреса партнёрам и клиентам подключаться некуда (ADR-0113) — это не мелочь, а причина тишины.
-          <span
-            className="text-warn"
-            title="Площадка определяет адрес по сигналам узла; узел за NAT или с частным адресом — задайте адрес в «Настройках»"
-          >
-            не задан — GOIP подключать некуда
-          </span>
+          <StatusDot
+            tone="warn"
+            label="не задан"
+            reason="GOIP подключать некуда. Площадка определяет адрес по сигналам узла; узел за NAT или с частным адресом — задайте адрес в «Настройках»"
+          />
         ) : (
-          <span className="num" translate="no">
-            {node.sip_address}
+          <span className="inline-flex items-center gap-1 whitespace-nowrap">
+            <span className="num" translate="no">
+              {node.sip_address}
+            </span>
+            <SipCheckDot check={node.sip_check ?? null} />
           </span>
         )}
-        <SipCheckBadge check={node.sip_check ?? null} />
       </TableCell>
 
-      <TableCell className="num text-right">{node.active_calls}</TableCell>
+      <TableCell className={`${NUM} ${WIDE_ONLY}`}>{node.active_calls}</TableCell>
 
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         <Heartbeat at={node.last_heartbeat_at} closed={closed} />
       </TableCell>
 
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         {node.agent_version === null ? (
           <span className="text-faint">—</span>
         ) : (
@@ -318,7 +322,7 @@ function NodeRows({
         )}
       </TableCell>
 
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         {/*
           Набор на узле против набора площадки (ADR-0068): отстающий узел работает со старой
           конфигурацией FreeSWITCH. Узел без версии — старый скрипт пульса: его обновляют
@@ -327,21 +331,19 @@ function NodeRows({
         {closed ? (
           <span className="text-faint">—</span>
         ) : node.set_version === null ? (
-          <span
-            className="text-muted-foreground"
-            title="Узел версию набора не присылает: обновите его командой zvonix-node-update"
-          >
-            не сообщает
-          </span>
+          <StatusDot
+            tone="off"
+            label="не сообщает"
+            reason="Узел версию набора не присылает: обновите его командой zvonix-node-update"
+          />
         ) : node.set_version === currentSet ? (
-          <span className="text-ok">актуален</span>
+          <StatusDot tone="ok" label="актуален" />
         ) : (
-          <span
-            className="text-warn"
-            title={`На узле ${node.set_version}, на площадке ${currentSet}`}
-          >
-            отстаёт
-          </span>
+          <StatusDot
+            tone="warn"
+            label="отстаёт"
+            reason={`На узле ${node.set_version}, на площадке ${currentSet}`}
+          />
         )}
       </TableCell>
 
@@ -349,14 +351,15 @@ function NodeRows({
         {/*
           Два действия разной тяжести: перевыпуск команды обратим и идёт окном с полем,
           вывод из эксплуатации необратим и идёт через подтверждение с последствием
-          (DESIGN.md, «Опасные действия»).
+          (DESIGN.md, «Опасные действия»). Значками, как во всех таблицах (DESIGN.md, «Таблица»).
         */}
         {canChange && !closed && (
-          <div className="flex justify-end gap-2">
+          <RowActions>
             <FormDialog
-              label="Настройки"
+              label={<Settings aria-hidden className="size-4" />}
+              tooltip="Настройки"
+              {...ROW_ICON}
               title={`Настройки узла «${node.name}»`}
-              variant="outline"
               disabled={busy}
             >
               <NodeSettingsForm
@@ -366,17 +369,20 @@ function NodeRows({
               />
             </FormDialog>
             <FormDialog
-              label="Новая команда"
+              label={<SquareTerminal aria-hidden className="size-4" />}
+              tooltip="Новая команда"
+              {...ROW_ICON}
               title={`Новая команда установки для «${node.name}»`}
               description={`Состояние сейчас: ${NODE_STATUS_MEANING[node.status]}`}
-              variant="outline"
               disabled={busy}
             >
               <ReissueInstall onReissue={onReissue} />
             </FormDialog>
 
             <ConfirmAction
-              label="Удалить"
+              label={<Trash2 aria-hidden className="size-4" />}
+              tooltip="Удалить"
+              {...ROW_ICON}
               title={`Удалить узел «${node.name}»`}
               consequence={
                 <>
@@ -393,12 +399,33 @@ function NodeRows({
               disabled={busy}
               onConfirm={onDecommission}
             />
-          </div>
+          </RowActions>
         )}
       </TableCell>
     </TableRow>
   );
 }
+
+/**
+ * Проверка адреса SIP по DNS (ADR-0113, ревизия) — точкой рядом с адресом, слово в подсказке: видно, что не так,
+ * не открывая окна, а строка остаётся в одну линию. Подробный разбор — в окне «Настройки».
+ */
+function SipCheckDot({ check }: { check: SipCheck | null }) {
+  if (check === null) return null;
+  const [tone, label] = SIP_CHECK_DOT[check.verdict];
+  return <StatusDot tone={tone} label={label} dotOnly />;
+}
+
+const SIP_CHECK_DOT: Record<SipCheck['verdict'], readonly [StatusTone, string]> = {
+  ok: ['ok', 'DNS верно'],
+  mismatch: ['crit', 'Запись DNS ведёт не туда'],
+  missing: ['crit', 'Записи DNS нет'],
+  ip: ['off', 'IP — лучше имя'],
+  ip_mismatch: ['crit', 'Не адрес узла'],
+  none: ['warn', 'Адрес не задан'],
+  unverifiable: ['off', 'Проверить не с чем'],
+  error: ['warn', 'DNS не ответил'],
+};
 
 /**
  * Перевыпуск команды установки.

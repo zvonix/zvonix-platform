@@ -6,7 +6,9 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
+import { Trash2 } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -94,15 +96,17 @@ function StopsView() {
       {error !== undefined && <ErrorNote error={error} />}
       {remove.error instanceof ApiError && <ErrorNote error={remove.error} />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Номер</TableHead>
-              <TableHead className="h-8">Откуда</TableHead>
-              <TableHead className="h-8">Чьи сообщения</TableHead>
-              <TableHead className="h-8">Когда</TableHead>
-              <TableHead className="h-8" />
+              <TableHead className={HEAD}>Номер</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Откуда</TableHead>
+              <TableHead className={HEAD}>Чьи сообщения</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Когда</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -116,31 +120,36 @@ function StopsView() {
             {list.data?.stops.map((stop) => (
               <TableRow key={stop.id}>
                 <TableCell className="num">{stop.phone}</TableCell>
-                <TableCell>{SOURCE_NAME[stop.source]}</TableCell>
-                <TableCell className="whitespace-normal">
+                <TableCell className={WIDE_ONLY}>{SOURCE_NAME[stop.source]}</TableCell>
+                <TableCell>
                   {stop.client_id === null ? (
                     <span className="text-warn">все клиенты</span>
                   ) : (
-                    (stop.client_name ?? 'клиент')
+                    <span className="inline-block max-w-56 truncate align-bottom">
+                      {stop.client_name ?? 'клиент'}
+                    </span>
                   )}
                 </TableCell>
-                <TableCell className="num">{moment(stop.created_at)}</TableCell>
-                <TableCell className="text-right">
+                <TableCell className={`num ${WIDE_ONLY}`}>{moment(stop.created_at)}</TableCell>
+                <TableCell>
                   {canChange && (
-                    <ConfirmAction
-                      label="Убрать"
-                      title="Убрать запрет"
-                      consequence={
-                        <p>
-                          Номеру снова смогут писать{' '}
-                          {stop.client_id === null ? 'все клиенты' : 'этот клиент'}. Делайте это
-                          только по просьбе самого человека. Действие останется в журнале.
-                        </p>
-                      }
-                      confirmLabel="Убрать"
-                      size="xs"
-                      onConfirm={() => remove.mutateAsync(stop.id)}
-                    />
+                    <RowActions>
+                      <ConfirmAction
+                        label={<Trash2 aria-hidden className="size-4" />}
+                        tooltip="Убрать запрет"
+                        {...ROW_ICON}
+                        title="Убрать запрет"
+                        consequence={
+                          <p>
+                            Номеру снова смогут писать{' '}
+                            {stop.client_id === null ? 'все клиенты' : 'этот клиент'}. Делайте это
+                            только по просьбе самого человека. Действие останется в журнале.
+                          </p>
+                        }
+                        confirmLabel="Убрать"
+                        onConfirm={() => remove.mutateAsync(stop.id)}
+                      />
+                    </RowActions>
                   )}
                 </TableCell>
               </TableRow>
