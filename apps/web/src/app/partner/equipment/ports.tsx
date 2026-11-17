@@ -38,7 +38,11 @@ export function PortHeader({ gateway }: { gateway: Gateway }) {
       <TableHead className="h-8">SIM-карта</TableHead>
       <TableHead className={`h-8 ${WIDE_ONLY}`}>Оператор</TableHead>
       <TableHead className={`h-8 ${WIDE_ONLY}`}>Прогрев</TableHead>
-      <TableHead className="h-8">Состояние</TableHead>
+      <TableHead className="h-8">
+        {/* На телефоне в столбце одна точка — слово заголовка шире её и выдавливало рубильник за край. */}
+        <span className="hidden md:inline">Состояние</span>
+        <span className="sr-only md:hidden">Состояние</span>
+      </TableHead>
       <TableHead className={`h-8 w-44 ${WIDE_ONLY}`}>Тариф</TableHead>
       <TableHead className="h-8 w-px">
         <span className="sr-only">Действия</span>

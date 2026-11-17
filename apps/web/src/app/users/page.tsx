@@ -193,10 +193,10 @@ function UsersTable() {
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Имя</TableHead>
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Роль</TableHead>
               <TableHead className={HEAD}>Состояние</TableHead>
-              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Адрес подтверждён</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Почта</TableHead>
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Второй фактор</TableHead>
-              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Последний вход</TableHead>
-              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Создана</TableHead>
+              <TableHead className={`${HEAD} hidden 2xl:table-cell`}>Последний вход</TableHead>
+              <TableHead className={`${HEAD} hidden 2xl:table-cell`}>Создана</TableHead>
               <TableHead className={`${HEAD} w-px`}>
                 <span className="sr-only">Действия</span>
               </TableHead>
@@ -261,16 +261,17 @@ function RowGroup({
 
   return (
     <TableRow>
+      {/* «Последний вход» и «Создана» — только на широком экране (2xl): на 1280 восемь столбцов не помещались. */}
       {/* Ячейка адреса — только адрес: по нему строку находят и сквозные проверки. */}
       <TableCell>
         <span className="num">{user.email}</span>
       </TableCell>
       <TableCell className={WIDE_ONLY}>
-        <ClippedText text={user.full_name} width="max-w-48" />
+        <ClippedText text={user.full_name} width="max-w-40" />
       </TableCell>
       <TableCell className={WIDE_ONLY}>
         {/* Название карточки бывает любой длины: без предела оно растягивало таблицу. */}
-        <ClippedText text={role} width="max-w-[200px]" />
+        <ClippedText text={role} width="max-w-40" />
       </TableCell>
       <TableCell>
         {/* Закрытый после неудачных попыток вход важнее состояния записи: человек не войдёт сейчас. */}
@@ -297,16 +298,26 @@ function RowGroup({
             reason="человек не перешёл по ссылке из письма; подтвердить вручную — кнопкой справа"
           />
         ) : (
-          <span className="num text-muted-foreground">{moment(user.email_confirmed_at)}</span>
+          <StatusDot
+            tone="ok"
+            label="подтверждена"
+            reason={`подтверждена ${moment(user.email_confirmed_at)}`}
+            dotOnly
+          />
         )}
       </TableCell>
       <TableCell className={WIDE_ONLY}>
-        {user.totp_enabled ? 'включён' : <span className="text-muted-foreground">нет</span>}
+        {/* Второй фактор — точкой: слово в каждой строке ничего не добавляло (DESIGN.md, «Таблица»). */}
+        <StatusDot
+          tone={user.totp_enabled ? 'ok' : 'off'}
+          label={user.totp_enabled ? 'второй фактор включён' : 'второго фактора нет'}
+          dotOnly
+        />
       </TableCell>
-      <TableCell className={WIDE_ONLY}>
+      <TableCell className="hidden 2xl:table-cell">
         <span className="num text-muted-foreground">{moment(user.last_login_at)}</span>
       </TableCell>
-      <TableCell className={WIDE_ONLY}>
+      <TableCell className="hidden 2xl:table-cell">
         <span className="num text-muted-foreground">{moment(user.created_at)}</span>
       </TableCell>
       <TableCell>

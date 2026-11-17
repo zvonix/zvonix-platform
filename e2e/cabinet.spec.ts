@@ -152,7 +152,7 @@ test.describe('заявки', () => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/applications');
     const row = page.getByRole('row', { name: /Смирнов Олег Петрович/u });
-    await row.getByRole('button', { name: 'Одобрить' }).click();
+    await row.getByRole('button', { name: 'Одобрить', exact: true }).click();
 
     const dialog = page.getByRole('alertdialog');
     await dialog.getByLabel('Псевдоним для клиентов').fill('Партнёр 40');
@@ -166,8 +166,10 @@ test.describe('заявки', () => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/applications');
     const row = page.getByRole('row', { name: /Кузнецова Мария/u });
-    await expect(row.getByRole('button', { name: /^почта не подтверждена: Одобрить пока нельзя/u })).toBeVisible();
-    await expect(row.getByRole('button', { name: 'Одобрить' })).toBeDisabled();
+    await expect(
+      row.getByRole('button', { name: /^почта не подтверждена: Одобрить пока нельзя/u }),
+    ).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Одобрить', exact: true })).toBeDisabled();
   });
 
   test('письмо не дошло — администратор подтверждает адрес вручную, и одобрить можно', async ({
@@ -181,8 +183,10 @@ test.describe('заявки', () => {
     await expect(dialog).toContainText('журнал');
     await dialog.getByRole('button', { name: 'Подтвердить адрес' }).click();
 
-    await expect(row.getByRole('button', { name: /^почта не подтверждена: Одобрить пока нельзя/u })).toHaveCount(0);
-    await expect(row.getByRole('button', { name: 'Одобрить' })).toBeEnabled();
+    await expect(
+      row.getByRole('button', { name: /^почта не подтверждена: Одобрить пока нельзя/u }),
+    ).toHaveCount(0);
+    await expect(row.getByRole('button', { name: 'Одобрить', exact: true })).toBeEnabled();
   });
 });
 
@@ -1805,7 +1809,7 @@ test.describe('партнёр добавляет своё оборудовани
     await expect(page.getByText(`Входы линий шлюза «${gatewayName}»`)).toBeVisible();
     await closeSecret(page);
     await expect(page.getByRole('region', { name: gatewayName, exact: true })).toContainText(
-      'карт 0 из 4',
+      'карт 0/4',
     );
 
     await page.getByRole('link', { name: gatewayName, exact: true }).click();

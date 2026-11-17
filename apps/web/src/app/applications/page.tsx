@@ -236,7 +236,7 @@ function ApplicationRow({
       </TableCell>
       <TableCell>{CABINET_KIND_NAME[application.cabinet]}</TableCell>
       <TableCell className={WIDE_ONLY}>
-        <ClippedText text={answers} width="max-w-[360px]" />
+        <ClippedText text={answers} width="max-w-64" />
       </TableCell>
       <TableCell>
         {unconfirmed ? (
