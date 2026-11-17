@@ -605,6 +605,8 @@ describe('остановка по неверному паролю (ADR-0123)', (
     (
       await api().inject({ method: 'GET', url: '/node/sip-gateways.xml', headers: asNode() })
     ).body.includes(`name="${trunk.sip_username}"`);
+  // Секунды эпохи, как шлёт узел. Отказ «в ту же секунду», что и прошлая смена пароля в соседнем тесте, законно
+  // считается старым — поэтому время отказа с запасом вперёд.
   const now = () => Math.floor(Date.now() / 1000);
 
   it('отказ без времени (старый узел) и «нет ответа» не останавливают', async () => {
@@ -616,7 +618,7 @@ describe('остановка по неверному паролю (ADR-0123)', (
   }, 120_000);
 
   it('403 с временем — остановлен: снят с узла, в журнале; «Подключить снова» возвращает', async () => {
-    expect((await report({ failure: 403, failure_at: now() })).statusCode).toBe(200);
+    expect((await report({ failure: 403, failure_at: now() + 5 })).statusCode).toBe(200);
     expect(await blockedAt()).not.toBeNull();
     expect(await onNode()).toBe(false);
     const logged = await withDatabase((execute) =>
@@ -639,7 +641,7 @@ describe('остановка по неверному паролю (ADR-0123)', (
   }, 120_000);
 
   it('новый пароль снимает остановку', async () => {
-    expect((await report({ failure: 401, failure_at: now() + 1 })).statusCode).toBe(200);
+    expect((await report({ failure: 401, failure_at: now() + 10 })).statusCode).toBe(200);
     expect(await blockedAt()).not.toBeNull();
     expect(
       (await patch(`/sip-trunks/${trunk.id}`, { outboundSecret: 'исправленный' })).statusCode,
