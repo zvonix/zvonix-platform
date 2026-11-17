@@ -31,6 +31,95 @@ export interface NumberPaceView {
 
 const WARMUP_DAYS = 14;
 
+/**
+ * Работа номера одним словом для строки таблицы — самое важное из прогрева, пределов, сна и паузы; всё остальное
+ * в подсказке ([DESIGN.md](../../../../docs/DESIGN.md), «Таблица»). Порядок — от того, что не даёт звонить, к тому,
+ * что лишь замедляет. Пусто — номер работает без ограничений, говорить не о чем.
+ */
+export function paceSummary(
+  pace: NumberPaceView | undefined,
+): { tone: 'warn' | 'off'; label: string; reason: string } | null {
+  if (pace === undefined) return null;
+  const limits = [
+    pace.per_hour === null ? null : `в час до ${String(pace.per_hour)}`,
+    pace.per_day === null ? null : `в сутки до ${String(pace.per_day)}`,
+  ]
+    .filter((part) => part !== null)
+    .join(', ');
+  const used =
+    pace.per_day === null
+      ? ''
+      : ` Сегодня ${String(pace.used_day)} из ${String(pace.per_day)}.`;
+  const warmup =
+    pace.warmup_day === null
+      ? ''
+      : ` Прогрев: сутки ${String(pace.warmup_day)} из ${String(WARMUP_DAYS)}.`;
+
+  if (pace.per_day !== null && pace.used_day >= pace.per_day) {
+    return {
+      tone: 'warn',
+      label: 'предел суток',
+      reason: `Номер сделал столько вызовов, сколько рекомендовано на сутки (${limits}). Лишние уходят на другие номера.${warmup}`,
+    };
+  }
+  if (pace.per_hour !== null && pace.used_hour >= pace.per_hour) {
+    return {
+      tone: 'warn',
+      label: 'предел часа',
+      reason: `Номер сделал столько вызовов, сколько рекомендовано на час (${limits}).${used}${warmup}`,
+    };
+  }
+  if (pace.poor) {
+    return {
+      tone: 'warn',
+      label: 'мало ответов',
+      reason:
+        'За сутки на этот номер почти не отвечают или сбрасывают в первые секунды — так оператор видит обзвон. Пределы номера вдвое ниже, пока ответов не станет больше.',
+    };
+  }
+  if (pace.braked) {
+    return {
+      tone: 'warn',
+      label: 'оператор тормозит',
+      reason:
+        'За последние 7 суток у этого оператора сняли несколько SIM. Все его номера звонят реже, торможение снимется само.',
+    };
+  }
+  if (
+    (pace.distinct_per_day !== null && pace.distinct_used_day >= pace.distinct_per_day) ||
+    (pace.distinct_per_hour !== null && pace.distinct_used_hour >= pace.distinct_per_hour)
+  ) {
+    return {
+      tone: 'warn',
+      label: 'предел абонентов',
+      reason:
+        'Номер обзвонил столько разных абонентов, сколько разрешено: новым звонят другие номера, знакомым он перезванивает.',
+    };
+  }
+  if (pace.asleep_until !== null && isFuture(pace.asleep_until)) {
+    return {
+      tone: 'off',
+      label: `спит до ${CLOCK.format(new Date(pace.asleep_until))}`,
+      reason: `Несколько часов в сутки номер не звонит — живой человек ночью спит. Вызовы в это время идут через другие номера.${used}${warmup}`,
+    };
+  }
+  if (pace.resting_until !== null && isFuture(pace.resting_until)) {
+    return {
+      tone: 'off',
+      label: 'пауза',
+      reason: `Пауза после звонка до ${CLOCK_SECONDS.format(new Date(pace.resting_until))}: живой человек не звонит без перерыва.${used}${warmup}`,
+    };
+  }
+  if (pace.warmup_day !== null) {
+    return {
+      tone: 'off',
+      label: `прогрев ${String(pace.warmup_day)}/${String(WARMUP_DAYS)}`,
+      reason: `Новый номер звонит понемногу, чтобы оператор не заблокировал его за массовые звонки: ${limits}. Каждые сутки больше, полностью — через ${String(WARMUP_DAYS)} суток.${used}`,
+    };
+  }
+  return null;
+}
+
 const CLOCK = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const CLOCK_SECONDS = new Intl.DateTimeFormat('ru-RU', {
   hour: '2-digit',

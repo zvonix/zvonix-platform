@@ -1,3 +1,4 @@
+import { StatusDot } from '@/components/status-dot';
 import { moment } from '@/lib/format';
 
 /** Подключение шлюза или линии GOIP — по опросу узлов (ADR-0103); одно у партнёра и в админке. */
@@ -31,14 +32,13 @@ export function Presence({ connection }: { connection: DeviceConnection }) {
       : connection.rejected
         ? `Обращалось ${moment(connection.knocked_at)}, но не вошло — обычно это неверное имя или пароль`
         : `Последний раз обращалось ${moment(connection.knocked_at)}`;
+  // Причина — в подсказке, а не хвостом в строке: строка таблицы остаётся в одну линию (DESIGN.md, «Таблица»).
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 ${online ? 'text-ok' : 'text-warn'}`}
-      title={title}
-    >
-      <span aria-hidden className={`size-2 rounded-full ${online ? 'bg-ok' : 'bg-warn'}`} />
-      {online ? 'на связи' : connection.rejected ? 'не на связи · проверьте пароль' : 'не на связи'}
-    </span>
+    <StatusDot
+      tone={online ? 'ok' : 'warn'}
+      label={online ? 'на связи' : 'не на связи'}
+      reason={title === '' ? undefined : title}
+    />
   );
 }
 

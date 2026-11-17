@@ -1,20 +1,23 @@
 'use client';
 
 import { goipLinePrefix, TESTABLE_SIM_STATUSES } from '@zvonix/shared';
-import { NumberPace } from '@/components/number-pace';
+import { RowActions } from '@/components/row-actions';
+import { StatusDot } from '@/components/status-dot';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
-import { PORT_STATE_NAME } from '@/lib/labels';
 import { TestCallButton } from '@/components/test-call';
 import { TariffSelect } from '@/components/tariff-select';
 import { PARTNER_RATES_KEY } from '@/lib/tariffs';
 import { Presence } from '@/components/presence';
 import { EQUIPMENT_KEY, type Gateway, type Port, type Sim } from './equipment';
-import { InsertSim, RemoveSim, SimActions, SimSwitch } from './manage';
+import { InsertSim, RemoveSim, SimActions, SimSwitch, simState } from './manage';
 
 /**
  * Строки портов — одни на общую таблицу оборудования и на страницу шлюза
  * ([ADR-0054](../../../../../../docs/adr/0054-vhod-po-liniyam-goip.md), «Кабинет»):
  * две копии разошлись бы на первой же правке, и партнёр видел бы один порт по-разному.
+ *
+ * По стандарту таблицы ([DESIGN.md](../../../../../../docs/DESIGN.md), «Таблица»): строка в одну линию, состояние —
+ * переключатель и одно слово с причиной в подсказке, действия — значками справа.
  */
 
 /** Столбцов у строки порта — для строк во всю ширину таблицы. */
@@ -23,13 +26,13 @@ export const PORT_COLUMNS = 7;
 export function PortHeader() {
   return (
     <TableRow className="text-muted-foreground hover:bg-transparent">
-      <TableHead className="h-8 w-[64px]">Порт</TableHead>
+      <TableHead className="h-8 w-12">Порт</TableHead>
       <TableHead className="h-8">Линия</TableHead>
       <TableHead className="h-8">SIM-карта</TableHead>
       <TableHead className="h-8">Оператор</TableHead>
       <TableHead className="h-8">Состояние</TableHead>
-      <TableHead className="h-8">Тариф</TableHead>
-      <TableHead className="h-8">
+      <TableHead className="h-8 w-44">Тариф</TableHead>
+      <TableHead className="h-8 w-px">
         <span className="sr-only">Действия</span>
       </TableHead>
     </TableRow>
@@ -48,7 +51,7 @@ export function PortRow({
   return (
     // В одну строчку: у партнёра десятки портов, и строка в две высоты вдвое сокращала то,
     // что видно на экране без прокрутки (владелец, 2026-09-25).
-    <TableRow className="whitespace-nowrap">
+    <TableRow>
       <TableCell className="num">{port.port_number}</TableCell>
       <TableCell>
         <LineCell gateway={gateway} port={port} />
@@ -61,23 +64,7 @@ export function PortRow({
         {port.sim === null ? (
           <span className="text-faint">—</span>
         ) : (
-          // Одной строкой: переключатель, связь, темп — строка таблицы не раздувается в столбик.
-          <div className="flex items-center gap-3 whitespace-nowrap">
-            {/*
-              Подтверждение оператора площадкой партнёру ничего не даёт и ничего от него
-              не требует (владелец, 2026-09-25) — здесь только состояние карты.
-            */}
-            <SimSwitch sim={port.sim} />
-            {port.sim.poor_connection === true && <PoorConnection />}
-            <NumberPace pace={port.sim.pace} />
-          </div>
-        )}
-        {/*
-          Состояние слота сообщает оборудование; «не опрошен» и «свободен» партнёру ничего
-          не говорят, а неисправный или выключенный слот — причина, почему карта молчит.
-        */}
-        {(port.state === 'fault' || port.state === 'disabled') && (
-          <span className="text-warn"> · слот {PORT_STATE_NAME[port.state]}</span>
+          <SimStateCell sim={port.sim} port={port} />
         )}
       </TableCell>
       <TableCell>
@@ -88,7 +75,7 @@ export function PortRow({
         )}
       </TableCell>
       <TableCell>
-        <div className="flex items-center justify-end gap-1">
+        <RowActions>
           {port.sim === null ? (
             <InsertSim portId={port.id} portNumber={port.port_number} spare={spare} />
           ) : (
@@ -103,9 +90,24 @@ export function PortRow({
               <RemoveSim portId={port.id} />
             </>
           )}
-        </div>
+        </RowActions>
       </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * Переключатель и одно слово: «работает», «прогрев 4/14», «предел суток», «выключена». Прогрев, пределы, сон
+ * и состояние слота — в подсказке слова: раньше они шли хвостом «· прогрев 4/14 · 0 из 23 за сутки · спит до 16:37»
+ * и растягивали строку (владелец, 2026-11-17).
+ */
+export function SimStateCell({ sim, port }: { sim: Sim; port?: Port }) {
+  const state = simState(sim, port?.state);
+  return (
+    <div className="flex items-center gap-2">
+      <SimSwitch sim={sim} bare />
+      <StatusDot tone={state.tone} label={state.label} reason={state.reason} />
+    </div>
   );
 }
 
@@ -147,30 +149,32 @@ function LineCell({ gateway, port }: { gateway: Gateway; port: Port }) {
   }
 
   return (
-    <>
+    <span className="inline-flex items-center gap-2">
       <span className="num">Line {port.port_number}</span>
-      <span className="text-faint"> · </span>
       {port.sip_username === null ? (
-        <span className="text-warn">вход не выдан</span>
+        <StatusDot
+          tone="warn"
+          label="нет входа"
+          reason="Линии ещё не выдан логин и пароль — выдайте их в настройках шлюза"
+        />
       ) : (
         // В строке важно «да или нет», адрес и время — подсказкой.
         <Presence connection={port.connection} />
       )}
-    </>
+    </span>
   );
 }
 
 /**
  * Почти не соединяет из-за отказов сети за последний час (ADR-0103, п. 5) — то же, о чём партнёру пришло письмо.
- * В строке порта — отдельной строкой ячейки: в одну строку она раздвигала таблицу шире экрана.
+ * Для шапки шлюза — точкой и словом, как всё состояние.
  */
-export function PoorConnection({ block = false }: { block?: boolean }) {
+export function PoorConnection() {
   return (
-    <span
-      className={block ? 'block text-warn' : 'text-warn'}
-      title="За последний час большинство вызовов сорвались в сети: проверьте баланс и блокировку SIM, сигнал, сам шлюз"
-    >
-      {block ? 'почти не соединяет' : ' · почти не соединяет'}
-    </span>
+    <StatusDot
+      tone="warn"
+      label="не соединяет"
+      reason="За последний час большинство вызовов сорвались в сети: проверьте баланс и блокировку SIM, сигнал, сам шлюз"
+    />
   );
 }
