@@ -268,6 +268,7 @@ function trunkChanges(
   body: z.infer<typeof updateSipTrunkSchema>,
 ): Parameters<TelephonyService['updateTrunk']>[1] {
   return {
+    ...(body.name === undefined ? {} : { name: body.name }),
     ...(body.proxyHost === undefined ? {} : { proxyHost: body.proxyHost }),
     ...(body.registersOutbound === undefined ? {} : { registersOutbound: body.registersOutbound }),
     ...(body.outboundUsername === undefined ? {} : { outboundUsername: body.outboundUsername }),

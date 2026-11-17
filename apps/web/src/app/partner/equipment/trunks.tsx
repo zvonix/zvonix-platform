@@ -64,7 +64,7 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className="h-8">Название</TableHead>
-              <TableHead className="h-8">Адрес и доступ</TableHead>
+              <TableHead className="h-8">Адрес</TableHead>
               <TableHead className="h-8 text-right">Каналов</TableHead>
               <TableHead className="h-8 text-right">Номеров</TableHead>
               <TableHead className="h-8">Тариф</TableHead>
@@ -75,18 +75,19 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
           <TableBody>
             {trunks.map((trunk) => (
               <TableRow key={trunk.id}>
-                <TableCell>{trunk.name}</TableCell>
+                <TableCell className="whitespace-nowrap">{trunk.name}</TableCell>
                 <TableCell className="whitespace-nowrap">
-                  <span className="num" translate="no">
+                  <span
+                    className="num"
+                    translate="no"
+                    title={
+                      trunk.registers_outbound
+                        ? `Регистрация у провайдера, логин ${trunk.outbound_username ?? '—'}`
+                        : 'Без регистрации: провайдер узнаёт узел по адресу'
+                    }
+                  >
                     {trunk.proxy_host}
                   </span>
-                  <span className="text-muted-foreground">
-                    {' · '}
-                    {trunk.registers_outbound ? 'регистрация ' : 'по адресу'}
-                  </span>
-                  {trunk.registers_outbound && (
-                    <span className="num text-faint">{trunk.outbound_username ?? '—'}</span>
-                  )}
                 </TableCell>
                 <TableCell className="num text-right">{trunk.max_concurrent_calls}</TableCell>
                 <TableCell className="num text-right">{trunk.numbers_count}</TableCell>
@@ -102,21 +103,24 @@ export function TrunksSection({ trunks }: { trunks: readonly Trunk[] }) {
                   />
                 </TableCell>
                 <TableCell>
-                  {/* В строку, с переносом только когда не хватает ширины: строка таблицы не раздувается в столбик. */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [&>*]:whitespace-nowrap">
+                  {/*
+                    Одной строкой (владелец, 2026-11-17: «всё в несколько строк»): переключатель, связь, безлимит или
+                    темп номера. Запрос безлимита и подробности — в окне настроек и в подсказках.
+                  */}
+                  <div className="flex items-center gap-3 whitespace-nowrap">
                     <TrunkStatus trunk={trunk} />
                     <TrunkPresence link={trunk.link} now={Date.now()} />
-                    {trunk.unlimited ? null : <NumberPace pace={trunk.pace} />}
-                    <TrunkUnlimited trunk={trunk} />
-                    {!trunk.has_price && (
-                      <Link
-                        href="/partner/prices"
-                        className="text-warn underline"
-                        title="В тарифе провайдера нет цены «через SIP»: без неё клиенты через него не звонят. Задайте цену в «Тарифах»"
+                    {trunk.unlimited ? (
+                      <span
+                        className="text-ok"
+                        title="Площадка выдала безлимит: у провайдера нет прогрева, пределов в час и в сутки, сна и пауз между звонками. Держат только его каналы и ваши лимиты"
                       >
-                        нет цены SIP
-                      </Link>
+                        безлимит
+                      </span>
+                    ) : (
+                      <NumberPace pace={trunk.pace} />
                     )}
+                    {/* «Нет цен SIP» пишет сам выбор тарифа рядом — второй раз в строке не повторяется. */}
                   </div>
                 </TableCell>
                 <TableCell>
@@ -183,7 +187,7 @@ function TrunkStatus({ trunk }: { trunk: Trunk }) {
   // нет; идущие разговоры не рвутся.
   const on = trunk.status === 'active';
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex items-center gap-2">
       <label className="inline-flex cursor-pointer items-center gap-2">
         <Switch
           checked={on}
@@ -202,7 +206,8 @@ function TrunkStatus({ trunk }: { trunk: Trunk }) {
 
 /**
  * Безлимит провайдера ([ADR-0119](../../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)):
- * партнёр только просит, выдаёт администратор площадки.
+ * партнёр только просит, выдаёт администратор площадки. Живёт в окне настроек, а не в строке таблицы
+ * (владелец, 2026-11-17: «запрос безлимита — через настройки, а в таблице не писать»).
  */
 function TrunkUnlimited({ trunk }: { trunk: Trunk }) {
   const refresh = useRefresh();
@@ -214,26 +219,22 @@ function TrunkUnlimited({ trunk }: { trunk: Trunk }) {
 
   if (trunk.unlimited) {
     return (
-      <span
-        className="text-ok"
-        title="Площадка выдала безлимит: у провайдера нет прогрева, пределов в час и в сутки, сна и пауз между звонками. Держат только его каналы и ваши лимиты"
-      >
-        безлимит
-      </span>
+      <p className="border-t border-border pt-3 text-ok">
+        Безлимит выдан: нет прогрева, пределов в час и в сутки, сна и пауз между звонками.
+      </p>
     );
   }
   if (trunk.unlimited_requested_at !== null) {
     return (
-      <span
-        className="text-muted-foreground"
-        title="Запрос отправлен администратору площадки, решения ещё нет"
-      >
-        безлимит запрошен
-      </span>
+      <p className="border-t border-border pt-3 text-muted-foreground">
+        Безлимит запрошен — ждёт решения администратора.
+      </p>
     );
   }
   return (
-    <ConfirmAction
+    <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+      <span className="text-muted-foreground">Без прогрева и пределов на номер</span>
+      <ConfirmAction
       label="Запросить безлимит"
       title={`Безлимит для провайдера «${trunk.name}»`}
       consequence={
@@ -251,11 +252,11 @@ function TrunkUnlimited({ trunk }: { trunk: Trunk }) {
       }
       confirmLabel="Отправить запрос"
       tone="neutral"
-      variant="ghost"
-      size="xs"
-      className="mt-1"
+      variant="outline"
+      size="sm"
       onConfirm={() => ask.mutateAsync()}
     />
+    </div>
   );
 }
 
@@ -297,7 +298,11 @@ function TrunkActions({ trunk }: { trunk: Trunk }) {
         size="icon-xs"
         className="size-7"
       >
-        <EditTrunkForm trunk={trunk} onSave={(changes) => update.mutateAsync(changes)} />
+        <EditTrunkForm
+          trunk={trunk}
+          onSave={(changes) => update.mutateAsync(changes)}
+          extra={<TrunkUnlimited trunk={trunk} />}
+        />
         {removable && (
           <div className="flex items-center justify-between gap-3 border-t border-border px-5 py-3">
             <span className="text-muted-foreground">Провайдер больше не нужен</span>

@@ -5,10 +5,11 @@ import {
   MAX_TRUNK_CONCURRENT_CALLS,
   TRUNK_NUMBERS_MAX,
 } from '@zvonix/shared';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm } from '@/components/form-dialog';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import type { ApiError } from '@/lib/api';
 import { integerFromInput } from '@/lib/money';
 
@@ -171,9 +172,8 @@ export function NewTrunkForm({
               `new-password`: иначе браузер предложит сохранить эту пару как вход в кабинет,
               а при следующей правке сам подставит пароль кабинета в поле провайдера.
             */}
-            <Input
+            <PasswordInput
               className="num"
-              type="password"
               autoComplete="new-password"
               value={secret}
               onChange={(event) => {
@@ -202,15 +202,23 @@ export function NewTrunkForm({
 export function EditTrunkForm({
   trunk,
   onSave,
+  extra,
 }: {
   trunk: {
+    readonly name: string;
     readonly proxy_host: string;
+    readonly registers_outbound: boolean;
+    readonly outbound_username: string | null;
     readonly max_concurrent_calls: number;
     readonly numbers_count: number;
   };
   onSave: (changes: Record<string, unknown>) => Promise<unknown>;
+  /** Под полями, до кнопок: у партнёра — запрос безлимита (владелец, 2026-11-17: «через настройки, а не в таблице»). */
+  extra?: ReactNode;
 }) {
+  const [name, setName] = useState(trunk.name);
   const [proxyHost, setProxyHost] = useState(trunk.proxy_host);
+  const [username, setUsername] = useState(trunk.outbound_username ?? '');
   const [channels, setChannels] = useState(String(trunk.max_concurrent_calls));
   const [numbers, setNumbers] = useState(String(trunk.numbers_count));
   const [secret, setSecret] = useState('');
@@ -218,9 +226,19 @@ export function EditTrunkForm({
   const channelCount = integerFromInput(channels);
   const channelsValid =
     channelCount !== undefined && channelCount >= 1 && channelCount <= MAX_TRUNK_CONCURRENT_CALLS;
+  const nameValid = name.trim().length >= 2;
+  const usernameValid = !trunk.registers_outbound || username.trim() !== '';
 
   const changes: Record<string, unknown> = {};
+  if (nameValid && name.trim() !== trunk.name) changes.name = name.trim();
   if (proxyHost.trim() !== trunk.proxy_host) changes.proxyHost = proxyHost.trim();
+  if (
+    trunk.registers_outbound &&
+    usernameValid &&
+    username.trim() !== (trunk.outbound_username ?? '')
+  ) {
+    changes.outboundUsername = username.trim();
+  }
   if (channelsValid && channelCount !== trunk.max_concurrent_calls) {
     changes.maxConcurrentCalls = channelCount;
   }
@@ -233,21 +251,62 @@ export function EditTrunkForm({
   return (
     <DialogForm
       submitLabel="Сохранить"
-      canSubmit={dirty && channelsValid && numbersValid}
+      canSubmit={dirty && nameValid && usernameValid && channelsValid && numbersValid}
       onSubmit={() => onSave(changes)}
     >
+      <DialogField label="Название" hint={nameValid ? undefined : 'Не короче двух букв.'}>
+        <Input
+          autoComplete="off"
+          autoFocus
+          value={name}
+          onChange={(event) => {
+            setName(event.target.value);
+          }}
+        />
+      </DialogField>
+
       <DialogField label="Адрес провайдера">
         <Input
           className="num"
           autoComplete="off"
           spellCheck={false}
-          autoFocus
           value={proxyHost}
           onChange={(event) => {
             setProxyHost(event.target.value);
           }}
         />
       </DialogField>
+
+      {trunk.registers_outbound && (
+        <>
+          <DialogField
+            label="Логин у провайдера"
+            hint={usernameValid ? undefined : 'Не может быть пустым.'}
+          >
+            <Input
+              className="num"
+              autoComplete="off"
+              spellCheck={false}
+              value={username}
+              onChange={(event) => {
+                setUsername(event.target.value);
+              }}
+            />
+          </DialogField>
+
+          <DialogField label="Новый пароль" hint="Пусто — пароль остаётся прежним.">
+            {/* `new-password`: иначе браузер подставит сюда пароль от кабинета. */}
+            <PasswordInput
+              className="num"
+              autoComplete="new-password"
+              value={secret}
+              onChange={(event) => {
+                setSecret(event.target.value);
+              }}
+            />
+          </DialogField>
+        </>
+      )}
 
       <DialogField
         label="Каналов"
@@ -268,17 +327,7 @@ export function EditTrunkForm({
 
       <NumbersField value={numbers} valid={numbersValid} onChange={setNumbers} />
 
-      <DialogField label="Новый пароль провайдера" hint="Пусто — пароль остаётся прежним." wide>
-        <Input
-          className="num"
-          type="password"
-          autoComplete="new-password"
-          value={secret}
-          onChange={(event) => {
-            setSecret(event.target.value);
-          }}
-        />
-      </DialogField>
+      {extra !== undefined && <div className="sm:col-span-2">{extra}</div>}
     </DialogForm>
   );
 }
