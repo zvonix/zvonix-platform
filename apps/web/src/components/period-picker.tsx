@@ -21,12 +21,6 @@ const shortDate = (day: string): string =>
 const rangeLabel = (from: string, to: string): string =>
   from === to ? shortDate(from) : `${shortDate(from)} – ${shortDate(to)}`;
 
-/** Быстрый период: сколько суток (у графиков серверов бывает и доля суток — час) и подпись кнопки. */
-export interface PeriodPreset {
-  readonly days: number;
-  readonly label: string;
-}
-
 const WIDE = '(min-width: 640px)';
 
 /** Два месяца рядом — на широком экране, на телефоне — один. */
@@ -51,12 +45,9 @@ function useWide(): boolean {
 export function PeriodPicker({
   value,
   onChange,
-  presets = REPORT_PERIODS,
 }: {
   value: ReportPeriod;
   onChange: (period: ReportPeriod) => void;
-  /** Быстрые кнопки; по умолчанию — как у сводки: сегодня, 7, 30, 90 дней. */
-  presets?: readonly PeriodPreset[];
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DateRange | undefined>();
@@ -81,7 +72,7 @@ export function PeriodPicker({
     <div className="flex flex-wrap items-center gap-1.5">
       <Segmented
         label="Период"
-        options={presets.map((period) => ({ key: period.days, label: period.label }))}
+        options={REPORT_PERIODS.map((period) => ({ key: period.days, label: period.label }))}
         value={'days' in value ? value.days : null}
         onChange={(days) => {
           onChange({ days });

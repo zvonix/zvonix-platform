@@ -11,22 +11,18 @@ import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { gaugeTone, usedPercent } from '@/lib/gauge';
 import { NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
-import { periodKey, periodMoments, periodQuery, type ReportPeriod } from '@/lib/reports';
-
-type Range = 'hour' | 'day' | 'week';
+import {
+  periodBounds,
+  periodKey,
+  periodMoments,
+  periodQuery,
+  type ReportPeriod,
+} from '@/lib/reports';
 
 /**
- * Быстрые окна графиков: `days` — длина в сутках (час — доля суток), как у кнопок выбора периода;
- * свой период — календарём, тем же, что у отчётов (ADR-0059, ревизия 2026-11-17).
+ * Корзина замеров: шире на длинном периоде, чтобы точек было не больше ~700 — как считает API.
+ * Период — тот же выбор, что у отчётов: быстрые кнопки и календарь (ADR-0059, ревизия 2026-11-17).
  */
-const RANGES: readonly { value: Range; days: number; label: string; ms: number; stepMs: number }[] =
-  [
-    { value: 'hour', days: 1 / 24, label: 'Час', ms: 3_600_000, stepMs: 60_000 },
-    { value: 'day', days: 1, label: 'Сутки', ms: 86_400_000, stepMs: 300_000 },
-    { value: 'week', days: 7, label: 'Неделя', ms: 604_800_000, stepMs: 1_800_000 },
-  ];
-
-/** Свой период: корзина шире, чтобы точек было не больше ~700 — как считает API. */
 const customStep = (spanMs: number): number =>
   Math.max(1, Math.ceil(spanMs / 700 / 60_000)) * 60_000;
 
@@ -66,18 +62,15 @@ export default function ServersPage() {
 
 function ServersView() {
   const [period, setPeriod] = useState<ReportPeriod>({ days: 1 });
-  const preset = 'days' in period ? RANGES.find((item) => item.days === period.days) : undefined;
-  const bounds = preset === undefined ? periodMoments(period) : undefined;
-  const custom =
-    bounds === undefined ? undefined : { from: Date.parse(bounds.from), to: Date.parse(bounds.to) };
+  // Быстрый период — те же сутки датами: серверы, как и отчёты, считают от полуночи по часам человека.
+  const bounds = periodBounds(period);
+  const moments = periodMoments(period);
+  const from = Date.parse(moments.from);
 
   const servers = useQuery({
     queryKey: ['servers', periodKey(period)],
     queryFn: ({ signal }) =>
-      request<{ servers: Server[] }>(
-        preset === undefined ? `/servers?${periodQuery(period)}` : `/servers?range=${preset.value}`,
-        { signal },
-      ),
+      request<{ servers: Server[] }>(`/servers?${periodQuery(bounds)}`, { signal }),
     // Замеры идут раз в минуту: чаще спрашивать нечего.
     refetchInterval: 60_000,
   });
@@ -86,11 +79,7 @@ function ServersView() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PeriodPicker
-        value={period}
-        onChange={setPeriod}
-        presets={RANGES.map((item) => ({ days: item.days, label: item.label }))}
-      />
+      <PeriodPicker value={period} onChange={setPeriod} />
 
       {error !== undefined && <ErrorNote error={error} />}
       {servers.isPending && <p className="text-muted-foreground">Загружаем…</p>}
@@ -100,13 +89,10 @@ function ServersView() {
           <ServerCard
             key={server.id ?? 'platform'}
             server={server}
-            from={custom?.from ?? servers.dataUpdatedAt - (preset?.ms ?? 86_400_000)}
-            to={custom?.to ?? servers.dataUpdatedAt}
-            stepMs={
-              custom === undefined
-                ? (preset?.stepMs ?? 300_000)
-                : customStep(custom.to - custom.from)
-            }
+            from={from}
+            // Сегодняшние сутки — до сейчас: дальше замеров ещё нет.
+            to={Math.min(Date.parse(moments.to), servers.dataUpdatedAt)}
+            stepMs={customStep(Date.parse(moments.to) - from)}
           />
         ))}
       </div>

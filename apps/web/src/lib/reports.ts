@@ -58,11 +58,14 @@ export interface Breakdown {
   })[];
 }
 
+/** Быстрые периоды — одни во всех выборах периода (владелец, 2026-11-17: «30, 60, 90 и т. д.»). */
 export const REPORT_PERIODS = [
   { days: 1, label: 'Сегодня' },
   { days: 7, label: '7 дней' },
   { days: 30, label: '30 дней' },
+  { days: 60, label: '60 дней' },
   { days: 90, label: '90 дней' },
+  { days: 365, label: 'Год' },
 ] as const;
 
 /** Минуты к востоку от UTC: сутки в сводке считаются по часам человека, а не сервера. */
@@ -94,7 +97,7 @@ const addDays = (day: string, delta: number): string => {
 };
 
 /** Первые и последние местные сутки периода: у быстрого — последние N, сегодня включительно. */
-function periodBounds(period: ReportPeriod): { from: string; to: string } {
+export function periodBounds(period: ReportPeriod): { from: string; to: string } {
   if (!('days' in period)) return period;
   const today = isoDay(new Date());
   return { from: addDays(today, 1 - Math.max(1, Math.round(period.days))), to: today };

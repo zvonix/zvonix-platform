@@ -82,7 +82,7 @@ SIM переводится в `throttled`, шлюз — в `suspended`. Оба �
 
 ## `GET /quality/blocks?days=…` или `?from=…&to=…&offset=…` — роли `admin`, `support`
 
-Отчёт блокировок ([ADR-0107](../adr/0107-son-nomera-plokhoy-nomer-i-otchyot-blokirovok.md)): за `days` суток (1–90, по умолчанию 7; иначе `400`) или за свои сутки `from`…`to` по часам человека (как у сводки, [reports.md](reports.md)) по партнёрам и по
+Отчёт блокировок ([ADR-0107](../adr/0107-son-nomera-plokhoy-nomer-i-otchyot-blokirovok.md)): за `days` суток (1–366, по умолчанию 7; иначе `400`) или за свои сутки `from`…`to` по часам человека (как у сводки, [reports.md](reports.md)) по партнёрам и по
 операторам SIM — сколько попыток ушло в сеть, сколько из них настоящих ответов (разговор от 5 секунд) и коротких
 (ответили, но короче 5 секунд), сколько SIM и шлюзов снял порог отказов и **снятий на 1000 попыток**. Снятия
 считаются по журналу действий (`sim.suspended_by_failures`, `gateway.suspended_by_failures`): состояние объекта хранит

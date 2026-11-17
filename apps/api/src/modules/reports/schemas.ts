@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { checkRange, offsetField, rangeFields } from '../../http/period.js';
 import { DIMENSIONS } from './reports.repository.js';
 
-/** Быстрые периоды сводки: «сегодня», неделя, месяц, квартал. */
-const REPORT_DAYS = [1, 7, 30, 90] as const;
+/** Быстрые периоды сводки: сегодня, 7, 30, 60, 90 дней и год (владелец, 2026-11-17). */
+const REPORT_DAYS = [1, 7, 30, 60, 90, 365] as const;
 
 const days = z
   .string()

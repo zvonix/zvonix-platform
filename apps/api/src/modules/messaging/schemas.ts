@@ -15,7 +15,7 @@ import {
 } from '@zvonix/shared';
 import { z } from 'zod';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
-import { checkRange, rangeFields } from '../../http/period.js';
+import { checkRange, MAX_RANGE_DAYS, rangeFields } from '../../http/period.js';
 import { amount } from '../billing/schemas.js';
 
 const label = z.string().trim().min(2, 'слишком короткое').max(60, 'слишком длинное');
@@ -120,13 +120,13 @@ export const updateSmppSchema = z
     { message: 'Нечего менять' },
   );
 
-/** Число суток периода: 1–90, по умолчанию своё у каждого отчёта. */
+/** Число суток периода: 1–366 (год с запасом), по умолчанию своё у каждого отчёта. */
 const reportDays = (fallback: number) =>
   z
     .string()
     .optional()
     .transform((raw) => Number(raw ?? String(fallback)))
-    .pipe(z.number().int().min(1).max(90));
+    .pipe(z.number().int().min(1).max(MAX_RANGE_DAYS));
 
 /**
  * Обзор для сотрудников: последние `days` суток или свои `from`…`to` по часам человека (`offset`, минуты к востоку

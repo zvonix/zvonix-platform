@@ -34,6 +34,8 @@ describe('период отчёта', () => {
 
   it('сводка: быстрые периоды прежние, даты сильнее days', () => {
     expect(overviewQuerySchema.safeParse({ days: '14' }).success).toBe(false);
+    expect(overviewQuerySchema.safeParse({ days: '60' }).success).toBe(true);
+    expect(overviewQuerySchema.safeParse({ days: '365' }).success).toBe(true);
     expect(
       overviewQuerySchema.parse({ days: '30', from: '2026-11-01', to: '2026-11-02' }),
     ).toMatchObject({
