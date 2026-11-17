@@ -14,11 +14,14 @@ import {
   type GatewayType,
   type SimStatus,
 } from '@zvonix/shared';
+import { ArrowLeftRight, EthernetPort, KeyRound } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { StatusDialog } from '@/components/status-dialog';
+import { StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { TestCallButton } from '@/components/test-call';
 import {
   LineCredentials,
@@ -209,17 +212,19 @@ export function PartnerGateways({
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Шлюз</TableHead>
-              <TableHead className="h-8">Вид</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Вход SIP</TableHead>
-              <TableHead className="h-8 text-right">Портов</TableHead>
-              <TableHead className="h-8">Связь</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Шлюз</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Вид</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Вход SIP</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Портов</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Связь</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -407,58 +412,62 @@ function GatewayRow({
   return (
     <TableRow>
       <TableCell>
-        {gateway.name}
-        {gateway.model !== null && <span className="block text-faint">{gateway.model}</span>}
-      </TableCell>
-      <TableCell>{GATEWAY_TYPE_NAME[gateway.type]}</TableCell>
-      <TableCell>
+        {/* Модель — в подсказке к названию: строка в одну линию (DESIGN.md, «Таблица»). */}
         <span
-          className={`rounded-sm px-1.5 py-0.5 ${usableTone(
-            REGISTRABLE_GATEWAY_STATUSES.includes(gateway.status),
-          )}`}
+          className="inline-block max-w-56 truncate align-bottom"
+          title={gateway.model ?? gateway.name}
         >
-          {GATEWAY_STATUS_NAME[gateway.status]}
+          {gateway.name}
         </span>
-        {gateway.suspended_by !== null && (
-          <span className="block text-muted-foreground">
-            {GATEWAY_SUSPENDED_BY_NAME[gateway.suspended_by]}
-          </span>
-        )}
       </TableCell>
+      <TableCell className={WIDE_ONLY}>{GATEWAY_TYPE_NAME[gateway.type]}</TableCell>
       <TableCell>
-        {byLine ? (
-          <span>по линиям</span>
-        ) : (
-          <span className="num" translate="no">
-            {gateway.sip_username}
-          </span>
-        )}
-        {gateway.type === 'goip' && (
-          <span className="block text-faint">
-            {REGISTRATION_MODE_NAME[gateway.registration_mode]}
-          </span>
-        )}
+        <StatusDot
+          tone={toneOf(usableTone(REGISTRABLE_GATEWAY_STATUSES.includes(gateway.status)))}
+          label={GATEWAY_STATUS_NAME[gateway.status]}
+          reason={
+            gateway.suspended_by === null
+              ? undefined
+              : GATEWAY_SUSPENDED_BY_NAME[gateway.suspended_by]
+          }
+          phoneDot
+        />
       </TableCell>
-      <TableCell className="num text-right">{gateway.port_count}</TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
+        {/* Способ подключения GOIP — в подсказке: «по линиям» и логин шлюза его и так выдают. */}
+        <span
+          className={byLine ? undefined : 'num'}
+          translate="no"
+          title={
+            gateway.type === 'goip' ? REGISTRATION_MODE_NAME[gateway.registration_mode] : undefined
+          }
+        >
+          {byLine ? 'по линиям' : gateway.sip_username}
+        </span>
+      </TableCell>
+      <TableCell className={`${NUM} ${WIDE_ONLY}`}>{gateway.port_count}</TableCell>
+      <TableCell className={WIDE_ONLY}>
         {byLine ? (
           // Регистрация у каждой линии своя — в окне портов.
-          <span className="text-muted-foreground">у линий — в окне портов</span>
+          <StatusDot
+            tone="off"
+            label="у каждой линии своя"
+            reason="связь линий — в окне портов"
+            dotOnly
+          />
         ) : gateway.type === 'sip_trunk' ? (
           <span className="text-faint">—</span>
         ) : (
-          <Connection connection={gateway.connection} />
+          <Presence connection={gateway.connection} />
         )}
       </TableCell>
       <TableCell>
         {/*
           Состояние и доступ — в строке, а не в окне портов: окно поверх окна не открывается.
           Переходов у шлюза до четырёх, и кнопка на каждый растягивала строку; теперь
-          одна кнопка и окно с вариантами (`StatusDialog`).
+          одна кнопка и окно с вариантами (`StatusDialog`). Выведенный навсегда — видно в «Состоянии».
         */}
-        <div className="flex flex-wrap items-center justify-end gap-1">
-          {canChange && retired && <span className="text-muted-foreground">выведен навсегда</span>}
-
+        <RowActions>
           {canChange && !retired && (
             <StatusDialog
               subject={`шлюз «${gateway.name}»`}
@@ -481,7 +490,9 @@ function GatewayRow({
 
           {canChange && !retired && gateway.type === 'goip' && (
             <ConfirmAction
-              label={byLine ? 'Один вход на шлюз' : 'Вход по линиям'}
+              label={<ArrowLeftRight aria-hidden className="size-4" />}
+              tooltip={byLine ? 'Один вход на шлюз' : 'Вход по линиям'}
+              {...ROW_ICON}
               title={`Способ подключения шлюза «${gateway.name}»`}
               consequence={
                 <p>
@@ -499,7 +510,9 @@ function GatewayRow({
 
           {canChange && !retired && !byLine && (
             <ConfirmAction
-              label="Новый пароль"
+              label={<KeyRound aria-hidden className="size-4" />}
+              tooltip="Новый пароль"
+              {...ROW_ICON}
               title={`Новый пароль шлюза «${gateway.name}»`}
               consequence={
                 <p>
@@ -514,21 +527,22 @@ function GatewayRow({
           )}
 
           <FormDialog
-            label="Порты"
+            label={<EthernetPort aria-hidden className="size-4" />}
+            tooltip="Порты"
+            {...ROW_ICON}
             title={`Порты шлюза «${gateway.name}»`}
             description={
               retired
                 ? 'Шлюз выведен навсегда: состояние больше не меняется, SIM из его портов вынуты.'
                 : 'Какая SIM стоит в каком порту.'
             }
-            variant="outline"
             wide
           >
             <div className="min-h-0 overflow-y-auto px-5 pb-5">
               <GatewayPorts gateway={gateway} sims={sims} onIssued={onIssued} />
             </div>
           </FormDialog>
-        </div>
+        </RowActions>
       </TableCell>
     </TableRow>
   );
@@ -558,7 +572,7 @@ function GatewayPorts({
   // по линиям вместо префикса — вход линии и её регистрация (ADR-0054).
   const goip = gateway.type === 'goip';
   const byLine = gateway.registration_mode === 'port';
-  const columns = goip ? (byLine ? 5 : 4) : 3;
+  const columns = (goip ? (byLine ? 5 : 4) : 3) + (canChange ? 1 : 0);
   // Выданное показывается и здесь: панель на карточке остаётся за этим окном,
   // и пароль, показанный один раз, легко не заметить (копия там — на случай закрытия окна).
   const [shown, setShown] = useState<IssuedLines | undefined>(undefined);
@@ -691,19 +705,19 @@ function GatewayPorts({
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8 text-right">Порт</TableHead>
-              {goip && !byLine && <TableHead className="h-8">Префикс линии</TableHead>}
-              {byLine && <TableHead className="h-8">Вход линии</TableHead>}
-              {byLine && <TableHead className="h-8">Связь</TableHead>}
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">SIM</TableHead>
+              <TableHead className={`${HEAD} w-px`}>Порт</TableHead>
+              {goip && !byLine && <TableHead className={HEAD}>Префикс линии</TableHead>}
+              {byLine && <TableHead className={HEAD}>Вход линии</TableHead>}
+              {byLine && <TableHead className={`${HEAD} w-px`}>Связь</TableHead>}
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={HEAD}>SIM</TableHead>
               {canChange && (
-                <TableHead className="h-8">
-                  <span className="sr-only">Проверка</span>
+                <TableHead className={`${HEAD} w-px`}>
+                  <span className="sr-only">Действия</span>
                 </TableHead>
               )}
             </TableRow>
@@ -727,42 +741,28 @@ function GatewayPorts({
 
             {ports.map((row) => (
               <TableRow key={row.id}>
-                <TableCell className="num text-right">{row.port_number}</TableCell>
+                <TableCell className="num">{row.port_number}</TableCell>
                 {goip && !byLine && (
                   <TableCell className="num">{goipLinePrefix(row.port_number)}</TableCell>
                 )}
                 {byLine && (
                   <TableCell>
                     {row.sip_username === null ? (
-                      <span className="text-warn">не выдан</span>
+                      <StatusDot
+                        tone="warn"
+                        label="не выдан"
+                        reason="линии ещё не выдан вход — кнопкой над таблицей"
+                      />
                     ) : (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="num" translate="no">
-                          {row.sip_username}
-                        </span>
-                        {canChange && gateway.status !== 'retired' && (
-                          <ConfirmAction
-                            label="Новый пароль"
-                            title={`Новый пароль линии ${String(row.port_number)}`}
-                            consequence={
-                              <p>
-                                Меняется только пароль, логин прежний. Линия замолчит, пока партнёр
-                                не введёт новый пароль в GOIP. Другие линии это не затрагивает.
-                              </p>
-                            }
-                            confirmLabel="Перевыпустить"
-                            size="xs"
-                            variant="ghost"
-                            onConfirm={() => resetLine.mutateAsync(row)}
-                          />
-                        )}
-                      </div>
+                      <span className="num" translate="no">
+                        {row.sip_username}
+                      </span>
                     )}
                   </TableCell>
                 )}
                 {byLine && (
                   <TableCell>
-                    <Connection connection={row.connection} />
+                    <Presence connection={row.connection} dotOnly />
                   </TableCell>
                 )}
                 <TableCell className="text-muted-foreground">
@@ -799,7 +799,25 @@ function GatewayPorts({
                 </TableCell>
                 {canChange && (
                   <TableCell>
-                    <PortTestCall sim={sims.find((sim) => sim.id === row.sim_card_id)} />
+                    <RowActions>
+                      <PortTestCall sim={sims.find((sim) => sim.id === row.sim_card_id)} />
+                      {byLine && row.sip_username !== null && gateway.status !== 'retired' && (
+                        <ConfirmAction
+                          label={<KeyRound aria-hidden className="size-4" />}
+                          tooltip="Новый пароль"
+                          {...ROW_ICON}
+                          title={`Новый пароль линии ${String(row.port_number)}`}
+                          consequence={
+                            <p>
+                              Меняется только пароль, логин прежний. Линия замолчит, пока партнёр не
+                              введёт новый пароль в GOIP. Другие линии это не затрагивает.
+                            </p>
+                          }
+                          confirmLabel="Перевыпустить"
+                          onConfirm={() => resetLine.mutateAsync(row)}
+                        />
+                      )}
+                    </RowActions>
                   </TableCell>
                 )}
               </TableRow>
@@ -818,16 +836,4 @@ function GatewayPorts({
 function PortTestCall({ sim }: { sim: SimOption | undefined }) {
   if (sim === undefined || !TESTABLE_SIM_STATUSES.includes(sim.status)) return null;
   return <TestCallButton scope="admin" subject={{ kind: 'sim', id: sim.id, msisdn: sim.msisdn }} />;
-}
-
-/** Подключение и адрес устройства — поддержке адрес нужен в строке, а не в подсказке (ADR-0103). */
-function Connection({ connection }: { connection: DeviceConnection }) {
-  return (
-    <span className="flex flex-col">
-      <Presence connection={connection} />
-      {connection.address !== null && (
-        <span className="num text-muted-foreground">{connection.address}</span>
-      )}
-    </span>
-  );
 }

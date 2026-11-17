@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { request } from '@/lib/api';
 import { useOperators } from '@/lib/dictionaries';
 import { bandRange, money } from '@/lib/money';
@@ -69,15 +70,15 @@ export function BandViolations() {
         новой ценой партнёра, а не правкой старой. Сравнивается стоимость вызова в {seconds} секунд.
       </p>
 
-      <div className="max-w-[900px] rounded-md border border-crit-soft bg-card">
+      <div className={`${TABLE_FRAME} max-w-[900px]`}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Оператор</TableHead>
-              <TableHead className="h-8">Регион</TableHead>
-              <TableHead className="h-8 text-right">Стоит</TableHead>
-              <TableHead className="h-8 text-right">Коридор</TableHead>
-              <TableHead className="h-8">Партнёр</TableHead>
+              <TableHead className={HEAD}>Оператор</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Регион</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Стоит</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Коридор</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Партнёр</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -88,22 +89,27 @@ export function BandViolations() {
                     <span className="num text-faint">{violation.rate.operator_id}</span>
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {violation.rate.region ?? <span className="text-muted-foreground">все</span>}
                 </TableCell>
-                <TableCell className="num text-right text-crit">
+                <TableCell className={`${NUM} text-crit`}>
                   {money(violation.reference_cost)}
                 </TableCell>
-                <TableCell className="num text-right text-muted-foreground">
+                <TableCell className={`${NUM} text-muted-foreground`}>
                   {bandRange(violation.band.min_price, violation.band.max_price)}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {/*
                     Идентификатор, а не имя: список партнёров сюда не тянется ради
                     одной колонки, а по идентификатору партнёр находится поиском
                     в своём разделе. Имя добавится, когда список нужно будет и здесь.
                   */}
-                  <span className="num text-faint">{violation.rate.partner_id}</span>
+                  <span
+                    className="num block max-w-[160px] truncate text-faint"
+                    title={violation.rate.partner_id}
+                  >
+                    {violation.rate.partner_id}
+                  </span>
                 </TableCell>
               </TableRow>
             ))}

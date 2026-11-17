@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { LiveSwitch } from '@/components/live-switch';
+import { HintText, StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -145,18 +147,18 @@ function Quality() {
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">{label}</TableHead>
-              <TableHead className="h-8">Партнёр</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8 text-right">Вызовов</TableHead>
-              <TableHead className="h-8 text-right">Состоялось</TableHead>
-              <TableHead className="h-8 text-right">Доля состоявшихся</TableHead>
-              <TableHead className="h-8 text-right">Средний разговор</TableHead>
-              <TableHead className="h-8 text-right">Отказов сети</TableHead>
+              <TableHead className={HEAD}>{label}</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Партнёр</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Вызовов</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Состоялось</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Доля состоявшихся</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Средний разговор</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Отказов сети</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -180,29 +182,32 @@ function Quality() {
               return (
                 <TableRow key={row.subject_id}>
                   <TableCell className="num">{row.subject_name}</TableCell>
-                  <TableCell>{row.partner_name}</TableCell>
+                  <TableCell className={WIDE_ONLY}>{row.partner_name}</TableCell>
+                  {/* Пишется только то, что требует внимания: работающий — пустая ячейка (DESIGN.md, «Таблица»). */}
                   <TableCell>
-                    {row.subject_status === 'active' ? (
-                      <span className="text-muted-foreground">
-                        {statusName(kind, row.subject_status)}
-                      </span>
+                    {row.subject_status !== 'active' && (
+                      <StatusDot tone="warn" label={statusName(kind, row.subject_status)} />
+                    )}
+                  </TableCell>
+                  <TableCell className={NUM}>{row.attempts}</TableCell>
+                  <TableCell className={`${NUM} ${WIDE_ONLY}`}>{row.answered}</TableCell>
+                  <TableCell className={`${NUM} ${low ? 'font-semibold text-crit' : ''}`}>
+                    {enough ? (
+                      percent(asrPercent(row))
                     ) : (
-                      <span className="rounded-sm bg-warn-soft px-1.5 py-0.5 text-warn">
-                        {statusName(kind, row.subject_status)}
+                      <span className="text-faint">
+                        <HintText
+                          label={percent(asrPercent(row))}
+                          reason="Мало вызовов — рано судить"
+                        />
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="num text-right">{row.attempts}</TableCell>
-                  <TableCell className="num text-right">{row.answered}</TableCell>
-                  <TableCell className={`num text-right ${low ? 'font-semibold text-crit' : ''}`}>
-                    {percent(asrPercent(row))}
-                    {!enough && <span className="ml-1 text-faint">мало вызовов</span>}
-                  </TableCell>
-                  <TableCell className="num text-right">
+                  <TableCell className={`${NUM} ${WIDE_ONLY}`}>
                     {row.answered === 0 ? '—' : duration(row.acd_seconds)}
                   </TableCell>
                   <TableCell
-                    className={`num text-right ${row.network_failures > 0 ? 'text-warn' : ''}`}
+                    className={`${NUM} ${WIDE_ONLY} ${row.network_failures > 0 ? 'text-warn' : ''}`}
                   >
                     {row.network_failures}
                   </TableCell>

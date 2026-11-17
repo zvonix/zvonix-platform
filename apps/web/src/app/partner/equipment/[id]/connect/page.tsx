@@ -8,6 +8,7 @@ import { ConsoleShell } from '@/components/console-shell';
 import { Presence } from '@/components/presence';
 import { CopyButton } from '@/components/copy-button';
 import { LineCredentials, type IssuedLines } from '@/components/sip-credentials';
+import { TABLE_FRAME } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -169,24 +170,26 @@ function GatewaySettings({
           <p className="text-muted-foreground">
             И у каждой линии — свой Routing Prefix: по нему GOIP понимает, с какой SIM звонить.
           </p>
-          <div className="max-w-sm overflow-x-auto rounded-lg border border-border bg-card">
+          <div className={`max-w-sm ${TABLE_FRAME}`}>
             <Table aria-label="Префиксы линий" className="whitespace-nowrap">
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">
-                  <TableHead className="h-8">Линия</TableHead>
+                  <TableHead className="h-8 w-px">Line</TableHead>
                   <TableHead className="h-8">Routing Prefix</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {gateway.ports.map((port) => (
                   <TableRow key={port.id}>
-                    <TableCell className="num">Line {port.port_number}</TableCell>
+                    <TableCell className="num">{port.port_number}</TableCell>
                     <TableCell>
-                      <span className="num select-all">{goipLinePrefix(port.port_number)}</span>
-                      <CopyButton
-                        value={goipLinePrefix(port.port_number)}
-                        label={`Скопировать Routing Prefix линии ${String(port.port_number)}`}
-                      />
+                      <span className="inline-flex items-center gap-1">
+                        <span className="num select-all">{goipLinePrefix(port.port_number)}</span>
+                        <CopyButton
+                          value={goipLinePrefix(port.port_number)}
+                          label={`Скопировать Routing Prefix линии ${String(port.port_number)}`}
+                        />
+                      </span>
                     </TableCell>
                   </TableRow>
                 ))}

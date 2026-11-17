@@ -2,8 +2,10 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { RATE_TERMINATION_CHOICES, type RateTerminationChoice } from '@zvonix/shared';
+import { Pencil } from 'lucide-react';
 import { useState } from 'react';
 import { DialogField, FormDialog } from '@/components/form-dialog';
+import { ROW_ICON } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import { DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -110,10 +112,15 @@ export function SetPrice({
 
   return (
     <FormDialog
-      label={rate === undefined ? 'Назначить цену' : 'Изменить'}
+      // В строке тарифа — значком, как все действия строки (DESIGN.md, «Таблица»); над таблицей — словами.
+      {...(rate === undefined
+        ? { label: 'Назначить цену', size: 'sm' as const }
+        : {
+            label: <Pencil aria-hidden className="size-4" />,
+            tooltip: 'Изменить',
+            ...ROW_ICON,
+          })}
       title={`Цена в тарифе «${tariff.name}»`}
-      size={rate === undefined ? 'sm' : 'xs'}
-      variant={rate === undefined ? 'default' : 'ghost'}
       open={open}
       onOpenChange={(next) => {
         // Пока цена отправляется, окно не закрывается: иначе ответ пришёл бы в пустоту.

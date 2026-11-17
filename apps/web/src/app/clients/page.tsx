@@ -2,15 +2,19 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { CLIENT_STATUSES, type ClientStatus } from '@zvonix/shared';
+import { ChevronRight, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { Choice } from '@/components/choice';
 import { ConsoleShell } from '@/components/console-shell';
 import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
+import { StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { MoneyOperation } from '@/components/money-operation';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import {
   Table,
   TableBody,
@@ -140,16 +144,18 @@ function ClientsTable() {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Название</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8 text-right">Остаток</TableHead>
-              <TableHead className="h-8 text-right">Разрешённый минус</TableHead>
-              <TableHead className="h-8">Добавлен</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Название</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Остаток</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Разрешённый минус</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Добавлен</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -177,11 +183,13 @@ function ClientsTable() {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <span className={`rounded-sm px-1.5 py-0.5 ${clientStatusTone(client.status)}`}>
-                    {CLIENT_STATUS_NAME[client.status]}
-                  </span>
+                  <StatusDot
+                    tone={toneOf(clientStatusTone(client.status))}
+                    label={CLIENT_STATUS_NAME[client.status]}
+                    phoneDot
+                  />
                 </TableCell>
-                <TableCell className="num text-right">
+                <TableCell className={NUM}>
                   {/*
                     Отрицательный остаток выделяется, но не паникой: при разрешённом минусе
                     это штатное состояние, а не авария (DESIGN.md).
@@ -190,37 +198,39 @@ function ClientsTable() {
                     {money(client.balance)}
                   </span>
                 </TableCell>
-                <TableCell className="num text-right text-muted-foreground">
+                <TableCell className={`${NUM} text-muted-foreground ${WIDE_ONLY}`}>
                   {money(client.overdraft_limit)}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   <span className="num text-muted-foreground">{moment(client.created_at)}</span>
                 </TableCell>
-                <TableCell className="w-px">
-                  <div className="flex items-start gap-2">
+                <TableCell>
+                  <RowActions>
                     {canChange && (
                       <MoneyOperation
                         path={`/clients/${client.id}/deposit`}
                         label="Пополнить"
+                        icon={<Wallet aria-hidden className="size-4" />}
                         title={`Пополнить счёт «${client.name}»`}
                         description="Деньги появятся на остатке сразу и станут доступны для звонков и сообщений MAX."
                         reasonPlaceholder="Платёжное поручение № 42 от 07.09.2026"
                         balanceName="Остаток"
                         doneText="Проведено"
-                        variant="outline"
                         invalidate={['clients']}
                         reasonOptional
                       />
                     )}
-                    <Button asChild variant="outline" size="sm">
-                      <Link
-                        href={`/clients/${client.id}`}
-                        aria-label={`Открыть клиента «${client.name}»`}
-                      >
-                        Открыть
-                      </Link>
-                    </Button>
-                  </div>
+                    <Tooltip label="Открыть">
+                      <Button asChild {...ROW_ICON}>
+                        <Link
+                          href={`/clients/${client.id}`}
+                          aria-label={`Открыть клиента «${client.name}»`}
+                        >
+                          <ChevronRight aria-hidden className="size-4" />
+                        </Link>
+                      </Button>
+                    </Tooltip>
+                  </RowActions>
                 </TableCell>
               </TableRow>
             ))}

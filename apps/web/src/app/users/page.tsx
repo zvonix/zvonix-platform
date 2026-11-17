@@ -8,6 +8,7 @@ import {
   type UserRole,
   type UserStatus,
 } from '@zvonix/shared';
+import { Power } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { Choice } from '@/components/choice';
 import { ConfirmAction } from '@/components/confirm-action';
@@ -17,6 +18,8 @@ import { ErrorNote } from '@/components/error-note';
 import { FilterInput } from '@/components/filter-input';
 import { FormDialog } from '@/components/form-dialog';
 import { PageNav } from '@/components/page-nav';
+import { ClippedText, StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { Button } from '@/components/ui/button';
 import { DialogClose } from '@/components/ui/dialog';
@@ -182,19 +185,21 @@ function UsersTable() {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Адрес</TableHead>
-              <TableHead className="h-8">Имя</TableHead>
-              <TableHead className="h-8">Роль</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Адрес подтверждён</TableHead>
-              <TableHead className="h-8">Второй фактор</TableHead>
-              <TableHead className="h-8">Последний вход</TableHead>
-              <TableHead className="h-8">Создана</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Адрес</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Имя</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Роль</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Почта</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Второй фактор</TableHead>
+              <TableHead className={`${HEAD} hidden 2xl:table-cell`}>Последний вход</TableHead>
+              <TableHead className={`${HEAD} hidden 2xl:table-cell`}>Создана</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -256,76 +261,102 @@ function RowGroup({
 
   return (
     <TableRow>
+      {/* «Последний вход» и «Создана» — только на широком экране (2xl): на 1280 восемь столбцов не помещались. */}
+      {/* Ячейка адреса — только адрес: по нему строку находят и сквозные проверки. */}
       <TableCell>
         <span className="num">{user.email}</span>
-        {locked && (
-          <span className="ml-2 rounded-sm bg-crit-soft px-1 text-crit">
-            вход закрыт до {moment(user.locked_until)}
-          </span>
-        )}
       </TableCell>
-      <TableCell>{user.full_name}</TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
+        <ClippedText text={user.full_name} width="max-w-40" />
+      </TableCell>
+      <TableCell className={WIDE_ONLY}>
         {/* Название карточки бывает любой длины: без предела оно растягивало таблицу. */}
-        <span className="block max-w-[200px] truncate" title={role}>
-          {role}
-        </span>
+        <ClippedText text={role} width="max-w-40" />
       </TableCell>
       <TableCell>
-        <span className={`rounded-sm px-1.5 py-0.5 ${statusTone(user.status)}`}>
-          {STATUS_NAME[user.status]}
-        </span>
-      </TableCell>
-      <TableCell>
-        {user.email_confirmed_at === null ? (
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="text-warn">нет</span>
-            {canChange && <ConfirmEmailButton userId={user.id} email={user.email} />}
-          </span>
+        {/* Закрытый после неудачных попыток вход важнее состояния записи: человек не войдёт сейчас. */}
+        {locked ? (
+          <StatusDot
+            tone="crit"
+            label="вход закрыт"
+            reason={`после неудачных попыток, до ${moment(user.locked_until)}`}
+            phoneDot
+          />
         ) : (
-          <span className="num text-muted-foreground">{moment(user.email_confirmed_at)}</span>
+          <StatusDot
+            tone={toneOf(statusTone(user.status))}
+            label={STATUS_NAME[user.status]}
+            phoneDot
+          />
         )}
       </TableCell>
-      <TableCell>
-        {user.totp_enabled ? 'включён' : <span className="text-muted-foreground">нет</span>}
+      <TableCell className={WIDE_ONLY}>
+        {user.email_confirmed_at === null ? (
+          <StatusDot
+            tone="warn"
+            label="нет"
+            reason="человек не перешёл по ссылке из письма; подтвердить вручную — кнопкой справа"
+          />
+        ) : (
+          <StatusDot
+            tone="ok"
+            label="подтверждена"
+            reason={`подтверждена ${moment(user.email_confirmed_at)}`}
+            dotOnly
+          />
+        )}
       </TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
+        {/* Второй фактор — точкой: слово в каждой строке ничего не добавляло (DESIGN.md, «Таблица»). */}
+        <StatusDot
+          tone={user.totp_enabled ? 'ok' : 'off'}
+          label={user.totp_enabled ? 'второй фактор включён' : 'второго фактора нет'}
+          dotOnly
+        />
+      </TableCell>
+      <TableCell className="hidden 2xl:table-cell">
         <span className="num text-muted-foreground">{moment(user.last_login_at)}</span>
       </TableCell>
-      <TableCell>
+      <TableCell className="hidden 2xl:table-cell">
         <span className="num text-muted-foreground">{moment(user.created_at)}</span>
       </TableCell>
-      <TableCell className="whitespace-normal">
-        {canChange && self && (
-          <span className="text-muted-foreground">
-            ваша запись — состояние меняет другой администратор
-          </span>
-        )}
-        {canChange && !self && user.status === 'disabled' && (
-          <span className="text-muted-foreground">закрыта навсегда</span>
-        )}
-        {changeable && (
-          <FormDialog
-            label="Изменить"
-            variant="outline"
-            title={`Состояние учётной записи ${user.email}`}
-            description={
-              <>
-                Сейчас — {STATUS_NAME[user.status].toLowerCase()}. Действие попадает в журнал вместе
-                с тем, что было до.
-              </>
-            }
-            open={open}
-            onOpenChange={setOpen}
-          >
-            <StatusChoice
-              user={user}
-              onDone={() => {
-                setOpen(false);
-              }}
+      <TableCell>
+        {/* Закрытая навсегда — видно в «Состоянии», действий у неё нет. */}
+        <RowActions>
+          {canChange && self && (
+            <StatusDot
+              tone="off"
+              label="ваша запись"
+              reason="состояние меняет другой администратор"
             />
-          </FormDialog>
-        )}
+          )}
+          {canChange && user.email_confirmed_at === null && (
+            <ConfirmEmailButton userId={user.id} email={user.email} icon />
+          )}
+          {changeable && (
+            <FormDialog
+              label={<Power aria-hidden className="size-4" />}
+              tooltip="Изменить"
+              {...ROW_ICON}
+              title={`Состояние учётной записи ${user.email}`}
+              description={
+                <>
+                  Сейчас — {STATUS_NAME[user.status].toLowerCase()}. Действие попадает в журнал
+                  вместе с тем, что было до.
+                </>
+              }
+              open={open}
+              onOpenChange={setOpen}
+            >
+              <StatusChoice
+                user={user}
+                onDone={() => {
+                  setOpen(false);
+                }}
+              />
+            </FormDialog>
+          )}
+        </RowActions>
       </TableCell>
     </TableRow>
   );

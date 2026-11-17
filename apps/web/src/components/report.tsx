@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { BarChart } from '@/components/bar-chart';
 import { ExportButton } from '@/components/export-button';
 import { LiveSwitch } from '@/components/live-switch';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -372,26 +373,32 @@ export function Report({ config }: { config: ReportConfig }) {
           </p>
         )}
 
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <div className={TABLE_FRAME}>
           <Table>
             <TableHeader>
               <TableRow className="text-muted-foreground hover:bg-transparent">
-                <TableHead className="h-8">Кто</TableHead>
+                <TableHead className={HEAD}>Кто</TableHead>
                 {messages ? (
                   <>
-                    <TableHead className="h-8 text-right">Сообщений</TableHead>
-                    <TableHead className="h-8 text-right">Доставлено</TableHead>
-                    <TableHead className="h-8 text-right">Прочитано</TableHead>
+                    <TableHead className={`${HEAD} text-right`}>Сообщений</TableHead>
+                    <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Доставлено</TableHead>
+                    <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Прочитано</TableHead>
                   </>
                 ) : (
                   <>
-                    <TableHead className="h-8 text-right">Вызовов</TableHead>
-                    <TableHead className="h-8 text-right">Доля состоявшихся</TableHead>
-                    <TableHead className="h-8 text-right">Разговоров</TableHead>
+                    <TableHead className={`${HEAD} text-right`}>Вызовов</TableHead>
+                    <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>
+                      Доля состоявшихся
+                    </TableHead>
+                    <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Разговоров</TableHead>
                   </>
                 )}
-                {config.money.map((entry) => (
-                  <TableHead key={entry.key} className="h-8 text-right">
+                {/* На телефоне — только первая сумма (главная для роли). */}
+                {config.money.map((entry, index) => (
+                  <TableHead
+                    key={entry.key}
+                    className={`${HEAD} text-right ${index === 0 ? '' : WIDE_ONLY}`}
+                  >
                     {entry.label}
                   </TableHead>
                 ))}
@@ -421,23 +428,29 @@ export function Report({ config }: { config: ReportConfig }) {
                   </TableCell>
                   {messages ? (
                     <>
-                      <TableCell className="num text-right">{row.messages}</TableCell>
-                      <TableCell className="num text-right">
-                        {row.messages_delivered} · {percent(deliveredShare(row))}
+                      <TableCell className={NUM}>{row.messages}</TableCell>
+                      <TableCell className={`${NUM} whitespace-nowrap ${WIDE_ONLY}`}>
+                        {row.messages_delivered}{' '}
+                        <span className="text-muted-foreground">
+                          {percent(deliveredShare(row))}
+                        </span>
                       </TableCell>
-                      <TableCell className="num text-right">
-                        {row.messages_read} · {percent(readShare(row))}
+                      <TableCell className={`${NUM} whitespace-nowrap ${WIDE_ONLY}`}>
+                        {row.messages_read}{' '}
+                        <span className="text-muted-foreground">{percent(readShare(row))}</span>
                       </TableCell>
                     </>
                   ) : (
                     <>
-                      <TableCell className="num text-right">{row.calls}</TableCell>
-                      <TableCell className="num text-right">{percent(asr(row))}</TableCell>
-                      <TableCell className="num text-right">{talk(row.talk_seconds)}</TableCell>
+                      <TableCell className={NUM}>{row.calls}</TableCell>
+                      <TableCell className={`${NUM} ${WIDE_ONLY}`}>{percent(asr(row))}</TableCell>
+                      <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                        {talk(row.talk_seconds)}
+                      </TableCell>
                     </>
                   )}
-                  {config.money.map((entry) => (
-                    <TableCell key={entry.key} className="num text-right">
+                  {config.money.map((entry, index) => (
+                    <TableCell key={entry.key} className={`${NUM} ${index === 0 ? '' : WIDE_ONLY}`}>
                       {money(row[moneyOf(entry)] ?? '0')}
                     </TableCell>
                   ))}

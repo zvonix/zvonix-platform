@@ -1,22 +1,24 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Infinity as InfinityIcon, Settings2, X } from 'lucide-react';
 import {
   GATEWAY_STATUSES,
   REGISTRABLE_GATEWAY_STATUSES,
   type GatewayStatus,
   type GatewaySuspendedBy,
 } from '@zvonix/shared';
-import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
 import { TestCallButton } from '@/components/test-call';
 import { TrunkCheckButton } from '@/components/trunk-check';
-import { NumberPace, type NumberPaceView } from '@/components/number-pace';
+import { paceSummary, warmupCell, type NumberPaceView } from '@/components/number-pace';
 import { TrunkPresence, type TrunkLink } from '@/components/presence';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
-import { Button } from '@/components/ui/button';
+import { StatusDialog } from '@/components/status-dialog';
+import { ClippedText, HintText, StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -31,7 +33,7 @@ import { moment } from '@/lib/format';
 import { atMost } from '@/lib/wait';
 import { GATEWAY_STATUS_NAME, GATEWAY_SUSPENDED_BY_NAME, usableTone } from '@/lib/labels';
 
-const COLUMNS = 6;
+const COLUMNS = 7;
 
 interface Trunk {
   readonly id: string;
@@ -89,9 +91,8 @@ const asApiError = (error: unknown): ApiError | undefined =>
  * Пароль после сохранения не показывается никогда: в ответах API его нет, есть только
  * признак, что он задан. Заменить можно, посмотреть — нет.
  *
- * Состояние меняется выбором и кнопкой «Применить», а не прямо в выпадающем списке:
- * там перебор стрелками с клавиатуры отправлял запрос на каждое нажатие, включая
- * «Выведен» (ui-review, 2026-09-14).
+ * Состояние меняется окном с вариантами (`StatusDialog`), а не прямо в выпадающем списке: там перебор стрелками
+ * с клавиатуры отправлял запрос на каждое нажатие, включая «Выведен» (ui-review, 2026-09-14).
  */
 export function PartnerTrunks({ partnerId }: { partnerId: string }) {
   const canChange = useCanChange();
@@ -178,16 +179,25 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
+      {/*
+        По стандарту таблицы (DESIGN.md, «Таблица»; владелец, 2026-11-17), как строка SIP-провайдера у партнёра: связь —
+        точкой у названия, состояние — точкой и словом, второе слово — только то, что требует внимания, прогрев —
+        своим столбцом, действия — значками. Смена состояния — одним окном с вариантами (`StatusDialog`), а не выбором
+        и «Применить» в строке.
+      */}
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Транк</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Провайдер и доступ</TableHead>
-              <TableHead className="h-8 text-right">Каналов</TableHead>
-              <TableHead className="h-8 text-right">Номеров</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Транк</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Провайдер</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Каналов</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Номеров</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Прогрев</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -209,89 +219,70 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
 
             {trunks.map((trunk) => (
               <TableRow key={trunk.id}>
-                <TableCell
-                  className="whitespace-nowrap"
-                  title={`Вход на узле: ${trunk.sip_username}`}
-                >
-                  {trunk.name}
+                <TableCell>
+                  <span className="inline-flex items-center gap-1">
+                    <ClippedText
+                      text={trunk.name}
+                      hint={`${trunk.name}. Вход на узле: ${trunk.sip_username}`}
+                      width="max-w-48"
+                    />
+                    <TrunkPresence link={trunk.link} now={Date.now()} dotOnly />
+                  </span>
                 </TableCell>
 
                 <TableCell>
-                  {/* В строку, с переносом только когда не хватает ширины: строка таблицы не раздувается в столбик. */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 [&>*]:whitespace-nowrap">
-                    <span
-                      className={`rounded-sm px-1.5 py-0.5 ${usableTone(
-                        REGISTRABLE_GATEWAY_STATUSES.includes(trunk.status),
-                      )}`}
-                    >
-                      {GATEWAY_STATUS_NAME[trunk.status]}
-                    </span>
-                    <TrunkPresence link={trunk.link} now={Date.now()} />
-                    {trunk.suspended_by !== null && (
-                      <span className="text-muted-foreground">
-                        {GATEWAY_SUSPENDED_BY_NAME[trunk.suspended_by]}
-                      </span>
-                    )}
-                    {trunk.unlimited ? null : <NumberPace pace={trunk.pace} />}
-                    <TrunkUnlimited trunk={trunk} canChange={canChange} onDone={refresh} />
-                    {!trunk.has_price && (
-                      <span
-                        className="text-warn"
-                        title="В тарифе провайдера нет цены «через SIP»: без неё клиенты через него не звонят"
-                      >
-                        нет цены SIP
-                      </span>
-                    )}
-                    {canChange && (
-                      <TrunkStatus
-                        // Новый выбор после смены состояния: прежний мог совпасть с новым.
-                        key={`${trunk.id}:${trunk.status}`}
-                        trunk={trunk}
-                        busy={busy}
-                        onActivate={() => {
-                          activate.mutate(trunk.id);
-                        }}
-                        onConfirm={(status) => confirmStatus.mutateAsync({ id: trunk.id, status })}
-                      />
-                    )}
-                  </div>
-                </TableCell>
-
-                <TableCell className="whitespace-nowrap">
-                  <span className="num" translate="no">
-                    {trunk.proxy_host}
+                  <span className="inline-flex items-center gap-3">
+                    <StatusDot
+                      tone={toneOf(usableTone(REGISTRABLE_GATEWAY_STATUSES.includes(trunk.status)))}
+                      label={GATEWAY_STATUS_NAME[trunk.status]}
+                      reason={
+                        trunk.suspended_by === null
+                          ? TRUNK_STATUS_MEANING[trunk.status]
+                          : `${GATEWAY_SUSPENDED_BY_NAME[trunk.suspended_by]}. ${TRUNK_STATUS_MEANING[trunk.status]}`
+                      }
+                    />
+                    <TrunkAttention trunk={trunk} />
                   </span>
-                  {trunk.registers_outbound ? (
-                    <>
-                      <span className="text-muted-foreground"> · регистрация </span>
-                      <span
-                        className="num text-faint"
-                        title={trunk.has_secret ? 'пароль задан' : 'пароля нет'}
-                      >
-                        {trunk.outbound_username ?? '—'}
-                      </span>
-                      {!trunk.has_secret && <span className="text-warn"> · пароля нет</span>}
-                    </>
-                  ) : (
-                    <span
-                      className="text-muted-foreground"
-                      title="Провайдер узнаёт нас по IP, учётных данных нет"
-                    >
-                      {' · по адресу'}
-                    </span>
-                  )}
                 </TableCell>
 
-                <TableCell className="num text-right">{trunk.max_concurrent_calls}</TableCell>
-                <TableCell className="num text-right">{trunk.numbers_count}</TableCell>
+                <TableCell className={WIDE_ONLY}>
+                  <ClippedText
+                    text={trunk.proxy_host}
+                    width="max-w-56"
+                    hint={
+                      trunk.registers_outbound
+                        ? `Регистрация у провайдера, логин ${trunk.outbound_username ?? '—'}; ${trunk.has_secret ? 'пароль задан' : 'пароля нет'}`
+                        : 'По адресу: провайдер узнаёт нас по IP, учётных данных нет'
+                    }
+                  />
+                </TableCell>
+
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  {trunk.max_concurrent_calls}
+                </TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{trunk.numbers_count}</TableCell>
+
+                <TableCell className={WIDE_ONLY}>
+                  <TrunkWarmup trunk={trunk} />
+                </TableCell>
 
                 <TableCell>
                   {canChange && (
-                    <div className="flex gap-2">
+                    <RowActions>
+                      {trunk.status !== 'retired' && (
+                        <>
+                          <TestCallButton
+                            scope="admin"
+                            subject={{ kind: 'trunk', id: trunk.id, name: trunk.name }}
+                          />
+                          <TrunkCheckButton scope="admin" trunk={trunk} />
+                        </>
+                      )}
                       <FormDialog
-                        label="Настроить"
+                        label={<Settings2 aria-hidden className="size-4" />}
+                        tooltip="Настроить"
+                        {...ROW_ICON}
                         title={`Настроить транк «${trunk.name}»`}
-                        variant="outline"
                       >
                         <EditTrunkForm
                           trunk={trunk}
@@ -303,16 +294,28 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                           }
                         />
                       </FormDialog>
+                      <TrunkUnlimited trunk={trunk} onDone={refresh} />
                       {trunk.status !== 'retired' && (
-                        <>
-                          <TestCallButton
-                            scope="admin"
-                            subject={{ kind: 'trunk', id: trunk.id, name: trunk.name }}
-                          />
-                          <TrunkCheckButton scope="admin" trunk={trunk} />
-                        </>
+                        <StatusDialog
+                          subject={`транк «${trunk.name}»`}
+                          current={GATEWAY_STATUS_NAME[trunk.status]}
+                          disabled={busy}
+                          options={GATEWAY_STATUSES.filter((status) => status !== trunk.status).map(
+                            (status) => ({
+                              value: status,
+                              action: GATEWAY_STATUS_NAME[status],
+                              meaning: TRUNK_STATUS_MEANING[status],
+                              danger: status === 'retired' || status === 'suspended',
+                            }),
+                          )}
+                          onChange={(status) =>
+                            status === 'active'
+                              ? activate.mutateAsync(trunk.id)
+                              : confirmStatus.mutateAsync({ id: trunk.id, status })
+                          }
+                        />
                       )}
-                    </div>
+                    </RowActions>
                   )}
                 </TableCell>
               </TableRow>
@@ -325,76 +328,57 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
 }
 
 /**
- * Смена состояния транка: выбор, затем «Применить».
- *
- * Включение применяется сразу, остальное — через подтверждение с последствием.
- * Выведенный транк состояние не меняет: вывод окончательный.
+ * Второе слово в «Состоянии» — только то, что требует внимания администратора, по важности: партнёр просит безлимит,
+ * в тарифе нет цены SIP, номер упёрся в предел или спит. Всё в порядке — пусто.
  */
-function TrunkStatus({
-  trunk,
-  busy,
-  onActivate,
-  onConfirm,
-}: {
-  trunk: Trunk;
-  busy: boolean;
-  onActivate: () => void;
-  onConfirm: (status: GatewayStatus) => Promise<unknown>;
-}) {
-  const options = GATEWAY_STATUSES.filter((status) => status !== trunk.status);
-  const [chosen, setChosen] = useState<GatewayStatus>(options[0] ?? 'active');
-
-  if (trunk.status === 'retired') {
-    return <span className="text-muted-foreground">выведен навсегда</span>;
+function TrunkAttention({ trunk }: { trunk: Trunk }) {
+  if (!trunk.unlimited && trunk.unlimited_requested_at !== null) {
+    return (
+      <StatusDot
+        tone="warn"
+        label="просит безлимит"
+        reason={`Партнёр попросил безлимит ${moment(trunk.unlimited_requested_at)}. Выдать или отклонить — значками справа`}
+      />
+    );
   }
-
-  return (
-    <div className="flex items-center gap-1">
-      <select
-        aria-label={`Новое состояние транка «${trunk.name}»`}
-        value={chosen}
-        onChange={(event) => {
-          setChosen(event.target.value as GatewayStatus);
-        }}
-        className="h-8 rounded-md border border-input bg-transparent px-1"
-      >
-        {options.map((status) => (
-          <option key={status} value={status}>
-            {GATEWAY_STATUS_NAME[status]}
-          </option>
-        ))}
-      </select>
-      {chosen === 'active' ? (
-        <Button variant="outline" size="sm" disabled={busy} onClick={onActivate}>
-          Применить
-        </Button>
-      ) : (
-        <ConfirmAction
-          label="Применить"
-          title={`«${GATEWAY_STATUS_NAME[chosen]}»: транк «${trunk.name}»`}
-          consequence={<p>{TRUNK_STATUS_MEANING[chosen]}</p>}
-          confirmLabel={`Перевести в «${GATEWAY_STATUS_NAME[chosen]}»`}
-          disabled={busy}
-          onConfirm={() => onConfirm(chosen)}
-        />
-      )}
-    </div>
+  if (!trunk.has_price) {
+    return (
+      <StatusDot
+        tone="warn"
+        label="нет цены SIP"
+        reason="В тарифе провайдера нет цены «через SIP»: без неё клиенты через него не звонят"
+      />
+    );
+  }
+  if (trunk.status !== 'active' || trunk.unlimited) return null;
+  const pace = paceSummary(trunk.pace);
+  return pace === null ? null : (
+    <StatusDot tone={pace.tone} label={pace.label} reason={pace.reason} />
   );
+}
+
+/** Прогрев — «4/14» с подсказкой, как у SIM; безлимит — словом, прогретый — пусто. */
+function TrunkWarmup({ trunk }: { trunk: Trunk }) {
+  if (trunk.unlimited) {
+    return (
+      <StatusDot
+        tone="ok"
+        label="безлимит"
+        reason="Нет прогрева, пределов в час и в сутки, сна и пауз между звонками; держат каналы провайдера и лимиты"
+      />
+    );
+  }
+  if (trunk.status !== 'active') return null;
+  const warmup = warmupCell(trunk.pace);
+  return warmup === null ? null : <HintText label={warmup.label} reason={warmup.reason} />;
 }
 
 /**
  * Безлимит провайдера ([ADR-0119](../../../../../docs/adr/0119-bezlimit-sip-provaydera-po-resheniyu-admina.md)):
- * решает только администратор — выдаёт по запросу партнёра или сам, отклоняет, снимает.
+ * решает только администратор — выдаёт по запросу партнёра или сам, отклоняет, снимает. Значками в ряду действий
+ * строки; что просит партнёр — словом в «Состоянии».
  */
-function TrunkUnlimited({
-  trunk,
-  canChange,
-  onDone,
-}: {
-  trunk: Trunk;
-  canChange: boolean;
-  onDone: () => Promise<void>;
-}) {
+function TrunkUnlimited({ trunk, onDone }: { trunk: Trunk; onDone: () => Promise<void> }) {
   const decide = useMutation({
     mutationFn: (unlimited: boolean) =>
       request<unknown>(`/sip-trunks/${trunk.id}/unlimited`, {
@@ -403,9 +387,32 @@ function TrunkUnlimited({
       }),
     onSuccess: onDone,
   });
+  if (trunk.status === 'retired') return null;
+
+  if (trunk.unlimited) {
+    return (
+      <ConfirmAction
+        label={<InfinityIcon aria-hidden className="size-4" />}
+        tooltip="Снять безлимит"
+        {...ROW_ICON}
+        title={`Снять безлимит у провайдера «${trunk.name}»`}
+        consequence={
+          <p>
+            К провайдеру вернётся рекомендованная работа площадки: прогрев, пределы, сон и паузы.
+            Часть вызовов пойдёт через другие номера или не пройдёт.
+          </p>
+        }
+        confirmLabel="Снять безлимит"
+        onConfirm={() => decide.mutateAsync(false)}
+      />
+    );
+  }
+
   const grant = (
     <ConfirmAction
-      label="Выдать безлимит"
+      label={<InfinityIcon aria-hidden className="size-4" />}
+      tooltip="Выдать безлимит"
+      {...ROW_ICON}
       title={`Безлимит для провайдера «${trunk.name}»`}
       consequence={
         <p>
@@ -416,62 +423,28 @@ function TrunkUnlimited({
       }
       confirmLabel="Выдать безлимит"
       tone="neutral"
-      size="xs"
       onConfirm={() => decide.mutateAsync(true)}
     />
   );
 
-  if (trunk.unlimited) {
-    return (
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-ok">безлимит</span>
-        {canChange && (
-          <ConfirmAction
-            label="Снять безлимит"
-            title={`Снять безлимит у провайдера «${trunk.name}»`}
-            consequence={
-              <p>
-                К провайдеру вернутся рекомендованная работа площадки: прогрев, пределы, сон и
-                паузы. Часть вызовов пойдёт через другие номера или не пройдёт.
-              </p>
-            }
-            confirmLabel="Снять безлимит"
-            variant="ghost"
-            size="xs"
-            onConfirm={() => decide.mutateAsync(false)}
-          />
-        )}
-      </div>
-    );
-  }
-  if (trunk.unlimited_requested_at !== null) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="rounded-sm bg-warn-soft px-1.5 py-0.5 text-warn">
-          просит безлимит с {moment(trunk.unlimited_requested_at)}
-        </span>
-        {canChange && (
-          <div className="flex gap-1">
-            {grant}
-            <ConfirmAction
-              label="Отклонить"
-              title={`Отклонить безлимит для провайдера «${trunk.name}»`}
-              consequence={
-                <p>
-                  Провайдер продолжит работать с ограничениями площадки. Партнёр сможет попросить
-                  снова.
-                </p>
-              }
-              confirmLabel="Отклонить"
-              tone="neutral"
-              variant="ghost"
-              size="xs"
-              onConfirm={() => decide.mutateAsync(false)}
-            />
-          </div>
-        )}
-      </div>
-    );
-  }
-  return canChange ? grant : null;
+  if (trunk.unlimited_requested_at === null) return grant;
+  return (
+    <>
+      {grant}
+      <ConfirmAction
+        label={<X aria-hidden className="size-4" />}
+        tooltip="Отклонить безлимит"
+        {...ROW_ICON}
+        title={`Отклонить безлимит для провайдера «${trunk.name}»`}
+        consequence={
+          <p>
+            Провайдер продолжит работать с ограничениями площадки. Партнёр сможет попросить снова.
+          </p>
+        }
+        confirmLabel="Отклонить"
+        tone="neutral"
+        onConfirm={() => decide.mutateAsync(false)}
+      />
+    </>
+  );
 }

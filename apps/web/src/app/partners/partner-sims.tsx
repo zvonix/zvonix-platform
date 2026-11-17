@@ -7,11 +7,14 @@ import {
   USABLE_SIM_STATUSES,
   type SimStatus,
 } from '@zvonix/shared';
+import { Pencil } from 'lucide-react';
 import { useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
-import { NumberPace, type NumberPaceView } from '@/components/number-pace';
+import { paceSummary, warmupCell, type NumberPaceView } from '@/components/number-pace';
 import { StatusDialog } from '@/components/status-dialog';
+import { HintText, StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -41,7 +44,7 @@ export interface Sim {
   readonly pace?: NumberPaceView;
 }
 
-const COLUMNS = 7;
+const COLUMNS = 6;
 
 /**
  * Кнопка называет **действие**, а не состояние: четыре кнопки «Заблокирована»,
@@ -124,17 +127,17 @@ export function PartnerSims({
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Номер SIM</TableHead>
-              <TableHead className="h-8">Оператор</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8 text-right">Вызовов разом</TableHead>
-              <TableHead className="h-8">Оператор сверен</TableHead>
-              <TableHead className="h-8" colSpan={2}>
-                {' '}
+              <TableHead className={HEAD}>Номер SIM</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Оператор</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Прогрев</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Вызовов разом</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -158,59 +161,43 @@ export function PartnerSims({
             {sims.map((sim) => (
               <TableRow key={sim.id}>
                 <TableCell>
-                  <span className="num">{sim.msisdn}</span>
-                  {sim.iccid !== null && <span className="num block text-faint">{sim.iccid}</span>}
-                </TableCell>
-                <TableCell>
-                  {operators.nameOf(sim.operator_id) ?? (
-                    <span className="text-muted-foreground">неизвестен</span>
-                  )}
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
+                  {/* ICCID — в подсказке к номеру: строка в одну линию (DESIGN.md, «Таблица»). */}
                   <span
-                    className={`rounded-sm px-1.5 py-0.5 ${usableTone(
-                      USABLE_SIM_STATUSES.includes(sim.status),
-                    )}`}
+                    className="num"
+                    title={sim.iccid === null ? undefined : `ICCID ${sim.iccid}`}
                   >
-                    {SIM_STATUS_NAME[sim.status]}
+                    {sim.msisdn}
                   </span>
-                  <NumberPace pace={sim.pace} />
                 </TableCell>
-                <TableCell className="text-right">
-                  {canChange ? (
-                    <ConcurrencyField sim={sim} onSaved={invalidate} />
-                  ) : (
-                    <span className="num">{sim.max_concurrent_calls}</span>
-                  )}
+                <TableCell className={WIDE_ONLY}>
+                  <OperatorCell sim={sim} name={operators.nameOf(sim.operator_id)} />
+                </TableCell>
+                <TableCell className={WIDE_ONLY}>
+                  <WarmupCell sim={sim} />
                 </TableCell>
                 <TableCell>
-                  {sim.operator_confirmed_at === null ? (
-                    <span className="text-warn">не сверен</span>
-                  ) : (
-                    <span className="num text-muted-foreground">
-                      {moment(sim.operator_confirmed_at)}
-                    </span>
-                  )}
+                  <SimState sim={sim} />
                 </TableCell>
-                <TableCell colSpan={2}>
-                  {canChange && sim.status === 'retired' && (
-                    <span className="text-muted-foreground">выведена навсегда</span>
-                  )}
-                  {canChange && sim.status !== 'retired' && (
-                    <StatusDialog
-                      subject={`SIM ${sim.msisdn}`}
-                      current={SIM_STATUS_NAME[sim.status]}
-                      options={SIM_STATUSES.filter(
-                        (status) => status !== sim.status && status !== 'paused',
-                      ).map((status) => ({
-                        value: status,
-                        action: STATUS_ACTION[status],
-                        meaning: SIM_STATUS_MEANING[status],
-                        danger: status === 'blocked' || status === 'retired',
-                      }))}
-                      onChange={(status) => changeStatus.mutateAsync({ id: sim.id, status })}
-                    />
-                  )}
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{sim.max_concurrent_calls}</TableCell>
+                <TableCell>
+                  <RowActions>
+                    {canChange && <ConcurrencyEdit sim={sim} onSaved={invalidate} />}
+                    {canChange && sim.status !== 'retired' && (
+                      <StatusDialog
+                        subject={`SIM ${sim.msisdn}`}
+                        current={SIM_STATUS_NAME[sim.status]}
+                        options={SIM_STATUSES.filter(
+                          (status) => status !== sim.status && status !== 'paused',
+                        ).map((status) => ({
+                          value: status,
+                          action: STATUS_ACTION[status],
+                          meaning: SIM_STATUS_MEANING[status],
+                          danger: status === 'blocked' || status === 'retired',
+                        }))}
+                        onChange={(status) => changeStatus.mutateAsync({ id: sim.id, status })}
+                      />
+                    )}
+                  </RowActions>
                 </TableCell>
               </TableRow>
             ))}
@@ -218,6 +205,60 @@ export function PartnerSims({
         </Table>
       </div>
     </div>
+  );
+}
+
+/**
+ * Оператор карты; не сверенный со справочником — жёлтой точкой, когда сверен — в подсказке
+ * (DESIGN.md, «Таблица»: отдельный столбец «Оператор сверен» с датой в каждой строке ничего не добавлял).
+ */
+function OperatorCell({ sim, name }: { sim: Sim; name: string | undefined }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={name === undefined ? 'text-muted-foreground' : undefined}
+        title={
+          sim.operator_confirmed_at === null
+            ? undefined
+            : `сверен ${moment(sim.operator_confirmed_at)}`
+        }
+      >
+        {name ?? 'неизвестен'}
+      </span>
+      {sim.operator_confirmed_at === null && (
+        <StatusDot
+          tone="warn"
+          label="не сверен"
+          reason="оператор ещё не сверен со справочником по номеру SIM"
+          dotOnly
+        />
+      )}
+    </span>
+  );
+}
+
+/** «4/14» с подсказкой; прогретый номер — пусто. Как в «Оборудовании» партнёра. */
+function WarmupCell({ sim }: { sim: Sim }) {
+  const warmup = sim.status === 'active' ? warmupCell(sim.pace) : null;
+  return warmup === null ? null : <HintText label={warmup.label} reason={warmup.reason} />;
+}
+
+/**
+ * Состояние карты точкой и словом. У работающей вместо «работает» — то, что мешает ей звонить
+ * (предел, сон, пауза: `paceSummary`), если такое есть; причина — в подсказке.
+ */
+function SimState({ sim }: { sim: Sim }) {
+  const pace = sim.status === 'active' ? paceSummary(sim.pace) : null;
+  if (pace !== null) {
+    return <StatusDot tone={pace.tone} label={pace.label} reason={pace.reason} phoneDot />;
+  }
+  return (
+    <StatusDot
+      tone={toneOf(usableTone(USABLE_SIM_STATUSES.includes(sim.status)))}
+      label={SIM_STATUS_NAME[sim.status]}
+      reason={SIM_STATUS_MEANING[sim.status]}
+      phoneDot
+    />
   );
 }
 
@@ -304,7 +345,7 @@ function DeclareSimForm({ onDeclare }: { onDeclare: (draft: SimDraft) => Promise
 }
 
 /**
- * «Вызовов разом» — число в строке и окно правки, а не отправка по потере фокуса.
+ * «Вызовов разом» — число в своём столбце и значок правки с окном, а не отправка по потере фокуса.
  *
  * Раньше значение уходило молча, когда фокус покидал поле: без подписи, без итога,
  * а после отказа поле продолжало показывать отвергнутое число. Одновременность на SIM
@@ -312,7 +353,7 @@ function DeclareSimForm({ onDeclare }: { onDeclare: (draft: SimDraft) => Promise
  * оператор может принять такую SIM за шлюз и заблокировать её — это сказано на экране,
  * а не только в коде.
  */
-function ConcurrencyField({ sim, onSaved }: { sim: Sim; onSaved: () => Promise<void> }) {
+function ConcurrencyEdit({ sim, onSaved }: { sim: Sim; onSaved: () => Promise<void> }) {
   const save = useMutation({
     mutationFn: (next: number) =>
       request<unknown>(`/sim-cards/${sim.id}/concurrency`, {
@@ -323,17 +364,14 @@ function ConcurrencyField({ sim, onSaved }: { sim: Sim; onSaved: () => Promise<v
   });
 
   return (
-    <div className="flex items-center justify-end gap-2">
-      <span className="num">{sim.max_concurrent_calls}</span>
-      <FormDialog
-        label="Изменить"
-        title={`Вызовов разом на SIM ${sim.msisdn}`}
-        variant="outline"
-        size="xs"
-      >
-        <ConcurrencyForm sim={sim} onSave={(next) => save.mutateAsync(next)} />
-      </FormDialog>
-    </div>
+    <FormDialog
+      label={<Pencil aria-hidden className="size-4" />}
+      tooltip="Изменить"
+      {...ROW_ICON}
+      title={`Вызовов разом на SIM ${sim.msisdn}`}
+    >
+      <ConcurrencyForm sim={sim} onSave={(next) => save.mutateAsync(next)} />
+    </FormDialog>
   );
 }
 

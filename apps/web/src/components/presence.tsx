@@ -1,3 +1,4 @@
+import { StatusDot } from '@/components/status-dot';
 import { moment } from '@/lib/format';
 
 /** Подключение шлюза или линии GOIP — по опросу узлов (ADR-0103); одно у партнёра и в админке. */
@@ -17,7 +18,14 @@ export interface DeviceConnection {
  * (владелец, 2026-09-29: «на связи может писать другим цветом»). Слово остаётся: один цвет не читается
  * при нарушенном цветовосприятии. Стучится, но не вошло — подсказка про пароль: это самая частая причина.
  */
-export function Presence({ connection }: { connection: DeviceConnection }) {
+export function Presence({
+  connection,
+  dotOnly = false,
+}: {
+  connection: DeviceConnection;
+  /** Только точка, слово — в подсказке: в столбце, где связь повторяется в каждой строке. */
+  dotOnly?: boolean;
+}) {
   const online = connection.connected;
   const title = online
     ? [
@@ -31,14 +39,14 @@ export function Presence({ connection }: { connection: DeviceConnection }) {
       : connection.rejected
         ? `Обращалось ${moment(connection.knocked_at)}, но не вошло — обычно это неверное имя или пароль`
         : `Последний раз обращалось ${moment(connection.knocked_at)}`;
+  // Причина — в подсказке, а не хвостом в строке: строка таблицы остаётся в одну линию (DESIGN.md, «Таблица»).
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 ${online ? 'text-ok' : 'text-warn'}`}
-      title={title}
-    >
-      <span aria-hidden className={`size-2 rounded-full ${online ? 'bg-ok' : 'bg-warn'}`} />
-      {online ? 'на связи' : connection.rejected ? 'не на связи · проверьте пароль' : 'не на связи'}
-    </span>
+    <StatusDot
+      tone={online ? 'ok' : 'warn'}
+      label={online ? 'на связи' : 'не на связи'}
+      reason={title === '' ? undefined : title}
+      dotOnly={dotOnly}
+    />
   );
 }
 
@@ -120,37 +128,41 @@ function failureName(code: number): { short: string; hint: string } {
 }
 
 /**
- * На связи ли узел с SIP-провайдером — так же, как шлюз: точка и слово (владелец, 2026-11-15: «показать коннект
- * есть к SIP-провайдеру»). Не на связи — узел не отправит провайдеру ни одного вызова; почему — словами рядом.
+ * На связи ли узел с SIP-провайдером — так же, как шлюз и линия (владелец, 2026-11-15: «показать коннект есть
+ * к SIP-провайдеру»). В строке таблицы — одной точкой рядом с названием, слово и причина — в подсказке, открывается
+ * и нажатием (DESIGN.md, «Таблица»; владелец, 2026-11-17). Не на связи — узел не отправит провайдеру ни одного вызова.
  */
-export function TrunkPresence({ link, now }: { link: TrunkLink | null; now: number }) {
+export function TrunkPresence({
+  link,
+  now,
+  dotOnly = false,
+}: {
+  link: TrunkLink | null;
+  now: number;
+  dotOnly?: boolean;
+}) {
   const fresh = link !== null && now - Date.parse(link.reported_at) < LINK_FRESH_MS;
   const online = fresh && link.status === 'UP';
   const state = link === null ? undefined : linkStateName(link);
-  // В строке таблицы — два слова, причина — в подсказке (владелец, 2026-11-17: «в таблицах много ненужной информации,
-  // всё в несколько строк»).
   const text = link === null || !fresh ? 'нет сведений' : online ? 'на связи' : 'не на связи';
+  const reason =
+    link === null
+      ? 'Узел ещё не сообщал о связи с провайдером: он сообщает каждые 30 секунд, если провайдер включён'
+      : [
+          ...(fresh ? [] : ['Сведения устарели — узел молчит или провайдер выключен. Последние']),
+          state ?? link.state,
+          link.status === 'UP' ? 'вызовы принимает' : 'вызовы не принимает',
+          ...(link.status !== 'UP' && link.failure != null
+            ? [`${failureName(link.failure).hint} (код ${String(link.failure)})`]
+            : []),
+          `сведения ${moment(link.reported_at)}`,
+        ].join(' · ');
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap ${online ? 'text-ok' : 'text-warn'}`}
-      title={
-        link === null
-          ? 'Узел ещё не сообщал о связи с провайдером: он сообщает каждые 30 секунд, если провайдер включён'
-          : [
-              ...(fresh
-                ? []
-                : ['Сведения устарели — узел молчит или провайдер выключен. Последние']),
-              state ?? link.state,
-              link.status === 'UP' ? 'вызовы принимает' : 'вызовы не принимает',
-              ...(link.status !== 'UP' && link.failure != null
-                ? [`${failureName(link.failure).hint} (код ${String(link.failure)})`]
-                : []),
-              `сведения ${moment(link.reported_at)}`,
-            ].join(' · ')
-      }
-    >
-      <span aria-hidden className={`size-2 rounded-full ${online ? 'bg-ok' : 'bg-warn'}`} />
-      {text}
-    </span>
+    <StatusDot
+      tone={online ? 'ok' : link === null || !fresh ? 'off' : 'warn'}
+      label={text}
+      reason={reason}
+      dotOnly={dotOnly}
+    />
   );
 }

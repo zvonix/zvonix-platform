@@ -1,10 +1,12 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, FormDialog } from '@/components/form-dialog';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import { DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -114,16 +116,20 @@ export function PriceBands() {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Оператор</TableHead>
-              <TableHead className="h-8">Регион</TableHead>
-              <TableHead className="h-8 text-right">Не ниже</TableHead>
-              <TableHead className="h-8 text-right">Не выше</TableHead>
-              <TableHead className="h-8">Действует с</TableHead>
-              {canChange && <TableHead className="h-8" />}
+              <TableHead className={HEAD}>Оператор</TableHead>
+              <TableHead className={HEAD}>Регион</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Не ниже</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Не выше</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Действует с</TableHead>
+              {canChange && (
+                <TableHead className={`${HEAD} w-px`}>
+                  <span className="sr-only">Действия</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -161,29 +167,29 @@ export function PriceBands() {
                 <TableCell>
                   {band.region ?? <span className="text-muted-foreground">все</span>}
                 </TableCell>
-                <TableCell className="num text-right">
+                <TableCell className={NUM}>
                   {band.min_price === null ? (
                     <span className="text-muted-foreground">без границы</span>
                   ) : (
                     money(band.min_price)
                   )}
                 </TableCell>
-                <TableCell className="num text-right">
+                <TableCell className={NUM}>
                   {band.max_price === null ? (
                     <span className="text-muted-foreground">без границы</span>
                   ) : (
                     money(band.max_price)
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   <span className="num text-muted-foreground">{moment(band.effective_from)}</span>
                 </TableCell>
                 {canChange && (
                   <TableCell>
-                    <div className="flex justify-end gap-2">
+                    <RowActions>
                       <BandEdit band={band} />
                       <LiftBand band={band} />
-                    </div>
+                    </RowActions>
                   </TableCell>
                 )}
               </TableRow>
@@ -359,11 +365,11 @@ function BandEdit({ band }: { band: PriceBand }) {
   const [open, setOpen] = useState(false);
   return (
     <FormDialog
-      label="Изменить"
+      label={<Pencil aria-hidden className="size-4" />}
+      tooltip="Изменить"
+      {...ROW_ICON}
       title="Изменить коридор цен"
       description="Границы — стоимость вызова в 60 секунд. Направление остаётся прежним."
-      variant="outline"
-      size="xs"
       open={open}
       onOpenChange={setOpen}
     >
@@ -399,8 +405,9 @@ function LiftBand({ band }: { band: PriceBand }) {
       : (operators.nameOf(band.operator_id) ?? 'оператор');
   return (
     <ConfirmAction
-      label="Снять"
-      size="xs"
+      label={<Trash2 aria-hidden className="size-4" />}
+      tooltip="Снять"
+      {...ROW_ICON}
       tone="neutral"
       title={`Снять коридор: ${operatorName}, ${band.region ?? 'все регионы'}`}
       consequence={

@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
+import { HintText, StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -92,16 +94,16 @@ function MyLimits() {
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Лимит</TableHead>
-              <TableHead className="h-8">На что</TableHead>
-              <TableHead className="hidden h-8 text-right sm:table-cell">Израсходовано</TableHead>
-              <TableHead className="h-8 text-right">Осталось</TableHead>
-              <TableHead className="h-8">Обнулится</TableHead>
-              <TableHead className="h-8">
+              <TableHead className={HEAD}>Лимит</TableHead>
+              <TableHead className={HEAD}>На что</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Израсходовано</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Осталось</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Обнулится</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
                 <span className="sr-only">Действия</span>
               </TableHead>
             </TableRow>
@@ -123,34 +125,36 @@ function MyLimits() {
             )}
             {limits.data?.limits.map((row) => (
               <TableRow key={row.id}>
-                <TableCell className="whitespace-normal">
-                  {counted(row.metric, row.value)} {LIMIT_WINDOW_NAME[row.window]}
-                  <span className="block text-faint">{limitRuleNote(row)}</span>
+                {/* Правило одной строкой; как оно считается — в подсказке (DESIGN.md, «Таблица»). */}
+                <TableCell>
+                  <RuleText row={row} />
                 </TableCell>
-                <TableCell>{lineName(row.channel_id)}</TableCell>
-                <TableCell
-                  className={`hidden text-right sm:table-cell num ${row.exceeded ? 'text-crit' : ''}`}
-                >
+                <TableCell className="whitespace-nowrap">{lineName(row.channel_id)}</TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY} ${row.exceeded ? 'text-crit' : ''}`}>
                   {amount(row.metric, row.used)}
                 </TableCell>
-                <TableCell className="num text-right">
+                <TableCell className={NUM}>
                   {row.exceeded ? (
-                    <span className="text-crit">исчерпан</span>
+                    <StatusDot
+                      tone="crit"
+                      label="исчерпан"
+                      reason={`вызовы отклоняются до ${momentInZone(row.resets_at, row.timezone)}`}
+                    />
                   ) : (
                     amount(row.metric, row.limit - row.used)
                   )}
                 </TableCell>
-                <TableCell className="num text-muted-foreground">
+                <TableCell className={`num text-muted-foreground ${WIDE_ONLY}`}>
                   {momentInZone(row.resets_at, row.timezone)}
                 </TableCell>
                 <TableCell>
                   {row.set_by === 'client' ? (
-                    <div className="flex flex-wrap justify-end gap-2">
+                    <RowActions>
                       <ChangeLimit row={row} scope={SCOPE} />
                       <RemoveLimit row={row} scope={SCOPE} />
-                    </div>
+                    </RowActions>
                   ) : (
-                    <span className="text-muted-foreground">задала площадка</span>
+                    <span className="whitespace-nowrap text-muted-foreground">задала площадка</span>
                   )}
                 </TableCell>
               </TableRow>
@@ -159,6 +163,17 @@ function MyLimits() {
         </Table>
       </div>
     </div>
+  );
+}
+
+/** «100 звонков в сутки»; поминутно, пояс и день обновления — подсказкой. */
+function RuleText({ row }: { row: LimitRow }) {
+  const text = `${counted(row.metric, row.value)} ${LIMIT_WINDOW_NAME[row.window]}`;
+  const note = limitRuleNote(row);
+  return note === '' ? (
+    <span className="whitespace-nowrap">{text}</span>
+  ) : (
+    <HintText label={text} reason={note} />
   );
 }
 

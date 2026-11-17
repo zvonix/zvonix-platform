@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { PARTNER_STATUSES } from '@zvonix/shared';
+import { ChevronRight, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { Choice } from '@/components/choice';
@@ -9,10 +10,13 @@ import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
+import { StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, NUM, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { ReadOnly } from '@/components/read-only';
 import { MoneyOperation } from '@/components/money-operation';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import {
   Table,
   TableBody,
@@ -117,17 +121,19 @@ function PartnersTable() {
 
       {listError !== undefined && <ErrorNote error={listError} />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table {...columns.tableProps}>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Имя</TableHead>
-              <TableHead className="h-8">Псевдоним у клиента</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8 text-right">Причитается</TableHead>
-              <TableHead className="h-8">Слушает записи</TableHead>
-              <TableHead className="h-8">Добавлен</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Имя</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Псевдоним у клиента</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Причитается</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Слушает записи</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Добавлен</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -166,19 +172,34 @@ function PartnerLine({ partner, canChange }: { partner: PartnerRow; canChange: b
           {partner.name}
         </Link>
       </TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         {/*
           Псевдоним заводится вместе с партнёром, но его отсутствие прячут только
           тогда, когда не собираются чинить: без псевдонима клиент партнёра не увидит.
         */}
-        {partner.display_name ?? <span className="text-crit">не задан</span>}
+        {partner.display_name === null ? (
+          <StatusDot
+            tone="crit"
+            label="не задан"
+            reason="без псевдонима клиент партнёра не увидит"
+          />
+        ) : (
+          <span
+            className="inline-block max-w-48 truncate align-bottom"
+            title={partner.display_name}
+          >
+            {partner.display_name}
+          </span>
+        )}
       </TableCell>
       <TableCell>
-        <span className={`rounded-sm px-1.5 py-0.5 ${partnerStatusTone(partner.status)}`}>
-          {PARTNER_STATUS_NAME[partner.status]}
-        </span>
+        <StatusDot
+          tone={toneOf(partnerStatusTone(partner.status))}
+          label={PARTNER_STATUS_NAME[partner.status]}
+          phoneDot
+        />
       </TableCell>
-      <TableCell className="num text-right">
+      <TableCell className={NUM}>
         {/*
           Остаток на счёте партнёра — это долг площадки перед ним: доля за вызовы и сообщения MAX
           начислена, выплата ещё не сделана. Минус означает обратное, и это разбор,
@@ -188,37 +209,39 @@ function PartnerLine({ partner, canChange }: { partner: PartnerRow; canChange: b
           {money(partner.balance)}
         </span>
       </TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         {partner.listens_to_recordings ? 'да' : <span className="text-muted-foreground">нет</span>}
       </TableCell>
-      <TableCell>
+      <TableCell className={WIDE_ONLY}>
         <span className="num text-muted-foreground">{moment(partner.created_at)}</span>
       </TableCell>
-      <TableCell className="w-px">
-        <div className="flex items-start gap-2">
+      <TableCell>
+        <RowActions>
           {canChange && (
             <MoneyOperation
               path={`/partners/${partner.id}/deposit`}
               label="Пополнить"
+              icon={<Wallet aria-hidden className="size-4" />}
               title={`Пополнить счёт партнёра «${partner.name}»`}
               description="Сумма добавится к тому, что причитается партнёру."
               reasonPlaceholder="Премия, возмещение, исправление"
               balanceName="Причитается"
               doneText="Проведено"
-              variant="outline"
               invalidate={['partners']}
               reasonOptional
             />
           )}
-          <Button asChild variant="outline" size="sm">
-            <Link
-              href={`/partners/${partner.id}`}
-              aria-label={`Открыть партнёра «${partner.name}»`}
-            >
-              Открыть
-            </Link>
-          </Button>
-        </div>
+          <Tooltip label="Открыть">
+            <Button asChild {...ROW_ICON}>
+              <Link
+                href={`/partners/${partner.id}`}
+                aria-label={`Открыть партнёра «${partner.name}»`}
+              >
+                <ChevronRight aria-hidden className="size-4" />
+              </Link>
+            </Button>
+          </Tooltip>
+        </RowActions>
       </TableCell>
     </TableRow>
   );

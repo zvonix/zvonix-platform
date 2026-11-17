@@ -2,9 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CHANNEL_STATUSES, type ChannelStatus } from '@zvonix/shared';
+import { KeyRound, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { StatusDialog } from '@/components/status-dialog';
+import { StatusDot, toneOf } from '@/components/status-dot';
+import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import type { IssuedCredentials, SipAccount } from '@/components/sip-credentials';
@@ -163,17 +166,19 @@ export function ClientChannels({
 
       {failed !== undefined && <ErrorNote error={failed} />}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Канал</TableHead>
-              <TableHead className="h-8">Состояние</TableHead>
-              <TableHead className="h-8">Подключение</TableHead>
-              <TableHead className="h-8">Имя SIP</TableHead>
-              <TableHead className="h-8">Запись</TableHead>
-              <TableHead className="h-8">Номер для показа</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Канал</TableHead>
+              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={`${HEAD} w-px`}>Подключение</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Имя SIP</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Запись</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Номер для показа</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -187,53 +192,64 @@ export function ClientChannels({
 
             {channels.map((channel) => (
               <TableRow key={channel.id}>
-                <TableCell className="max-w-72 whitespace-normal">
-                  {channel.name}
-                  {channel.comment !== null && (
-                    <span className="block truncate text-faint" title={channel.comment}>
-                      {channel.comment}
-                    </span>
-                  )}
-                </TableCell>
                 <TableCell>
+                  {/* Комментарий клиента — в подсказке к названию: строка в одну линию (DESIGN.md, «Таблица»). */}
                   <span
-                    className={`rounded-sm px-1.5 py-0.5 ${usableTone(channel.status === 'active')}`}
+                    className="inline-block max-w-72 truncate align-bottom"
+                    title={channel.comment ?? channel.name}
                   >
-                    {CHANNEL_STATUS_NAME[channel.status]}
+                    {channel.name}
                   </span>
-                  {channel.suspended_by === 'client' && (
-                    <span className="block text-faint">выключил клиент</span>
-                  )}
                 </TableCell>
                 <TableCell>
+                  <StatusDot
+                    tone={toneOf(usableTone(channel.status === 'active'))}
+                    label={CHANNEL_STATUS_NAME[channel.status]}
+                    reason={
+                      channel.suspended_by === 'client'
+                        ? 'выключил сам клиент в своём кабинете'
+                        : undefined
+                    }
+                    phoneDot
+                  />
+                </TableCell>
+                <TableCell>
+                  {/* Связь АТС клиента — точкой без слова, адрес — в подсказке, как связь линий шлюза. */}
                   {channel.status !== 'active' ? (
                     <span className="text-faint">—</span>
                   ) : channel.connection.connected ? (
-                    <span className="text-ok">
-                      есть
-                      {channel.connection.address !== null && (
-                        <span className="num block text-faint" translate="no">
-                          {channel.connection.address}
-                        </span>
-                      )}
-                    </span>
+                    <StatusDot
+                      tone="ok"
+                      label="подключение есть"
+                      reason={
+                        channel.connection.address === null
+                          ? undefined
+                          : `АТС клиента на связи с адреса ${channel.connection.address}`
+                      }
+                      dotOnly
+                    />
                   ) : (
-                    <span className="text-warn">нет</span>
+                    <StatusDot
+                      tone="warn"
+                      label="подключения нет"
+                      reason="АТС клиента не зарегистрирована на площадке — вызовы по каналу не пойдут"
+                      dotOnly
+                    />
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   <span className="num" translate="no">
                     {channel.sip_username}
                   </span>
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {channel.recording_required ? (
                     'обязательна'
                   ) : (
                     <span className="text-muted-foreground">не нужна</span>
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className={WIDE_ONLY}>
                   {channel.caller_id === null ? (
                     <span className="text-muted-foreground">номер SIM</span>
                   ) : (
@@ -247,7 +263,7 @@ export function ClientChannels({
                     ответила бы ей отказом (DESIGN.md).
                   */}
                   {canChange && channel.status !== 'closed' && (
-                    <div className="flex flex-wrap gap-1">
+                    <RowActions>
                       <StatusDialog
                         subject={`канал «${channel.name}»`}
                         current={CHANNEL_STATUS_NAME[channel.status]}
@@ -263,8 +279,9 @@ export function ClientChannels({
                         onChange={(status) => changeStatus.mutateAsync({ id: channel.id, status })}
                       />
                       <FormDialog
-                        label="Настроить"
-                        variant="outline"
+                        label={<Settings aria-hidden className="size-4" />}
+                        tooltip="Настроить"
+                        {...ROW_ICON}
                         title={`Настройки канала «${channel.name}»`}
                         description="Учётных данных правка не касается — регистрация АТС клиента не прервётся."
                       >
@@ -279,7 +296,9 @@ export function ClientChannels({
                         на утечку было бы отключение канала целиком.
                       */}
                       <ConfirmAction
-                        label="Новый доступ"
+                        label={<KeyRound aria-hidden className="size-4" />}
+                        tooltip="Новый доступ"
+                        {...ROW_ICON}
                         title={`Перевыпустить доступ канала «${channel.name}»`}
                         consequence={
                           <>
@@ -297,7 +316,7 @@ export function ClientChannels({
                         disabled={busy}
                         onConfirm={() => reissue.mutateAsync(channel)}
                       />
-                    </div>
+                    </RowActions>
                   )}
                 </TableCell>
               </TableRow>

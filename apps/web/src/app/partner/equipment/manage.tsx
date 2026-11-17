@@ -1,11 +1,12 @@
 'use client';
 
-import { ArrowUpFromLine } from 'lucide-react';
+import { ArrowUpFromLine, Plus, Power, Trash2 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
+import { ROW_ICON } from '@/components/table-parts';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import {
   LineCredentials,
@@ -21,7 +22,10 @@ import { Switch } from '@/components/ui/switch';
 import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
 import { integerFromInput } from '@/lib/money';
-import { REGISTRATION_MODE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
+import { PORT_STATE_NAME, REGISTRATION_MODE_NAME, SIM_STATUS_NAME } from '@/lib/labels';
+import { paceSummary } from '@/components/number-pace';
+import type { StatusTone } from '@/components/status-dot';
+import type { GatewayPortState } from '@zvonix/shared';
 import { EQUIPMENT_KEY, gatewayStateName, type Gateway, type Port, type Sim } from './equipment';
 
 /**
@@ -396,7 +400,7 @@ export function DeleteGateway({ gateway, onDeleted }: { gateway: Gateway; onDele
  * Отключённое автоматом — карта, шлюз или SIP-провайдер (ADR-0100): что сделать и кнопка «Включить». Включит API только
  * после удачного тестового звонка, сделанного позже отключения; иначе отказ с той же подсказкой виден здесь же.
  */
-export function AfterTestCall({
+function AfterTestCall({
   badge,
   label,
   hint,
@@ -655,7 +659,12 @@ export function InsertSim({
   });
 
   return (
-    <FormDialog label="Вставить SIM" title={`SIM в порт ${String(portNumber)}`} variant="outline">
+    <FormDialog
+      label={<Plus aria-hidden className="size-4" />}
+      tooltip="Вставить SIM"
+      {...ROW_ICON}
+      title={`SIM в порт ${String(portNumber)}`}
+    >
       <InsertSimForm spare={spare} onInsert={(choice) => insert.mutateAsync(choice)} />
     </FormDialog>
   );
@@ -741,9 +750,7 @@ export function RemoveSim({ portId }: { portId: string }) {
       {/* Значком, как тестовый звонок и настройки рядом: слова в строке таблицы растягивали её. */}
       <WithTooltip label="Вынуть карту из порта">
         <Button
-          variant="ghost"
-          size="icon-xs"
-          className="size-7"
+          {...ROW_ICON}
           aria-label="Вынуть карту из порта"
           disabled={remove.isPending}
           onClick={() => {
@@ -776,7 +783,7 @@ const SWITCHABLE: ReadonlySet<Sim['status']> = new Set(['new', 'active', 'paused
  * переключателем не тронуть: у них только название состояния, а путь назад — в действиях строки.
  * Отказ включения (оператор не совпал, номер придержан) — под переключателем, словами API.
  */
-export function SimSwitch({ sim }: { sim: Sim }) {
+export function SimSwitch({ sim, bare = false }: { sim: Sim; bare?: boolean }) {
   const refresh = useRefresh();
   const change = useMutation({
     mutationFn: (status: 'active' | 'paused') =>
@@ -788,7 +795,8 @@ export function SimSwitch({ sim }: { sim: Sim }) {
   });
   const error = asApiError(change.error);
 
-  if (!SWITCHABLE.has(sim.status)) return <>{SIM_STATUS_NAME[sim.status]}</>;
+  // `bare` — в строке таблицы: слово состояния рядом даёт simState, здесь только сам переключатель.
+  if (!SWITCHABLE.has(sim.status)) return bare ? null : <>{SIM_STATUS_NAME[sim.status]}</>;
   const on = sim.status === 'active';
   return (
     <span className="inline-flex flex-col gap-1">
@@ -801,7 +809,9 @@ export function SimSwitch({ sim }: { sim: Sim }) {
             change.mutate(checked ? 'active' : 'paused');
           }}
         />
-        <span className={on ? '' : 'text-muted-foreground'}>{SIM_STATUS_NAME[sim.status]}</span>
+        {!bare && (
+          <span className={on ? '' : 'text-muted-foreground'}>{SIM_STATUS_NAME[sim.status]}</span>
+        )}
       </label>
       {error !== undefined && <ErrorNote error={error} />}
     </span>
@@ -830,21 +840,26 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
   });
 
   const error = asApiError(activate.error);
-  if (sim.status === 'retired') return null;
-  if (sim.status === 'blocked') {
-    return <span className="text-muted-foreground">распоряжается администратор площадки</span>;
-  }
+  // Заблокированной распоряжается площадка — действий нет, причина в подсказке состояния (simState).
+  if (sim.status === 'retired' || sim.status === 'blocked') return null;
   if (sim.status === 'throttled') {
+    // Значком, как остальные действия строки; почему придержана и что сделать — в подсказке состояния.
     return (
-      <AfterTestCall
-        label="Включить"
-        hint="Много неудачных вызовов. Проверьте карту и сделайте с неё тестовый звонок — после удачного включите."
-        pending={activate.isPending}
-        error={error}
-        onEnable={() => {
-          activate.mutate();
-        }}
-      />
+      <>
+        <WithTooltip label="Включить после удачного тестового звонка">
+          <Button
+            {...ROW_ICON}
+            aria-label="Включить карту после удачного тестового звонка"
+            disabled={activate.isPending}
+            onClick={() => {
+              activate.mutate();
+            }}
+          >
+            <Power aria-hidden className="size-4" />
+          </Button>
+        </WithTooltip>
+        {error !== undefined && <ErrorNote error={error} />}
+      </>
     );
   }
   // Включить и выключить — переключателем в колонке состояния (SimSwitch); здесь остаётся удаление карты
@@ -852,16 +867,69 @@ export function SimActions({ sim, inPort }: { sim: Sim; inPort: boolean }) {
   if (inPort) return null;
 
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap justify-end gap-2">
-        <ConfirmAction
-          label="Удалить"
-          title={`Удалить карту ${sim.msisdn}`}
-          consequence={<p>Карта удаляется навсегда. Вернуть её нельзя — только добавить заново.</p>}
-          confirmLabel="Удалить карту"
-          onConfirm={() => retire.mutateAsync()}
-        />
-      </div>
-    </div>
+    <ConfirmAction
+      label={<Trash2 aria-hidden className="size-4" />}
+      tooltip="Удалить карту"
+      {...ROW_ICON}
+      title={`Удалить карту ${sim.msisdn}`}
+      consequence={<p>Карта удаляется навсегда. Вернуть её нельзя — только добавить заново.</p>}
+      confirmLabel="Удалить карту"
+      onConfirm={() => retire.mutateAsync()}
+    />
   );
+}
+
+/**
+ * Состояние карты одним словом для строки таблицы, причина — в подсказке ([DESIGN.md](../../../../../../docs/DESIGN.md),
+ * «Таблица»). Порядок — от того, что не даёт звонить совсем, к тому, что лишь замедляет.
+ */
+export function simState(
+  sim: Sim,
+  slot?: GatewayPortState,
+): { tone: StatusTone; label: string; reason?: string } | null {
+  switch (sim.status) {
+    case 'retired':
+      return { tone: 'off', label: 'выведена' };
+    case 'blocked':
+      return {
+        tone: 'crit',
+        label: 'заблокирована',
+        reason: 'Карту заблокировала площадка — распоряжается администратор. Напишите в поддержку.',
+      };
+    case 'throttled':
+      return {
+        tone: 'warn',
+        label: 'придержана',
+        reason:
+          'Много неудачных вызовов. Проверьте карту и сделайте с неё тестовый звонок — после удачного включите её значком справа.',
+      };
+    case 'paused':
+      // Выключена — видно по рубильнику; слово «выключена» в строке его только повторяло.
+      return null;
+    case 'new':
+      return {
+        tone: 'off',
+        label: 'новая',
+        reason: 'Карта ещё не включалась. Проверьте её тестовым звонком и включите переключателем.',
+      };
+    case 'active':
+      break;
+  }
+  if (slot === 'fault' || slot === 'disabled') {
+    return {
+      tone: 'warn',
+      label: `слот ${PORT_STATE_NAME[slot]}`,
+      reason: 'Так сообщает сам шлюз: карта в этом слоте не звонит. Проверьте слот и карту в GOIP.',
+    };
+  }
+  if (sim.poor_connection === true) {
+    return {
+      tone: 'warn',
+      label: 'не соединяет',
+      reason:
+        'За последний час большинство вызовов сорвались в сети: проверьте баланс и блокировку SIM, сигнал, сам шлюз.',
+    };
+  }
+  // Всё в порядке — слов нет: что карта включена, показывает рубильник (владелец, 2026-11-17).
+  return paceSummary(sim.pace);
 }

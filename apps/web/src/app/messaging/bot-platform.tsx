@@ -6,6 +6,9 @@ import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import { Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -232,16 +235,18 @@ function BotClients({ canChange }: { canChange: boolean }) {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="font-semibold">Клиенты бота</h3>
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Клиент</TableHead>
-              <TableHead className="h-8 text-right">Подписчиков</TableHead>
-              <TableHead className="h-8 text-right">Цена сообщения</TableHead>
-              <TableHead className="h-8 text-right">Плата в месяц</TableHead>
-              <TableHead className="h-8">Месяц</TableHead>
-              <TableHead className="h-8" />
+              <TableHead className={HEAD}>Клиент</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Подписчиков</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Цена сообщения</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Плата в месяц</TableHead>
+              <TableHead className={HEAD}>Месяц</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -255,35 +260,43 @@ function BotClients({ canChange }: { canChange: boolean }) {
             {rows.map((row) => (
               <TableRow key={row.client_id}>
                 <TableCell>
-                  {row.client_name}
-                  {!row.enabled && <span className="block text-faint">отключён</span>}
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                    {row.client_name}
+                    {!row.enabled && <StatusDot tone="off" label="отключён" />}
+                  </span>
                 </TableCell>
-                <TableCell className="num text-right">{row.subscribers}</TableCell>
-                <TableCell className="num text-right">
-                  {money(row.terms.message_price)}
-                  {row.own.message_price !== null && <span className="block text-faint">своя</span>}
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>{row.subscribers}</TableCell>
+                {/* Своя цена клиента — подсказкой у суммы, а не второй строкой «своя». */}
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  <OwnPrice value={row.terms.message_price} own={row.own.message_price !== null} />
                 </TableCell>
-                <TableCell className="num text-right">
-                  {money(row.terms.monthly_fee)}
-                  {row.own.monthly_fee !== null && <span className="block text-faint">своя</span>}
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  <OwnPrice value={row.terms.monthly_fee} own={row.own.monthly_fee !== null} />
                 </TableCell>
-                <TableCell>{row.fee_paid ? 'Оплачен' : 'Ждёт оплаты'}</TableCell>
-                <TableCell className="text-right">
+                <TableCell>
+                  <StatusDot
+                    tone={row.fee_paid ? 'ok' : 'warn'}
+                    label={row.fee_paid ? 'Оплачен' : 'Ждёт оплаты'}
+                  />
+                </TableCell>
+                <TableCell>
                   {canChange && (
-                    <FormDialog
-                      label="Условия"
-                      title={`Условия бота: ${row.client_name}`}
-                      description="Пусто — как у всех клиентов. 0 — бесплатно. Новая плата действует со следующего месяца."
-                      variant="outline"
-                      size="xs"
-                    >
-                      <TermsForm
-                        row={row}
-                        onSave={(messagePrice, monthlyFee) =>
-                          save.mutateAsync({ clientId: row.client_id, messagePrice, monthlyFee })
-                        }
-                      />
-                    </FormDialog>
+                    <RowActions>
+                      <FormDialog
+                        label={<Pencil aria-hidden className="size-4" />}
+                        tooltip="Условия"
+                        {...ROW_ICON}
+                        title={`Условия бота: ${row.client_name}`}
+                        description="Пусто — как у всех клиентов. 0 — бесплатно. Новая плата действует со следующего месяца."
+                      >
+                        <TermsForm
+                          row={row}
+                          onSave={(messagePrice, monthlyFee) =>
+                            save.mutateAsync({ clientId: row.client_id, messagePrice, monthlyFee })
+                          }
+                        />
+                      </FormDialog>
+                    </RowActions>
                   )}
                 </TableCell>
               </TableRow>
@@ -292,6 +305,23 @@ function BotClients({ canChange }: { canChange: boolean }) {
         </Table>
       </div>
     </div>
+  );
+}
+
+/**
+ * Сумма условия; своя у клиента — короткой пометкой в той же строке (по ней сквозной тест узнаёт сохранённую цену),
+ * пояснение — в подсказке.
+ */
+function OwnPrice({ value, own }: { value: string; own: boolean }) {
+  if (!own) return <>{money(value)}</>;
+  return (
+    <span
+      className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
+      title="Своя у этого клиента; у остальных — общая"
+    >
+      <span className="text-faint">своя</span>
+      {money(value)}
+    </span>
   );
 }
 

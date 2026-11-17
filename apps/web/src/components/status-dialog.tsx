@@ -1,7 +1,9 @@
 'use client';
 
+import { Power } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { DialogForm, FormDialog } from '@/components/form-dialog';
+import { ROW_ICON } from '@/components/table-parts';
 
 export interface StatusOption<T extends string> {
   readonly value: T;
@@ -37,11 +39,13 @@ export function StatusDialog<T extends string>({
   disabled?: boolean;
 }) {
   return (
+    // Значком в ряду действий строки, как остальные (DESIGN.md, «Таблица»): слово «Состояние» растягивало строку.
     <FormDialog
-      label="Состояние"
+      label={<Power aria-hidden className="size-4" />}
+      tooltip="Сменить состояние"
+      {...ROW_ICON}
       title={`Состояние: ${subject}`}
       description={`Сейчас — «${current}»`}
-      variant="outline"
       disabled={disabled || options.length === 0}
     >
       <StatusChoice options={options} onChange={onChange} />

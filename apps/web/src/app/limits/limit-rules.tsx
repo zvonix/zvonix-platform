@@ -2,12 +2,15 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LIMIT_METRICS, LIMIT_WINDOWS, type LimitMetric, type LimitWindow } from '@zvonix/shared';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ReadOnly } from '@/components/read-only';
+import { StatusDot } from '@/components/status-dot';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -26,7 +29,7 @@ import { LIMIT_METRIC_NAME, LIMIT_WINDOW_NAME, limitRuleNote } from '@/lib/label
 import { amount, counted } from '@/lib/limits';
 import { integerFromInput } from '@/lib/money';
 
-const COLUMNS = 5;
+const COLUMNS = 6;
 
 /** Верхняя граница предела — та же, что проверяет API. */
 const LIMIT_MAX = 10_000_000;
@@ -190,15 +193,18 @@ export function LimitRules() {
 
       {!canChange && <ReadOnly what="лимиты" />}
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Кого</TableHead>
-              <TableHead className="h-8">Ограничение</TableHead>
-              <TableHead className="h-8">Израсходовано</TableHead>
-              <TableHead className="h-8">Окно с</TableHead>
-              <TableHead className="h-8"> </TableHead>
+              <TableHead className={HEAD}>Кого</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Вид</TableHead>
+              <TableHead className={HEAD}>Ограничение</TableHead>
+              <TableHead className={HEAD}>Израсходовано</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Окно с</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
+                <span className="sr-only">Действия</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -223,31 +229,42 @@ export function LimitRules() {
               const subjectTitle = `${SUBJECT_NAME[subjectOf.kind].toLowerCase()} «${subjectOf.name}»`;
               return (
                 <TableRow key={`${rule.id}:${rule.usage_sim_card_id ?? ''}`}>
+                  {/*
+                    Строка в одну линию (DESIGN.md, «Таблица»): вид — своим столбцом, пояснение правила — в подсказке.
+                    У лимита тарифа строка на карту: вместо безликого «тариф партнёра» — номер карты.
+                  */}
                   <TableCell>
-                    {subjectOf.name}
-                    <span className="block text-faint">{SUBJECT_NAME[subjectOf.kind]}</span>
-                  </TableCell>
-
-                  <TableCell>
-                    {counted(rule.metric, rule.value)} {LIMIT_WINDOW_NAME[rule.window]}
-                    <span className="block text-faint">{limitRuleNote(rule)}</span>
-                    {rule.usage_sim_card_id !== null && (
-                      <span className="num block text-faint">
-                        карта {sims.nameOf(rule.usage_sim_card_id) ?? rule.usage_sim_card_id}
+                    {rule.usage_sim_card_id === null ? (
+                      subjectOf.name
+                    ) : (
+                      <span className="num" title="Карта тарифа партнёра">
+                        {sims.nameOf(rule.usage_sim_card_id) ?? rule.usage_sim_card_id}
                       </span>
                     )}
                   </TableCell>
 
-                  <TableCell>
-                    <span className={rule.exceeded ? 'num text-crit' : 'num'}>
-                      {amount(rule.metric, rule.used)}
-                    </span>
-                    {rule.exceeded && (
-                      <span className="block text-crit">исчерпан — вызовы отклоняются</span>
-                    )}
+                  <TableCell className={`text-muted-foreground ${WIDE_ONLY}`}>
+                    {SUBJECT_NAME[subjectOf.kind]}
                   </TableCell>
 
                   <TableCell>
+                    <span className="cursor-help" title={limitRuleNote(rule)}>
+                      {counted(rule.metric, rule.value)} {LIMIT_WINDOW_NAME[rule.window]}
+                    </span>
+                  </TableCell>
+
+                  <TableCell>
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <span className={rule.exceeded ? 'num text-crit' : 'num'}>
+                        {amount(rule.metric, rule.used)}
+                      </span>
+                      {rule.exceeded && (
+                        <StatusDot tone="crit" label="исчерпан" reason="Вызовы отклоняются" />
+                      )}
+                    </span>
+                  </TableCell>
+
+                  <TableCell className={WIDE_ONLY}>
                     <span className="num text-muted-foreground">
                       {momentInZone(rule.bucket_start, rule.timezone)}
                     </span>
@@ -255,10 +272,11 @@ export function LimitRules() {
 
                   <TableCell>
                     {canChange && (
-                      <div className="flex flex-wrap items-center gap-2">
+                      <RowActions>
                         <FormDialog
-                          label="Изменить"
-                          variant="outline"
+                          label={<Pencil aria-hidden className="size-4" />}
+                          tooltip="Изменить"
+                          {...ROW_ICON}
                           title={`Предел лимита: ${subjectTitle}`}
                           description={
                             <>
@@ -279,7 +297,7 @@ export function LimitRules() {
                           busy={remove.isPending}
                           onRemove={() => remove.mutateAsync(rule.id)}
                         />
-                      </div>
+                      </RowActions>
                     )}
                   </TableCell>
                 </TableRow>
@@ -489,7 +507,9 @@ function RemoveLimit({
 }) {
   return (
     <ConfirmAction
-      label="Снять лимит"
+      label={<Trash2 aria-hidden className="size-4" />}
+      tooltip="Снять лимит"
+      {...ROW_ICON}
       title={`Снять лимит: ${subjectTitle}`}
       consequence={
         <>

@@ -3,7 +3,11 @@
 import Link from 'next/link';
 import { Fragment, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
+import { ChevronsDownUp, ChevronsUpDown, Pencil } from 'lucide-react';
 import { Hint } from '@/components/hint';
+import { HintText, StatusDot } from '@/components/status-dot';
+import { HEAD, NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import { WithTooltip } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -73,16 +77,16 @@ function PartnerLimits() {
         </Hint>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
-              <TableHead className="h-8">Лимит</TableHead>
-              <TableHead className="h-8">Карты</TableHead>
-              <TableHead className="hidden h-8 text-right sm:table-cell">Израсходовано</TableHead>
-              <TableHead className="h-8 text-right">Осталось</TableHead>
-              <TableHead className="h-8">Обнулится</TableHead>
-              <TableHead className="h-8">
+              <TableHead className={HEAD}>Лимит</TableHead>
+              <TableHead className={HEAD}>Карты</TableHead>
+              <TableHead className={`${HEAD} text-right ${WIDE_ONLY}`}>Израсходовано</TableHead>
+              <TableHead className={`${HEAD} text-right`}>Осталось</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Обнулится</TableHead>
+              <TableHead className={`${HEAD} w-px`}>
                 <span className="sr-only">Действия</span>
               </TableHead>
             </TableRow>
@@ -141,47 +145,58 @@ function LimitGroup({
       ? [...rows].sort((a, b) => Number(b.exceeded) - Number(a.exceeded))
       : rows;
 
-  const rule = (
-    <>
-      {counted(first.metric, first.value)} {LIMIT_WINDOW_NAME[first.window]}
-      <span className="block text-faint">
-        {first.tariff_id === null
-          ? limitRuleNote(first)
-          : `тариф «${tariffName(first.tariff_id) ?? '—'}»`}
-      </span>
-    </>
-  );
+  // Правило — одной строкой; чей это тариф или как считается — в подсказке (DESIGN.md, «Таблица»).
+  const note =
+    first.tariff_id === null
+      ? limitRuleNote(first)
+      : `тариф «${tariffName(first.tariff_id) ?? '—'}»`;
+  const ruleText = `${counted(first.metric, first.value)} ${LIMIT_WINDOW_NAME[first.window]}`;
+  const rule =
+    note === '' ? (
+      <span className="whitespace-nowrap">{ruleText}</span>
+    ) : (
+      <HintText label={ruleText} reason={note} />
+    );
 
   if (collapsed) {
     return (
       <TableRow>
-        <TableCell className="align-top whitespace-normal">{rule}</TableCell>
         <TableCell>
-          <span className="num">{rows.length} карт</span>
-          {exhausted > 0 && <span className="text-crit"> · исчерпали: {exhausted}</span>}
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            className="ml-2"
-            onClick={() => {
-              setOpen(true);
-            }}
-          >
-            Показать все
-          </Button>
+          <span className="inline-flex items-center gap-1">
+            {rule}
+            <Toggle
+              label="Показать все"
+              onClick={() => {
+                setOpen(true);
+              }}
+            />
+          </span>
         </TableCell>
-        <TableCell className="hidden sm:table-cell" />
-        <TableCell className="num text-right">
-          <span className="text-muted-foreground">меньше всего: </span>
+        <TableCell>
+          <span className="inline-flex items-center gap-2">
+            <span className="num">{rows.length} карт</span>
+            {exhausted > 0 && (
+              <StatusDot
+                tone="crit"
+                label={`исчерпали: ${String(exhausted)}`}
+                reason="эти карты отдыхают до обнуления лимита"
+              />
+            )}
+          </span>
+        </TableCell>
+        <TableCell className={WIDE_ONLY} />
+        <TableCell className={NUM}>
           {poorest <= 0 ? (
-            <span className="text-crit">исчерпан</span>
+            <Exhausted />
           ) : (
-            amount(first.metric, poorest)
+            <HintText
+              label={amount(first.metric, poorest)}
+              reason="меньше всего осталось у одной из карт правила"
+            />
           )}
         </TableCell>
-        <TableCell />
-        <TableCell className="align-top">
+        <TableCell className={WIDE_ONLY} />
+        <TableCell>
           <Actions row={first} />
         </TableCell>
       </TableRow>
@@ -193,39 +208,30 @@ function LimitGroup({
       {visible.map((row, index) => (
         <TableRow key={`${row.id}:${row.usage_sim_card_id ?? ''}`}>
           {index === 0 && (
-            <TableCell rowSpan={visible.length} className="align-top whitespace-normal">
-              {rule}
-              {collapsible && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  className="mt-2"
-                  onClick={() => {
-                    setOpen(false);
-                  }}
-                >
-                  Свернуть
-                </Button>
-              )}
+            <TableCell rowSpan={visible.length} className="align-top">
+              <span className="inline-flex items-center gap-1">
+                {rule}
+                {collapsible && (
+                  <Toggle
+                    label="Свернуть"
+                    onClick={() => {
+                      setOpen(false);
+                    }}
+                  />
+                )}
+              </span>
             </TableCell>
           )}
           <TableCell className="num">
             {whose(row, numberOf) ?? <span className="text-faint">—</span>}
           </TableCell>
-          <TableCell
-            className={`hidden text-right sm:table-cell num ${row.exceeded ? 'text-crit' : ''}`}
-          >
+          <TableCell className={`${NUM} ${WIDE_ONLY} ${row.exceeded ? 'text-crit' : ''}`}>
             {amount(row.metric, row.used)}
           </TableCell>
-          <TableCell className="num text-right">
-            {row.exceeded ? (
-              <span className="text-crit">исчерпан</span>
-            ) : (
-              amount(row.metric, row.limit - row.used)
-            )}
+          <TableCell className={NUM}>
+            {row.exceeded ? <Exhausted /> : amount(row.metric, row.limit - row.used)}
           </TableCell>
-          <TableCell className="num text-muted-foreground">
+          <TableCell className={`num text-muted-foreground ${WIDE_ONLY}`}>
             {momentInZone(row.resets_at, row.timezone)}
           </TableCell>
           {index === 0 && (
@@ -239,19 +245,46 @@ function LimitGroup({
   );
 }
 
+/** Исчерпанный лимит — точкой, что это значит — в подсказке. */
+function Exhausted() {
+  return <StatusDot tone="crit" label="исчерпан" reason="карта отдыхает до обнуления лимита" />;
+}
+
+/** Свернуть и развернуть правило на много карт — значком рядом с правилом: строка остаётся в одну линию. */
+function Toggle({ label, onClick }: { label: 'Показать все' | 'Свернуть'; onClick: () => void }) {
+  const Icon = label === 'Свернуть' ? ChevronsDownUp : ChevronsUpDown;
+  return (
+    <WithTooltip label={label}>
+      <Button type="button" {...ROW_ICON} aria-label={label} onClick={onClick}>
+        <Icon aria-hidden className="size-4" />
+      </Button>
+    </WithTooltip>
+  );
+}
+
 /** Что можно сделать с правилом отсюда: лимит тарифа меняется в тарифе, лимит площадки — только площадкой. */
 function Actions({ row }: { row: LimitRow }) {
   if (row.tariff_id !== null) {
-    return <span className="text-muted-foreground">меняется в тарифе</span>;
+    return (
+      <RowActions>
+        <WithTooltip label="Меняется в тарифе">
+          <Button asChild {...ROW_ICON}>
+            <Link href="/partner/prices" aria-label="Меняется в тарифе">
+              <Pencil aria-hidden className="size-4" />
+            </Link>
+          </Button>
+        </WithTooltip>
+      </RowActions>
+    );
   }
   if (row.set_by !== 'partner') {
-    return <span className="text-muted-foreground">задала площадка</span>;
+    return <span className="whitespace-nowrap text-muted-foreground">задала площадка</span>;
   }
   return (
-    <div className="flex flex-wrap justify-end gap-2">
+    <RowActions>
       <ChangeLimit row={row} />
       <RemoveLimit row={row} />
-    </div>
+    </RowActions>
   );
 }
 

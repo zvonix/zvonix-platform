@@ -10,6 +10,7 @@ import {
 import { useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
+import { HEAD, TABLE_FRAME } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -397,12 +398,14 @@ function Editor({ product, data }: { product: Product; data: Distribution }) {
           <h2 className="font-semibold">
             {showWeight ? `Вес ${text.itemsHeading}` : `Порядок ${text.itemsHeading}`}
           </h2>
-          <div className="rounded-lg border border-border bg-card">
+          <div className={TABLE_FRAME}>
             <Table>
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">
-                  <TableHead className="h-8">{product === 'calls' ? 'Карта' : 'Аккаунт'}</TableHead>
-                  <TableHead className="h-8 text-right">
+                  <TableHead className={HEAD}>
+                    {product === 'calls' ? 'Карта' : 'Аккаунт'}
+                  </TableHead>
+                  <TableHead className={`${HEAD} text-right`}>
                     {showWeight ? 'Вес' : 'Номер в списке'}
                   </TableHead>
                 </TableRow>
@@ -417,7 +420,9 @@ function Editor({ product, data }: { product: Product; data: Distribution }) {
                 )}
                 {data.items.map((account) => (
                   <TableRow key={account.id}>
-                    <TableCell>{account.label}</TableCell>
+                    <TableCell className={product === 'calls' ? 'num' : 'whitespace-nowrap'}>
+                      {account.label}
+                    </TableCell>
                     <TableCell className="text-right">
                       <RankInput
                         label={`${showWeight ? 'Вес' : 'Номер в списке'} ${text.itemName} «${account.label}»`}
@@ -464,7 +469,7 @@ function RankInput({
     <Input
       aria-label={label}
       inputMode="numeric"
-      className="ml-auto w-20 text-right"
+      className="num ml-auto h-7 w-20 text-right"
       value={text}
       onChange={(event) => {
         setText(event.target.value.replace(/\D/gu, ''));

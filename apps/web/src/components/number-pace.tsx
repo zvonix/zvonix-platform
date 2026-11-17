@@ -31,128 +31,112 @@ export interface NumberPaceView {
 
 const WARMUP_DAYS = 14;
 
-const CLOCK = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
-const CLOCK_SECONDS = new Intl.DateTimeFormat('ru-RU', {
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-});
-
-export function NumberPace({
-  pace,
-  block = false,
-}: {
-  pace: NumberPaceView | undefined;
-  block?: boolean;
-}) {
-  if (pace === undefined) return null;
-  return (
-    <>
-      <PaceStatus pace={pace} block={block} />
-      <PaceWait pace={pace} block={block} />
-    </>
-  );
-}
-
 /**
- * Почему номер сейчас не звонит, хотя предел не исчерпан: спит (ADR-0107) или отдыхает после прошлого вызова. Время —
- * по часам браузера, как везде в кабинете. Истёкшее не показывается: список обновляется раз в несколько секунд.
+ * Работа номера одним словом для строки таблицы — самое важное из прогрева, пределов, сна и паузы; всё остальное
+ * в подсказке ([DESIGN.md](../../../../docs/DESIGN.md), «Таблица»). Порядок — от того, что не даёт звонить, к тому,
+ * что лишь замедляет. Пусто — номер работает без ограничений, говорить не о чем.
  */
-function PaceWait({ pace, block }: { pace: NumberPaceView; block: boolean }) {
-  const className = `${block ? 'block' : ''} text-muted-foreground`;
-  const prefix = block ? '' : ' · ';
-  if (pace.asleep_until !== null && isFuture(pace.asleep_until)) {
-    return (
-      <span
-        className={className}
-        title="Сон номера: несколько часов в сутки номер не звонит — живой человек ночью спит. Часы свои у каждого номера, засыпает он между 20:00 и 08:00 по Москве; вызовы в это время идут через другие номера"
-      >
-        {prefix}спит до {CLOCK.format(new Date(pace.asleep_until))}
-      </span>
-    );
-  }
-  if (pace.resting_until !== null && isFuture(pace.resting_until)) {
-    return (
-      <span
-        className={className}
-        title="Пауза после звонка: живой человек не звонит без перерыва. Пока номер отдыхает, вызовы идут через другие номера"
-      >
-        {prefix}пауза до {CLOCK_SECONDS.format(new Date(pace.resting_until))}
-      </span>
-    );
-  }
-  return null;
-}
-
-/** Прогрев и пределы номера. */
-function PaceStatus({ pace, block }: { pace: NumberPaceView; block: boolean }) {
-  const dayFull = pace.per_day !== null && pace.used_day >= pace.per_day;
-  const hourFull = pace.per_hour !== null && pace.used_hour >= pace.per_hour;
-  // Исчерпаны новые абоненты: перезванивать знакомым номер ещё может, новым — нет.
-  const distinctFull =
-    (pace.distinct_per_day !== null && pace.distinct_used_day >= pace.distinct_per_day) ||
-    (pace.distinct_per_hour !== null && pace.distinct_used_hour >= pace.distinct_per_hour);
+export function paceSummary(
+  pace: NumberPaceView | undefined,
+): { tone: 'warn' | 'off'; label: string; reason: string } | null {
+  if (pace === undefined) return null;
   const limits = [
     pace.per_hour === null ? null : `в час до ${String(pace.per_hour)}`,
     pace.per_day === null ? null : `в сутки до ${String(pace.per_day)}`,
   ]
     .filter((part) => part !== null)
     .join(', ');
-  const title =
+  const used =
+    pace.per_day === null ? '' : ` Сегодня ${String(pace.used_day)} из ${String(pace.per_day)}.`;
+  const warmup =
     pace.warmup_day === null
-      ? `Рекомендованная работа номера: ${limits}. Лишние вызовы уходят на другие номера`
-      : `Новый номер звонит понемногу, чтобы оператор не заблокировал его за массовые звонки: ${limits}. Каждые сутки больше, полностью — через ${String(WARMUP_DAYS)} суток`;
-  const className = block ? 'block' : '';
+      ? ''
+      : ` Прогрев: сутки ${String(pace.warmup_day)} из ${String(WARMUP_DAYS)}.`;
 
-  if (dayFull || hourFull) {
-    return (
-      <span className={`${className} text-warn`} title={title}>
-        {block ? '' : ' · '}
-        {dayFull ? 'предел суток' : 'предел часа'}
-      </span>
-    );
+  if (pace.per_day !== null && pace.used_day >= pace.per_day) {
+    return {
+      tone: 'warn',
+      label: 'предел суток',
+      reason: `Номер сделал столько вызовов, сколько рекомендовано на сутки (${limits}). Лишние уходят на другие номера.${warmup}`,
+    };
+  }
+  if (pace.per_hour !== null && pace.used_hour >= pace.per_hour) {
+    return {
+      tone: 'warn',
+      label: 'предел часа',
+      reason: `Номер сделал столько вызовов, сколько рекомендовано на час (${limits}).${used}${warmup}`,
+    };
   }
   if (pace.poor) {
-    return (
-      <span
-        className={`${className} text-warn`}
-        title="За сутки на этот номер почти не отвечают или сбрасывают в первые секунды — так оператор видит обзвон. Пределы номера вдвое ниже, пока ответов не станет больше"
-      >
-        {block ? '' : ' · '}
-        мало ответов
-      </span>
-    );
+    return {
+      tone: 'warn',
+      label: 'мало ответов',
+      reason:
+        'За сутки на этот номер почти не отвечают или сбрасывают в первые секунды — так оператор видит обзвон. Пределы номера вдвое ниже, пока ответов не станет больше.',
+    };
   }
   if (pace.braked) {
-    return (
-      <span
-        className={`${className} text-warn`}
-        title="За последние 7 суток у этого оператора сняли несколько SIM — оператор начал резать номера. Все его номера звонят реже, торможение снимется само"
-      >
-        {block ? '' : ' · '}
-        оператор тормозит
-      </span>
-    );
+    return {
+      tone: 'warn',
+      label: 'оператор тормозит',
+      reason:
+        'За последние 7 суток у этого оператора сняли несколько SIM. Все его номера звонят реже, торможение снимется само.',
+    };
   }
-  if (distinctFull) {
-    return (
-      <span
-        className={`${className} text-warn`}
-        title="Номер обзвонил столько разных абонентов, сколько разрешено: новым звонят другие номера, знакомым он перезванивает"
-      >
-        {block ? '' : ' · '}
-        предел абонентов
-      </span>
-    );
+  if (
+    (pace.distinct_per_day !== null && pace.distinct_used_day >= pace.distinct_per_day) ||
+    (pace.distinct_per_hour !== null && pace.distinct_used_hour >= pace.distinct_per_hour)
+  ) {
+    return {
+      tone: 'warn',
+      label: 'предел абонентов',
+      reason:
+        'Номер обзвонил столько разных абонентов, сколько разрешено: новым звонят другие номера, знакомым он перезванивает.',
+    };
   }
-  if (pace.warmup_day === null) return null;
-  return (
-    <span className={`${className} text-muted-foreground`} title={title}>
-      {block ? '' : ' · '}
-      прогрев {pace.warmup_day}/{WARMUP_DAYS}
-      {pace.per_day === null
-        ? ''
-        : ` · ${String(pace.used_day)} из ${String(pace.per_day)} за сутки`}
-    </span>
-  );
+  if (pace.asleep_until !== null && isFuture(pace.asleep_until)) {
+    return {
+      tone: 'off',
+      label: `спит до ${CLOCK.format(new Date(pace.asleep_until))}`,
+      reason: `Несколько часов в сутки номер не звонит — живой человек ночью спит. Вызовы в это время идут через другие номера.${used}${warmup}`,
+    };
+  }
+  if (pace.resting_until !== null && isFuture(pace.resting_until)) {
+    return {
+      tone: 'off',
+      label: 'пауза',
+      reason: `Пауза после звонка до ${CLOCK_SECONDS.format(new Date(pace.resting_until))}: живой человек не звонит без перерыва.${used}${warmup}`,
+    };
+  }
+  // Прогрев — своим столбцом (warmupCell): слово «прогрев» в каждой строке ничего не добавляло (владелец, 2026-11-17).
+  return null;
 }
+
+/**
+ * Прогрев номера для своего столбца: «4/14» без слова, подробности — в подсказке. Пусто — номер прогрет или прогрев
+ * выключен.
+ */
+export function warmupCell(
+  pace: NumberPaceView | undefined,
+): { label: string; reason: string } | null {
+  if (pace === undefined || pace.warmup_day === null) return null;
+  const limits = [
+    pace.per_hour === null ? null : `в час до ${String(pace.per_hour)}`,
+    pace.per_day === null ? null : `в сутки до ${String(pace.per_day)}`,
+  ]
+    .filter((part) => part !== null)
+    .join(', ');
+  const used =
+    pace.per_day === null ? '' : ` Сегодня ${String(pace.used_day)} из ${String(pace.per_day)}.`;
+  return {
+    label: `${String(pace.warmup_day)}/${String(WARMUP_DAYS)}`,
+    reason: `Сутки прогрева ${String(pace.warmup_day)} из ${String(WARMUP_DAYS)}. Новый номер звонит понемногу, чтобы оператор не заблокировал его за массовые звонки: ${limits}. Каждые сутки больше.${used}`,
+  };
+}
+
+const CLOCK = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
+const CLOCK_SECONDS = new Intl.DateTimeFormat('ru-RU', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
