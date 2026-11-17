@@ -2369,10 +2369,9 @@ test.describe('сайт проекта (ADR-0082)', () => {
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /index/u);
     await expect(page.locator('meta[name="robots"]')).not.toHaveAttribute('content', /noindex/u);
 
-    await page
-      .getByRole('navigation', { name: 'Разделы сайта' })
-      .getByRole('link', { name: 'Цены' })
-      .click();
+    const nav = page.getByRole('navigation', { name: 'Разделы сайта' });
+    await nav.getByRole('button', { name: 'Клиентам' }).click();
+    await nav.getByRole('link', { name: 'Цены' }).click();
     await expect(page).toHaveURL(/\/pricing$/u);
     await expect(page.getByRole('heading', { name: 'Цены от' })).toBeVisible();
 
@@ -2380,6 +2379,42 @@ test.describe('сайт проекта (ADR-0082)', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Частые вопросы' })).toBeVisible();
     await page.goto('/contacts');
     await expect(page.getByRole('heading', { level: 1, name: 'Свяжитесь с нами' })).toBeVisible();
+    await context.close();
+  });
+
+  test('открытые страницы не называют программы сервиса и не говорят «площадка»', async ({
+    browser,
+  }) => {
+    // Названия и версии программ подсказывают, какие уязвимости пробовать; «площадка» — слово кабинета и документации,
+    // на сайте — «сервис» или Zvonix (владелец, 2026-11-16). Оборудование партнёров (GOIP) и протоколы (SIP, SMPP) — можно.
+    const FORBIDDEN = /площадк|freeswitch|nestjs|postgres|redis|next\.js|ubuntu|nginx/iu;
+    const context = await browser.newContext({ extraHTTPHeaders: { 'x-zvonix-site': '1' } });
+    const page = await context.newPage();
+    const paths = [
+      '/',
+      '/calls',
+      '/messages',
+      '/pricing',
+      '/integration',
+      '/partners',
+      '/equipment',
+      '/payouts',
+      '/how-it-works',
+      '/security',
+      '/faq',
+      '/contacts',
+    ];
+    for (const path of paths) {
+      const response = await page.goto(path);
+      expect(response?.status(), path).toBe(200);
+      // Выдача целиком: видимый текст, заголовок страницы и описание для поисковиков.
+      const text = [
+        await page.locator('body').innerText(),
+        await page.title(),
+        (await page.locator('meta[name="description"]').getAttribute('content')) ?? '',
+      ].join('\n');
+      expect(text.match(FORBIDDEN)?.[0], path).toBeUndefined();
+    }
     await context.close();
   });
 
@@ -2509,16 +2544,48 @@ test.describe('токен GitHub в настройках (ADR-0084)', () => {
 });
 
 test.describe('сайт: меню и вход', () => {
-  test('открытый раздел подсвечен в меню, «Войти» ведёт на вход', async ({ page }) => {
-    await page.goto('/site/clients');
+  test('подменю открывается щелчком и наведением, закрывается Esc и щелчком мимо; открытый раздел подсвечен', async ({
+    page,
+  }) => {
+    await page.goto('/site/calls');
     const nav = page.getByRole('navigation', { name: 'Разделы сайта' }).first();
-    await expect(nav.getByRole('link', { name: 'Клиентам' })).toHaveAttribute(
+    const clients = nav.getByRole('button', { name: 'Клиентам' });
+    const partners = nav.getByRole('button', { name: 'Партнёрам' });
+    // У всех трёх групп подменю, «Контакты» — ссылка.
+    await expect(nav.getByRole('button')).toHaveCount(3);
+    await expect(nav.getByRole('link', { name: 'Контакты' })).toBeVisible();
+
+    await expect(clients).toHaveAttribute('aria-expanded', 'false');
+    await clients.click();
+    await expect(clients).toHaveAttribute('aria-expanded', 'true');
+    await expect(nav.getByRole('link', { name: 'Звонки' })).toHaveAttribute('aria-current', 'page');
+    await expect(nav.getByRole('link', { name: 'Сообщения' })).not.toHaveAttribute(
       'aria-current',
       'page',
     );
-    await expect(nav.getByRole('link', { name: 'Партнёрам' })).not.toHaveAttribute(
-      'aria-current',
-      'page',
+    await page.keyboard.press('Escape');
+    await expect(clients).toHaveAttribute('aria-expanded', 'false');
+    await expect(clients).toBeFocused();
+    await expect(nav.getByRole('link', { name: 'Звонки' })).toBeHidden();
+
+    // С клавиатуры: Enter открывает, Tab идёт по пунктам, уход фокуса из группы закрывает её.
+    await page.keyboard.press('Enter');
+    await expect(clients).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Tab');
+    await expect(nav.getByRole('link', { name: 'Звонки' })).toBeFocused();
+
+    await page.getByRole('heading', { level: 1 }).click();
+    await expect(clients).toHaveAttribute('aria-expanded', 'false');
+
+    await partners.hover();
+    await expect(partners).toHaveAttribute('aria-expanded', 'true');
+    // Щелчок по группе, открытой наведением, её не закрывает.
+    await partners.click();
+    await expect(partners).toHaveAttribute('aria-expanded', 'true');
+    // Заявка партнёра — в кабинете, со сразу выбранным кабинетом партнёра.
+    await expect(nav.getByRole('link', { name: 'Оставить заявку' })).toHaveAttribute(
+      'href',
+      /\/register\?cabinet=partner$/u,
     );
 
     // Адрес кабинета на стенде — отдельный источник, поэтому проверяется ссылка, а не переход по ней.
@@ -2526,6 +2593,33 @@ test.describe('сайт: меню и вход', () => {
       'href',
       /\/login$/u,
     );
+  });
+
+  test('на телефоне меню — группы с подписями и регистрация; прежний адрес «Клиентам» ведёт на «Звонки»', async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: { 'x-zvonix-site': '1' },
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    await page.goto('/clients');
+    await expect(page).toHaveURL(/\/calls$/u);
+
+    await page.getByRole('button', { name: 'Открыть меню' }).click();
+    const menu = page.locator('#site-menu');
+    for (const group of ['Клиентам', 'Партнёрам', 'О сервисе']) {
+      await expect(menu.getByText(group, { exact: true })).toBeVisible();
+    }
+    await expect(menu.getByRole('link', { name: 'Звонки' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(menu.getByRole('link', { name: 'Зарегистрироваться' })).toBeVisible();
+    await menu.getByRole('link', { name: 'Выплаты' }).click();
+    await expect(page).toHaveURL(/\/payouts$/u);
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await context.close();
   });
 });
 

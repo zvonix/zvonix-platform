@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { Cabinet } from '@zvonix/shared';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { YandexCaptcha } from '@/components/yandex-captcha';
@@ -61,6 +61,12 @@ const ROLES: readonly { id: Cabinet; title: string; text: string }[] = [
  */
 export default function RegisterPage() {
   const [cabinet, setCabinet] = useState<Cabinet>('client');
+  // Сайт ведёт сюда со ссылки «Оставить заявку» для партнёров: `?cabinet=partner` сразу выбирает кабинет партнёра.
+  // Из адресной строки после первого рисования, а не через `useSearchParams`: тому нужна граница ожидания вокруг формы.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('cabinet') === 'partner')
+      setCabinet('partner');
+  }, []);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

@@ -5,12 +5,15 @@ export const revalidate = 3600;
 
 const PATHS = [
   '/',
-  '/clients',
-  '/partners',
-  '/how-it-works',
+  '/calls',
+  '/messages',
   '/pricing',
-  '/security',
   '/integration',
+  '/partners',
+  '/equipment',
+  '/payouts',
+  '/how-it-works',
+  '/security',
   '/faq',
   '/contacts',
 ] as const;

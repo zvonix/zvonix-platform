@@ -99,12 +99,15 @@ export function CallToAction({
   cabinetUrl,
   title = 'Начните с регистрации',
   text = 'Регистрация занимает несколько минут: укажите контакты и подтвердите почту.',
+  partner = false,
 }: {
   cabinetUrl: string;
   title?: string;
   text?: string;
+  /** Страница для партнёров: регистрация открывается сразу на кабинете партнёра. */
+  partner?: boolean;
 }) {
-  const register = `${cabinetUrl}/register`;
+  const register = `${cabinetUrl}/register${partner ? '?cabinet=partner' : ''}`;
   const login = `${cabinetUrl}/login`;
   return (
     <section className="mx-auto w-full max-w-6xl px-4 pt-20">
@@ -135,9 +138,9 @@ export function CallToAction({
 }
 
 const PATH: readonly { title: string; text: string }[] = [
-  { title: 'Клиент', text: 'Ваша АТС или приложение звонит на линию площадки.' },
-  { title: 'Площадка', text: 'Выбирает партнёра: цена, лимиты, ваши приоритеты.' },
-  { title: 'Узел АТС', text: 'Ведёт вызов на нашем FreeSWITCH, пишет запись.' },
+  { title: 'Клиент', text: 'Ваша АТС или приложение звонит на линию Zvonix.' },
+  { title: 'Zvonix', text: 'Выбирает партнёра: цена, лимиты, ваши приоритеты.' },
+  { title: 'АТС Zvonix', text: 'Ведёт вызов через облачную АТС, пишет запись.' },
   { title: 'GSM-шлюз', text: 'SIM партнёра выводит вызов в сотовую сеть.' },
   { title: 'Абонент', text: 'Получает обычный звонок.' },
 ];
