@@ -102,6 +102,8 @@ export interface Trunk {
   readonly has_price: boolean;
   /** Связь узла с провайдером (ADR-0121); пусто — узел ещё не сообщал. */
   readonly link: TrunkLink | null;
+  /** Остановлен из-за неверного логина или пароля (ADR-0123); пусто — нет. */
+  readonly auth_blocked_at: string | null;
   readonly pace?: NumberPaceView;
 }
 

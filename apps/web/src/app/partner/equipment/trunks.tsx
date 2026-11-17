@@ -15,6 +15,7 @@ import { WithTooltip } from '@/components/ui/tooltip';
 import { TariffSelect } from '@/components/tariff-select';
 import { TestCallButton } from '@/components/test-call';
 import { TrunkCheckButton } from '@/components/trunk-check';
+import { TrunkAuthBlocked, TrunkReconnectButton } from '@/components/trunk-reconnect';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -166,6 +167,8 @@ function TrunkWarmup({ trunk }: { trunk: Trunk }) {
  * вами — показывает рубильник в конце строки, слов «Включён/Выключен» нет (владелец, 2026-11-17).
  */
 function TrunkStateCell({ trunk }: { trunk: Trunk }) {
+  // Остановка по неверному паролю важнее прочего: пока её не снять, провайдер не работает вовсе (ADR-0123).
+  if (trunk.auth_blocked_at !== null) return <TrunkAuthBlocked />;
   const label = gatewayStateName(trunk).toLowerCase();
   if (trunk.status === 'pending') {
     return (
@@ -344,6 +347,9 @@ function TrunkActions({ trunk }: { trunk: Trunk }) {
         compact
       />
       <TrunkCheckButton scope="partner" trunk={trunk} />
+      {trunk.auth_blocked_at !== null && (
+        <TrunkReconnectButton scope="partner" trunkId={trunk.id} invalidate={EQUIPMENT_KEY} />
+      )}
       <FormDialog
         label={<Settings2 aria-hidden className="size-4" />}
         tooltip="Настройки провайдера"

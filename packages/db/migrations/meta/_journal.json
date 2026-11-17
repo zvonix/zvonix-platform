@@ -687,6 +687,13 @@
       "when": 1794688088606,
       "tag": "0097_sip_trunks_link_failure",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1794923579622,
+      "tag": "0098_sip_trunks_auth_guard",
+      "breakpoints": true
     }
   ]
 }

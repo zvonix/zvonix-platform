@@ -29,6 +29,12 @@ const UNREGISTERED_USERNAME = 'zvonix';
 /** Повтор регистрации при отказе провайдера, с — не чаще, чтобы не попасть в его бан. */
 const RETRY_SECONDS = 30;
 
+/**
+ * Повтор после «провайдер не ответил» (908), с ([ADR-0123](../../../../../docs/adr/0123-ostanovka-provaydera-po-nevernomu-parolyu.md)).
+ * Само ожидание ответа длится ~32 с; повтор каждые 30 с держал бы провайдера под непрерывным потоком REGISTER.
+ */
+const NO_ANSWER_RETRY_SECONDS = 120;
+
 /** Срок регистрации у провайдера, с. */
 const EXPIRE_SECONDS = 600;
 
@@ -49,6 +55,7 @@ function gatewayLine(gateway: NodeSipGateway): string {
     ['password', registers ? (gateway.password ?? '') : ''],
     ['expire-seconds', String(EXPIRE_SECONDS)],
     ['retry-seconds', String(RETRY_SECONDS)],
+    ['fail-908-retry-seconds', String(NO_ANSWER_RETRY_SECONDS)],
     ['caller-id-in-from', 'false'],
   ];
   const body = params

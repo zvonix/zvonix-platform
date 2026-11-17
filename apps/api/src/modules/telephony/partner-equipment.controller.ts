@@ -198,6 +198,8 @@ interface TrunkView {
     failure: number | null;
     reported_at: string;
   } | null;
+  /** Остановлен из-за неверного логина или пароля (ADR-0123); пусто — нет. */
+  readonly auth_blocked_at: string | null;
   readonly pace?: NumberPaceView;
 }
 
@@ -786,6 +788,7 @@ function toTrunkView(
             failure: row.trunk.linkFailure,
             reported_at: row.trunk.linkReportedAt.toISOString(),
           },
+    auth_blocked_at: row.trunk.authBlockedAt?.toISOString() ?? null,
   };
 }
 

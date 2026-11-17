@@ -22,6 +22,8 @@ describe('sipGatewaysXml', () => {
     expect(xml).toContain('<param name="register" value="true"/>');
     expect(xml).toContain('<param name="username" value="21231690871100"/>');
     expect(xml).toContain('<param name="password" value="секрет"/>');
+    // «Нет ответа» — повтор раз в 2 минуты, а не каждые 30 с (ADR-0123).
+    expect(xml).toContain('<param name="fail-908-retry-seconds" value="120"/>');
   });
 
   it('без регистрации — служебное имя и пустой пароль: без username gateway не поднимется', () => {
