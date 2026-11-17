@@ -586,3 +586,73 @@ describe('пароль провайдера показывается по зап
     );
   }, 120_000);
 });
+
+describe('остановка по неверному паролю (ADR-0123)', () => {
+  const report = (link: Record<string, unknown>) =>
+    api().inject({
+      method: 'POST',
+      url: '/node/sip-gateways/status',
+      headers: asNode(),
+      payload: {
+        gateways: [{ name: trunk.sip_username, state: 'FAIL_WAIT', status: 'DOWN', ...link }],
+      },
+    });
+  const blockedAt = async () =>
+    (await get(`/sip-trunks?partnerId=${partnerId}`))
+      .json<{ trunks: (Trunk & { auth_blocked_at: string | null })[] }>()
+      .trunks.find((row) => row.id === trunk.id)?.auth_blocked_at;
+  const onNode = async () =>
+    (
+      await api().inject({ method: 'GET', url: '/node/sip-gateways.xml', headers: asNode() })
+    ).body.includes(`name="${trunk.sip_username}"`);
+  // Секунды эпохи, как шлёт узел. Отказ «в ту же секунду», что и прошлая смена пароля в соседнем тесте, законно
+  // считается старым — поэтому время отказа с запасом вперёд.
+  const now = () => Math.floor(Date.now() / 1000);
+
+  it('отказ без времени (старый узел) и «нет ответа» не останавливают', async () => {
+    expect((await report({ failure: 403 })).statusCode).toBe(200);
+    expect(await blockedAt()).toBeNull();
+    expect((await report({ failure: 908, failure_at: now() })).statusCode).toBe(200);
+    expect(await blockedAt()).toBeNull();
+    expect(await onNode()).toBe(true);
+  }, 120_000);
+
+  it('403 с временем — остановлен: снят с узла, в журнале; «Подключить снова» возвращает', async () => {
+    expect((await report({ failure: 403, failure_at: now() + 5 })).statusCode).toBe(200);
+    expect(await blockedAt()).not.toBeNull();
+    expect(await onNode()).toBe(false);
+    const logged = await withDatabase((execute) =>
+      execute(
+        sql`select count(*)::int as n from audit_log where action = 'sip_trunk.auth_blocked' and entity_id = ${trunk.id}`,
+      ),
+    );
+    expect((logged.rows[0] as { n: number }).n).toBe(1);
+
+    const resumed = await post(`/sip-trunks/${trunk.id}/reconnect`, {});
+    expect(resumed.statusCode).toBe(200);
+    expect(
+      resumed.json<{ trunk: { auth_blocked_at: string | null } }>().trunk.auth_blocked_at,
+    ).toBeNull();
+    expect(await onNode()).toBe(true);
+
+    // Тот же старый отказ из журнала узла (раньше возобновления) остановку не возвращает.
+    expect((await report({ failure: 403, failure_at: now() - 3600 })).statusCode).toBe(200);
+    expect(await blockedAt()).toBeNull();
+  }, 120_000);
+
+  it('новый пароль снимает остановку', async () => {
+    expect((await report({ failure: 401, failure_at: now() + 10 })).statusCode).toBe(200);
+    expect(await blockedAt()).not.toBeNull();
+    expect(
+      (await patch(`/sip-trunks/${trunk.id}`, { outboundSecret: 'исправленный' })).statusCode,
+    ).toBe(200);
+    expect(await blockedAt()).toBeNull();
+    expect(await onNode()).toBe(true);
+  }, 120_000);
+
+  it('несуществующий провайдер — 404', async () => {
+    expect(
+      (await post('/sip-trunks/00000000-0000-7000-8000-000000000000/reconnect', {})).statusCode,
+    ).toBe(404);
+  }, 120_000);
+});

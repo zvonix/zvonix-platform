@@ -717,9 +717,13 @@ if [ -f "\$GW_FILE" ]; then
     ST="\$(printf '%s\n' "\$GWS" | awk '\$1=="State" {print \$2; exit}' | tr -cd 'A-Z_')"
     SS="\$(printf '%s\n' "\$GWS" | awk '\$1=="Status" {print \$2; exit}' | tr -cd 'A-Z_')"
     [ -n "\$ST" ] && [ -n "\$SS" ] || continue
-    FC="\$(printf '%s\n' "\$REG_FAILS" | grep -F " \$NAME Failed Registration [" | tail -n 1 \
-      | sed -n 's/.* Failed Registration \[\([0-9]\{3\}\)\].*/\1/p')"
-    LINKS="\${LINKS}\${LINKS:+,}{\"name\":\"\$NAME\",\"state\":\"\$ST\",\"status\":\"\$SS\"\${FC:+,\"failure\":\$FC}}"
+    # Последний отказ: код и когда (ADR-0123). Время — начало строки журнала, по часам узла; date переводит его
+    # в секунды эпохи с учётом пояса узла. Без времени площадка отказ показывает, но транк не останавливает.
+    FL="\$(printf '%s\n' "\$REG_FAILS" | grep -F " \$NAME Failed Registration [" | tail -n 1)"
+    FC="\$(printf '%s\n' "\$FL" | sed -n 's/.* Failed Registration \[\([0-9]\{3\}\)\].*/\1/p')"
+    FA=""
+    [ -n "\$FC" ] && FA="\$(date -d "\$(printf '%s\n' "\$FL" | awk '{print \$1" "\$2}')" +%s 2>/dev/null | tr -cd '0-9')"
+    LINKS="\${LINKS}\${LINKS:+,}{\"name\":\"\$NAME\",\"state\":\"\$ST\",\"status\":\"\$SS\"\${FC:+,\"failure\":\$FC}\${FA:+,\"failure_at\":\$FA}}"
   done
   [ -n "\$LINKS" ] && printf '{"gateways":[%s]}' "\$LINKS" \
     | curl -fsS --max-time 10 -K "${NODE_ETC}/sip-gateways-status.curl" \
@@ -821,6 +825,13 @@ if [ -z "$NAME" ] || [ -z "$LINE" ]; then
   exit 0
 fi
 PROXY="$(printf '%s' "$LINE" | sed -n 's/.*<param name="proxy" value="\([^"]*\)".*/\1/p')"
+# Логин — чтобы считать пакеты только этой учётной записи (ADR-0123): у одного провайдера их бывает несколько, и
+# адреса у них общие. Транк без регистрации узнаётся провайдером по адресу — его пакеты считаются по адресу.
+USER=""
+case "$LINE" in
+  *'<param name="register" value="true"/>'*)
+    USER="$(printf '%s' "$LINE" | sed -n 's/.*<param name="username" value="\([^"]*\)".*/\1/p')" ;;
+esac
 HOST="${PROXY%%:*}"
 PORT=5060
 case "$PROXY" in *:*) PORT="${PROXY##*:}" ;; esac
@@ -842,35 +853,45 @@ trap 'rm -f "$DETAILS" "$CAPTURE"' EXIT
 if command -v tcpdump >/dev/null 2>&1; then
   FILTER=""
   for IP in $IPS; do FILTER="${FILTER:+$FILTER or }host $IP"; done
-  timeout "$LISTEN" tcpdump -n -l -i any "port $PORT and ($FILTER)" >"$CAPTURE" 2>/dev/null &
+  # -A — с текстом пакета: по нему видно, чья это учётная запись и что ответил провайдер.
+  timeout "$LISTEN" tcpdump -n -l -A -i any "port $PORT and ($FILTER)" >"$CAPTURE" 2>/dev/null &
   LISTENER=$!
   sleep 1
   "$FS_CLI" -x "sofia profile zvonix register $NAME" >/dev/null 2>&1
   wait "$LISTENER" 2>/dev/null
-  SENT=0
-  RECEIVED=0
-  FIRST=""
-  # Строка tcpdump: «… IP <откуда>.<порт> > <куда>.<порт>: …». Откуда — адрес провайдера: ответ, иначе — запрос.
-  while IFS= read -r PACKET; do
-    FROM="$(printf '%s' "$PACKET" | sed -n 's/.* IP \([0-9.]*\)\.[0-9]* > .*/\1/p')"
-    case " $IPS " in
-      *" $FROM "*)
-        RECEIVED=$((RECEIVED + 1))
-        [ -n "$FIRST" ] || FIRST="$(printf '%s' "$PACKET" | grep -oE 'SIP/2\.0 [0-9]{3}[^,]*' | head -n 1)"
-        ;;
-      *) [ -n "$FROM" ] && SENT=$((SENT + 1)) ;;
-    esac
-  done <"$CAPTURE"
+  # Пакет начинается строкой «ЧЧ:ММ:СС.… IP <откуда>.<порт> > <куда>.<порт>: …», дальше его текст. Из каждого
+  # пакета этой учётной записи — строка «IN|OUT<таб>первая строка SIP<таб>заголовок».
+  PACKETS="$(awk -v ips=" $IPS " -v user="$USER" '
+    function flush() {
+      if (head == "") return
+      if (user == "" || index(body, "sip:" user "@") > 0) {
+        from = head; sub(/.* IP /, "", from); sub(/\.[0-9]+ > .*/, "", from)
+        dir = index(ips, " " from " ") > 0 ? "IN" : "OUT"
+        first = ""
+        if (match(body, /SIP\/2\.0 [0-9][0-9][0-9][^\r\n]*/)) first = substr(body, RSTART, RLENGTH)
+        else if (match(body, /[A-Z]+ sip:[^ ]+ SIP\/2\.0/)) first = substr(body, RSTART, RLENGTH)
+        printf "%s\t%s\t%s\n", dir, first, head
+      }
+      head = ""; body = ""
+    }
+    /^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\./ { flush(); head = $0; next }
+    { body = body "\n" $0 }
+    END { flush() }
+  ' "$CAPTURE")"
+  SENT="$(printf '%s\n' "$PACKETS" | grep -c '^OUT')"
+  RECEIVED="$(printf '%s\n' "$PACKETS" | grep -c '^IN')"
+  LAST="$(printf '%s\n' "$PACKETS" | awk -F '\t' '$1 == "IN" && $2 != "" {last = $2} END {print last}')"
+  WHO="${USER:+учётной записи $USER }"
   if [ "$SENT" -eq 0 ]; then
-    echo "ИТОГ: узел за $LISTEN с не отправил провайдеру ни одного запроса — FreeSWITCH не пробует регистрироваться"
+    echo "ИТОГ: узел за $LISTEN с не отправил провайдеру ни одного запроса ${WHO}— FreeSWITCH не пробует регистрироваться"
   elif [ "$RECEIVED" -eq 0 ]; then
-    echo "ИТОГ: запросов с узла ушло $SENT (на $IPS, порт $PORT), ответов — ни одного. Запросы уходят с узла, но провайдер их не получает или отбрасывает: это сторона провайдера или сети до него"
+    echo "ИТОГ: запросов ${WHO}с узла ушло $SENT (на $IPS, порт $PORT), ответов — ни одного. Запросы уходят с узла, но провайдер их не получает или отбрасывает: это сторона провайдера или сети до него"
   else
-    echo "ИТОГ: провайдер отвечает: отправлено $SENT, получено $RECEIVED${FIRST:+, ответ «$FIRST»}"
+    echo "ИТОГ: провайдер отвечает${USER:+ (учётная запись $USER)}: отправлено $SENT, получено $RECEIVED${LAST:+, последний ответ «$LAST»}"
   fi
   cat "$DETAILS"
-  echo "Пакеты (первые 12):"
-  head -n 12 "$CAPTURE" | cut -c1-200
+  echo "Пакеты ${WHO}(первые 12):"
+  printf '%s\n' "$PACKETS" | head -n 12 | awk -F '\t' '{print (index($3, $2) > 0 ? $3 : $3 "  " $2)}' | cut -c1-220
 else
   "$FS_CLI" -x "sofia profile zvonix register $NAME" >/dev/null 2>&1
   sleep 5

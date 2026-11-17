@@ -52,6 +52,22 @@ import {
 import { DatabaseService } from '../../infra/database.service.js';
 
 export type GatewayId = Id<'gateway'>;
+
+/** Связь с провайдером со слов узла (ADR-0121, ADR-0123). */
+export interface TrunkLinkReport {
+  readonly name: string;
+  readonly state: string;
+  readonly status: string;
+  readonly failure?: number | undefined;
+  /** Секунды эпохи. */
+  readonly failure_at?: number | undefined;
+}
+
+/**
+ * Ответы провайдера на REGISTER с паролем, после которых повтор бессмыслен (ADR-0123): неверный пароль (401, 407 —
+ * повторный вызов после ответа с паролем), запрещено (403), нет такой учётной записи (404).
+ */
+const AUTH_FAILURE_CODES: ReadonlySet<number> = new Set([401, 403, 404, 407]);
 export type ChannelId = Id<'channel'>;
 export type SimCardId = Id<'simCard'>;
 export type GatewayPortId = Id<'gatewayPort'>;
@@ -787,26 +803,60 @@ export class TelephonyRepository {
    */
   async recordTrunkLinks(
     nodeId: Id<'node'>,
-    links: readonly { name: string; state: string; status: string; failure?: number | undefined }[],
+    links: readonly TrunkLinkReport[],
     at: Date,
-  ): Promise<number> {
+  ): Promise<{ recorded: number; blocked: GatewayId[] }> {
     let recorded = 0;
+    const blocked: GatewayId[] = [];
     for (const link of links) {
+      const failureAt = link.failure_at === undefined ? null : new Date(link.failure_at * 1000);
+      // Остановка по неверному паролю (ADR-0123) — в том же запросе, что и запись связи: отказ провайдера на запрос
+      // с паролем, транк не готов, отказ позже последнего возобновления. Уже остановленный не трогается.
+      const blocks =
+        link.status !== 'UP' &&
+        link.failure !== undefined &&
+        AUTH_FAILURE_CODES.has(link.failure) &&
+        failureAt !== null;
       const rows = await this.db
         .update(sipTrunks)
         .set({
           linkState: link.state,
           linkStatus: link.status,
           linkFailure: link.failure ?? null,
+          linkFailureAt: failureAt,
           linkReportedAt: at,
+          ...(blocks
+            ? {
+                authBlockedAt: sql`case when ${sipTrunks.authBlockedAt} is null and ${failureAt}::timestamptz > coalesce(${sipTrunks.authResumedAt}, '-infinity'::timestamptz) then ${at}::timestamptz else ${sipTrunks.authBlockedAt} end`,
+              }
+            : {}),
         })
         .where(
           sql`${sipTrunks.gatewayId} = (select ${gateways.id} from ${gateways} where ${gateways.sipUsername} = ${link.name} and ${gateways.nodeId} = ${nodeId} and ${gateways.type} = 'sip_trunk')`,
         )
-        .returning({ id: sipTrunks.gatewayId });
+        .returning({ id: sipTrunks.gatewayId, authBlockedAt: sipTrunks.authBlockedAt });
       recorded += rows.length;
+      for (const row of rows) {
+        if (row.authBlockedAt !== null && row.authBlockedAt.getTime() === at.getTime()) {
+          blocked.push(row.id);
+        }
+      }
     }
-    return recorded;
+    return { recorded, blocked };
+  }
+
+  /** Возобновить остановленный по паролю транк (ADR-0123): «Подключить снова» или новый логин/пароль. */
+  async resumeTrunkAuth(gatewayId: GatewayId, at: Date): Promise<SipTrunkRow | undefined> {
+    try {
+      const [row] = await this.db
+        .update(sipTrunks)
+        .set({ authBlockedAt: null, authResumedAt: at, updatedAt: at })
+        .where(eq(sipTrunks.gatewayId, gatewayId))
+        .returning();
+      return row;
+    } catch (cause) {
+      throw toDatabaseError(cause);
+    }
   }
 
   /**
@@ -837,6 +887,8 @@ export class TelephonyRepository {
       eq(gateways.status, 'active'),
       eq(partners.status, 'verified'),
       eq(gateways.nodeId, nodeId),
+      // Остановленный по неверному паролю не зарегистрирован — вызов ушёл бы в GATEWAY_DOWN (ADR-0123).
+      isNull(sipTrunks.authBlockedAt),
     ];
     if (options.region !== undefined) {
       conditions.push(coversRegion(options.region, gateways.partnerId));
@@ -920,6 +972,8 @@ export class TelephonyRepository {
           eq(gateways.nodeId, nodeId),
           eq(gateways.status, 'active'),
           eq(partners.status, 'verified'),
+          // Остановленный по неверному паролю не поднимается (ADR-0123): узел снимет его на следующем пульсе.
+          isNull(sipTrunks.authBlockedAt),
         ),
       )
       .orderBy(orderByText(gateways.name));

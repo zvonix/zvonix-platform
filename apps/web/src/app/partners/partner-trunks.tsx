@@ -13,6 +13,7 @@ import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
 import { TestCallButton } from '@/components/test-call';
 import { TrunkCheckButton } from '@/components/trunk-check';
+import { TrunkAuthBlocked, TrunkReconnectButton } from '@/components/trunk-reconnect';
 import { paceSummary, warmupCell, type NumberPaceView } from '@/components/number-pace';
 import { TrunkPresence, type TrunkLink } from '@/components/presence';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
@@ -56,6 +57,8 @@ interface Trunk {
   readonly unlimited_requested_at: string | null;
   readonly has_price: boolean;
   readonly link: TrunkLink | null;
+  /** Остановлен из-за неверного логина или пароля (ADR-0123); пусто — нет. */
+  readonly auth_blocked_at: string | null;
   readonly pace?: NumberPaceView;
 }
 
@@ -241,6 +244,7 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                           : `${GATEWAY_SUSPENDED_BY_NAME[trunk.suspended_by]}. ${TRUNK_STATUS_MEANING[trunk.status]}`
                       }
                     />
+                    {trunk.auth_blocked_at !== null && <TrunkAuthBlocked />}
                     <TrunkAttention trunk={trunk} />
                   </span>
                 </TableCell>
@@ -276,6 +280,13 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                             subject={{ kind: 'trunk', id: trunk.id, name: trunk.name }}
                           />
                           <TrunkCheckButton scope="admin" trunk={trunk} />
+                          {trunk.auth_blocked_at !== null && (
+                            <TrunkReconnectButton
+                              scope="admin"
+                              trunkId={trunk.id}
+                              invalidate={['sip-trunks', partnerId]}
+                            />
+                          )}
                         </>
                       )}
                       <FormDialog
