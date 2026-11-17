@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { DayChart, type ChartScope, type DayPoint } from '@/components/day-chart';
+import type { ChartScope } from '@/components/day-chart';
+import { DayChartCard, SCOPES } from '@/components/day-chart-card';
 import { ExportButton } from '@/components/export-button';
 import { LiveSwitch } from '@/components/live-switch';
 import { PeriodPicker } from '@/components/period-picker';
@@ -14,11 +15,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { duration, plural } from '@/lib/format';
+import { duration } from '@/lib/format';
 import { money, sumMoney } from '@/lib/money';
 import {
   acd,
-  asNumber,
   asr,
   deliveredShare,
   readShare,
@@ -59,12 +59,6 @@ const MESSAGE_KEY_NAME: Record<string, string> = {
   api: 'API и кабинет',
   smpp: 'SMPP',
 };
-
-const SCOPES: readonly { readonly key: ChartScope; readonly label: string }[] = [
-  { key: 'all', label: 'Всё' },
-  { key: 'calls', label: 'Звонки' },
-  { key: 'messages', label: 'Сообщения' },
-];
 
 const percent = (value: number | undefined): string =>
   value === undefined ? '—' : `${value.toFixed(1).replace('.', ',')} %`;
@@ -118,33 +112,6 @@ function tableCells(
   ];
 }
 
-/** Сутки ряда сводки → точка графика: высота числом, подписи — строкой API. */
-function pointOf(
-  row: ReportRow & { readonly day: string },
-  moneyEntry: ReportConfig['money'][number] | undefined,
-): DayPoint {
-  if (moneyEntry === undefined) {
-    return {
-      day: row.day,
-      calls: row.calls,
-      messages: row.messages,
-      callsText: `${String(row.calls)} ${plural(row.calls, ['вызов', 'вызова', 'вызовов'])}`,
-      messagesText: `${String(row.messages)} ${plural(row.messages, ['сообщение', 'сообщения', 'сообщений'])}`,
-      totalText: String(row.calls + row.messages),
-    };
-  }
-  const calls = row[moneyEntry.key] ?? '0';
-  const messages = row[moneyEntry.messageKey] ?? '0';
-  return {
-    day: row.day,
-    calls: asNumber(calls),
-    messages: asNumber(messages),
-    callsText: money(calls),
-    messagesText: money(messages),
-    totalText: money(sumMoney(calls, messages)),
-  };
-}
-
 /**
  * Сводка: период, карточки, график по суткам и таблица по разрезам.
  * Одна на все роли — у каждой свои суммы и разрезы (`ReportConfig`), расчёт общий.
@@ -155,7 +122,6 @@ function pointOf(
 export function Report({ config }: { config: ReportConfig }) {
   const [period, setPeriod] = useState<ReportPeriod>({ days: 7 });
   const [scope, setScope] = useState<ChartScope>('all');
-  const [metric, setMetric] = useState<'count' | 'money'>('money');
   const dimensions =
     scope === 'all'
       ? config.dimensions
@@ -172,7 +138,6 @@ export function Report({ config }: { config: ReportConfig }) {
   const moneyOf = (entry: ReportConfig['money'][number]): MoneyKey =>
     messages ? entry.messageKey : entry.key;
   const firstMoney = config.money[0];
-  const moneyEntry = metric === 'money' ? firstMoney : undefined;
 
   const chooseScope = (next: ChartScope): void => {
     setScope(next);
@@ -188,23 +153,6 @@ export function Report({ config }: { config: ReportConfig }) {
       : scope === 'all'
         ? sumMoney(totals[entry.key], totals[entry.messageKey])
         : (totals[scope === 'calls' ? entry.key : entry.messageKey] ?? '0');
-  const nothing =
-    totals === undefined ||
-    (scope === 'all'
-      ? totals.calls + totals.messages
-      : scope === 'calls'
-        ? totals.calls
-        : totals.messages) === 0;
-
-  /** Итог графика за период — то же, что сумма столбцов. */
-  const chartTotal = (): string => {
-    if (totals === undefined) return '';
-    if (moneyEntry !== undefined) return money(scopeMoney(moneyEntry));
-    const calls = `${String(totals.calls)} ${plural(totals.calls, ['вызов', 'вызова', 'вызовов'])}`;
-    const sent = `${String(totals.messages)} ${plural(totals.messages, ['сообщение', 'сообщения', 'сообщений'])}`;
-    return scope === 'all' ? `${calls} · ${sent}` : scope === 'calls' ? calls : sent;
-  };
-
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -292,45 +240,17 @@ export function Report({ config }: { config: ReportConfig }) {
             )}
           </dl>
 
-          <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <h2 className="font-semibold">По дням</h2>
-              <Segmented
-                label="Показатель"
-                options={[
-                  { key: 'money', label: firstMoney?.label ?? 'Деньги' },
-                  { key: 'count', label: 'Количество' },
-                ]}
-                value={metric}
-                onChange={setMetric}
-              />
-              <div className="ml-auto flex flex-col items-end">
-                <span className="num text-[17px] font-semibold leading-tight">{chartTotal()}</span>
-                {moneyEntry !== undefined && scope === 'all' && (
-                  <span className="num text-muted-foreground">
-                    звонки {money(overview.data.totals[moneyEntry.key] ?? '0')} · сообщения{' '}
-                    {money(overview.data.totals[moneyEntry.messageKey] ?? '0')}
-                  </span>
-                )}
-                {moneyEntry !== undefined &&
-                  config.botFeeLabel !== undefined &&
-                  scope !== 'calls' && (
-                    <span className="num text-muted-foreground">
-                      и {config.botFeeLabel} {money(overview.data.bot_fees ?? '0')}
-                    </span>
-                  )}
-              </div>
-            </div>
-            {nothing ? (
-              <p className="py-6 text-muted-foreground">За этот период ничего не было.</p>
-            ) : (
-              <DayChart
-                points={overview.data.series.map((row) => pointOf(row, moneyEntry))}
-                scope={scope}
-                label={`${moneyEntry?.label ?? 'Количество'} по дням`}
-              />
-            )}
-          </section>
+          <DayChartCard
+            series={overview.data.series}
+            totals={overview.data.totals}
+            pair={firstMoney}
+            scope={scope}
+            extra={
+              config.botFeeLabel === undefined
+                ? undefined
+                : `и ${config.botFeeLabel} ${money(overview.data.bot_fees ?? '0')}`
+            }
+          />
         </div>
       )}
 

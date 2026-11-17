@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { LiveSwitch } from '@/components/live-switch';
+import { Segmented } from '@/components/segmented';
 import {
   Table,
   TableBody,
@@ -63,9 +64,6 @@ function statusName(kind: Kind, status: string): string {
   return names[status] ?? status;
 }
 
-const TOGGLE_ON = 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]';
-const TOGGLE_OFF = 'text-muted-foreground hover:text-foreground';
-
 export default function QualityPage() {
   return (
     <ConsoleShell title="Качество" requireRole={['admin', 'support']}>
@@ -96,44 +94,18 @@ function Quality() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
-        <div
-          className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-          role="group"
-          aria-label="Что смотрим"
-        >
-          {KINDS.map((entry) => (
-            <button
-              key={entry.kind}
-              type="button"
-              aria-pressed={kind === entry.kind}
-              onClick={() => {
-                setKind(entry.kind);
-              }}
-              className={`rounded px-2.5 py-1.5 ${kind === entry.kind ? TOGGLE_ON : TOGGLE_OFF}`}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
-        <div
-          className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-          role="group"
-          aria-label="За какое время"
-        >
-          {WINDOWS.map((entry) => (
-            <button
-              key={entry.minutes}
-              type="button"
-              aria-pressed={minutes === entry.minutes}
-              onClick={() => {
-                setMinutes(entry.minutes);
-              }}
-              className={`rounded px-2.5 py-1.5 ${minutes === entry.minutes ? TOGGLE_ON : TOGGLE_OFF}`}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="Что смотрим"
+          options={KINDS.map((entry) => ({ key: entry.kind, label: entry.label }))}
+          value={kind}
+          onChange={setKind}
+        />
+        <Segmented
+          label="За какое время"
+          options={WINDOWS.map((entry) => ({ key: entry.minutes, label: entry.label }))}
+          value={minutes}
+          onChange={setMinutes}
+        />
         <div className="ml-auto">
           <LiveSwitch />
         </div>

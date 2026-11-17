@@ -75,13 +75,52 @@ const offsetMinutes = (): number => -new Date().getTimezoneOffset();
 export type ReportPeriod =
   { readonly days: number } | { readonly from: string; readonly to: string };
 
-/** Часть адреса API с периодом и часовым поясом. */
-const periodQuery = (period: ReportPeriod): string =>
-  `${'days' in period ? `days=${String(period.days)}` : `from=${period.from}&to=${period.to}`}&offset=${String(offsetMinutes())}`;
+const pad = (value: number): string => String(value).padStart(2, '0');
+
+/** Местные сутки `ГГГГ-ММ-ДД` — так их ждёт API. */
+export const isoDay = (date: Date): string =>
+  `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
+/** `ГГГГ-ММ-ДД` → местная полночь. */
+export const fromIsoDay = (day: string): Date => {
+  const [year = 0, month = 1, date = 1] = day.split('-').map(Number);
+  return new Date(year, month - 1, date);
+};
+
+const addDays = (day: string, delta: number): string => {
+  const date = fromIsoDay(day);
+  date.setDate(date.getDate() + delta);
+  return isoDay(date);
+};
+
+/** Первые и последние местные сутки периода: у быстрого — последние N, сегодня включительно. */
+function periodBounds(period: ReportPeriod): { from: string; to: string } {
+  if (!('days' in period)) return period;
+  const today = isoDay(new Date());
+  return { from: addDays(today, 1 - Math.max(1, Math.round(period.days))), to: today };
+}
+
+/** Период той же длины сразу перед данным — с чем сравнивать «стало». */
+export function previousPeriod(period: ReportPeriod): { from: string; to: string } {
+  const { from, to } = periodBounds(period);
+  const length =
+    Math.round((fromIsoDay(to).getTime() - fromIsoDay(from).getTime()) / 86_400_000) + 1;
+  return { from: addDays(from, -length), to: addDays(from, -1) };
+}
+
+/** Границы периода моментами `[from, to)` — для API, которые принимают время, а не сутки. */
+export function periodMoments(period: ReportPeriod): { from: string; to: string } {
+  const { from, to } = periodBounds(period);
+  return { from: fromIsoDay(from).toISOString(), to: fromIsoDay(addDays(to, 1)).toISOString() };
+}
 
 /** Ключ кэша: два одинаковых периода — один запрос. */
-const periodKey = (period: ReportPeriod): string =>
+export const periodKey = (period: ReportPeriod): string =>
   'days' in period ? String(period.days) : `${period.from}..${period.to}`;
+
+/** Часть адреса API с периодом и часовым поясом: `days=7&offset=420` или `from=…&to=…&offset=420`. */
+export const periodQuery = (period: ReportPeriod): string =>
+  `${'days' in period ? `days=${String(period.days)}` : `from=${period.from}&to=${period.to}`}&offset=${String(offsetMinutes())}`;
 
 export function useOverview(base: string, period: ReportPeriod): UseQueryResult<Overview> {
   const live = useLiveInterval();

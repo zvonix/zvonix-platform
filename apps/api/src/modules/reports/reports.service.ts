@@ -17,17 +17,9 @@ import {
   type ReportScope,
   type SeriesRow,
 } from './reports.repository.js';
-import { daysBetween } from './schemas.js';
+import { periodDays, periodWindow, type PeriodQuery } from '../../http/period.js';
 
-const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
-
-/** Период сводки из запроса: последние `days` суток или сутки `from`…`to` включительно. */
-export interface ReportRange {
-  readonly days: number;
-  readonly from?: string | undefined;
-  readonly to?: string | undefined;
-}
 
 export interface Overview {
   readonly days: number;
@@ -69,35 +61,6 @@ export const rubles = (micros: string): string => Money.format(Money.fromMicros(
 @Injectable()
 export class ReportsService {
   constructor(private readonly repository: ReportsRepository) {}
-
-  /**
-   * Границы: последние `days` суток по часовому поясу браузера, включая сегодняшние.
-   * Сутки — по местным часам человека: иначе «сегодня» у Красноярска начиналось бы в 7 утра.
-   */
-  period(days: number, offsetMinutes: number, now = new Date()): { from: Date; to: Date } {
-    const local = now.getTime() + offsetMinutes * MINUTE_MS;
-    const today = Math.floor(local / DAY_MS) * DAY_MS;
-    return {
-      from: new Date(today - (days - 1) * DAY_MS - offsetMinutes * MINUTE_MS),
-      to: new Date(today + DAY_MS - offsetMinutes * MINUTE_MS),
-    };
-  }
-
-  /**
-   * Границы периода сводки. Даты — местные сутки человека, как и у `days`: «с 1 по 3 ноября»
-   * в Красноярске начинается в полночь по Красноярску. Длина — в сутках: по ней дополняется ряд.
-   */
-  window(range: ReportRange, offsetMinutes: number): { from: Date; to: Date; days: number } {
-    if (range.from === undefined || range.to === undefined) {
-      return { ...this.period(range.days, offsetMinutes), days: range.days };
-    }
-    const shift = offsetMinutes * MINUTE_MS;
-    return {
-      from: new Date(Date.parse(`${range.from}T00:00:00Z`) - shift),
-      to: new Date(Date.parse(`${range.to}T00:00:00Z`) + DAY_MS - shift),
-      days: daysBetween(range.from, range.to),
-    };
-  }
 
   /** Границы календарного месяца `ГГГГ-ММ` по местному времени человека. */
   monthBounds(month: string, offsetMinutes: number): { from: Date; to: Date } {
@@ -155,31 +118,28 @@ export class ReportsService {
     };
   }
 
-  async overview(scope: ReportScope, range: ReportRange, offsetMinutes: number): Promise<Overview> {
-    const { from, to, days } = this.window(range, offsetMinutes);
+  async overview(scope: ReportScope, query: PeriodQuery): Promise<Overview> {
+    const window = periodWindow(query);
+    const { from, to, days } = window;
     const [rows, botFees] = await Promise.all([
-      this.repository.series(scope, from, to, offsetMinutes),
+      this.repository.series(scope, from, to, query.offset),
       this.repository.botFees(scope, from, to),
     ]);
     const byDay = new Map(rows.map((row) => [row.day, row]));
 
     // Сутки без вызовов — нули, а не дыра: график с пропусками врёт о масштабе.
-    const series: SeriesRow[] = [];
-    for (let index = 0; index < days; index += 1) {
-      const local = new Date(from.getTime() + index * DAY_MS + offsetMinutes * MINUTE_MS);
-      const day = local.toISOString().slice(0, 10);
-      series.push(byDay.get(day) ?? { day, ...EMPTY_METRICS });
-    }
+    const series: SeriesRow[] = periodDays(window, query.offset).map(
+      (day) => byDay.get(day) ?? { day, ...EMPTY_METRICS },
+    );
     return { days, from, to, totals: sumMetrics(series), series, botFees };
   }
 
   async breakdown(
     scope: ReportScope,
-    range: ReportRange,
-    offsetMinutes: number,
+    query: PeriodQuery,
     dimension: Dimension,
   ): Promise<BreakdownRow[]> {
-    const { from, to } = this.window(range, offsetMinutes);
+    const { from, to } = periodWindow(query);
     return this.repository.breakdown(scope, from, to, dimension);
   }
 }

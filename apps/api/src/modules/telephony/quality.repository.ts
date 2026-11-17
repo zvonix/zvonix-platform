@@ -281,29 +281,33 @@ export class QualityRepository {
   }
 
   /**
-   * Попытки, ушедшие в сеть с `since`, по партнёрам и по операторам SIM (ADR-0107). Отказы площадки (`failure_reason`
+   * Попытки, ушедшие в сеть в `[since, until)`, по партнёрам и по операторам SIM (ADR-0107). Отказы площадки (`failure_reason`
    * заполнен) в сеть не уходили и не считаются. Транки в разрезе операторов не участвуют: оператора у них нет.
    */
   async blockAttempts(
     since: Date,
+    until: Date,
   ): Promise<{ partners: BlockAttemptsRow[]; operators: BlockAttemptsRow[] }> {
     const real = sql`count(*) filter (where c.answered_at is not null and coalesce(c.duration_seconds, ${CALL_REAL_ANSWER_SECONDS}) >= ${CALL_REAL_ANSWER_SECONDS})::int`;
     const short = sql`count(*) filter (where c.answered_at is not null and c.duration_seconds < ${CALL_REAL_ANSWER_SECONDS})::int`;
     const at = since.toISOString();
+    const end = until.toISOString();
     const [partners, operators] = await Promise.all([
       this.db.execute<BlockAttemptsRow>(sql`
         select p.id, p.name, count(*)::int as attempts, ${real} as "realAnswered", ${short} as "shortAnswered"
           from calls c
           join gateways g on g.id = c.gateway_id
           join partners p on p.id = g.partner_id
-         where c.started_at >= ${at}::timestamptz and c.failure_reason is null
+         where c.started_at >= ${at}::timestamptz and c.started_at < ${end}::timestamptz
+           and c.failure_reason is null
          group by p.id, p.name`),
       this.db.execute<BlockAttemptsRow>(sql`
         select o.id, o.name, count(*)::int as attempts, ${real} as "realAnswered", ${short} as "shortAnswered"
           from calls c
           join sim_cards s on s.id = c.sim_card_id
           join operators o on o.id = s.operator_id
-         where c.started_at >= ${at}::timestamptz and c.failure_reason is null
+         where c.started_at >= ${at}::timestamptz and c.started_at < ${end}::timestamptz
+           and c.failure_reason is null
          group by o.id, o.name`),
     ]);
     return { partners: partners.rows, operators: operators.rows };

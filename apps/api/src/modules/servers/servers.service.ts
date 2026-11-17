@@ -182,9 +182,25 @@ export class ServersService {
   }
 
   /** Площадка и все действующие узлы: последний замер и история за окно. */
-  async overview(range: ServerRange, now: Date = new Date()): Promise<ServerView[]> {
-    const window = SERVER_RANGES[range];
-    const since = new Date(now.getTime() - window.durationMs);
+  async overview(
+    range: ServerRange,
+    now: Date = new Date(),
+    custom?: { from: Date; to: Date },
+  ): Promise<ServerView[]> {
+    // Свой период — корзины такой ширины, чтобы точек на источник было не больше ~700, как у быстрых окон.
+    const window =
+      custom === undefined
+        ? SERVER_RANGES[range]
+        : {
+            durationMs: custom.to.getTime() - custom.from.getTime(),
+            bucketSeconds:
+              Math.max(
+                1,
+                Math.ceil((custom.to.getTime() - custom.from.getTime()) / 700 / MINUTE_MS),
+              ) * 60,
+          };
+    const since = custom?.from ?? new Date(now.getTime() - window.durationMs);
+    const until = custom?.to;
 
     const sources: {
       scope: 'platform' | 'node';
@@ -209,7 +225,7 @@ export class ServersService {
         status: source.status,
         stale: !fresh,
         current: latest === undefined ? null : snapshotOf(latest),
-        series: await this.repository.series(source.id, since, window.bucketSeconds),
+        series: await this.repository.series(source.id, since, window.bucketSeconds, until),
       });
     }
     return views;

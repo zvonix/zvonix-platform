@@ -7,11 +7,12 @@ import { FAILURE_SCOPES, parseId, validationFailed, type FailureScope } from '@z
 import type { z } from 'zod';
 import { Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
-import { zodBody } from '../../http/zod.pipe.js';
+import { periodWindow } from '../../http/period.js';
+import { zodBody, zodQuery } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
 import type { FailureThresholdRow } from './quality.repository.js';
 import { QualityService, type BlocksRow, type QualityView } from './quality.service.js';
-import { failureThresholdSchema } from './schemas.js';
+import { blocksQuerySchema, failureThresholdSchema } from './schemas.js';
 
 /** Окно наблюдения по умолчанию: сутки. Меньше — шум, больше — поздно. */
 const DEFAULT_WINDOW_MINUTES = 1440;
@@ -67,23 +68,26 @@ export class QualityController {
    */
   @Roles('admin', 'support')
   @Get('quality/blocks')
-  async blocks(@Query('days') days?: string): Promise<{
+  async blocks(
+    @Query(zodQuery(blocksQuerySchema)) query: z.infer<typeof blocksQuerySchema>,
+  ): Promise<{
     days: number;
     partners: BlocksView[];
     operators: BlocksView[];
     braked_operators: string[];
   }> {
-    const period = days === undefined ? DEFAULT_BLOCKS_DAYS : Number(days);
-    if (!Number.isInteger(period) || period < 1 || period > MAX_BLOCKS_DAYS) {
-      throw validationFailed('Период отчёта — целое число суток от 1 до 90');
-    }
     const now = new Date();
+    // Без дат — прежние скользящие сутки до сейчас; свои даты — сутки по часам человека (ADR-0059, ревизия 2026-11-17).
+    const custom = query.from !== undefined && query.to !== undefined;
+    const window = periodWindow(query, now);
+    const since = custom ? window.from : new Date(now.getTime() - query.days * 86_400_000);
+    const until = custom ? window.to : now;
     const [report, braked] = await Promise.all([
-      this.quality.blocks(new Date(now.getTime() - period * 86_400_000)),
+      this.quality.blocks(since, until),
       this.quality.brakedOperators(now),
     ]);
     return {
-      days: period,
+      days: window.days,
       partners: report.partners.map(toBlocksView),
       operators: report.operators.map(toBlocksView),
       // Операторы, чьи номера сейчас тормозят (ADR-0108) — независимо от периода отчёта: окно торможения своё.
@@ -180,10 +184,6 @@ function toQualityView(row: QualityView): QualityResponse {
 function toThresholdView(row: FailureThresholdRow): ThresholdResponse {
   return { scope: row.scope, failures: row.failures, window_minutes: row.windowMinutes };
 }
-
-/** Период отчёта блокировок, суток. */
-const DEFAULT_BLOCKS_DAYS = 7;
-const MAX_BLOCKS_DAYS = 90;
 
 /** Меньше стольких попыток — доля снятий ничего не говорит. */
 const BLOCKS_MIN_ATTEMPTS = 100;

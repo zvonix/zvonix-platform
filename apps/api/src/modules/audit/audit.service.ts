@@ -21,7 +21,7 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import { and, gte, inArray } from 'drizzle-orm';
+import { and, gte, inArray, lt } from 'drizzle-orm';
 import { currentCorrelationId } from '@zvonix/logger';
 import { newId, type Id, type UserRole } from '@zvonix/shared';
 import { auditLog } from '@zvonix/db/schema';
@@ -80,12 +80,19 @@ export class AuditService {
   async occurrences(
     actions: readonly string[],
     since: Date,
+    until?: Date,
   ): Promise<{ action: string; entityId: string | null }[]> {
     if (actions.length === 0) return [];
     return this.database.db
       .select({ action: auditLog.action, entityId: auditLog.entityId })
       .from(auditLog)
-      .where(and(inArray(auditLog.action, [...actions]), gte(auditLog.occurredAt, since)));
+      .where(
+        and(
+          inArray(auditLog.action, [...actions]),
+          gte(auditLog.occurredAt, since),
+          until === undefined ? undefined : lt(auditLog.occurredAt, until),
+        ),
+      );
   }
 
   private async insert(event: AuditEvent, executor: Executor): Promise<void> {

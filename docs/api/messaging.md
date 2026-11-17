@@ -284,7 +284,7 @@ failure_reason, earned, created_at, sent_at, delivered_at, read_at }], total }` 
 ## Обзор для сотрудников
 
 `GET /messages/overview?days=14&offset=420` (роли `admin`, `support`; `days` 1–90, `offset` — минуты часового пояса
-к востоку от UTC). `200` → `{ "days": 14, "series": [{ "day": "2026-10-05", "messages": 12, "delivered": 9, "failed": 1,
+к востоку от UTC; вместо `days` — свои сутки `from`/`to` `ГГГГ-ММ-ДД` включительно, как у сводки, [reports.md](reports.md)). `200` → `{ "days": 14, "series": [{ "day": "2026-10-05", "messages": 12, "delivered": 9, "failed": 1,
 "revenue": "6.48", "margin": "1.08" }, …] }`: каждые сутки периода (с нулями). `revenue` и `margin` — без
 возвращённых сообщений. Используется блоком «Сообщения MAX» на странице «Обзор».
 
@@ -313,7 +313,8 @@ failure_reason, earned, created_at, sent_at, delivered_at, read_at }], total }` 
 
 ## Отчёт для сотрудников
 
-`GET /messages/report?days=7` (роли `admin`, `support`; `days` 1–90, по умолчанию 7). `200` →
+`GET /messages/report?days=7` (роли `admin`, `support`; `days` 1–90, по умолчанию 7 — скользящие сутки до сейчас;
+или свои сутки `from`/`to` с `offset`, как у сводки). `200` →
 `{ "days": 7, "clients": [{ "client_id", "name", …счётчики }], "accounts": [{ "account_id", "label", "partner_name", "status",
 "state_reason", "paused_until", "pause_reason", …счётчики }] }`. Счётчики одни и те же: `total` (принято), `sent` (ушло), `delivered`,
 `read`, `failed`, причины отказов `not_in_max`, `account_unavailable`, `wait_expired`, `platform`, `recipient_stopped`, а также `settled` (ушли через
@@ -512,7 +513,7 @@ failure_reason, earned, created_at, sent_at, delivered_at, read_at }], total }` 
 
 ## Бот или аккаунты ([ADR-0094](../adr/0094-statistika-bot-ili-akkaunty.md))
 
-- `GET /client/messages/route-stats?days=7` → `{ days, recipients, in_bot, via_bot, via_accounts, refused }` (`refused` —
+- `GET /client/messages/route-stats?days=7` (или `from`/`to`/`offset`, как у отчёта) → `{ days, recipients, in_bot, via_bot, via_accounts, refused }` (`refused` —
   отклонено при приёме за те же сутки).
 - В `GET /messages/report` — `routes: [{ client_id, name, recipients, in_bot, via_bot, via_accounts }]`.
 

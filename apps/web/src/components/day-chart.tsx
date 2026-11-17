@@ -4,25 +4,33 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from 'recharts';
 import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
 
-/** Что показывает график: оба ряда сложенными столбцами или один. */
+/** Что показывает сводка: оба продукта или один. */
 export type ChartScope = 'all' | 'calls' | 'messages';
 
-/** Сутки графика: высота — числом, а подписи — готовой строкой (деньги не считаются в `number`). */
+/** Ряд графика: название в легенде и подсказке, цвет — токен темы `--chart-*`. */
+export interface DaySeries {
+  readonly label: string;
+  readonly color: string;
+}
+
+/** Цвета рядов: звонки и сообщения; у других графиков — первый и второй ряд. */
+export const CHART_COLORS = {
+  calls: 'var(--chart-calls)',
+  messages: 'var(--chart-messages)',
+} as const;
+
+/**
+ * Сутки графика: высоты рядов числами, подписи — готовыми строками (деньги не считаются в `number`).
+ * `values[i]` и `texts[i]` — ряд `series[i]`.
+ */
 export interface DayPoint {
   /** `ГГГГ-ММ-ДД`. */
   readonly day: string;
-  readonly calls: number;
-  readonly messages: number;
-  readonly callsText: string;
-  readonly messagesText: string;
-  /** Сумма обоих рядов строкой — подпись над столбцом и итог подсказки. */
+  readonly values: readonly number[];
+  readonly texts: readonly string[];
+  /** Сумма рядов строкой — подпись над сложенным столбцом и итог подсказки. */
   readonly totalText: string;
 }
-
-const CONFIG = {
-  calls: { label: 'Звонки', color: 'var(--chart-calls)' },
-  messages: { label: 'Сообщения', color: 'var(--chart-messages)' },
-} as const;
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
@@ -45,7 +53,7 @@ const axisNumber = (value: number): string =>
 const REDUCE = '(prefers-reduced-motion: reduce)';
 
 /** «Уменьшить движение» в системе — графики без анимации (DESIGN.md, «Движение»). */
-function useReducedMotion(): boolean {
+export function useReducedMotion(): boolean {
   return useSyncExternalStore(
     (notify) => {
       const query = window.matchMedia(REDUCE);
@@ -60,8 +68,8 @@ function useReducedMotion(): boolean {
 }
 
 /** Ширина области графика: от неё зависит, сколько подписей над столбцами поместится. */
-function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
-  const ref = useRef<HTMLDivElement>(null);
+function useWidth(): [React.RefObject<HTMLElement | null>, number] {
+  const ref = useRef<HTMLElement>(null);
   const [width, setWidth] = useState(0);
   useEffect(() => {
     const element = ref.current;
@@ -82,8 +90,9 @@ const CHAR_PX = 6.6;
 const LABEL_GAP = 6;
 
 /**
- * Какие столбцы подписать числом: сначала наибольший, затем по убыванию, пока подписи
- * не начнут налезать друг на друга. На 7 сутках подписаны все, на 90 — вершины.
+ * Какие места подписать числом: сначала наибольшее, затем по убыванию, пока подписи не начнут
+ * налезать друг на друга. На 7 сутках подписаны все, на 90 — вершины. Место — столбец (или
+ * столбик ряда в группе), его центр — `(index + 0.5) * step`.
  */
 function labelled(
   values: readonly number[],
@@ -111,40 +120,51 @@ function labelled(
 
 /**
  * Столбцы по суткам на Recharts (ADR-0059, ревизия 2026-11-17): числа над столбцами — сколько
- * помещается, подсказка при наведении — у каждого, оба ряда сложенными столбцами или один.
- * Деньги приходят строкой API и показываются ею же; `number` — только высота столбца.
+ * помещается, подсказка при наведении — у каждого. Ряды сложенными столбцами (части целого: звонки
+ * и сообщения) или рядом (разное: пришли и ушли). Деньги приходят строкой API и показываются ею же;
+ * `number` — только высота.
  */
 export function DayChart({
   points,
-  scope,
+  series,
   label,
+  stacked = true,
 }: {
   points: readonly DayPoint[];
-  scope: ChartScope;
+  series: readonly DaySeries[];
   /** Что показывает график — для чтения с экрана: «Заработано по дням». */
   label: string;
+  stacked?: boolean;
 }) {
   const reduced = useReducedMotion();
   const [ref, width] = useWidth();
-  const series = scope === 'all' ? (['calls', 'messages'] as const) : ([scope] as const);
-  const top = series.at(-1) ?? 'calls';
-  const valueOf = (point: DayPoint): number => series.reduce((sum, key) => sum + point[key], 0);
-  const textOf = (point: DayPoint): string =>
-    scope === 'all' ? point.totalText : scope === 'calls' ? point.callsText : point.messagesText;
+  const plot = Math.max(0, width - Y_AXIS);
+  const last = series.length - 1;
 
-  const values = points.map(valueOf);
-  const texts = points.map(textOf);
-  const shown = labelled(values, texts, Math.max(0, width - Y_AXIS));
-  const data = points.map((point) => ({ ...point }));
+  // Подписи: над сложенным столбцом — сумма, в группе — каждый столбик своим числом.
+  const shownStacked = labelled(
+    points.map((point) => point.values.reduce((sum, value) => sum + value, 0)),
+    points.map((point) => point.totalText),
+    plot,
+  );
+  const shownGrouped = labelled(
+    points.flatMap((point) => series.map((_, i) => point.values[i] ?? 0)),
+    points.flatMap((point) => series.map((_, i) => point.texts[i] ?? '')),
+    plot,
+  );
+  const isShown = (index: number, seriesIndex: number): boolean =>
+    stacked ? shownStacked.has(index) : shownGrouped.has(index * series.length + seriesIndex);
+  const textAt = (index: number, seriesIndex: number): string =>
+    (stacked ? points[index]?.totalText : points[index]?.texts[seriesIndex]) ?? '';
 
   return (
     <figure ref={ref} className="flex flex-col gap-1" aria-label={label}>
-      {scope === 'all' && (
+      {series.length > 1 && (
         <div className="flex gap-3 text-muted-foreground" aria-hidden>
-          {series.map((key) => (
-            <span key={key} className="flex items-center gap-1.5">
-              <span className="size-2.5 rounded-[2px]" style={{ background: CONFIG[key].color }} />
-              {CONFIG[key].label}
+          {series.map((entry) => (
+            <span key={entry.label} className="flex items-center gap-1.5">
+              <span className="size-2.5 rounded-[2px]" style={{ background: entry.color }} />
+              {entry.label}
             </span>
           ))}
         </div>
@@ -152,9 +172,10 @@ export function DayChart({
       <ChartContainer className="aspect-auto h-56 w-full">
         <BarChart
           accessibilityLayer
-          data={data}
+          data={points}
           margin={{ top: 18, right: 0, bottom: 0, left: 0 }}
           barCategoryGap={points.length > 45 ? 1 : '18%'}
+          barGap={1}
         >
           <CartesianGrid vertical={false} strokeDasharray="0" className="stroke-border-soft" />
           <XAxis
@@ -184,21 +205,17 @@ export function DayChart({
               return (
                 <div className="grid min-w-36 gap-1 rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md">
                   <div className="text-muted-foreground">{longDay(point.day)}</div>
-                  {series.map((key) => (
-                    <div key={key} className="flex items-center gap-2">
+                  {series.map((entry, i) => (
+                    <div key={entry.label} className="flex items-center gap-2">
                       <span
                         className="h-0.5 w-3 rounded-full"
-                        style={{ background: CONFIG[key].color }}
+                        style={{ background: entry.color }}
                       />
-                      <span className="num font-semibold">
-                        {key === 'calls' ? point.callsText : point.messagesText}
-                      </span>
-                      <span className="ml-auto pl-2 text-muted-foreground">
-                        {CONFIG[key].label}
-                      </span>
+                      <span className="num font-semibold">{point.texts[i]}</span>
+                      <span className="ml-auto pl-2 text-muted-foreground">{entry.label}</span>
                     </div>
                   ))}
-                  {scope === 'all' && (
+                  {stacked && series.length > 1 && (
                     <div className="flex items-center gap-2 border-t border-border pt-1">
                       <span className="num font-semibold">{point.totalText}</span>
                       <span className="ml-auto pl-2 text-muted-foreground">Всего</span>
@@ -208,23 +225,23 @@ export function DayChart({
               );
             }}
           />
-          {series.map((key) => (
+          {series.map((entry, seriesIndex) => (
             <Bar
-              key={key}
-              dataKey={key}
-              stackId="day"
-              fill={CONFIG[key].color}
-              radius={key === top ? [4, 4, 0, 0] : 0}
-              minPointSize={key === top ? 2 : 0}
+              key={entry.label}
+              dataKey={(point: DayPoint) => point.values[seriesIndex] ?? 0}
+              name={entry.label}
+              {...(stacked ? { stackId: 'day' } : {})}
+              fill={entry.color}
+              radius={!stacked || seriesIndex === last ? [4, 4, 0, 0] : 0}
+              minPointSize={!stacked || seriesIndex === last ? 2 : 0}
               isAnimationActive={!reduced}
               animationDuration={450}
               animationEasing="ease-out"
             >
-              {key === top && (
+              {(!stacked || seriesIndex === last) && (
                 <LabelList
-                  dataKey={key}
                   content={({ x, y, width: barWidth, index }) => {
-                    if (index === undefined || !shown.has(index)) return null;
+                    if (index === undefined || !isShown(index, seriesIndex)) return null;
                     return (
                       <text
                         x={Number(x) + Number(barWidth) / 2}
@@ -232,7 +249,7 @@ export function DayChart({
                         textAnchor="middle"
                         className="num fill-foreground text-[11px]"
                       >
-                        {texts[index]}
+                        {textAt(index, seriesIndex)}
                       </text>
                     );
                   }}

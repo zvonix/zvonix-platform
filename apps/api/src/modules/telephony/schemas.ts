@@ -23,6 +23,7 @@ import {
   type Msisdn,
 } from '@zvonix/shared';
 import { z } from 'zod';
+import { checkRange, rangeFields } from '../../http/period.js';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
 
 /** Портов у шлюза. Самые большие GOIP — на 32 слота; 256 с запасом отсекает опечатку. */
@@ -665,3 +666,15 @@ export const trunkLinksSchema = z.object({
     )
     .max(500),
 });
+
+/** Период отчёта блокировок: 1–90 суток (по умолчанию неделя) или свои сутки `from`…`to`. */
+export const blocksQuerySchema = z
+  .object({
+    days: z
+      .string()
+      .optional()
+      .transform((raw) => Number(raw ?? '7'))
+      .pipe(z.number().int().min(1).max(90)),
+    ...rangeFields,
+  })
+  .superRefine(checkRange);

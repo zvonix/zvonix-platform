@@ -8,34 +8,24 @@ import { Segmented } from '@/components/segmented';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { REPORT_PERIODS, type ReportPeriod } from '@/lib/reports';
+import { fromIsoDay, isoDay, REPORT_PERIODS, type ReportPeriod } from '@/lib/reports';
 
 /** Самый длинный свой период — как у API (`MAX_RANGE_DAYS`). */
 const MAX_DAYS = 366;
-
-const pad = (value: number): string => String(value).padStart(2, '0');
-
-/** Местные сутки `ГГГГ-ММ-ДД` — так их ждёт API. */
-const isoDay = (date: Date): string =>
-  `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-
-/** `ГГГГ-ММ-ДД` → местная полночь. */
-const fromIsoDay = (day: string): Date => {
-  const [year = 0, month = 1, date = 1] = day.split('-').map(Number);
-  return new Date(year, month - 1, date);
-};
 
 /** `ГГГГ-ММ-ДД` → `дд.мм.гг`. */
 const shortDate = (day: string): string =>
   `${day.slice(8, 10)}.${day.slice(5, 7)}.${day.slice(2, 4)}`;
 
 /** Подпись своего периода на кнопке: «01.11.26 – 17.11.26», один день — одной датой. */
-const periodLabel = (period: ReportPeriod): string =>
-  'days' in period
-    ? (REPORT_PERIODS.find((entry) => entry.days === period.days)?.label ?? '')
-    : period.from === period.to
-      ? shortDate(period.from)
-      : `${shortDate(period.from)} – ${shortDate(period.to)}`;
+const rangeLabel = (from: string, to: string): string =>
+  from === to ? shortDate(from) : `${shortDate(from)} – ${shortDate(to)}`;
+
+/** Быстрый период: сколько суток (у графиков серверов бывает и доля суток — час) и подпись кнопки. */
+export interface PeriodPreset {
+  readonly days: number;
+  readonly label: string;
+}
 
 const WIDE = '(min-width: 640px)';
 
@@ -61,9 +51,12 @@ function useWide(): boolean {
 export function PeriodPicker({
   value,
   onChange,
+  presets = REPORT_PERIODS,
 }: {
   value: ReportPeriod;
   onChange: (period: ReportPeriod) => void;
+  /** Быстрые кнопки; по умолчанию — как у сводки: сегодня, 7, 30, 90 дней. */
+  presets?: readonly PeriodPreset[];
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DateRange | undefined>();
@@ -88,7 +81,7 @@ export function PeriodPicker({
     <div className="flex flex-wrap items-center gap-1.5">
       <Segmented
         label="Период"
-        options={REPORT_PERIODS.map((period) => ({ key: period.days, label: period.label }))}
+        options={presets.map((period) => ({ key: period.days, label: period.label }))}
         value={'days' in value ? value.days : null}
         onChange={(days) => {
           onChange({ days });
@@ -105,7 +98,7 @@ export function PeriodPicker({
             className={custom ? 'num font-semibold' : 'text-muted-foreground'}
           >
             <CalendarDays />
-            {custom && periodLabel(value)}
+            {custom && rangeLabel(value.from, value.to)}
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-auto p-0">
@@ -128,10 +121,7 @@ export function PeriodPicker({
             <span className="num text-muted-foreground">
               {draft?.from === undefined
                 ? 'Выберите начало и конец'
-                : periodLabel({
-                    from: isoDay(draft.from),
-                    to: isoDay(draft.to ?? draft.from),
-                  })}
+                : rangeLabel(isoDay(draft.from), isoDay(draft.to ?? draft.from))}
             </span>
             <Button
               size="icon-sm"

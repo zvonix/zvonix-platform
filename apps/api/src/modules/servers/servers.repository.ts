@@ -63,7 +63,12 @@ export class ServersRepository {
    * а графику нужно несколько сотен точек. Нагрузка усредняется, а память и диск берутся
    * по худшему значению корзины — график, на котором провал сгладился, соврал бы.
    */
-  async series(source: MetricSource, since: Date, bucketSeconds: number): Promise<MetricPoint[]> {
+  async series(
+    source: MetricSource,
+    since: Date,
+    bucketSeconds: number,
+    until?: Date,
+  ): Promise<MetricPoint[]> {
     const bucket = sql<Date>`to_timestamp(floor(extract(epoch from ${serverMetrics.takenAt}) / ${bucketSeconds}) * ${bucketSeconds})`;
     const rows = await this.database.db
       .select({
@@ -73,7 +78,13 @@ export class ServersRepository {
         diskFreeMb: sql<number>`min(${serverMetrics.diskFreeMb})::int`,
       })
       .from(serverMetrics)
-      .where(and(sourceCondition(source), gte(serverMetrics.takenAt, since)))
+      .where(
+        and(
+          sourceCondition(source),
+          gte(serverMetrics.takenAt, since),
+          until === undefined ? undefined : lt(serverMetrics.takenAt, until),
+        ),
+      )
       .groupBy(sql`1`)
       .orderBy(sql`1`);
     return rows;

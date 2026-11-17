@@ -6,6 +6,7 @@ import { Suspense, useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { LiveSwitch } from '@/components/live-switch';
+import { Segmented } from '@/components/segmented';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -35,8 +36,6 @@ interface Payment {
 }
 
 const COLUMNS = 6;
-const TOGGLE_ON = 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]';
-const TOGGLE_OFF = 'text-muted-foreground hover:text-foreground';
 
 /** Отбор: заявки, ждущие решения, — по умолчанию; остальное — для разбора. */
 const FILTERS: readonly { value: PaymentStatus | ''; label: string }[] = [
@@ -78,25 +77,12 @@ function Payments() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <div
-          className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-          role="group"
-          aria-label="Какие заявки"
-        >
-          {FILTERS.map((filter) => (
-            <button
-              key={filter.value}
-              type="button"
-              aria-pressed={status === filter.value}
-              onClick={() => {
-                setStatus(filter.value);
-              }}
-              className={`rounded px-2.5 py-1.5 ${status === filter.value ? TOGGLE_ON : TOGGLE_OFF}`}
-            >
-              {filter.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="Какие заявки"
+          options={FILTERS.map((filter) => ({ key: filter.value, label: filter.label }))}
+          value={status}
+          onChange={setStatus}
+        />
         <div className="ml-auto">
           <LiveSwitch />
         </div>

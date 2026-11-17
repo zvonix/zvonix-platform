@@ -1957,6 +1957,38 @@ describe('обзор для сотрудников', () => {
     expect(today).toMatchObject({ messages: 2, failed: 1, revenue: '0.54', margin: '0.09' });
     expect(body.series[0]).toMatchObject({ messages: 0, revenue: '0' });
 
+    // Свой период — те же сутки по датам (ADR-0059, ревизия 2026-11-17); отчёт принимает его же.
+    const todayDay = new Date().toISOString().slice(0, 10);
+    const ranged = await api().inject({
+      method: 'GET',
+      url: `/messages/overview?from=${todayDay}&to=${todayDay}&offset=0`,
+      headers: bearer(adminToken),
+    });
+    expect(ranged.json<{ days: number; series: unknown[] }>()).toMatchObject({ days: 1 });
+    expect(ranged.json<{ series: unknown[] }>().series[0]).toMatchObject({
+      messages: 2,
+      failed: 1,
+    });
+    const report = await api().inject({
+      method: 'GET',
+      url: `/messages/report?from=${todayDay}&to=${todayDay}&offset=0`,
+      headers: bearer(adminToken),
+    });
+    expect(report.statusCode).toBe(200);
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const empty = await api().inject({
+      method: 'GET',
+      url: `/messages/report?from=${yesterday}&to=${yesterday}&offset=0`,
+      headers: bearer(adminToken),
+    });
+    expect(empty.json<{ clients: unknown[] }>().clients).toEqual([]);
+    const half = await api().inject({
+      method: 'GET',
+      url: `/messages/overview?from=${todayDay}`,
+      headers: bearer(adminToken),
+    });
+    expect(half.statusCode).toBe(400);
+
     const denied = await api().inject({
       method: 'GET',
       url: '/messages/overview',

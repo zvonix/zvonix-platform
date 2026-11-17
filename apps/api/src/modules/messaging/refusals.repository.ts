@@ -33,12 +33,18 @@ export class RefusalsRepository {
       .where(inArray(messageRefusals.id, [...ids] as MessageRefusalRow['id'][]));
   }
 
-  /** Сколько сообщений клиента отклонено при приёме с `since` — для строки «За 7 суток». */
-  async countSince(clientId: Id<'client'>, since: Date): Promise<number> {
+  /** Сколько сообщений клиента отклонено при приёме в `[since, until)` — для строки «За 7 суток». */
+  async countSince(clientId: Id<'client'>, since: Date, until: Date): Promise<number> {
     const [row] = await this.database.db
       .select({ n: count() })
       .from(messageRefusals)
-      .where(and(eq(messageRefusals.clientId, clientId), gte(messageRefusals.createdAt, since)));
+      .where(
+        and(
+          eq(messageRefusals.clientId, clientId),
+          gte(messageRefusals.createdAt, since),
+          lt(messageRefusals.createdAt, until),
+        ),
+      );
     return row?.n ?? 0;
   }
 

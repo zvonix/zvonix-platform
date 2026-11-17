@@ -10,7 +10,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { PeriodPicker } from '@/components/period-picker';
+import { Segmented } from '@/components/segmented';
 import { request } from '@/lib/api';
+import { periodQuery, type ReportPeriod } from '@/lib/reports';
 
 /**
  * Отчёт блокировок ([ADR-0107](../../../../../docs/adr/0107-son-nomera-plokhoy-nomer-i-otchyot-blokirovok.md)): сколько
@@ -37,29 +40,21 @@ interface BlocksResponse {
   readonly braked_operators: string[];
 }
 
-const PERIODS = [
-  { days: 7, label: 'Неделя' },
-  { days: 30, label: 'Месяц' },
-] as const;
-
 const GROUPS = [
   { key: 'partners', label: 'Партнёры', one: 'Партнёр' },
   { key: 'operators', label: 'Операторы', one: 'Оператор SIM' },
 ] as const;
 type Group = (typeof GROUPS)[number]['key'];
 
-const TOGGLE_ON = 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]';
-const TOGGLE_OFF = 'text-muted-foreground hover:text-foreground';
-
 const share = (part: number, whole: number): string =>
   whole === 0 ? '—' : `${((part * 100) / whole).toFixed(1).replace('.', ',')} %`;
 
 export function Blocks() {
-  const [days, setDays] = useState<number>(7);
+  const [period, setPeriod] = useState<ReportPeriod>({ days: 7 });
   const [group, setGroup] = useState<Group>('partners');
   const report = useQuery({
-    queryKey: ['quality', 'blocks', days],
-    queryFn: () => request<BlocksResponse>(`/quality/blocks?days=${String(days)}`),
+    queryKey: ['quality', 'blocks', periodQuery(period)],
+    queryFn: () => request<BlocksResponse>(`/quality/blocks?${periodQuery(period)}`),
   });
   const rows = report.data?.[group] ?? [];
   const label = GROUPS.find((entry) => entry.key === group)?.one ?? '';
@@ -71,44 +66,13 @@ export function Blocks() {
         <h2 id="blocks-title" className="font-semibold">
           Блокировки номеров
         </h2>
-        <div
-          className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-          role="group"
-          aria-label="По кому"
-        >
-          {GROUPS.map((entry) => (
-            <button
-              key={entry.key}
-              type="button"
-              aria-pressed={group === entry.key}
-              onClick={() => {
-                setGroup(entry.key);
-              }}
-              className={`rounded px-2.5 py-1.5 ${group === entry.key ? TOGGLE_ON : TOGGLE_OFF}`}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
-        <div
-          className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-          role="group"
-          aria-label="За какой срок"
-        >
-          {PERIODS.map((entry) => (
-            <button
-              key={entry.days}
-              type="button"
-              aria-pressed={days === entry.days}
-              onClick={() => {
-                setDays(entry.days);
-              }}
-              className={`rounded px-2.5 py-1.5 ${days === entry.days ? TOGGLE_ON : TOGGLE_OFF}`}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="По кому"
+          options={GROUPS.map((entry) => ({ key: entry.key, label: entry.label }))}
+          value={group}
+          onChange={setGroup}
+        />
+        <PeriodPicker value={period} onChange={setPeriod} />
       </div>
 
       {report.error !== null && (
