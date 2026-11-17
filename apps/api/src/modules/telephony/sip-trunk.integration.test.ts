@@ -20,6 +20,7 @@ import {
   uniqueEmail,
   withDatabase,
 } from '../../testing/harness.js';
+import { NodesRepository } from '../nodes/nodes.repository.js';
 
 prepareEnvironment();
 
@@ -515,5 +516,39 @@ describe('связь узла с провайдером (ADR-0121)', () => {
       payload: { gateways: [{ name: trunk.sip_username, state: 'REGED', status: 'UP' }] },
     });
     expect([401, 403]).toContain(response.statusCode);
+  }, 120_000);
+});
+
+describe('проверка связи с провайдером (ADR-0122)', () => {
+  it('узел не берёт команды — понятный итог; берёт — команда с именем транка, итог из его ответа', async () => {
+    const silent = await post(`/sip-trunks/${trunk.id}/check`, {});
+    expect(silent.statusCode).toBe(200);
+    expect(silent.json<{ summary: string }>().summary).toMatch(/не принимает команды/u);
+
+    await api().get(NodesRepository).markCommandsPolled(parseId(nodeId, 'node'), new Date());
+    const pending = post(`/sip-trunks/${trunk.id}/check`, {});
+    const taken = await api().inject({ method: 'GET', url: '/node/commands', headers: asNode() });
+    expect(taken.statusCode).toBe(200);
+    const [commandId, command] = taken.body.split('\n');
+    expect(command).toBe(`zvonix-sip-check ${trunk.sip_username}`);
+    const answered = await api().inject({
+      method: 'POST',
+      url: `/node/commands/${commandId ?? ''}/result`,
+      headers: { ...asNode(), 'content-type': 'text/plain' },
+      payload:
+        'ИТОГ: запросов с узла ушло 7, ответов — ни одного.\nПровайдер: sip → 1.2.3.4, порт 5060\n',
+    });
+    expect(answered.statusCode).toBe(200);
+    const result = await pending;
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toEqual({
+      summary: 'запросов с узла ушло 7, ответов — ни одного.',
+      details: 'Провайдер: sip → 1.2.3.4, порт 5060',
+    });
+  }, 120_000);
+
+  it('несуществующий провайдер — 404', async () => {
+    const missing = await post('/sip-trunks/00000000-0000-7000-8000-000000000000/check', {});
+    expect(missing.statusCode).toBe(404);
   }, 120_000);
 });

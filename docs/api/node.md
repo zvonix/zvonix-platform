@@ -426,15 +426,17 @@ Basic поверх TLS: имя — идентификатор ключа, пар
 Ключ узла ([ADR-0115](../adr/0115-uzel-zabiraet-komandy.md)). Долгий запрос: площадка держит его до 25 с.
 
 - `200`, `text/plain` — две строки: идентификатор команды и строка `api` FreeSWITCH. Сейчас это
-  `originate {…}` тестового звонка и `sofia profile zvonix flush_inbound_reg …` после смены пароля.
+  `originate {…}` тестового звонка, `sofia profile zvonix flush_inbound_reg …` после смены пароля и
+  `zvonix-sip-check <имя транка>` — проверка связи с провайдером ([ADR-0122](../adr/0122-proverka-svyazi-s-sip-provayderom.md)).
 - `204` — команд нет, служба сразу спрашивает снова.
 - Каждый запрос отмечает `nodes.commands_polled_at`. Узел без ESL площадки считается готовым принимать
   команды, если спрашивал за последние 90 с.
 - Команду, которую узел не взял за 10 с, площадка считает несостоявшейся и больше не выдаёт.
 
 Кто спрашивает — `/usr/local/sbin/zvonix-commands` (служба systemd `zvonix-commands`, ставит
-`node/install.sh`). Выполняет **только** команды, начинающиеся с `originate {` и
-`sofia profile zvonix flush_inbound_reg `; прочие отвергает ответом `-ERR NODE_REFUSED`.
+`node/install.sh`). Выполняет **только** команды, начинающиеся с `originate {`,
+`sofia profile zvonix flush_inbound_reg ` и `zvonix-sip-check ` (свой скрипт `/usr/local/sbin/zvonix-sip-check`, имя
+транка он чистит и ищет в файле sofia-gateway сам); прочие отвергает ответом `-ERR NODE_REFUSED`.
 Ключ — в `/etc/zvonix-node/commands.curl` (только root).
 
 ## `POST /node/commands/:id/result` — ответ на команду

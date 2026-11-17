@@ -12,6 +12,7 @@ import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
 import { TestCallButton } from '@/components/test-call';
+import { TrunkCheckButton } from '@/components/trunk-check';
 import { NumberPace, type NumberPaceView } from '@/components/number-pace';
 import { TrunkPresence, type TrunkLink } from '@/components/presence';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
@@ -298,10 +299,13 @@ export function PartnerTrunks({ partnerId }: { partnerId: string }) {
                         />
                       </FormDialog>
                       {trunk.status !== 'retired' && (
-                        <TestCallButton
-                          scope="admin"
-                          subject={{ kind: 'trunk', id: trunk.id, name: trunk.name }}
-                        />
+                        <>
+                          <TestCallButton
+                            scope="admin"
+                            subject={{ kind: 'trunk', id: trunk.id, name: trunk.name }}
+                          />
+                          <TrunkCheckButton scope="admin" trunk={trunk} />
+                        </>
                       )}
                     </div>
                   )}

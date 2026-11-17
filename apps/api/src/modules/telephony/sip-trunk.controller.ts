@@ -29,6 +29,7 @@ import {
   updateSipTrunkSchema,
 } from './schemas.js';
 import { TelephonyService } from './telephony.service.js';
+import { TrunkCheckService, type TrunkCheckResult } from './trunk-check.service.js';
 import type { GatewayRow, SipTrunkRow } from './telephony.repository.js';
 
 /**
@@ -77,6 +78,7 @@ export class SipTrunkController {
     private readonly telephony: TelephonyService,
     private readonly billing: BillingService,
     private readonly tariffs: TariffService,
+    private readonly checks: TrunkCheckService,
   ) {}
 
   private async views(
@@ -174,6 +176,29 @@ export class SipTrunkController {
       actor.role,
     );
     return { trunk: await this.view(updated) };
+  }
+
+  /**
+   * Проверка связи узла с провайдером ([ADR-0122](../../../../../docs/adr/0122-proverka-svyazi-s-sip-provayderom.md)):
+   * узел записывает трафик к провайдеру и сразу регистрируется. Ответ — через 35–40 с.
+   */
+  @Roles('admin', 'support')
+  @Post('sip-trunks/:id/check')
+  @HttpCode(200)
+  async check(@Param('id') id: string): Promise<TrunkCheckResult> {
+    return this.checks.check(parseId(id, 'gateway'));
+  }
+
+  /** То же для своего провайдера из кабинета партнёра (ADR-0122). */
+  @Cabinets('partner')
+  @Post('partner/sip-trunks/:id/check')
+  @HttpCode(200)
+  async partnerCheck(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<TrunkCheckResult> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    return this.checks.check(parseId(id, 'gateway'), partner.id);
   }
 
   /** Партнёр просит безлимит для своего провайдера (ADR-0119); решает администратор. */

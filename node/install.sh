@@ -796,10 +796,95 @@ else
   echo "ВНИМАНИЕ: площадка не приняла пульс узла — узел останется «ставится» (journalctl -u zvonix-heartbeat)" >&2
 fi
 
+# --- Проверка связи с SIP-провайдером (ADR-0122) --------------------------------
+# «Провайдер не отвечает» бывает и у провайдера, и в сети между узлом и им. Провайдер на это отвечает «подключений
+# с вашего адреса не было» — и спорить не с чем. Проверка записывает трафик к адресам провайдера, сразу просит
+# FreeSWITCH зарегистрироваться и считает: сколько запросов ушло, сколько ответов пришло, какой первый ответ.
+# Запускает её только служба команд по команде площадки; имя транка — из файла sofia-gateway, адрес — оттуда же.
+command -v tcpdump >/dev/null 2>&1 || apt-get install -y -qq tcpdump >/dev/null 2>&1 \
+  || echo "ВНИМАНИЕ: tcpdump не установился — проверка связи с провайдером покажет только состояние" >&2
+
+cat >/usr/local/sbin/zvonix-sip-check <<SIPCHECK_HEAD
+#!/bin/sh
+# Проверка связи узла с SIP-провайдером (ADR-0122) — порождается node/install.sh, правится там.
+FS_CLI="${FS_CLI}"
+GW_FILE="${CONF_DIR}/zvonix-gateways/zvonix.xml"
+SIPCHECK_HEAD
+cat >>/usr/local/sbin/zvonix-sip-check <<'SIPCHECK'
+set -u
+# Сколько слушать: FreeSWITCH повторяет REGISTER без ответа 0,5 → 1 → 2 → 4 с … до 32 с.
+LISTEN=35
+NAME="$(printf '%s' "${1:-}" | tr -cd 'A-Za-z0-9._-')"
+LINE="$(grep -F "<gateway name=\"$NAME\">" "$GW_FILE" 2>/dev/null | head -n 1)"
+if [ -z "$NAME" ] || [ -z "$LINE" ]; then
+  echo "ИТОГ: провайдера нет на узле — включите его и подождите минуту"
+  exit 0
+fi
+PROXY="$(printf '%s' "$LINE" | sed -n 's/.*<param name="proxy" value="\([^"]*\)".*/\1/p')"
+HOST="${PROXY%%:*}"
+PORT=5060
+case "$PROXY" in *:*) PORT="${PROXY##*:}" ;; esac
+PORT="$(printf '%s' "$PORT" | tr -cd '0-9')"
+IPS="$(getent ahostsv4 "$HOST" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+if [ -z "$IPS" ]; then
+  echo "ИТОГ: узел не находит адрес $HOST — имя провайдера не разрешается (DNS)"
+  exit 0
+fi
+
+DETAILS="$(mktemp)"
+CAPTURE="$(mktemp)"
+trap 'rm -f "$DETAILS" "$CAPTURE"' EXIT
+{
+  echo "Провайдер: $HOST → $IPS, порт $PORT"
+  for IP in $IPS; do echo "Маршрут к $IP: $(ip route get "$IP" 2>/dev/null | head -n 1)"; done
+} >"$DETAILS"
+
+if command -v tcpdump >/dev/null 2>&1; then
+  FILTER=""
+  for IP in $IPS; do FILTER="${FILTER:+$FILTER or }host $IP"; done
+  timeout "$LISTEN" tcpdump -n -l -i any "port $PORT and ($FILTER)" >"$CAPTURE" 2>/dev/null &
+  LISTENER=$!
+  sleep 1
+  "$FS_CLI" -x "sofia profile zvonix register $NAME" >/dev/null 2>&1
+  wait "$LISTENER" 2>/dev/null
+  SENT=0
+  RECEIVED=0
+  FIRST=""
+  # Строка tcpdump: «… IP <откуда>.<порт> > <куда>.<порт>: …». Откуда — адрес провайдера: ответ, иначе — запрос.
+  while IFS= read -r PACKET; do
+    FROM="$(printf '%s' "$PACKET" | sed -n 's/.* IP \([0-9.]*\)\.[0-9]* > .*/\1/p')"
+    case " $IPS " in
+      *" $FROM "*)
+        RECEIVED=$((RECEIVED + 1))
+        [ -n "$FIRST" ] || FIRST="$(printf '%s' "$PACKET" | grep -oE 'SIP/2\.0 [0-9]{3}[^,]*' | head -n 1)"
+        ;;
+      *) [ -n "$FROM" ] && SENT=$((SENT + 1)) ;;
+    esac
+  done <"$CAPTURE"
+  if [ "$SENT" -eq 0 ]; then
+    echo "ИТОГ: узел за $LISTEN с не отправил провайдеру ни одного запроса — FreeSWITCH не пробует регистрироваться"
+  elif [ "$RECEIVED" -eq 0 ]; then
+    echo "ИТОГ: запросов с узла ушло $SENT (на $IPS, порт $PORT), ответов — ни одного. Запросы уходят с узла, но провайдер их не получает или отбрасывает: это сторона провайдера или сети до него"
+  else
+    echo "ИТОГ: провайдер отвечает: отправлено $SENT, получено $RECEIVED${FIRST:+, ответ «$FIRST»}"
+  fi
+  cat "$DETAILS"
+  echo "Пакеты (первые 12):"
+  head -n 12 "$CAPTURE" | cut -c1-200
+else
+  "$FS_CLI" -x "sofia profile zvonix register $NAME" >/dev/null 2>&1
+  sleep 5
+  echo "ИТОГ: на узле нет tcpdump — видно только состояние регистрации"
+  cat "$DETAILS"
+fi
+echo "Состояние: $("$FS_CLI" -x "sofia status gateway $NAME" 2>/dev/null | awk '$1=="State" || $1=="Status" {printf "%s %s  ", $1, $2}')"
+SIPCHECK
+chmod 0700 /usr/local/sbin/zvonix-sip-check
+
 # --- Служба команд узла (ADR-0115, GET /node/commands) -------------------------
 # Тестовый звонок и сброс входа площадка отдаёт по ESL только узлу своей машины. Узел на отдельной
-# машине сам забирает их долгим запросом, выполняет fs_cli и присылает ответ. Выполняет только две
-# разрешённые команды — прочие отвергает, кто бы их ни прислал. ESL наружу не открывается.
+# машине сам забирает их долгим запросом, выполняет и присылает ответ. Выполняет только три
+# разрешённые команды (звонок, сброс входа, проверка связи) — прочие отвергает. ESL наружу не открывается.
 # Ключ — в файле только для root, в аргументы процесса не попадает; адрес — в самом скрипте.
 
 ( umask 077 && printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" >"${NODE_ETC}/commands.curl" )
@@ -838,6 +923,9 @@ while :; do
     # originate держит ответ, пока абонент не снимет трубку, — в фоне, чтобы не ждать следующую команду.
     'originate {'*|'sofia profile zvonix flush_inbound_reg '*)
       ( report "$ID" "$("$FS_CLI" -x "$API" 2>&1)" ) & ;;
+    # Проверка связи с провайдером (ADR-0122): свой скрипт, имя транка он чистит и ищет в файле сам.
+    'zvonix-sip-check '*)
+      ( report "$ID" "$(/usr/local/sbin/zvonix-sip-check "${API#zvonix-sip-check }" 2>&1 | head -c 8000)" ) & ;;
     *) report "$ID" '-ERR NODE_REFUSED' ;;
   esac
 done

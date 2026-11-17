@@ -10,6 +10,7 @@ import { NumberPace } from '@/components/number-pace';
 import { TrunkPresence } from '@/components/presence';
 import { TariffSelect } from '@/components/tariff-select';
 import { TestCallButton } from '@/components/test-call';
+import { TrunkCheckButton } from '@/components/trunk-check';
 import { EditTrunkForm, NewTrunkForm } from '@/components/trunk-forms';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -287,6 +288,7 @@ function TrunkActions({ trunk }: { trunk: Trunk }) {
         subject={{ kind: 'trunk', id: trunk.id, name: trunk.name }}
         compact
       />
+      <TrunkCheckButton scope="partner" trunk={trunk} />
       <FormDialog
         label={<Settings2 aria-hidden className="size-4" />}
         tooltip="Настройки провайдера"
