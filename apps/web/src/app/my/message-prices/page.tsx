@@ -55,7 +55,7 @@ function MessagePrices() {
   }
 
   return (
-    <section aria-label="Сообщения MAX" className="flex max-w-2xl flex-col gap-2">
+    <section aria-label="Сообщения MAX" className="flex flex-col gap-2">
       <div className="flex items-center gap-1">
         <h2 className="font-semibold">За сообщение</h2>
         <Hint label="Как считается цена сообщений">
