@@ -5,13 +5,14 @@ import { useState, type ComponentProps } from 'react';
 import { Input } from '@/components/ui/input';
 
 /**
- * Поле пароля со значком «показать» (владелец, 2026-11-17: «сделать, чтобы можно было увидеть введённый пароль»).
- * Показывает только набранное сейчас: сохранённый пароль площадка не отдаёт никому.
+ * Поле пароля со значком «показать» (владелец, 2026-11-17: «кнопку показать пароль и при необходимости изменить»).
+ * `onShow` — первое «показать»: подгрузить сохранённый пароль, если поле его ещё не знает.
  */
 export function PasswordInput({
   className = '',
+  onShow,
   ...props
-}: Omit<ComponentProps<typeof Input>, 'type'>) {
+}: Omit<ComponentProps<typeof Input>, 'type'> & { onShow?: () => void }) {
   const [shown, setShown] = useState(false);
   const label = shown ? 'Скрыть пароль' : 'Показать пароль';
   return (
@@ -24,7 +25,8 @@ export function PasswordInput({
         aria-pressed={shown}
         className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
         onClick={() => {
-          setShown((value) => !value);
+          if (!shown) onShow?.();
+          setShown(!shown);
         }}
       >
         {shown ? <EyeOff aria-hidden className="size-4" /> : <Eye aria-hidden className="size-4" />}

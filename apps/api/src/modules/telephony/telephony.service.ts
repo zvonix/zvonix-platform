@@ -1719,6 +1719,34 @@ export class TelephonyService {
     }));
   }
 
+  /**
+   * Пароль провайдера — показать в окне настроек (владелец, 2026-11-17: «кнопку показать пароль и при необходимости
+   * изменить»). Только по нажатию «показать», не в списке; каждый показ — в журнале. `partnerId` — из кабинета
+   * партнёра: чужой транк не находится.
+   */
+  async revealTrunkSecret(
+    gatewayId: GatewayId,
+    partnerId: PartnerId | undefined,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<string | null> {
+    const found = await this.repository.findTrunk(gatewayId);
+    if (found === undefined || (partnerId !== undefined && found.gateway.partnerId !== partnerId)) {
+      throw notFound('SIP-провайдер не найден');
+    }
+    const secret = this.openSecret(found.trunk.outboundSecret, gatewayId);
+    await this.audit.record({
+      action: 'sip_trunk.secret_viewed',
+      entityType: 'gateway',
+      entityId: gatewayId,
+      actorUserId,
+      actorRole,
+      before: null,
+      after: { has_secret: secret !== null },
+    });
+    return secret;
+  }
+
   /** Пароль провайдера в базе — только зашифрованным. Пусто остаётся пустым. */
   private sealSecret(plain: string | null): string | null {
     if (plain === null || plain === '') return null;

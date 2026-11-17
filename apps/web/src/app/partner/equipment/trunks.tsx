@@ -46,7 +46,7 @@ export function AddTrunk() {
       label="Добавить SIP-провайдера"
       variant="outline"
       title="Новый SIP-провайдер"
-      description="Адрес, имя и пароль — из кабинета провайдера. Пароль после сохранения не показывается никому."
+      description="Адрес, логин и пароль — из кабинета провайдера"
     >
       <NewTrunkForm onCreate={(body) => add.mutateAsync(body)} />
     </FormDialog>
@@ -235,27 +235,27 @@ function TrunkUnlimited({ trunk }: { trunk: Trunk }) {
     <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
       <span className="text-muted-foreground">Без прогрева и пределов на номер</span>
       <ConfirmAction
-      label="Запросить безлимит"
-      title={`Безлимит для провайдера «${trunk.name}»`}
-      consequence={
-        <>
-          <p>
-            Площадка бережёт номера: прогрев, пределы в час и в сутки, сон, паузы между звонками.
-            Если провайдер пропускает любой поток и сам отвечает за свои номера, эти ограничения ему
-            не нужны.
-          </p>
-          <p>
-            Запрос уйдёт администратору площадки. Одновременных звонков всё равно будет не больше,
-            чем каналов у провайдера ({trunk.max_concurrent_calls}).
-          </p>
-        </>
-      }
-      confirmLabel="Отправить запрос"
-      tone="neutral"
-      variant="outline"
-      size="sm"
-      onConfirm={() => ask.mutateAsync()}
-    />
+        label="Запросить безлимит"
+        title={`Безлимит для провайдера «${trunk.name}»`}
+        consequence={
+          <>
+            <p>
+              Площадка бережёт номера: прогрев, пределы в час и в сутки, сон, паузы между звонками.
+              Если провайдер пропускает любой поток и сам отвечает за свои номера, эти ограничения
+              ему не нужны.
+            </p>
+            <p>
+              Запрос уйдёт администратору площадки. Одновременных звонков всё равно будет не больше,
+              чем каналов у провайдера ({trunk.max_concurrent_calls}).
+            </p>
+          </>
+        }
+        confirmLabel="Отправить запрос"
+        tone="neutral"
+        variant="outline"
+        size="sm"
+        onConfirm={() => ask.mutateAsync()}
+      />
     </div>
   );
 }
@@ -301,6 +301,11 @@ function TrunkActions({ trunk }: { trunk: Trunk }) {
         <EditTrunkForm
           trunk={trunk}
           onSave={(changes) => update.mutateAsync(changes)}
+          revealSecret={() =>
+            request<{ password: string | null }>(`/partner/sip-trunks/${trunk.id}/secret`).then(
+              (reply) => reply.password,
+            )
+          }
           extra={<TrunkUnlimited trunk={trunk} />}
         />
         {removable && (

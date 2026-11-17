@@ -155,7 +155,7 @@ export function NewTrunkForm({
 
       {registers && (
         <>
-          <DialogField label="Имя у провайдера">
+          <DialogField label="Логин">
             <Input
               className="num"
               autoComplete="off"
@@ -167,7 +167,7 @@ export function NewTrunkForm({
             />
           </DialogField>
 
-          <DialogField label="Пароль провайдера">
+          <DialogField label="Пароль">
             {/*
               `new-password`: иначе браузер предложит сохранить эту пару как вход в кабинет,
               а при следующей правке сам подставит пароль кабинета в поле провайдера.
@@ -185,8 +185,7 @@ export function NewTrunkForm({
       )}
 
       <p className="text-muted-foreground sm:col-span-2">
-        Добавляется выключенным: включите, когда провайдер подтвердит доступ. Пароль после
-        сохранения не показывается — его можно заменить, но не посмотреть.
+        Добавляется выключенным: включите, когда провайдер подтвердит доступ.
       </p>
     </DialogForm>
   );
@@ -202,6 +201,7 @@ export function NewTrunkForm({
 export function EditTrunkForm({
   trunk,
   onSave,
+  revealSecret,
   extra,
 }: {
   trunk: {
@@ -213,6 +213,8 @@ export function EditTrunkForm({
     readonly numbers_count: number;
   };
   onSave: (changes: Record<string, unknown>) => Promise<unknown>;
+  /** Сохранённый пароль — по «показать»; каждый показ площадка пишет в журнал. */
+  revealSecret?: () => Promise<string | null>;
   /** Под полями, до кнопок: у партнёра — запрос безлимита (владелец, 2026-11-17: «через настройки, а не в таблице»). */
   extra?: ReactNode;
 }) {
@@ -221,7 +223,9 @@ export function EditTrunkForm({
   const [username, setUsername] = useState(trunk.outbound_username ?? '');
   const [channels, setChannels] = useState(String(trunk.max_concurrent_calls));
   const [numbers, setNumbers] = useState(String(trunk.numbers_count));
+  // Пароль: пусто, пока не нажали «показать» — тогда сохранённый. Уходит на сохранение, только если его изменили.
   const [secret, setSecret] = useState('');
+  const [saved, setSaved] = useState<string | undefined>(undefined);
 
   const channelCount = integerFromInput(channels);
   const channelsValid =
@@ -245,7 +249,7 @@ export function EditTrunkForm({
   const numberCount = integerFromInput(numbers);
   const numbersValid = validNumbers(numberCount);
   if (numbersValid && numberCount !== trunk.numbers_count) changes.numbersCount = numberCount;
-  if (secret !== '') changes.outboundSecret = secret;
+  if (secret !== '' && secret !== saved) changes.outboundSecret = secret;
   const dirty = Object.keys(changes).length > 0;
 
   return (
@@ -279,10 +283,7 @@ export function EditTrunkForm({
 
       {trunk.registers_outbound && (
         <>
-          <DialogField
-            label="Логин у провайдера"
-            hint={usernameValid ? undefined : 'Не может быть пустым.'}
-          >
+          <DialogField label="Логин" hint={usernameValid ? undefined : 'Не может быть пустым.'}>
             <Input
               className="num"
               autoComplete="off"
@@ -294,14 +295,22 @@ export function EditTrunkForm({
             />
           </DialogField>
 
-          <DialogField label="Новый пароль" hint="Пусто — пароль остаётся прежним.">
+          <DialogField label="Пароль">
             {/* `new-password`: иначе браузер подставит сюда пароль от кабинета. */}
             <PasswordInput
               className="num"
               autoComplete="new-password"
+              placeholder="••••••••"
               value={secret}
               onChange={(event) => {
                 setSecret(event.target.value);
+              }}
+              onShow={() => {
+                if (saved !== undefined || revealSecret === undefined || secret !== '') return;
+                void revealSecret().then((password) => {
+                  setSaved(password ?? '');
+                  setSecret((current) => (current === '' ? (password ?? '') : current));
+                });
               }}
             />
           </DialogField>

@@ -566,3 +566,23 @@ describe('название провайдера меняется в настро
     expect((await patch(`/sip-trunks/${trunk.id}`, { name: ' ' })).statusCode).toBe(400);
   }, 120_000);
 });
+
+describe('пароль провайдера показывается по запросу', () => {
+  it('администратор видит сохранённый пароль, показ — в журнале', async () => {
+    expect(
+      (await patch(`/sip-trunks/${trunk.id}`, { outboundSecret: 'новый-пароль-1' })).statusCode,
+    ).toBe(200);
+    const shown = await get(`/sip-trunks/${trunk.id}/secret`);
+    expect(shown.statusCode).toBe(200);
+    expect(shown.json()).toEqual({ password: 'новый-пароль-1' });
+    const viewed = await withDatabase((execute) =>
+      execute(
+        sql`select count(*)::int as n from audit_log where action = 'sip_trunk.secret_viewed' and entity_id = ${trunk.id}`,
+      ),
+    );
+    expect((viewed.rows[0] as { n: number }).n).toBeGreaterThan(0);
+    expect((await get('/sip-trunks/00000000-0000-7000-8000-000000000000/secret')).statusCode).toBe(
+      404,
+    );
+  }, 120_000);
+});

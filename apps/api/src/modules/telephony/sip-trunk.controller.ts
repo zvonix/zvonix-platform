@@ -201,6 +201,39 @@ export class SipTrunkController {
     return this.checks.check(parseId(id, 'gateway'), partner.id);
   }
 
+  /** Пароль провайдера — по нажатию «показать» в окне настроек; показ — в журнале. */
+  @Roles('admin')
+  @Get('sip-trunks/:id/secret')
+  async secret(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ password: string | null }> {
+    const password = await this.telephony.revealTrunkSecret(
+      parseId(id, 'gateway'),
+      undefined,
+      parseId(actor.userId, 'user'),
+      actor.role,
+    );
+    return { password };
+  }
+
+  /** То же для своего провайдера из кабинета партнёра. */
+  @Cabinets('partner')
+  @Get('partner/sip-trunks/:id/secret')
+  async partnerSecret(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ password: string | null }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const password = await this.telephony.revealTrunkSecret(
+      parseId(id, 'gateway'),
+      partner.id,
+      parseId(actor.userId, 'user'),
+      actor.role,
+    );
+    return { password };
+  }
+
   /** Партнёр просит безлимит для своего провайдера (ADR-0119); решает администратор. */
   @Cabinets('partner')
   @Post('partner/sip-trunks/:id/unlimited-request')
