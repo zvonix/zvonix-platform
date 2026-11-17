@@ -47,9 +47,7 @@ export function paceSummary(
     .filter((part) => part !== null)
     .join(', ');
   const used =
-    pace.per_day === null
-      ? ''
-      : ` Сегодня ${String(pace.used_day)} из ${String(pace.per_day)}.`;
+    pace.per_day === null ? '' : ` Сегодня ${String(pace.used_day)} из ${String(pace.per_day)}.`;
   const warmup =
     pace.warmup_day === null
       ? ''

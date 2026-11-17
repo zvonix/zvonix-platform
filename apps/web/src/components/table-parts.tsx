@@ -18,3 +18,10 @@ export const ROW_ICON = {
   size: 'icon-xs',
   className: 'size-7 text-muted-foreground hover:text-foreground',
 } as const;
+
+/**
+ * Столбец, который на телефоне прячется: там в строке остаётся главное — что это, состояние и действия
+ * ([DESIGN.md](../../../../docs/DESIGN.md), «Таблица»; «Три аудитории»: партнёр видит состояние SIM без прокрутки
+ * вбок). Ставится одинаково на заголовок и на ячейку столбца.
+ */
+export const WIDE_ONLY = 'hidden md:table-cell';

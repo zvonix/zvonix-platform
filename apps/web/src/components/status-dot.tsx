@@ -54,7 +54,7 @@ export function StatusDot({
           <button
             type="button"
             aria-label={`${label}: ${reason}`}
-            className={`${className} cursor-help rounded-sm underline decoration-dotted decoration-1 underline-offset-4 focus-visible:outline-2 focus-visible:outline-ring`}
+            className={`${className} cursor-help rounded-sm focus-visible:outline-2 focus-visible:outline-ring`}
             onClick={() => {
               setOpen((current) => !current);
             }}

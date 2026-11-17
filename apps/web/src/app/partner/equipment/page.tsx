@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/table';
 import { request } from '@/lib/api';
 import { GATEWAY_TYPE_NAME, REGISTRATION_MODE_NAME } from '@/lib/labels';
-import { ROW_ICON, RowActions } from '@/components/row-actions';
+import { ROW_ICON, RowActions } from '@/components/table-parts';
 import { StatusDot } from '@/components/status-dot';
 import { Tooltip } from '@/components/ui/tooltip';
 import {
@@ -138,8 +138,8 @@ function PartnerEquipment() {
             Карты вне шлюзов
           </h3>
           <p className="max-w-prose text-muted-foreground">
-            Вынутые из портов карты вызовов не получают. Вставить такую карту можно значком «+»
-            у пустого порта в таблице выше.
+            Вынутые из портов карты вызовов не получают. Вставить такую карту можно значком «+» у
+            пустого порта в таблице выше.
           </p>
           <div className="overflow-x-auto rounded-lg border border-border bg-card">
             <Table>

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
-import { ROW_ICON } from '@/components/row-actions';
+import { ROW_ICON } from '@/components/table-parts';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import {
   LineCredentials,
