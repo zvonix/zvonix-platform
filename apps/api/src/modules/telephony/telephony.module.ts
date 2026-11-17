@@ -31,6 +31,7 @@ import { PartnerLimitsController } from './partner-limits.controller.js';
 import { TestCallController } from './test-call.controller.js';
 import { TestCallRepository } from './test-call.repository.js';
 import { TestCallService } from './test-call.service.js';
+import { TrunkCheckService } from './trunk-check.service.js';
 import { NodeRegistrationsController } from './node-registrations.controller.js';
 import { RegistrationsService } from './registrations.service.js';
 import { ClientLimitsController } from './client-limits.controller.js';
@@ -69,6 +70,7 @@ import { LimitOwnersService } from './limit-owners.service.js';
     PartnerReportService,
     TestCallService,
     TestCallRepository,
+    TrunkCheckService,
     RegistrationsService,
     LimitOwnersService,
     CallPaceService,

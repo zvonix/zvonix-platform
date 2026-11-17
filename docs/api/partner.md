@@ -245,6 +245,13 @@ failure, reported_at }` или `null` ([ADR-0121](../adr/0121-svyaz-uzla-s-sip-p
 Отказы: `404` чужой, `409` `gateway_retired`, `destination_blocked`, `node_not_ready`, `test_call_in_progress`.
 Журнал — `sip_trunk.test_call` с маской номера.
 
+### `POST /partner/sip-trunks/:id/check`
+
+Проверка связи узла с провайдером ([ADR-0122](../adr/0122-proverka-svyazi-s-sip-provayderom.md)): узел 35 с пишет
+трафик к адресам провайдера и сразу регистрируется. Тело пустое. `200` → `{ "summary": "запросов с узла ушло 7, ответов —
+ни одного. …", "details": "Провайдер: …\nМаршрут к …\nПакеты …\nСостояние: …" }` — около 40 с. Узел не принимает
+команды, не ответил вовремя или ещё не обновился — тоже `200` с понятным `summary` и пустым `details`. Чужой — `404`, удалённый — `409`.
+
 Состояние и тариф своего транка меняются путями шлюза: `POST /partner/gateways/:id/status`
 и `POST /partner/gateways/:id/tariff`. Остальные пути шлюза (вход SIP, порты, способ подключения) у транка — `404`.
 
