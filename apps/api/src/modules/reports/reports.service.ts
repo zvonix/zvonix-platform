@@ -17,9 +17,17 @@ import {
   type ReportScope,
   type SeriesRow,
 } from './reports.repository.js';
+import { daysBetween } from './schemas.js';
 
 const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
+
+/** Период сводки из запроса: последние `days` суток или сутки `from`…`to` включительно. */
+export interface ReportRange {
+  readonly days: number;
+  readonly from?: string | undefined;
+  readonly to?: string | undefined;
+}
 
 export interface Overview {
   readonly days: number;
@@ -72,6 +80,22 @@ export class ReportsService {
     return {
       from: new Date(today - (days - 1) * DAY_MS - offsetMinutes * MINUTE_MS),
       to: new Date(today + DAY_MS - offsetMinutes * MINUTE_MS),
+    };
+  }
+
+  /**
+   * Границы периода сводки. Даты — местные сутки человека, как и у `days`: «с 1 по 3 ноября»
+   * в Красноярске начинается в полночь по Красноярску. Длина — в сутках: по ней дополняется ряд.
+   */
+  window(range: ReportRange, offsetMinutes: number): { from: Date; to: Date; days: number } {
+    if (range.from === undefined || range.to === undefined) {
+      return { ...this.period(range.days, offsetMinutes), days: range.days };
+    }
+    const shift = offsetMinutes * MINUTE_MS;
+    return {
+      from: new Date(Date.parse(`${range.from}T00:00:00Z`) - shift),
+      to: new Date(Date.parse(`${range.to}T00:00:00Z`) + DAY_MS - shift),
+      days: daysBetween(range.from, range.to),
     };
   }
 
@@ -131,8 +155,8 @@ export class ReportsService {
     };
   }
 
-  async overview(scope: ReportScope, days: number, offsetMinutes: number): Promise<Overview> {
-    const { from, to } = this.period(days, offsetMinutes);
+  async overview(scope: ReportScope, range: ReportRange, offsetMinutes: number): Promise<Overview> {
+    const { from, to, days } = this.window(range, offsetMinutes);
     const [rows, botFees] = await Promise.all([
       this.repository.series(scope, from, to, offsetMinutes),
       this.repository.botFees(scope, from, to),
@@ -151,11 +175,11 @@ export class ReportsService {
 
   async breakdown(
     scope: ReportScope,
-    days: number,
+    range: ReportRange,
     offsetMinutes: number,
     dimension: Dimension,
   ): Promise<BreakdownRow[]> {
-    const { from, to } = this.period(days, offsetMinutes);
+    const { from, to } = this.window(range, offsetMinutes);
     return this.repository.breakdown(scope, from, to, dimension);
   }
 }

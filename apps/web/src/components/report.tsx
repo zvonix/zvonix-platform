@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { BarChart } from '@/components/bar-chart';
+import { DayChart, type ChartScope, type DayPoint } from '@/components/day-chart';
 import { ExportButton } from '@/components/export-button';
 import { LiveSwitch } from '@/components/live-switch';
+import { PeriodPicker } from '@/components/period-picker';
+import { Segmented } from '@/components/segmented';
 import {
   Table,
   TableBody,
@@ -20,10 +22,10 @@ import {
   asr,
   deliveredShare,
   readShare,
-  REPORT_PERIODS,
   useBreakdown,
   useOverview,
   type MoneyKey,
+  type ReportPeriod,
   type ReportProduct,
   type ReportRow,
 } from '@/lib/reports';
@@ -58,9 +60,10 @@ const MESSAGE_KEY_NAME: Record<string, string> = {
   smpp: 'SMPP',
 };
 
-const PRODUCTS: readonly { readonly key: ReportProduct; readonly label: string }[] = [
+const SCOPES: readonly { readonly key: ChartScope; readonly label: string }[] = [
+  { key: 'all', label: 'Всё' },
   { key: 'calls', label: 'Звонки' },
-  { key: 'messages', label: 'Сообщения MAX' },
+  { key: 'messages', label: 'Сообщения' },
 ];
 
 const percent = (value: number | undefined): string =>
@@ -115,86 +118,115 @@ function tableCells(
   ];
 }
 
-/** Сутки `ГГГГ-ММ-ДД` → `дд.мм`. */
-const shortDay = (day: string): string => `${day.slice(8, 10)}.${day.slice(5, 7)}`;
+/** Сутки ряда сводки → точка графика: высота числом, подписи — строкой API. */
+function pointOf(
+  row: ReportRow & { readonly day: string },
+  moneyEntry: ReportConfig['money'][number] | undefined,
+): DayPoint {
+  if (moneyEntry === undefined) {
+    return {
+      day: row.day,
+      calls: row.calls,
+      messages: row.messages,
+      callsText: `${String(row.calls)} ${plural(row.calls, ['вызов', 'вызова', 'вызовов'])}`,
+      messagesText: `${String(row.messages)} ${plural(row.messages, ['сообщение', 'сообщения', 'сообщений'])}`,
+      totalText: String(row.calls + row.messages),
+    };
+  }
+  const calls = row[moneyEntry.key] ?? '0';
+  const messages = row[moneyEntry.messageKey] ?? '0';
+  return {
+    day: row.day,
+    calls: asNumber(calls),
+    messages: asNumber(messages),
+    callsText: money(calls),
+    messagesText: money(messages),
+    totalText: money(sumMoney(calls, messages)),
+  };
+}
 
 /**
  * Сводка: период, карточки, график по суткам и таблица по разрезам.
  * Одна на все роли — у каждой свои суммы и разрезы (`ReportConfig`), расчёт общий.
+ *
+ * «Всё / Звонки / Сообщения» (владелец, 2026-11-17: «общий график по заработку с переключением
+ * отдельно на звонки и на сообщения») задаёт и карточки, и график, и список разрезов.
  */
 export function Report({ config }: { config: ReportConfig }) {
-  const [days, setDays] = useState<number>(7);
-  // Продукт: сводка была только по вызовам, MAX в ней не было вовсе (владелец, 2026-10-23).
-  const [product, setProduct] = useState<ReportProduct>('calls');
+  const [period, setPeriod] = useState<ReportPeriod>({ days: 7 });
+  const [scope, setScope] = useState<ChartScope>('all');
   const [metric, setMetric] = useState<'count' | 'money'>('money');
-  const dimensions = config.dimensions.filter((entry) => entry.product === product);
-  const [by, setBy] = useState<string>(dimensions[0]?.by ?? '');
+  const dimensions =
+    scope === 'all'
+      ? config.dimensions
+      : config.dimensions.filter((entry) => entry.product === scope);
+  const [by, setBy] = useState<string>(config.dimensions[0]?.by ?? '');
+  const dimension = dimensions.find((entry) => entry.by === by) ?? dimensions[0];
+  const product: ReportProduct = dimension?.product ?? 'calls';
 
-  const overview = useOverview(config.base, days);
-  const breakdown = useBreakdown(config.base, days, by);
+  const overview = useOverview(config.base, period);
+  const breakdown = useBreakdown(config.base, period, dimension?.by ?? by);
 
   const messages = product === 'messages';
-  const dimensionLabel = dimensions.find((entry) => entry.by === by)?.label ?? 'Кто';
+  const dimensionLabel = dimension?.label ?? 'Кто';
   const moneyOf = (entry: ReportConfig['money'][number]): MoneyKey =>
     messages ? entry.messageKey : entry.key;
   const firstMoney = config.money[0];
-  const countLabel = messages ? 'Сообщения' : 'Вызовы';
+  const moneyEntry = metric === 'money' ? firstMoney : undefined;
 
-  const chooseProduct = (next: ReportProduct): void => {
-    setProduct(next);
-    setBy(config.dimensions.find((entry) => entry.product === next)?.by ?? '');
+  const chooseScope = (next: ChartScope): void => {
+    setScope(next);
+    if (next !== 'all' && !config.dimensions.some((d) => d.by === by && d.product === next)) {
+      setBy(config.dimensions.find((entry) => entry.product === next)?.by ?? '');
+    }
+  };
+
+  const totals = overview.data?.totals;
+  const scopeMoney = (entry: ReportConfig['money'][number]): string =>
+    totals === undefined
+      ? '0'
+      : scope === 'all'
+        ? sumMoney(totals[entry.key], totals[entry.messageKey])
+        : (totals[scope === 'calls' ? entry.key : entry.messageKey] ?? '0');
+  const nothing =
+    totals === undefined ||
+    (scope === 'all'
+      ? totals.calls + totals.messages
+      : scope === 'calls'
+        ? totals.calls
+        : totals.messages) === 0;
+
+  /** Итог графика за период — то же, что сумма столбцов. */
+  const chartTotal = (): string => {
+    if (totals === undefined) return '';
+    if (moneyEntry !== undefined) return money(scopeMoney(moneyEntry));
+    const calls = `${String(totals.calls)} ${plural(totals.calls, ['вызов', 'вызова', 'вызовов'])}`;
+    const sent = `${String(totals.messages)} ${plural(totals.messages, ['сообщение', 'сообщения', 'сообщений'])}`;
+    return scope === 'all' ? `${calls} · ${sent}` : scope === 'calls' ? calls : sent;
   };
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
-        <div
-          className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-          role="group"
-          aria-label="Период"
-        >
-          {REPORT_PERIODS.map((period) => (
-            <button
-              key={period.days}
-              type="button"
-              aria-pressed={days === period.days}
-              onClick={() => {
-                setDays(period.days);
-              }}
-              className={`rounded px-2.5 py-1.5 ${days === period.days ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {period.label}
-            </button>
-          ))}
-        </div>
-        <div
-          className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-          role="group"
-          aria-label="Что считать"
-        >
-          {PRODUCTS.map((entry) => (
-            <button
-              key={entry.key}
-              type="button"
-              aria-pressed={product === entry.key}
-              onClick={() => {
-                chooseProduct(entry.key);
-              }}
-              className={`rounded px-2.5 py-1.5 ${product === entry.key ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
+        <PeriodPicker value={period} onChange={setPeriod} />
+        <Segmented label="Что считать" options={SCOPES} value={scope} onChange={chooseScope} />
         <div className="ml-auto flex flex-wrap items-center gap-3">
           <ExportButton
-            name={messages ? 'сводка-max-по-дням' : 'сводка-по-дням'}
+            name="сводка-по-дням"
             load={() => {
               const data = overview.data;
               if (data === undefined) return Promise.reject(new Error('Сводка ещё не загружена'));
               return Promise.resolve({
-                header: ['Сутки', ...tableHeader(config, product)],
-                rows: data.series.map((row) => [row.day, ...tableCells(config, product, row)]),
+                header: [
+                  'Сутки',
+                  ...tableHeader(config, 'calls'),
+                  ...tableHeader(config, 'messages'),
+                ],
+                rows: data.series.map((row) => [
+                  row.day,
+                  ...tableCells(config, 'calls', row),
+                  ...tableCells(config, 'messages', row),
+                ]),
               });
             }}
           />
@@ -211,142 +243,106 @@ export function Report({ config }: { config: ReportConfig }) {
       {overview.data === undefined ? (
         overview.error === null && <p className="text-muted-foreground">Загружаем…</p>
       ) : (
-        <>
-          {/* «Итого» — оба продукта и плата за бота: сколько всего, не переключаясь. */}
-          {firstMoney !== undefined && (
-            <p className="flex flex-wrap items-baseline gap-x-2 text-muted-foreground">
-              <span>Итого за период, {firstMoney.label.toLowerCase()}:</span>
-              <span className="num text-[15px] font-semibold text-foreground">
-                {money(
-                  sumMoney(
-                    overview.data.totals[firstMoney.key],
-                    overview.data.totals[firstMoney.messageKey],
-                    config.botFeeLabel === undefined ? undefined : overview.data.bot_fees,
-                  ),
-                )}
-              </span>
-              <span className="num">
-                звонки {money(overview.data.totals[firstMoney.key] ?? '0')} · MAX{' '}
-                {money(overview.data.totals[firstMoney.messageKey] ?? '0')}
-                {config.botFeeLabel !== undefined &&
-                  ` · ${config.botFeeLabel} ${money(overview.data.bot_fees ?? '0')}`}
-              </span>
-            </p>
-          )}
-
+        <div
+          className={`flex flex-col gap-4 transition-opacity ${overview.isPlaceholderData ? 'opacity-60' : ''}`}
+        >
           {/* Столько колонок, сколько влезает: шесть карточек администратора — в один ряд, четыре
               клиентские — тоже, на телефоне — по две. Без «сирот» во втором ряду. */}
           <dl
             className="grid gap-3"
             style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}
           >
-            {messages ? (
-              <>
-                <Card title="Сообщений" value={String(overview.data.totals.messages)} />
-                <Card
-                  title="Доставлено"
-                  value={String(overview.data.totals.messages_delivered)}
-                  note={`доля ${percent(deliveredShare(overview.data.totals))}`}
-                />
-                <Card
-                  title="Прочитано"
-                  value={String(overview.data.totals.messages_read)}
-                  note={`из доставленных ${percent(readShare(overview.data.totals))}`}
-                />
-              </>
-            ) : (
-              <>
-                <Card title="Вызовов" value={String(overview.data.totals.calls)} />
-                <Card
-                  title="Состоялось"
-                  value={String(overview.data.totals.answered)}
-                  note={`доля ${percent(asr(overview.data.totals))}`}
-                />
-                <Card
-                  title="Разговоров"
-                  value={talk(overview.data.totals.talk_seconds)}
-                  note={`средний ${talk(acd(overview.data.totals))}`}
-                />
-              </>
-            )}
             {config.money.map((entry) => (
-              <Card
-                key={entry.key}
-                title={entry.label}
-                value={money(overview.data.totals[moneyOf(entry)] ?? '0')}
-                strong
-              />
+              <Card key={entry.key} title={entry.label} value={money(scopeMoney(entry))} strong />
             ))}
+            {/* Ровно три карточки счётчиков в любом режиме: вместе с деньгами (одна у клиента и партнёра,
+                три у сотрудников) их чётное число — без одинокой карточки во втором ряду. */}
+            {scope !== 'messages' && (
+              <Card
+                title="Вызовов"
+                value={String(overview.data.totals.calls)}
+                note={`состоялось ${percent(asr(overview.data.totals))}`}
+              />
+            )}
+            {scope === 'calls' && (
+              <Card title="Состоялось" value={String(overview.data.totals.answered)} />
+            )}
+            {scope !== 'calls' && (
+              <Card
+                title="Сообщений"
+                value={String(overview.data.totals.messages)}
+                note={`доставлено ${percent(deliveredShare(overview.data.totals))}`}
+              />
+            )}
+            {scope === 'messages' && (
+              <Card title="Доставлено" value={String(overview.data.totals.messages_delivered)} />
+            )}
+            {scope === 'messages' ? (
+              <Card
+                title="Прочитано"
+                value={String(overview.data.totals.messages_read)}
+                note={`из доставленных ${percent(readShare(overview.data.totals))}`}
+              />
+            ) : (
+              <Card
+                title="Разговоров"
+                value={talk(overview.data.totals.talk_seconds)}
+                note={`средний ${talk(acd(overview.data.totals))}`}
+              />
+            )}
           </dl>
 
-          <section className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
-            <div className="flex flex-wrap items-center gap-2">
+          <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <h2 className="font-semibold">По дням</h2>
-              <div
-                className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-                role="group"
-                aria-label="Показатель"
-              >
-                {(
-                  [
-                    { key: 'count', label: countLabel },
-                    { key: 'money', label: firstMoney?.label ?? 'Деньги' },
-                  ] as const
-                ).map((entry) => (
-                  <button
-                    key={entry.key}
-                    type="button"
-                    aria-pressed={metric === entry.key}
-                    onClick={() => {
-                      setMetric(entry.key);
-                    }}
-                    className={`rounded px-2.5 py-1.5 ${metric === entry.key ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    {entry.label}
-                  </button>
-                ))}
+              <Segmented
+                label="Показатель"
+                options={[
+                  { key: 'money', label: firstMoney?.label ?? 'Деньги' },
+                  { key: 'count', label: 'Количество' },
+                ]}
+                value={metric}
+                onChange={setMetric}
+              />
+              <div className="ml-auto flex flex-col items-end">
+                <span className="num text-[17px] font-semibold leading-tight">{chartTotal()}</span>
+                {moneyEntry !== undefined && scope === 'all' && (
+                  <span className="num text-muted-foreground">
+                    звонки {money(overview.data.totals[moneyEntry.key] ?? '0')} · сообщения{' '}
+                    {money(overview.data.totals[moneyEntry.messageKey] ?? '0')}
+                  </span>
+                )}
+                {moneyEntry !== undefined &&
+                  config.botFeeLabel !== undefined &&
+                  scope !== 'calls' && (
+                    <span className="num text-muted-foreground">
+                      и {config.botFeeLabel} {money(overview.data.bot_fees ?? '0')}
+                    </span>
+                  )}
               </div>
             </div>
-            {(messages ? overview.data.totals.messages : overview.data.totals.calls) === 0 ? (
-              <p className="py-6 text-muted-foreground">
-                {messages ? 'За этот период сообщений не было.' : 'За этот период вызовов не было.'}
-              </p>
+            {nothing ? (
+              <p className="py-6 text-muted-foreground">За этот период ничего не было.</p>
             ) : (
-              <Chart
-                series={overview.data.series}
-                product={product}
-                moneyKey={
-                  metric === 'money' && firstMoney !== undefined ? moneyOf(firstMoney) : undefined
-                }
-                label={metric === 'count' ? countLabel : (firstMoney?.label ?? '')}
+              <DayChart
+                points={overview.data.series.map((row) => pointOf(row, moneyEntry))}
+                scope={scope}
+                label={`${moneyEntry?.label ?? 'Количество'} по дням`}
               />
             )}
           </section>
-        </>
+        </div>
       )}
 
       <section className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="font-semibold">Разрез</h2>
-          <div
-            className="flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-            role="group"
-            aria-label="Разрез"
-          >
-            {dimensions.map((dimension) => (
-              <button
-                key={dimension.by}
-                type="button"
-                aria-pressed={by === dimension.by}
-                onClick={() => {
-                  setBy(dimension.by);
-                }}
-                className={`rounded px-2.5 py-1.5 ${by === dimension.by ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
-              >
-                {dimension.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="Разрез"
+            options={dimensions.map((entry) => ({ key: entry.by, label: entry.label }))}
+            value={dimension?.by ?? null}
+            onChange={setBy}
+          />
           <div className="ml-auto">
             <ExportButton
               name={`сводка-${dimensionLabel.toLowerCase()}`}
@@ -476,51 +472,5 @@ function Card({
       </dd>
       {note !== undefined && <dd className="text-muted-foreground">{note}</dd>}
     </div>
-  );
-}
-
-function Chart({
-  series,
-  product,
-  moneyKey,
-  label,
-}: {
-  series: readonly (ReportRow & { readonly day: string })[];
-  product: ReportProduct;
-  /** Деньги по этому ключу; нет — число вызовов или сообщений. */
-  moneyKey: MoneyKey | undefined;
-  label: string;
-}) {
-  const count = (row: ReportRow): number => (product === 'messages' ? row.messages : row.calls);
-  const valueOf = (row: ReportRow): number =>
-    moneyKey === undefined ? count(row) : asNumber(row[moneyKey]);
-  const shown = (row: ReportRow): string =>
-    moneyKey === undefined
-      ? `${String(count(row))} ${plural(
-          count(row),
-          product === 'messages'
-            ? ['сообщение', 'сообщения', 'сообщений']
-            : ['вызов', 'вызова', 'вызовов'],
-        )}`
-      : money(row[moneyKey] ?? '0');
-  let best: (typeof series)[number] | undefined;
-  for (const row of series) {
-    if (best === undefined || valueOf(row) > valueOf(best)) best = row;
-  }
-
-  return (
-    <BarChart
-      bars={series.map((row) => ({
-        label: shortDay(row.day),
-        value: valueOf(row),
-        title: `${shortDay(row.day)}: ${shown(row)}`,
-      }))}
-      peak={
-        best === undefined || valueOf(best) === 0
-          ? `${label}: за период ничего нет`
-          : `${label}, наибольшее — ${shown(best)}`
-      }
-      summary={`${label} по дням`}
-    />
   );
 }

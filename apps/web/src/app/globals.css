@@ -80,6 +80,10 @@
   --warn-soft: #f7edd3;
   --crit: #ad3b34;
   --crit-soft: #f8dedc;
+  /* Ряды графиков: звонки и сообщения. Пара проверена на различимость при нарушениях цветового
+     зрения (навык dataviz, validate_palette) — ADR-0059, ревизия 2026-11-17. */
+  --chart-calls: #b5642e;
+  --chart-messages: #2f6db5;
 
   color-scheme: light;
 }
@@ -117,6 +121,8 @@
     --warn-soft: #2a2212;
     --crit: #dc6d64;
     --crit-soft: #2d1714;
+    --chart-calls: #c97a45;
+    --chart-messages: #4d8bd0;
 
     color-scheme: dark;
   }
@@ -154,6 +160,8 @@
   --warn-soft: #2a2212;
   --crit: #dc6d64;
   --crit-soft: #2d1714;
+  --chart-calls: #c97a45;
+  --chart-messages: #4d8bd0;
 
   color-scheme: dark;
 }
@@ -195,6 +203,8 @@
   --color-warn-soft: var(--warn-soft);
   --color-crit: var(--crit);
   --color-crit-soft: var(--crit-soft);
+  --color-chart-calls: var(--chart-calls);
+  --color-chart-messages: var(--chart-messages);
 
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { request } from './api';
 import { useLiveInterval } from './live';
 
@@ -68,24 +68,41 @@ export const REPORT_PERIODS = [
 /** Минуты к востоку от UTC: сутки в сводке считаются по часам человека, а не сервера. */
 const offsetMinutes = (): number => -new Date().getTimezoneOffset();
 
-export function useOverview(base: string, days: number): UseQueryResult<Overview> {
+/**
+ * Период сводки: быстрый — последние N суток — или свой, сутки `from`…`to` включительно
+ * по часам человека (ADR-0059, ревизия 2026-11-17).
+ */
+export type ReportPeriod =
+  { readonly days: number } | { readonly from: string; readonly to: string };
+
+/** Часть адреса API с периодом и часовым поясом. */
+const periodQuery = (period: ReportPeriod): string =>
+  `${'days' in period ? `days=${String(period.days)}` : `from=${period.from}&to=${period.to}`}&offset=${String(offsetMinutes())}`;
+
+/** Ключ кэша: два одинаковых периода — один запрос. */
+const periodKey = (period: ReportPeriod): string =>
+  'days' in period ? String(period.days) : `${period.from}..${period.to}`;
+
+export function useOverview(base: string, period: ReportPeriod): UseQueryResult<Overview> {
   const live = useLiveInterval();
   return useQuery({
-    queryKey: ['report', base, 'overview', days],
-    queryFn: () =>
-      request<Overview>(`${base}/overview?days=${String(days)}&offset=${String(offsetMinutes())}`),
+    queryKey: ['report', base, 'overview', periodKey(period)],
+    queryFn: () => request<Overview>(`${base}/overview?${periodQuery(period)}`),
     refetchInterval: live,
+    // Пока грузится новый период, на экране остаётся прежний: без мигания и прыжка раскладки.
+    placeholderData: keepPreviousData,
   });
 }
 
-export function useBreakdown(base: string, days: number, by: string): UseQueryResult<Breakdown> {
+export function useBreakdown(
+  base: string,
+  period: ReportPeriod,
+  by: string,
+): UseQueryResult<Breakdown> {
   const live = useLiveInterval();
   return useQuery({
-    queryKey: ['report', base, 'breakdown', days, by],
-    queryFn: () =>
-      request<Breakdown>(
-        `${base}/breakdown?days=${String(days)}&offset=${String(offsetMinutes())}&by=${by}`,
-      ),
+    queryKey: ['report', base, 'breakdown', periodKey(period), by],
+    queryFn: () => request<Breakdown>(`${base}/breakdown?${periodQuery(period)}&by=${by}`),
     refetchInterval: live,
   });
 }

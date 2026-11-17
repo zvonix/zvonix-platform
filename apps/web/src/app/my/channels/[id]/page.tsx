@@ -380,8 +380,8 @@ const SUMMARY_PERIODS = [
 
 /** Сводка линии — из того же разреза отчётов, что и «Сводка» кабинета (ADR-0101, п. 9). */
 function SummaryTab({ channel }: { channel: Channel }) {
-  const today = useBreakdown('/client/reports', 1, 'channel');
-  const week = useBreakdown('/client/reports', 7, 'channel');
+  const today = useBreakdown('/client/reports', { days: 1 }, 'channel');
+  const week = useBreakdown('/client/reports', { days: 7 }, 'channel');
   const results = [today, week];
   const failed = results.find((result) => result.error !== null)?.error;
 

@@ -355,6 +355,36 @@ describe('сводки (ADR-0059)', () => {
     });
   }, 120_000);
 
+  it('произвольный период: сутки from…to включительно, те же деньги, что у days', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const weekAgo = new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10);
+    const ranged = await get(`/reports/overview?from=${weekAgo}&to=${today}&offset=0`);
+    expect(ranged.statusCode).toBe(200);
+    const body = ranged.json<Overview & { days: number }>();
+    expect(body.days).toBe(7);
+    expect(body.series.map((row) => row.day)).toEqual(
+      Array.from({ length: 7 }, (_, i) =>
+        new Date(Date.parse(`${weekAgo}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10),
+      ),
+    );
+    const byDays = (await get('/reports/overview?days=7&offset=0')).json<Overview>();
+    expect(body.totals).toEqual(byDays.totals);
+
+    // Разрез принимает тот же период.
+    const breakdown = await get(`/reports/breakdown?from=${today}&to=${today}&offset=0&by=client`);
+    expect(breakdown.statusCode).toBe(200);
+
+    // Неполный, перевёрнутый, слишком длинный и несуществующий периоды — отказ проверки.
+    for (const query of [
+      `from=${today}`,
+      `from=${today}&to=${weekAgo}`,
+      'from=2025-01-01&to=2026-06-01',
+      'from=2026-02-30&to=2026-03-01',
+    ]) {
+      expect((await get(`/reports/overview?${query}`)).statusCode).toBe(400);
+    }
+  }, 120_000);
+
   it('клиенту — только своё: потрачено, без партнёра, закупки и маржи', async () => {
     const overview = (
       await get('/client/reports/overview?days=7', as(rich.token))

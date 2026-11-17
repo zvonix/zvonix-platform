@@ -130,14 +130,14 @@ export class ReportsController {
   @Roles('admin', 'support')
   @Get('reports/overview')
   async overview(@Query(zodQuery(overviewQuerySchema)) query: OverviewQuery) {
-    const overview = await this.reports.overview({ kind: 'all' }, query.days, query.offset);
+    const overview = await this.reports.overview({ kind: 'all' }, query, query.offset);
     return overviewOf(overview, staffView, 1n);
   }
 
   @Roles('admin', 'support')
   @Get('reports/breakdown')
   async breakdown(@Query(zodQuery(breakdownQuerySchema)) query: BreakdownQuery) {
-    const rows = await this.reports.breakdown({ kind: 'all' }, query.days, query.offset, query.by);
+    const rows = await this.reports.breakdown({ kind: 'all' }, query, query.offset, query.by);
     return breakdownOf(rows, staffView);
   }
 
@@ -150,7 +150,7 @@ export class ReportsController {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     const overview = await this.reports.overview(
       { kind: 'client', clientId: client.id },
-      query.days,
+      query,
       query.offset,
     );
     return overviewOf(overview, clientView, -1n);
@@ -166,7 +166,7 @@ export class ReportsController {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
     const rows = await this.reports.breakdown(
       { kind: 'client', clientId: client.id },
-      query.days,
+      query,
       query.offset,
       query.by,
     );
@@ -214,7 +214,7 @@ export class ReportsController {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
     const overview = await this.reports.overview(
       { kind: 'partner', partnerId: partner.id },
-      query.days,
+      query,
       query.offset,
     );
     return overviewOf(overview, partnerView, 0n);
@@ -230,7 +230,7 @@ export class ReportsController {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
     const rows = await this.reports.breakdown(
       { kind: 'partner', partnerId: partner.id },
-      query.days,
+      query,
       query.offset,
       query.by,
     );

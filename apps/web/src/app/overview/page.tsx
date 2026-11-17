@@ -58,7 +58,7 @@ export default function OverviewPage() {
 }
 
 function Overview() {
-  const overview = useOverview('/reports', FETCH_DAYS);
+  const overview = useOverview('/reports', { days: FETCH_DAYS });
   const live = useLiveInterval();
 
   const applications = useQuery({
