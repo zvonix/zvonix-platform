@@ -8,6 +8,9 @@ import { FormDialog } from '@/components/form-dialog';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
 
+/** Предел ожидания проверки — с запасом над сроком площадки (60 с). */
+const CHECK_TIMEOUT_MS = 70_000;
+
 interface TrunkCheckResult {
   readonly summary: string;
   readonly details: string;
@@ -44,7 +47,9 @@ export function TrunkCheckButton({
 
 function TrunkCheck({ path }: { path: string }) {
   const check = useMutation({
-    mutationFn: () => request<TrunkCheckResult>(path, { method: 'POST', body: {} }),
+    // Узел слушает 35 с, площадка ждёт его до 60 с: обычных 20 с запросу не хватит.
+    mutationFn: () =>
+      request<TrunkCheckResult>(path, { method: 'POST', body: {}, timeoutMs: CHECK_TIMEOUT_MS }),
   });
   const { mutate } = check;
   // Окно монтирует содержимое только открытым: открыли — проверяем.
