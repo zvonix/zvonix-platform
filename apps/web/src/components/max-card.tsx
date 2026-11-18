@@ -51,7 +51,7 @@ export function ClientMaxCard({ clientId }: { clientId: string }) {
     queryFn: ({ signal }) =>
       request<{ clients: BotClient[] }>('/bots/platform/clients', { signal }),
   });
-  const sent = useBreakdown('/reports', DAYS, 'message_client');
+  const sent = useBreakdown('/reports', { days: DAYS }, 'message_client');
 
   const connection = smpp.data?.accounts.find((row) => row.client_id === clientId);
   const bot = bots.data?.clients.find((row) => row.client_id === clientId);
@@ -119,7 +119,7 @@ export function PartnerMaxCard({ partnerId }: { partnerId: string }) {
     queryFn: ({ signal }) =>
       request<{ accounts: MessengerAccount[] }>('/messenger/accounts', { signal }),
   });
-  const sent = useBreakdown('/reports', DAYS, 'message_partner');
+  const sent = useBreakdown('/reports', { days: DAYS }, 'message_partner');
 
   const own = accounts.data?.accounts.filter((row) => row.partner_id === partnerId) ?? [];
   const totals = sent.data?.rows.find((row) => row.key === partnerId);

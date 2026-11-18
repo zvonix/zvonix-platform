@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { Hint } from '@/components/hint';
+import { PeriodPicker } from '@/components/period-picker';
 import { ClippedText, StatusDot } from '@/components/status-dot';
 import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
@@ -18,6 +19,7 @@ import {
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { MESSAGE_FAILURE_NAME } from '@/lib/labels';
+import { periodQuery, type ReportPeriod } from '@/lib/reports';
 
 interface Counts {
   readonly total: number;
@@ -102,8 +104,6 @@ function eventName(event: JournalEvent): string {
   return 'вышел из MAX';
 }
 
-const PERIODS = [7, 14, 30] as const;
-
 /** Меньше этого ушедших — доля читавших ничего не говорит: показываем «—». */
 const MIN_SETTLED = 20;
 /** Доля непрочитанных и отказов «нет MAX», с которой число подсвечивается. */
@@ -122,30 +122,18 @@ export default function MessagingReportPage() {
 }
 
 function ReportView() {
-  const [days, setDays] = useState<number>(7);
+  const [period, setPeriod] = useState<ReportPeriod>({ days: 7 });
   const report = useQuery({
-    queryKey: ['messenger', 'report', days],
-    queryFn: ({ signal }) => request<Report>(`/messages/report?days=${String(days)}`, { signal }),
+    queryKey: ['messenger', 'report', periodQuery(period)],
+    queryFn: ({ signal }) => request<Report>(`/messages/report?${periodQuery(period)}`, { signal }),
     refetchInterval: 60_000,
   });
   const error = report.error instanceof ApiError ? report.error : undefined;
 
   return (
     <div className="flex max-w-[1200px] flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Период">
-        {PERIODS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={days === value}
-            onClick={() => {
-              setDays(value);
-            }}
-            className={`rounded-md border px-3 py-1 ${days === value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card'}`}
-          >
-            {value} дн.
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <PeriodPicker value={period} onChange={setPeriod} />
         <Hint label="Как читать отчёт">
           <p>
             «Не прочитано» считается только у сообщений через аккаунты партнёров, ушедших больше

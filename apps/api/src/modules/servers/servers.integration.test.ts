@@ -198,6 +198,29 @@ describe('страница «Серверы»', () => {
         })
       ).statusCode,
     ).toBe(400);
+
+    // Свой период — сутки по датам, как у отчётов (ADR-0059, ревизия 2026-11-17); одна дата — отказ.
+    const today = new Date().toISOString().slice(0, 10);
+    const ranged = await api().inject({
+      method: 'GET',
+      url: `/servers?from=${today}&to=${today}&offset=0`,
+      headers: bearer(adminToken),
+    });
+    expect(ranged.statusCode).toBe(200);
+    expect(
+      ranged
+        .json<{ servers: { scope: string }[] }>()
+        .servers.some((row) => row.scope === 'platform'),
+    ).toBe(true);
+    expect(
+      (
+        await api().inject({
+          method: 'GET',
+          url: `/servers?from=${today}`,
+          headers: bearer(adminToken),
+        })
+      ).statusCode,
+    ).toBe(400);
   });
 
   it('отметка в меню: мало места — проблема с названием, достаточно — нет; роли и вход', async () => {

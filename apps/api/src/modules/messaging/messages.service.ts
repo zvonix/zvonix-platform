@@ -51,6 +51,7 @@ import {
   type MessageFilter,
   type MessageRow,
 } from './messages.repository.js';
+import { periodDays, periodWindow, type PeriodQuery } from '../../http/period.js';
 import {
   MESSAGE_PROVIDER,
   RecipientRejectedError,
@@ -506,17 +507,16 @@ export class MessagesService {
     }
   }
 
-  /** Обзор для сотрудников: каждые из последних `days` суток (с нулями), плюс итог. */
-  async overview(days: number, offsetMinutes: number) {
-    const dayOf = (back: number): string =>
-      new Date(Date.now() + offsetMinutes * 60_000 - back * 86_400_000).toISOString().slice(0, 10);
-    const labels = Array.from({ length: days }, (_unused, index) => dayOf(days - 1 - index));
-    const first = labels[0] ?? dayOf(0);
-    const since = new Date(Date.parse(`${first}T00:00:00Z`) - offsetMinutes * 60_000);
+  /** Обзор для сотрудников: сутки периода по порядку (с нулями) — последние `days` или свои `from`…`to`. */
+  async overview(query: PeriodQuery) {
+    const window = periodWindow(query);
     const rows = new Map(
-      (await this.repository.dailyCounts(since, offsetMinutes)).map((row) => [row.day, row]),
+      (await this.repository.dailyCounts(window.from, window.to, query.offset)).map((row) => [
+        row.day,
+        row,
+      ]),
     );
-    const series = labels.map((day) => ({
+    const series = periodDays(window, query.offset).map((day) => ({
       day,
       messages: rows.get(day)?.messages ?? 0,
       delivered: rows.get(day)?.delivered ?? 0,
@@ -527,23 +527,37 @@ export class MessagesService {
     return series;
   }
 
-  /** Отчёт для сотрудников за `days` суток: по клиентам, по аккаунтам и журнал аккаунтов (ADR-0088). */
-  async report(days: number, now: Date = new Date()) {
-    const since = new Date(now.getTime() - days * 86_400_000);
+  /**
+   * Окно отчёта: свои сутки `from`…`to` по часам человека или, без дат, прежние скользящие `days` × 24 часа до
+   * сейчас — старый кабинет получает то же, что раньше.
+   */
+  private reportWindow(query: PeriodQuery, now: Date): { since: Date; until: Date } {
+    if (query.from !== undefined && query.to !== undefined) {
+      const window = periodWindow(query, now);
+      return { since: window.from, until: window.to };
+    }
+    return { since: new Date(now.getTime() - query.days * 86_400_000), until: now };
+  }
+
+  /** Отчёт для сотрудников за период: по клиентам, по аккаунтам и журнал аккаунтов (ADR-0088). */
+  async report(query: PeriodQuery, now: Date = new Date()) {
+    const { since, until } = this.reportWindow(query, now);
+    // «Не прочитано» — у ушедших больше суток назад: свежие ещё не успели прочитать.
+    const settledBefore = new Date(Math.min(until.getTime(), now.getTime()) - 86_400_000);
     const [counts, journal, routes] = await Promise.all([
-      this.repository.report(since, new Date(now.getTime() - 86_400_000)),
-      this.repository.journal(since, 30),
-      this.repository.routeStats(since),
+      this.repository.report(since, until, settledBefore),
+      this.repository.journal(since, until, 30),
+      this.repository.routeStats(since, until),
     ]);
     return { ...counts, journal, routes };
   }
 
-  /** Бот или аккаунты у одного клиента за `days` суток (ADR-0094). */
-  async routeStatsOf(clientId: Id<'client'>, days: number, now: Date = new Date()) {
-    const since = new Date(now.getTime() - days * 86_400_000);
+  /** Бот или аккаунты у одного клиента за период (ADR-0094). */
+  async routeStatsOf(clientId: Id<'client'>, query: PeriodQuery, now: Date = new Date()) {
+    const { since, until } = this.reportWindow(query, now);
     const [[row], refused] = await Promise.all([
-      this.repository.routeStats(since, clientId),
-      this.refusals.countSince(clientId, since),
+      this.repository.routeStats(since, until, clientId),
+      this.refusals.countSince(clientId, since, until),
     ]);
     return {
       recipients: row?.recipients ?? 0,

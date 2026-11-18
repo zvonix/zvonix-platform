@@ -11,6 +11,7 @@ import { CurrentMachine } from '../../http/request-context.js';
 import { zodBody, zodQuery } from '../../http/zod.pipe.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
 import { nodeMetricsSchema, serversQuerySchema } from './schemas.js';
+import { periodWindow } from '../../http/period.js';
 import { ServersService, type ServerView } from './servers.service.js';
 
 interface ServerJson {
@@ -78,13 +79,19 @@ export class ServersController {
     return { count: problems.length, problems };
   }
 
-  /** Площадка и узлы: последний замер и история за окно (`range`: hour, day, week). */
+  /** Площадка и узлы: последний замер и история за окно (`range`: hour, day, week) или за свои сутки `from`…`to`. */
   @Roles('admin', 'support')
   @Get('servers')
   async overview(
     @Query(zodQuery(serversQuerySchema)) query: z.infer<typeof serversQuerySchema>,
   ): Promise<{ servers: ServerJson[] }> {
-    return { servers: (await this.servers.overview(query.range)).map(toJson) };
+    const custom =
+      query.from !== undefined && query.to !== undefined
+        ? periodWindow({ ...query, days: 1 })
+        : undefined;
+    return {
+      servers: (await this.servers.overview(query.range, new Date(), custom)).map(toJson),
+    };
   }
 
   /** Замер от узла: раз в минуту, по ключу узла. */

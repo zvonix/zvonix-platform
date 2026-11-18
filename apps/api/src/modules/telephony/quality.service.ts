@@ -141,10 +141,10 @@ export class QualityService {
    * шлюзов снял порог отказов и снятий на 1000 попыток. Снятия — по журналу действий: состояние объекта хранит только
    * последнее, а журнал — каждое снятие.
    */
-  async blocks(since: Date): Promise<BlocksReport> {
+  async blocks(since: Date, until: Date): Promise<BlocksReport> {
     const [attempts, events] = await Promise.all([
-      this.repository.blockAttempts(since),
-      this.audit.occurrences(SUSPENSION_ACTIONS, since),
+      this.repository.blockAttempts(since, until),
+      this.audit.occurrences(SUSPENSION_ACTIONS, since, until),
     ]);
     const simIds = events
       .filter((event) => event.action === 'sim.suspended_by_failures')

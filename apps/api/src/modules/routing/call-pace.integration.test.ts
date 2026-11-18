@@ -629,6 +629,21 @@ describe('«плохой» номер, честная причина и отчё
     });
     expect(body.operators.find((row) => row.id === operator)).toMatchObject({ sims_suspended: 1 });
     expect((await get('/quality/blocks?days=0')).statusCode).toBe(400);
+
+    // Свой период: сегодня — те же попытки, вчера — ни одной (ADR-0059, ревизия 2026-11-17).
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const ranged = (await get(`/quality/blocks?from=${today}&to=${today}&offset=0`)).json<{
+      days: number;
+      partners: { id: string; attempts: number }[];
+    }>();
+    expect(ranged.days).toBe(1);
+    expect(ranged.partners.find((row) => row.id === partner.id)?.attempts).toBe(120);
+    const before = (await get(`/quality/blocks?from=${yesterday}&to=${yesterday}&offset=0`)).json<{
+      partners: { id: string }[];
+    }>();
+    expect(before.partners.find((row) => row.id === partner.id)).toBeUndefined();
+    expect((await get(`/quality/blocks?from=${today}&to=${yesterday}`)).statusCode).toBe(400);
   });
 });
 

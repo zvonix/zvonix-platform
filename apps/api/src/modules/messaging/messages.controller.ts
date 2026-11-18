@@ -242,7 +242,7 @@ export class ClientMessagesController {
     @Query(zodQuery(messagesReportQuerySchema)) query: z.infer<typeof messagesReportQuerySchema>,
   ) {
     const client = await this.billing.requireClientOwnedBy(actor.userId);
-    return { days: query.days, ...(await this.messages.routeStatsOf(client.id, query.days)) };
+    return { days: query.days, ...(await this.messages.routeStatsOf(client.id, query)) };
   }
 
   /** Партнёры с ценой сообщения для клиента — из чего строится список приоритетов (ADR-0081). */
@@ -347,9 +347,9 @@ export class StaffMessagesController {
     @Query(zodQuery(messagesOverviewQuerySchema))
     query: z.infer<typeof messagesOverviewQuerySchema>,
   ) {
-    const series = await this.messages.overview(query.days, query.offset);
+    const series = await this.messages.overview(query);
     return {
-      days: query.days,
+      days: series.length,
       series: series.map((row) => ({
         day: row.day,
         messages: row.messages,
@@ -367,7 +367,7 @@ export class StaffMessagesController {
   async report(
     @Query(zodQuery(messagesReportQuerySchema)) query: z.infer<typeof messagesReportQuerySchema>,
   ) {
-    const report = await this.messages.report(query.days);
+    const report = await this.messages.report(query);
     return {
       days: query.days,
       clients: report.clients.map(({ clientId, ...rest }) => ({ client_id: clientId, ...rest })),

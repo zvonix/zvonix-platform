@@ -1,3 +1,9 @@
+'use client';
+
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { useReducedMotion } from '@/components/day-chart';
+import { ChartContainer, ChartTooltip } from '@/components/ui/chart';
+
 export interface ChartPoint {
   /** Момент, мс от начала эпохи. */
   readonly t: number;
@@ -5,34 +11,17 @@ export interface ChartPoint {
   readonly v: number;
 }
 
-const PLOT_HEIGHT = 88;
-const TICKS = [100, 50, 0] as const;
-
-/** Ближайшая к моменту точка, если она не дальше полутора шагов; иначе `undefined` (там разрыв). */
-function pointNear(
-  points: readonly ChartPoint[],
-  t: number,
-  stepMs: number,
-): ChartPoint | undefined {
-  let best: ChartPoint | undefined;
-  for (const point of points) {
-    if (best === undefined || Math.abs(point.t - t) < Math.abs(best.t - t)) best = point;
-  }
-  return best !== undefined && Math.abs(best.t - t) <= stepMs * 1.5 ? best : undefined;
-}
+const PLOT_HEIGHT = 120;
+const TICKS = [0, 50, 100];
 
 /**
- * График в процентах за период: шкала 0–100 %, время по краям, при наведении — вертикальная линия
- * и значение на этот момент.
+ * График в процентах за период на Recharts — тот же блок Chart, что у столбцов по суткам
+ * (ADR-0059, ревизия 2026-11-17; раньше — свой SVG по [ADR-0065](../../../../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)).
+ * Шкала 0–100 %, время по оси, при наведении — линия и значение на этот момент; графики одного
+ * сервера наводятся вместе (`syncId`).
  *
- * Свой SVG без библиотеки графиков: нужна одна ломаная на несколько сотен точек
- * ([ADR-0065](../../../../docs/adr/0065-sostoyanie-serverov-i-istoriya.md)). Подписи — обычным
- * текстом, а не внутри SVG: линия растягивается по ширине, и текст в ней сплющился бы.
- * Разрыв в данных (источник молчал дольше трёх шагов) не соединяется линией — иначе провал
+ * Разрыв в данных (источник молчал дольше трёх шагов) линией не соединяется — иначе провал
  * выглядел бы плавным спуском, а молчание узла — спокойной работой.
- *
- * Наведение общее у всех графиков сервера: момент хранит родитель (`hoverAt`), и линия встаёт
- * на одно время на всех.
  */
 export function LineChart({
   title,
@@ -42,8 +31,7 @@ export function LineChart({
   stepMs,
   label,
   formatTime,
-  hoverAt,
-  onHover,
+  syncId,
 }: {
   title: string;
   points: readonly ChartPoint[];
@@ -55,52 +43,29 @@ export function LineChart({
   /** Что показывает график — для чтения с экрана. */
   label: string;
   formatTime: (t: number) => string;
-  hoverAt: number | null;
-  onHover: (t: number | null) => void;
+  /** Общий у графиков одного сервера: наведение встаёт на одно время на всех. */
+  syncId: string;
 }) {
-  const span = Math.max(to - from, 1);
-  const xPercent = (t: number) => Math.min(100, Math.max(0, ((t - from) / span) * 100));
-  const yPercent = (v: number) => 100 - Math.min(100, Math.max(0, v));
+  const reduced = useReducedMotion();
 
-  // Сегменты между разрывами: у каждого своя линия и своя площадь.
-  const segments: ChartPoint[][] = [];
+  // Разрыв — точка без значения между сегментами: Recharts не соединяет через неё.
+  const data: { t: number; v: number | null }[] = [];
   for (const point of points) {
-    const last = segments.at(-1);
-    const previous = last?.at(-1);
-    if (last !== undefined && previous !== undefined && point.t - previous.t <= stepMs * 3) {
-      last.push(point);
-    } else {
-      segments.push([point]);
+    const previous = data.at(-1);
+    if (previous !== undefined && point.t - previous.t > stepMs * 3) {
+      data.push({ t: previous.t + stepMs, v: null });
     }
+    data.push({ t: point.t, v: point.v });
   }
-
-  const line = (segment: readonly ChartPoint[]) =>
-    segment
-      .map(
-        (point, i) =>
-          `${i === 0 ? 'M' : 'L'}${xPercent(point.t).toFixed(2)},${yPercent(point.v).toFixed(2)}`,
-      )
-      .join(' ');
-  const area = (segment: readonly ChartPoint[]) => {
-    const first = segment[0];
-    const last = segment.at(-1);
-    if (first === undefined || last === undefined) return '';
-    return `${line(segment)} L${xPercent(last.t).toFixed(2)},100 L${xPercent(first.t).toFixed(2)},100 Z`;
-  };
-
-  const shown = hoverAt === null ? points.at(-1) : pointNear(points, hoverAt, stepMs);
-  const hovered = hoverAt === null ? undefined : shown;
+  const latest = points.at(-1);
+  const values = points.map((point) => point.v);
 
   return (
     <figure className="flex flex-col gap-1">
       <figcaption className="flex flex-wrap items-baseline justify-between gap-x-3">
         <span className="font-medium">{title}</span>
-        <span className="num text-muted-foreground" aria-live="off">
-          {shown === undefined
-            ? hoverAt === null
-              ? 'нет данных'
-              : `${formatTime(hoverAt)} · нет замера`
-            : `${String(Math.round(shown.v))} %${hovered === undefined ? '' : ` · ${formatTime(hovered.t)}`}`}
+        <span className="num text-muted-foreground">
+          {latest === undefined ? 'нет данных' : `сейчас ${String(Math.round(latest.v))} %`}
         </span>
       </figcaption>
 
@@ -114,108 +79,65 @@ export function LineChart({
           нет данных
         </div>
       ) : (
-        <div className="flex gap-1.5">
-          <div
-            className="num flex w-11 shrink-0 flex-col justify-between whitespace-nowrap text-right text-muted-foreground"
-            style={{ height: PLOT_HEIGHT }}
-            aria-hidden
-          >
-            {TICKS.map((tick) => (
-              <span key={tick} className="leading-none">
-                {String(tick)} %
-              </span>
-            ))}
-          </div>
-          <div
-            className="relative min-w-0 flex-1 touch-pan-y"
-            style={{ height: PLOT_HEIGHT }}
-            onPointerMove={(event) => {
-              const box = event.currentTarget.getBoundingClientRect();
-              if (box.width <= 0) return;
-              const fraction = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
-              onHover(from + fraction * span);
-            }}
-            onPointerLeave={() => {
-              onHover(null);
-            }}
-          >
-            <svg
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-              className="absolute inset-0 h-full w-full text-primary"
-              role="img"
-              aria-label={`${label}: от ${String(Math.round(Math.min(...points.map((p) => p.v))))} до ${String(Math.round(Math.max(...points.map((p) => p.v))))} %`}
-            >
-              {TICKS.map((tick) => (
-                <line
-                  key={tick}
-                  x1="0"
-                  x2="100"
-                  y1={yPercent(tick)}
-                  y2={yPercent(tick)}
-                  className="stroke-border"
-                  strokeWidth="1"
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-              {segments.map((segment) =>
-                segment.length > 1 ? (
-                  <g key={segment[0]?.t}>
-                    <path d={area(segment)} fill="currentColor" opacity="0.12" />
-                    <path
-                      d={line(segment)}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinejoin="round"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  </g>
-                ) : null,
-              )}
-              {hovered !== undefined && (
-                <line
-                  x1={xPercent(hovered.t)}
-                  x2={xPercent(hovered.t)}
-                  y1="0"
-                  y2="100"
-                  className="stroke-muted-foreground"
-                  strokeWidth="1"
-                  strokeDasharray="3 3"
-                  vectorEffect="non-scaling-stroke"
-                />
-              )}
-            </svg>
-            {/* Одиночные точки (замер между разрывами) и маркер наведения — кружками поверх: в растянутом SVG они стали бы овалами. */}
-            {segments.map((segment) =>
-              segment.length === 1 && segment[0] !== undefined ? (
-                <span
-                  key={segment[0].t}
-                  className="pointer-events-none absolute size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary"
-                  style={{
-                    left: `${String(xPercent(segment[0].t))}%`,
-                    top: `${String(yPercent(segment[0].v))}%`,
-                  }}
-                />
-              ) : null,
-            )}
-            {hovered !== undefined && (
-              <span
-                className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-card bg-primary"
-                style={{
-                  left: `${String(xPercent(hovered.t))}%`,
-                  top: `${String(yPercent(hovered.v))}%`,
-                }}
-              />
-            )}
-          </div>
-        </div>
+        <ChartContainer
+          className="aspect-auto w-full"
+          style={{ height: PLOT_HEIGHT }}
+          role="img"
+          aria-label={`${label}: от ${String(Math.round(Math.min(...values)))} до ${String(Math.round(Math.max(...values)))} %`}
+        >
+          <AreaChart data={data} syncId={syncId} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+            <CartesianGrid vertical={false} className="stroke-border-soft" />
+            <XAxis
+              dataKey="t"
+              type="number"
+              scale="time"
+              domain={[from, to]}
+              tickLine={false}
+              axisLine={false}
+              tickMargin={6}
+              minTickGap={40}
+              tickFormatter={formatTime}
+              className="num"
+            />
+            <YAxis
+              width={44}
+              domain={[0, 100]}
+              ticks={TICKS}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(value: number) => `${String(value)} %`}
+              className="num"
+            />
+            <ChartTooltip
+              isAnimationActive={false}
+              cursor={{ stroke: 'var(--muted-foreground)', strokeDasharray: '3 3' }}
+              content={({ active, payload }) => {
+                const point = payload[0]?.payload as { t: number; v: number | null } | undefined;
+                if (!active || point === undefined || point.v === null) return null;
+                return (
+                  <div className="rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md">
+                    <span className="num font-semibold">{String(Math.round(point.v))} %</span>
+                    <span className="num ml-2 text-muted-foreground">{formatTime(point.t)}</span>
+                  </div>
+                );
+              }}
+            />
+            <Area
+              dataKey="v"
+              type="linear"
+              stroke="var(--primary)"
+              strokeWidth={1.5}
+              fill="var(--primary)"
+              fillOpacity={0.12}
+              connectNulls={false}
+              dot={false}
+              activeDot={{ r: 4, stroke: 'var(--card)', strokeWidth: 2 }}
+              isAnimationActive={!reduced}
+              animationDuration={450}
+            />
+          </AreaChart>
+        </ChartContainer>
       )}
-
-      <div className="num flex justify-between pl-[50px] text-muted-foreground" aria-hidden>
-        <span>{formatTime(from)}</span>
-        <span>{formatTime(to)}</span>
-      </div>
     </figure>
   );
 }

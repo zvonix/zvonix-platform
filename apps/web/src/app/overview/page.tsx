@@ -1,25 +1,27 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import Link from 'next/link';
 import { NODE_OFFLINE_AFTER_MS, type NodeStatus } from '@zvonix/shared';
-import { BarChart } from '@/components/bar-chart';
 import { ConsoleShell } from '@/components/console-shell';
+import type { ChartScope } from '@/components/day-chart';
+import { DayChartCard } from '@/components/day-chart-card';
+import { PeriodPicker } from '@/components/period-picker';
 import { request } from '@/lib/api';
-import { duration, plural } from '@/lib/format';
+import { duration } from '@/lib/format';
 import { useLiveInterval } from '@/lib/live';
 import { money } from '@/lib/money';
 import { gaugeTone, usedPercent } from '@/lib/gauge';
 import { NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
-import { useOverview, type ReportRow } from '@/lib/reports';
+import {
+  periodQuery,
+  previousPeriod,
+  useOverview,
+  type ReportPeriod,
+  type ReportRow,
+} from '@/lib/reports';
 
-/** Сколько суток сравниваем: последние со всеми предыдущими такой же длины. */
-const SPAN = 7;
-
-/** Сводка принимает только 1, 7, 30 и 90 суток: берём 30 и показываем из них последние `SPAN * 2`. */
-const FETCH_DAYS = 30;
-
-const shortDay = (day: string): string => `${day.slice(8, 10)}.${day.slice(5, 7)}`;
 const asNumber = (value: string | undefined): number => Number(value ?? '0');
 
 /** Списано с клиентов за сутки — за вызовы и за сообщения MAX. */
@@ -58,7 +60,11 @@ export default function OverviewPage() {
 }
 
 function Overview() {
-  const overview = useOverview('/reports', FETCH_DAYS);
+  // Период показателей и графика; сравнение — с периодом той же длины прямо перед ним.
+  const [period, setPeriod] = useState<ReportPeriod>({ days: 7 });
+  const [scope, setScope] = useState<ChartScope>('all');
+  const overview = useOverview('/reports', period);
+  const earlier = useOverview('/reports', previousPeriod(period));
   const live = useLiveInterval();
 
   const applications = useQuery({
@@ -85,11 +91,8 @@ function Overview() {
     refetchInterval: live,
   });
 
-  const series = (overview.data?.series ?? []).slice(-SPAN * 2);
-  const recent = series.slice(-SPAN);
-  const previous = series.slice(-SPAN * 2, -SPAN);
-  const now = sum(recent);
-  const before = sum(previous);
+  const now = sum(overview.data?.series ?? []);
+  const before = sum(earlier.data?.series ?? []);
   const share = now.calls === 0 ? undefined : (now.answered / now.calls) * 100;
   const shareBefore = before.calls === 0 ? undefined : (before.answered / before.calls) * 100;
 
@@ -138,8 +141,12 @@ function Overview() {
 
       <ServersBlock />
 
-      <section aria-label={`Показатели за ${String(SPAN)} суток`} className="flex flex-col gap-2">
-        <h2 className="font-semibold">Последние {String(SPAN)} суток</h2>
+      <section aria-label="Показатели за период" className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="font-semibold">Показатели</h2>
+          <PeriodPicker value={period} onChange={setPeriod} />
+          <span className="text-muted-foreground">изменение — к такому же периоду перед ним</span>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Kpi
             href="/reports"
@@ -177,34 +184,17 @@ function Overview() {
         </div>
       </section>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Вызовы по дням</h2>
-          <BarChart
-            bars={series.map((row) => ({
-              label: shortDay(row.day),
-              value: row.calls,
-              title: `${shortDay(row.day)}: ${String(row.calls)} ${plural(row.calls, ['вызов', 'вызова', 'вызовов'])}`,
-            }))}
-            peak={`За ${String(SPAN * 2)} суток: ${String(now.calls + before.calls)} ${plural(now.calls + before.calls, ['вызов', 'вызова', 'вызовов'])}`}
-            summary="Вызовы по дням"
-          />
-        </section>
-        <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Списано с клиентов по дням — звонки и MAX</h2>
-          <BarChart
-            bars={series.map((row) => ({
-              label: shortDay(row.day),
-              value: dayRevenue(row),
-              title: `${shortDay(row.day)}: ${rubles(dayRevenue(row))}`,
-            }))}
-            peak={`За ${String(SPAN * 2)} суток: ${rubles(now.revenue + before.revenue)}`}
-            summary="Списано с клиентов по дням, звонки и MAX"
-          />
-        </section>
-      </div>
+      {overview.data !== undefined && (
+        <DayChartCard
+          series={overview.data.series}
+          totals={overview.data.totals}
+          pair={{ key: 'revenue', messageKey: 'message_revenue', label: 'Списано с клиентов' }}
+          scope={scope}
+          onScope={setScope}
+        />
+      )}
 
-      <MessagesBlock />
+      <MessagesBlock period={period} />
 
       <p className="text-muted-foreground">
         Подробнее — в{' '}
@@ -256,7 +246,7 @@ function Kpi({
           ? 'нет данных для сравнения'
           : Math.abs(delta) < 0.05
             ? 'без изменений'
-            : `${sign}${delta.toFixed(1).replace('.', ',')} ${points ? 'п. п.' : '%'} к прошлым ${String(SPAN)} суткам`}
+            : `${sign}${delta.toFixed(1).replace('.', ',')} ${points ? 'п. п.' : '%'} к прошлому периоду`}
       </span>
     </Link>
   );
@@ -342,21 +332,20 @@ interface MessagesDay {
 }
 
 /**
- * Сообщения MAX: те же 7 суток к предыдущим 7 и график по дням. Блока нет, пока сообщений не было вовсе:
- * пустые плитки у выключенного продукта только шумят.
+ * Сообщения MAX за тот же период, что и показатели выше, к такому же периоду перед ним; по дням они — на общем графике.
+ * Блока нет, пока сообщений не было вовсе: пустые плитки у выключенного продукта только шумят.
  */
-function MessagesBlock() {
+function MessagesBlock({ period }: { period: ReportPeriod }) {
   const live = useLiveInterval();
-  const overview = useQuery({
-    queryKey: ['overview', 'messages'],
-    queryFn: () =>
-      request<{ series: MessagesDay[] }>(
-        `/messages/overview?days=${String(SPAN * 2)}&offset=${String(-new Date().getTimezoneOffset())}`,
-      ),
+  const load = (which: ReportPeriod) => ({
+    queryKey: ['overview', 'messages', periodQuery(which)],
+    queryFn: () => request<{ series: MessagesDay[] }>(`/messages/overview?${periodQuery(which)}`),
     refetchInterval: live,
   });
+  const current = useQuery(load(period));
+  const earlier = useQuery(load(previousPeriod(period)));
 
-  const series = overview.data?.series ?? [];
+  const series = current.data?.series ?? [];
   if (series.every((row) => row.messages === 0)) return null;
 
   const total = (rows: readonly MessagesDay[]) =>
@@ -370,15 +359,15 @@ function MessagesBlock() {
       }),
       { messages: 0, delivered: 0, failed: 0, revenue: 0, margin: 0 },
     );
-  const now = total(series.slice(-SPAN));
-  const before = total(series.slice(-SPAN * 2, -SPAN));
+  const now = total(series);
+  const before = total(earlier.data?.series ?? []);
   const delivery = now.messages === 0 ? undefined : (now.delivered / now.messages) * 100;
   const deliveryBefore =
     before.messages === 0 ? undefined : (before.delivered / before.messages) * 100;
 
   return (
     <section aria-label="Сообщения MAX" className="flex flex-col gap-2">
-      <h2 className="font-semibold">Сообщения MAX за {String(SPAN)} суток</h2>
+      <h2 className="font-semibold">Сообщения MAX за период</h2>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Kpi
           href="/messaging"
@@ -417,15 +406,6 @@ function MessagesBlock() {
           delta={change(now.margin, before.margin)}
         />
       </div>
-      <BarChart
-        bars={series.map((row) => ({
-          label: shortDay(row.day),
-          value: row.messages,
-          title: `${shortDay(row.day)}: ${String(row.messages)} ${plural(row.messages, ['сообщение', 'сообщения', 'сообщений'])}`,
-        }))}
-        peak={`За ${String(SPAN * 2)} суток: ${String(now.messages + before.messages)} ${plural(now.messages + before.messages, ['сообщение', 'сообщения', 'сообщений'])}`}
-        summary="Сообщения по дням"
-      />
     </section>
   );
 }

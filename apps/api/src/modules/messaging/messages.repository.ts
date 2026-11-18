@@ -973,6 +973,7 @@ export class MessagesRepository {
    */
   async dailyCounts(
     since: Date,
+    until: Date,
     offsetMinutes: number,
   ): Promise<
     {
@@ -992,7 +993,7 @@ export class MessagesRepository {
              coalesce(sum(client_amount) filter (where status <> 'failed'), 0)::text as revenue,
              coalesce(sum(commission_amount) filter (where status <> 'failed'), 0)::text as margin
         from messages
-       where created_at >= ${since}
+       where created_at >= ${since} and created_at < ${until}
        group by 1
        order by 1`);
     return (
@@ -1054,6 +1055,7 @@ export class MessagesRepository {
    */
   async journal(
     since: Date,
+    until: Date,
     recentLimit: number,
   ): Promise<{ accounts: AccountJournalRow[]; recent: AccountEventRow[] }> {
     const accounts = await this.database.db.execute(sql`
@@ -1070,7 +1072,7 @@ export class MessagesRepository {
                  count(*) filter (where result = 'absent') as absent,
                  count(*) filter (where result = 'unknown') as unknown,
                  count(*) filter (where result = 'limited') as limited
-            from number_checks where created_at >= ${since} group by account_id
+            from number_checks where created_at >= ${since} and created_at < ${until} group by account_id
         ) c on c.account_id = a.id
         left join (
           select account_id,
@@ -1078,14 +1080,14 @@ export class MessagesRepository {
                  count(*) filter (where kind = 'unavailable' and reason = 'suspended') as suspended,
                  count(*) filter (where kind = 'unavailable' and reason = 'logged_out') as logged_out,
                  count(*) filter (where kind = 'health_paused') as health_paused
-            from messenger_account_events where created_at >= ${since} group by account_id
+            from messenger_account_events where created_at >= ${since} and created_at < ${until} group by account_id
         ) e on e.account_id = a.id
        where c.account_id is not null or e.account_id is not null`);
     const recent = await this.database.db.execute(sql`
       select e.account_id as "accountId", a.label as label, e.kind as kind, e.reason as reason, e.created_at as "createdAt"
         from messenger_account_events e
         join messenger_accounts a on a.id = e.account_id
-       where e.created_at >= ${since}
+       where e.created_at >= ${since} and e.created_at < ${until}
        order by e.created_at desc
        limit ${recentLimit}`);
     return {
@@ -1104,6 +1106,7 @@ export class MessagesRepository {
    */
   async report(
     since: Date,
+    until: Date,
     settledBefore: Date,
   ): Promise<{ clients: ClientReportRow[]; accounts: AccountReportRow[] }> {
     const counts = sql`
@@ -1126,7 +1129,7 @@ export class MessagesRepository {
       select m.client_id as "clientId", c.name as name, ${counts}
         from messages m
         join clients c on c.id = m.client_id
-       where m.created_at >= ${since}
+       where m.created_at >= ${since} and m.created_at < ${until}
        group by m.client_id, c.name
        order by count(*) desc`);
     const byAccount = await this.database.db.execute(sql`
@@ -1136,7 +1139,7 @@ export class MessagesRepository {
         from messages m
         join messenger_accounts a on a.id = m.account_id
         join partners p on p.id = a.partner_id
-       where m.created_at >= ${since}
+       where m.created_at >= ${since} and m.created_at < ${until}
        group by m.account_id, a.label, p.name, a.status, a.state_reason, a.paused_until, a.pause_reason
        order by count(*) desc`);
     return {
@@ -1150,12 +1153,12 @@ export class MessagesRepository {
    * (поделились номером и не остановили), сколько ушедших сообщений прошло ботом и сколько через аккаунты партнёров.
    * Без клиента — по каждому клиенту, у которого были сообщения.
    */
-  async routeStats(since: Date, clientId?: Id<'client'>): Promise<RouteStatsRow[]> {
+  async routeStats(since: Date, until: Date, clientId?: Id<'client'>): Promise<RouteStatsRow[]> {
     const result = await this.database.db.execute(sql`
       with sent as (
         select m.client_id, m.recipient, m.route
           from messages m
-         where m.created_at >= ${since}
+         where m.created_at >= ${since} and m.created_at < ${until}
            and m.status in ('sent', 'delivered', 'read')
            ${clientId === undefined ? sql`` : sql`and m.client_id = ${clientId}`}
       ),

@@ -6,18 +6,25 @@ import { useState } from 'react';
 import { ConsoleShell } from '@/components/console-shell';
 import { ErrorNote } from '@/components/error-note';
 import { LineChart, type ChartPoint } from '@/components/line-chart';
+import { PeriodPicker } from '@/components/period-picker';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { gaugeTone, usedPercent } from '@/lib/gauge';
 import { NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
+import {
+  periodBounds,
+  periodKey,
+  periodMoments,
+  periodQuery,
+  type ReportPeriod,
+} from '@/lib/reports';
 
-type Range = 'hour' | 'day' | 'week';
-
-const RANGES: readonly { value: Range; label: string; ms: number; stepMs: number }[] = [
-  { value: 'hour', label: 'Час', ms: 3_600_000, stepMs: 60_000 },
-  { value: 'day', label: 'Сутки', ms: 86_400_000, stepMs: 300_000 },
-  { value: 'week', label: 'Неделя', ms: 604_800_000, stepMs: 1_800_000 },
-];
+/**
+ * Корзина замеров: шире на длинном периоде, чтобы точек было не больше ~700 — как считает API.
+ * Период — тот же выбор, что у отчётов: быстрые кнопки и календарь (ADR-0059, ревизия 2026-11-17).
+ */
+const customStep = (spanMs: number): number =>
+  Math.max(1, Math.ceil(spanMs / 700 / 60_000)) * 60_000;
 
 interface Server {
   readonly scope: 'platform' | 'node';
@@ -54,12 +61,16 @@ export default function ServersPage() {
 }
 
 function ServersView() {
-  const [range, setRange] = useState<Range>('day');
-  const window = RANGES.find((item) => item.value === range) ?? RANGES[1];
+  const [period, setPeriod] = useState<ReportPeriod>({ days: 1 });
+  // Быстрый период — те же сутки датами: серверы, как и отчёты, считают от полуночи по часам человека.
+  const bounds = periodBounds(period);
+  const moments = periodMoments(period);
+  const from = Date.parse(moments.from);
 
   const servers = useQuery({
-    queryKey: ['servers', range],
-    queryFn: ({ signal }) => request<{ servers: Server[] }>(`/servers?range=${range}`, { signal }),
+    queryKey: ['servers', periodKey(period)],
+    queryFn: ({ signal }) =>
+      request<{ servers: Server[] }>(`/servers?${periodQuery(bounds)}`, { signal }),
     // Замеры идут раз в минуту: чаще спрашивать нечего.
     refetchInterval: 60_000,
   });
@@ -68,25 +79,7 @@ function ServersView() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div role="group" aria-label="Период графиков" className="flex gap-1">
-        {RANGES.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            aria-pressed={range === item.value}
-            onClick={() => {
-              setRange(item.value);
-            }}
-            className={`min-h-8 rounded-md border px-3 ${
-              range === item.value
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-border bg-card hover:bg-muted'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <PeriodPicker value={period} onChange={setPeriod} />
 
       {error !== undefined && <ErrorNote error={error} />}
       {servers.isPending && <p className="text-muted-foreground">Загружаем…</p>}
@@ -96,9 +89,10 @@ function ServersView() {
           <ServerCard
             key={server.id ?? 'platform'}
             server={server}
-            windowMs={window?.ms ?? 86_400_000}
-            stepMs={window?.stepMs ?? 300_000}
-            now={servers.dataUpdatedAt}
+            from={from}
+            // Сегодняшние сутки — до сейчас: дальше замеров ещё нет.
+            to={Math.min(Date.parse(moments.to), servers.dataUpdatedAt)}
+            stepMs={customStep(Date.parse(moments.to) - from)}
           />
         ))}
       </div>
@@ -108,18 +102,19 @@ function ServersView() {
 
 function ServerCard({
   server,
-  windowMs,
+  from,
+  to,
   stepMs,
-  now,
 }: {
   server: Server;
-  windowMs: number;
+  /** Окно графиков, мс от начала эпохи. */
+  from: number;
+  to: number;
   stepMs: number;
-  now: number;
 }) {
   const { current } = server;
-
-  const [hoverAt, setHoverAt] = useState<number | null>(null);
+  const windowMs = to - from;
+  const syncId = `server-${server.id ?? 'platform'}`;
 
   // Все три графика в процентах занятого: шкала одна и читается без пересчёта.
   const percentSeries = (used: (point: Server['series'][number]) => number): ChartPoint[] =>
@@ -191,35 +186,32 @@ function ServerCard({
             <LineChart
               title="Процессор"
               points={cpu}
-              from={now - windowMs}
-              to={now}
+              from={from}
+              to={to}
               stepMs={stepMs}
               label={`${server.name}: загрузка процессора, %`}
               formatTime={formatTime}
-              hoverAt={hoverAt}
-              onHover={setHoverAt}
+              syncId={syncId}
             />
             <LineChart
               title="Память"
               points={memory}
-              from={now - windowMs}
-              to={now}
+              from={from}
+              to={to}
               stepMs={stepMs}
               label={`${server.name}: занятая память, %`}
               formatTime={formatTime}
-              hoverAt={hoverAt}
-              onHover={setHoverAt}
+              syncId={syncId}
             />
             <LineChart
               title="Диск"
               points={disk}
-              from={now - windowMs}
-              to={now}
+              from={from}
+              to={to}
               stepMs={stepMs}
               label={`${server.name}: занятое место на диске, %`}
               formatTime={formatTime}
-              hoverAt={hoverAt}
-              onHover={setHoverAt}
+              syncId={syncId}
             />
           </div>
 

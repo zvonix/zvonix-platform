@@ -912,13 +912,21 @@ test.describe('обзор для сотрудников', () => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/');
     await expect(page).toHaveURL(/\/overview$/u);
-    await expect(page.getByRole('heading', { name: 'Вызовы по дням' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'По дням' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Требует внимания' })).toBeVisible();
     await expect(page.getByRole('link', { name: /Доля состоявшихся/u })).toBeVisible();
 
-    // Четырнадцать столбцов за четырнадцать суток: график получил данные, а не пустой ответ.
-    await expect(page.locator('[role="img"][aria-label="Вызовы по дням"] > div')).toHaveCount(14);
-    await page.waitForLoadState('networkidle');
+    // Каждый быстрый период — и этот, и прошлый такой же длины для сравнения — API принимает
+    // (ADR-0059, ревизия 2026-11-17): отказ 400 оставил бы показатели пустыми молча.
+    const periods = page.getByRole('group', { name: 'Период' });
+    for (const label of ['Сегодня', '30 дней', '60 дней', '90 дней', 'Год', '7 дней']) {
+      await periods.getByRole('button', { name: label, exact: true }).click();
+      await expect(periods.getByRole('button', { name: label, exact: true })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await page.waitForLoadState('networkidle');
+    }
     expect(refused).toEqual([]);
 
     await page.getByRole('link', { name: /Заявки на рассмотрении/u }).click();
@@ -998,12 +1006,12 @@ test.describe('серверы в «Обзоре»', () => {
 });
 
 test.describe('сообщения в «Обзоре»', () => {
-  test('блок появляется, когда сообщения были: показатели за 7 суток и график; без них блока нет', async ({
+  test('блок появляется, когда сообщения были: показатели за период к прошлому такому же; без них блока нет', async ({
     page,
   }) => {
     await signIn(page, PEOPLE.admin);
     await page.goto('/overview');
-    await expect(page.getByRole('heading', { name: 'Вызовы по дням' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'По дням' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Сообщения MAX' })).toHaveCount(0);
 
     // Ответ подменён: на стенде сообщений нет, а проверяется поведение блока.
@@ -1015,15 +1023,18 @@ test.describe('сообщения в «Обзоре»', () => {
       revenue: index >= 7 ? '5.4' : '2.7',
       margin: index >= 7 ? '0.9' : '0.45',
     }));
-    await page.route('**/api/messages/overview*', (route) =>
-      route.fulfill({ json: { days: 14, series } }),
-    );
+    // Выбранный период (7 дней) — последние семь суток, прошлый для сравнения (from…to) — первые семь.
+    await page.route('**/api/messages/overview*', (route) => {
+      const earlier = route.request().url().includes('from=');
+      return route.fulfill({
+        json: { days: 7, series: earlier ? series.slice(0, 7) : series.slice(7) },
+      });
+    });
     await page.reload();
     const block = page.getByRole('region', { name: 'Сообщения MAX' });
     await expect(block).toBeVisible();
     await expect(block.getByRole('link', { name: /Сообщений/u })).toContainText('70');
     await expect(block.getByRole('link', { name: /Не отправлено/u })).toContainText('14');
-    await expect(block.getByRole('img', { name: 'Сообщения по дням' })).toBeVisible();
   });
 });
 
@@ -1456,8 +1467,9 @@ test.describe('серверы (ADR-0065)', () => {
       await expect(page.getByRole('meter', { name: 'Процессор' })).toBeVisible();
       await expect(page.getByRole('img', { name: /загрузка процессора/u })).toBeVisible();
 
-      await page.getByRole('button', { name: 'Неделя' }).click();
-      await expect(page.getByRole('button', { name: 'Неделя' })).toHaveAttribute(
+      // Период — тот же выбор, что у отчётов (ADR-0059, ревизия 2026-11-17).
+      await page.getByRole('button', { name: '7 дней' }).click();
+      await expect(page.getByRole('button', { name: '7 дней' })).toHaveAttribute(
         'aria-pressed',
         'true',
       );

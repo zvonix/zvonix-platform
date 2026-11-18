@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { checkRange, offsetField, rangeFields } from '../../http/period.js';
 import { DIMENSIONS } from './reports.repository.js';
 
-/** Периоды сводки: «сегодня», неделя, месяц, квартал. */
-const REPORT_DAYS = [1, 7, 30, 90] as const;
+/** Быстрые периоды сводки: сегодня, 7, 30, 60, 90 дней и год (владелец, 2026-11-17). */
+const REPORT_DAYS = [1, 7, 30, 60, 90, 365] as const;
 
 const days = z
   .string()
@@ -10,23 +11,20 @@ const days = z
   .transform((raw) => Number(raw ?? '7'))
   .pipe(z.union(REPORT_DAYS.map((value) => z.literal(value)) as [z.ZodLiteral<number>]));
 
-/** Смещение часового пояса браузера в минутах к востоку от UTC (Красноярск — 420). */
-const offset = z
-  .string()
-  .optional()
-  .transform((raw) => Number(raw ?? '0'))
-  .pipe(z.number().int().min(-720).max(840));
+/**
+ * Период сводки: «последние N дней» (`days`) или свои сутки `from`…`to` включительно.
+ * Даты сильнее `days`: старый кабинет шлёт только `days` и получает то же, что раньше.
+ */
+const range = { days, ...rangeFields };
 
 /** Месяц акта: `ГГГГ-ММ`, не старше 2020 года — раньше площадки не было. */
 export const statementQuerySchema = z.object({
   month: z.string().regex(/^20[2-9]\d-(0[1-9]|1[0-2])$/u, 'ожидается месяц вида 2026-09'),
-  offset,
+  offset: offsetField,
 });
 
-export const overviewQuerySchema = z.object({ days, offset });
+export const overviewQuerySchema = z.object(range).superRefine(checkRange);
 
-export const breakdownQuerySchema = z.object({
-  days,
-  offset,
-  by: z.enum(DIMENSIONS),
-});
+export const breakdownQuerySchema = z
+  .object({ ...range, by: z.enum(DIMENSIONS) })
+  .superRefine(checkRange);

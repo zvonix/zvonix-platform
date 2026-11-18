@@ -15,6 +15,7 @@ import {
 } from '@zvonix/shared';
 import { z } from 'zod';
 import { boundedLimit, boundedOffset } from '../../http/pagination.js';
+import { checkRange, MAX_RANGE_DAYS, rangeFields } from '../../http/period.js';
 import { amount } from '../billing/schemas.js';
 
 const label = z.string().trim().min(2, 'слишком короткое').max(60, 'слишком длинное');
@@ -119,28 +120,26 @@ export const updateSmppSchema = z
     { message: 'Нечего менять' },
   );
 
-/** Обзор для сотрудников: число суток и смещение часового пояса браузера (минуты к востоку от UTC). */
-export const messagesOverviewQuerySchema = z.object({
-  days: z
+/** Число суток периода: 1–366 (год с запасом), по умолчанию своё у каждого отчёта. */
+const reportDays = (fallback: number) =>
+  z
     .string()
     .optional()
-    .transform((raw) => Number(raw ?? '14'))
-    .pipe(z.number().int().min(1).max(90)),
-  offset: z
-    .string()
-    .optional()
-    .transform((raw) => Number(raw ?? '0'))
-    .pipe(z.number().int().min(-720).max(840)),
-});
+    .transform((raw) => Number(raw ?? String(fallback)))
+    .pipe(z.number().int().min(1).max(MAX_RANGE_DAYS));
 
-/** Отчёт для сотрудников: за сколько суток (по умолчанию неделя). */
-export const messagesReportQuerySchema = z.object({
-  days: z
-    .string()
-    .optional()
-    .transform((raw) => Number(raw ?? '7'))
-    .pipe(z.number().int().min(1).max(90)),
-});
+/**
+ * Обзор для сотрудников: последние `days` суток или свои `from`…`to` по часам человека (`offset`, минуты к востоку
+ * от UTC) — ADR-0059, ревизия 2026-11-17.
+ */
+export const messagesOverviewQuerySchema = z
+  .object({ days: reportDays(14), ...rangeFields })
+  .superRefine(checkRange);
+
+/** Отчёт для сотрудников: за сколько суток (по умолчанию неделя) или за свои сутки `from`…`to`. */
+export const messagesReportQuerySchema = z
+  .object({ days: reportDays(7), ...rangeFields })
+  .superRefine(checkRange);
 
 /** Сотрудник отключает или возвращает подключение SMPP клиента. */
 export const staffSmppSchema = z.object({ enabled: z.boolean() });

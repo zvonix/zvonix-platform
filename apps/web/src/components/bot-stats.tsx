@@ -2,12 +2,13 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { BarChart } from '@/components/bar-chart';
+import { CHART_COLORS, DayChart } from '@/components/day-chart';
 import { ErrorNote } from '@/components/error-note';
 import { ExportButton } from '@/components/export-button';
 import { FilterInput } from '@/components/filter-input';
 import { Hint } from '@/components/hint';
 import { PageNav } from '@/components/page-nav';
+import { PeriodPicker } from '@/components/period-picker';
 import { StatusDot } from '@/components/status-dot';
 import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
@@ -23,7 +24,7 @@ import { loadAllRows } from '@/lib/csv';
 import { moment, plural } from '@/lib/format';
 import { MESSAGE_FAILURE_NAME } from '@/lib/labels';
 import { money } from '@/lib/money';
-import { REPORT_PERIODS } from '@/lib/reports';
+import { periodKey, periodMoments, type ReportPeriod } from '@/lib/reports';
 
 interface Counts {
   readonly started: number;
@@ -54,18 +55,6 @@ interface Subscriber {
 
 const PAGE = 50;
 
-/** Начало периода: «Сегодня» — с начала суток человека, иначе — последние N суток. */
-function periodStart(days: number): string {
-  const now = new Date();
-  if (days === 1) {
-    const midnight = new Date(now);
-    midnight.setHours(0, 0, 0, 0);
-    return midnight.toISOString();
-  }
-  return new Date(now.getTime() - days * 86_400_000).toISOString();
-}
-
-const shortDay = (day: string): string => `${day.slice(8, 10)}.${day.slice(5, 7)}`;
 const share = (part: number, whole: number): string =>
   whole === 0 ? '—' : `${String(Math.round((part * 100) / whole))} %`;
 
@@ -82,16 +71,16 @@ function duration(seconds: number): string {
  * остановки, воронка, сообщения через бота и подписчики. Одна и та же у клиента и у сотрудников — разные адреса API.
  */
 export function BotStats({ base }: { base: string }) {
-  const [days, setDays] = useState(7);
+  const [period, setPeriod] = useState<ReportPeriod>({ days: 7 });
   const [phone, setPhone] = useState('');
   const [offset, setOffset] = useState(0);
 
-  const from = periodStart(days);
+  const { from, to } = periodMoments(period);
   const stats = useQuery({
-    queryKey: ['bot-stats', base, days],
+    queryKey: ['bot-stats', base, periodKey(period)],
     queryFn: ({ signal }) =>
       request<BotStats>(
-        `${base}/stats?from=${encodeURIComponent(from)}&offset=${String(-new Date().getTimezoneOffset())}`,
+        `${base}/stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&offset=${String(-new Date().getTimezoneOffset())}`,
         { signal },
       ),
   });
@@ -132,24 +121,8 @@ export function BotStats({ base }: { base: string }) {
             подписки.
           </p>
         </Hint>
-        <div
-          className="ml-auto flex flex-wrap gap-0.5 rounded-md border border-border bg-muted p-0.5"
-          role="group"
-          aria-label="Период"
-        >
-          {REPORT_PERIODS.map((period) => (
-            <button
-              key={period.days}
-              type="button"
-              aria-pressed={days === period.days}
-              onClick={() => {
-                setDays(period.days);
-              }}
-              className={`rounded px-2.5 py-1.5 ${days === period.days ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {period.label}
-            </button>
-          ))}
+        <div className="ml-auto">
+          <PeriodPicker value={period} onChange={setPeriod} />
         </div>
       </div>
 
@@ -192,32 +165,23 @@ export function BotStats({ base }: { base: string }) {
           </section>
 
           {data.daily.length > 1 && (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <section className="flex flex-col gap-2">
-                <h3 className="font-medium">Запустили и вернулись по дням</h3>
-                <BarChart
-                  bars={data.daily.map((row) => ({
-                    label: shortDay(row.day),
-                    value: row.started + row.restarted,
-                    title: `${shortDay(row.day)}: запустили ${String(row.started)}, вернулись ${String(row.restarted)}, номер ${String(row.phone_shared)}`,
-                  }))}
-                  peak={`За период: ${String(data.events.started + data.events.restarted)}`}
-                  summary="Запуски бота по дням"
-                />
-              </section>
-              <section className="flex flex-col gap-2">
-                <h3 className="font-medium">Остановили по дням</h3>
-                <BarChart
-                  bars={data.daily.map((row) => ({
-                    label: shortDay(row.day),
-                    value: row.stopped,
-                    title: `${shortDay(row.day)}: остановили ${String(row.stopped)}`,
-                  }))}
-                  peak={`За период: ${String(data.events.stopped)}`}
-                  summary="Остановки бота по дням"
-                />
-              </section>
-            </div>
+            <section className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
+              <h3 className="font-medium">По дням</h3>
+              <DayChart
+                stacked={false}
+                series={[
+                  { label: 'Пришли', color: CHART_COLORS.messages },
+                  { label: 'Остановили', color: CHART_COLORS.calls },
+                ]}
+                points={data.daily.map((row) => ({
+                  day: row.day,
+                  values: [row.started + row.restarted, row.stopped],
+                  texts: [String(row.started + row.restarted), String(row.stopped)],
+                  totalText: String(row.started + row.restarted - row.stopped),
+                }))}
+                label="Пришли и остановили бота по дням"
+              />
+            </section>
           )}
 
           <section className="flex flex-col gap-2 rounded-lg border border-border bg-card p-4">
