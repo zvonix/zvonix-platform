@@ -60,12 +60,12 @@ export interface Breakdown {
 
 /** Быстрые периоды — одни во всех выборах периода (владелец, 2026-11-17: «30, 60, 90 и т. д.»). */
 export const REPORT_PERIODS = [
-  { days: 1, label: 'Сегодня' },
-  { days: 7, label: '7 дней' },
-  { days: 30, label: '30 дней' },
-  { days: 60, label: '60 дней' },
-  { days: 90, label: '90 дней' },
-  { days: 365, label: 'Год' },
+  { days: 1, label: 'Сегодня', short: 'Сегодня' },
+  { days: 7, label: '7 дней', short: '7 д' },
+  { days: 30, label: '30 дней', short: '30 д' },
+  { days: 60, label: '60 дней', short: '60 д' },
+  { days: 90, label: '90 дней', short: '90 д' },
+  { days: 365, label: 'Год', short: 'Год' },
 ] as const;
 
 /** Минуты к востоку от UTC: сутки в сводке считаются по часам человека, а не сервера. */

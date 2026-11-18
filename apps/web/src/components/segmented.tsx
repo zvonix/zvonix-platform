@@ -9,6 +9,7 @@ export function Segmented<T extends string | number>({
   options,
   value,
   onChange,
+  compact = false,
 }: {
   /** Название группы для чтения с экрана. */
   label: string;
@@ -16,6 +17,8 @@ export function Segmented<T extends string | number>({
   /** `null` — ни один не выбран (например, выбран свой период в календаре). */
   value: T | null;
   onChange: (value: T) => void;
+  /** Узкие кнопки — чтобы на телефоне весь набор помещался в одну строку. */
+  compact?: boolean;
 }) {
   return (
     <div
@@ -31,7 +34,7 @@ export function Segmented<T extends string | number>({
           onClick={() => {
             onChange(option.key);
           }}
-          className={`rounded px-2.5 py-1 transition-colors ${value === option.key ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
+          className={`rounded py-1 transition-colors ${compact ? 'px-2' : 'px-2.5'} ${value === option.key ? 'bg-card font-semibold shadow-[0_0_0_1px_var(--border)]' : 'text-muted-foreground hover:text-foreground'}`}
         >
           {option.label}
         </button>

@@ -69,10 +69,15 @@ export function PeriodPicker({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5 sm:flex-nowrap">
       <Segmented
         label="Период"
-        options={REPORT_PERIODS.map((period) => ({ key: period.days, label: period.label }))}
+        options={REPORT_PERIODS.map((period) => ({
+          key: period.days,
+          // На телефоне — «30 д»: весь набор и календарь в одну строку.
+          label: wide ? period.label : period.short,
+        }))}
+        compact={!wide}
         value={'days' in value ? value.days : null}
         onChange={(days) => {
           onChange({ days });
