@@ -353,6 +353,17 @@ describe('сводки (ADR-0059)', () => {
       partner_cost: '10',
       margin: '1.5',
     });
+
+    // Разрез «Клиенты»: строка — клиент по имени, а не SIM, и деньги его вызова.
+    const byClient = (await get('/reports/breakdown?days=1&offset=0&by=client')).json<{
+      rows: { key: string | null; name: string | null; revenue: string }[];
+    }>();
+    expect(byClient.rows.find((row) => row.key === rich.id)).toMatchObject({
+      name: expect.stringMatching(/^Такси/u) as unknown,
+      revenue: '11.5',
+      partner_cost: '10',
+      margin: '1.5',
+    });
   }, 120_000);
 
   it('произвольный период: сутки from…to включительно, те же деньги, что у days', async () => {
