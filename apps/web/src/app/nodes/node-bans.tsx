@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ErrorNote } from '@/components/error-note';
 import { FormDialog } from '@/components/form-dialog';
-import { HEAD, ROW_ICON, RowActions, TABLE_FRAME } from '@/components/table-parts';
+import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
   Table,
   TableBody,
@@ -40,6 +40,14 @@ const JAIL_NAME: Record<BanJail, string> = {
   sip_known: 'SIP: поток под логинами площадки',
   ssh: 'SSH: подбор пароля',
 };
+
+/** Срок блокировки до минуты, без года и секунд: так строка с кнопкой «Снять» помещается на ширине телефона. */
+const UNTIL = new Intl.DateTimeFormat('ru-RU', {
+  day: '2-digit',
+  month: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
 
 export function NodeBansButton({
   nodeId,
@@ -107,7 +115,7 @@ function NodeBansList({ nodeId, canChange }: { nodeId: string; canChange: boolea
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">
                   <TableHead className={HEAD}>Адрес</TableHead>
-                  <TableHead className={HEAD}>За что</TableHead>
+                  <TableHead className={`${HEAD} ${WIDE_ONLY}`}>За что</TableHead>
                   <TableHead className={HEAD}>До</TableHead>
                   <TableHead className={`${HEAD} w-px`}>
                     <span className="sr-only">Действия</span>
@@ -125,9 +133,12 @@ function NodeBansList({ nodeId, canChange }: { nodeId: string; canChange: boolea
                 {list.data.bans.map((ban) => (
                   <TableRow key={`${ban.jail}:${ban.address}`}>
                     <TableCell className="num select-all">{ban.address}</TableCell>
-                    <TableCell>{JAIL_NAME[ban.jail]}</TableCell>
-                    <TableCell className="num text-muted-foreground">
-                      {ban.until === null ? 'срок не сообщён' : moment(ban.until)}
+                    <TableCell className={WIDE_ONLY}>{JAIL_NAME[ban.jail]}</TableCell>
+                    <TableCell
+                      className="num whitespace-nowrap text-muted-foreground"
+                      title={ban.until === null ? undefined : moment(ban.until)}
+                    >
+                      {ban.until === null ? 'срок не сообщён' : UNTIL.format(new Date(ban.until))}
                     </TableCell>
                     <TableCell>
                       {canChange && (
