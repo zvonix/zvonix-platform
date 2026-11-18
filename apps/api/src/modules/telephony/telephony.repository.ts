@@ -525,6 +525,25 @@ export class TelephonyRepository {
     return result.rowCount ?? 0;
   }
 
+  /**
+   * Откуда входили с верным паролем с момента `since` — линии клиентов, шлюзы и линии GOIP
+   * ([ADR-0125](../../../../../docs/adr/0125-svoi-adresa-ne-blokiruyutsya.md)). Адрес пишет опрос регистраций узла,
+   * а регистрация бывает только после верного пароля. Строки как есть — `адрес:порт/транспорт`.
+   */
+  async recentRegistrationAddresses(since: Date): Promise<string[]> {
+    const result = await this.db.execute(sql`
+      select registration_address as address from ${channels}
+        where registration_address is not null and registration_seen_at >= ${since.toISOString()}::timestamptz
+      union
+      select registration_address from ${gateways}
+        where registration_address is not null and registration_seen_at >= ${since.toISOString()}::timestamptz
+      union
+      select registration_address from ${gatewayPorts}
+        where registration_address is not null and registration_seen_at >= ${since.toISOString()}::timestamptz
+    `);
+    return (result.rows as { address: string }[]).map((row) => row.address);
+  }
+
   async clearChannelRegistration(id: ChannelId): Promise<void> {
     await this.db
       .update(channels)

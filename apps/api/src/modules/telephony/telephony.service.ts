@@ -49,6 +49,7 @@ import { directoryDocument, notFoundDocument, type DirectoryUser } from './direc
 import { MAX_GATEWAY_PORTS } from './schemas.js';
 import { sipHostProblem } from './sip-host.js';
 import { TestCallRepository } from './test-call.repository.js';
+import { TRUSTED_FOR_MS, trustedAddressesText } from './trusted-addresses.js';
 import { RegistrationsService } from './registrations.service.js';
 import {
   issueSipCredentials,
@@ -1755,6 +1756,16 @@ export class TelephonyService {
         !row.trunk.unlimited &&
         row.gateway.status !== 'retired',
     );
+  }
+
+  /**
+   * Доверенные адреса узла — откуда за неделю входили с верным паролем линии, шлюзы и линии GOIP
+   * ([ADR-0125](../../../../../docs/adr/0125-svoi-adresa-ne-blokiruyutsya.md)): fail2ban узла их не блокирует.
+   * Один список на все узлы: линия, переехавшая на другой узел, не должна получить там блок за первый таймаут.
+   */
+  async nodeTrustedAddresses(now: Date = new Date()): Promise<string> {
+    const since = new Date(now.getTime() - TRUSTED_FOR_MS);
+    return trustedAddressesText(await this.repository.recentRegistrationAddresses(since));
   }
 
   /**

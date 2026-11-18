@@ -33,7 +33,14 @@
       <param name="gateway-url" value="@@CONTROL_PLANE@@/node/directory" bindings="directory"/>
       <param name="gateway-credentials" value="@@KEY_ID@@:@@KEY_SECRET@@"/>
       <param name="auth-scheme" value="basic"/>
-      <param name="timeout" value="3"/>
+      <!--
+        8 секунд, а не 3, как у маршрута (ADR-0125). Учётная запись не на пути разговора: её ждут REGISTER
+        или первый INVITE, и программа их повторит сама. А обрыв стоит дорого: «Can't find user», отказ входа
+        и строка, которую считает fail2ban. 18.11.2026 при 3 с было 17 обрывов «CURL error 28» за день, хотя
+        обычный ответ приходит за 50 мс, и живой клиент получил блок. Больше 8 с не нужно: дольше программа
+        клиента сама бросает попытку и шлёт новую.
+      -->
+      <param name="timeout" value="8"/>
       <param name="enable-cacert-check" value="true"/>
       <param name="enable-ssl-verifyhost" value="true"/>
     </binding>

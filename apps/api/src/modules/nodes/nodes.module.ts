@@ -3,6 +3,8 @@ import { AuditModule } from '../audit/audit.module.js';
 import { MachineModule } from '../machine/machine.module.js';
 import { SettingsModule } from '../settings/settings.module.js';
 import { NodeInstallController } from './install.controller.js';
+import { NodeBansController } from './node-bans.controller.js';
+import { NodeBansService } from './node-bans.service.js';
 import { NodeAgentController } from './node-agent.controller.js';
 import { NodeCommandsController } from './node-commands.controller.js';
 import { NodeCommandsService } from './node-commands.service.js';
@@ -19,8 +21,16 @@ import { NodesService } from './nodes.service.js';
     NodeAgentController,
     NodeInstallController,
     NodeCommandsController,
+    NodeBansController,
   ],
-  providers: [NodesService, NodesRepository, NodeSetService, NameResolver, NodeCommandsService],
+  providers: [
+    NodesService,
+    NodesRepository,
+    NodeSetService,
+    NameResolver,
+    NodeCommandsService,
+    NodeBansService,
+  ],
   // Понадобится маршрутизации: вызов направляется только на узел, который отвечает.
   exports: [NodesService, NodesRepository, NodeSetService, NodeCommandsService],
 })

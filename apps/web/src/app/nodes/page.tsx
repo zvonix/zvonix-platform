@@ -27,6 +27,7 @@ import { moment } from '@/lib/format';
 import { NODE_STATUS_MEANING, NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
 import { AllowedIpsField, parseAddresses } from './allowed-ips';
 import { NewNodeForm, type NodeDraft } from './new-node-form';
+import { NodeBansButton } from './node-bans';
 import { NodeSettingsForm, type NodeSettingsDraft } from './node-settings';
 import type { SipCheck } from './sip-check';
 
@@ -353,52 +354,59 @@ function NodeRows({
           вывод из эксплуатации необратим и идёт через подтверждение с последствием
           (DESIGN.md, «Опасные действия»). Значками, как во всех таблицах (DESIGN.md, «Таблица»).
         */}
-        {canChange && !closed && (
+        {!closed && (
           <RowActions>
-            <FormDialog
-              label={<Settings aria-hidden className="size-4" />}
-              tooltip="Настройки"
-              {...ROW_ICON}
-              title={`Настройки узла «${node.name}»`}
-              disabled={busy}
-            >
-              <NodeSettingsForm
-                nodeId={node.id}
-                initial={{ name: node.name, sipAddress: node.sip_address ?? '' }}
-                onSave={onSaveSettings}
-              />
-            </FormDialog>
-            <FormDialog
-              label={<SquareTerminal aria-hidden className="size-4" />}
-              tooltip="Новая команда"
-              {...ROW_ICON}
-              title={`Новая команда установки для «${node.name}»`}
-              description={`Состояние сейчас: ${NODE_STATUS_MEANING[node.status]}`}
-              disabled={busy}
-            >
-              <ReissueInstall onReissue={onReissue} />
-            </FormDialog>
+            {/* Блокировки видят и поддержка, и администратор; снимает только администратор (ADR-0125). */}
+            <NodeBansButton nodeId={node.id} nodeName={node.name} canChange={canChange} />
+            {canChange && (
+              <>
+                <FormDialog
+                  label={<Settings aria-hidden className="size-4" />}
+                  tooltip="Настройки"
+                  {...ROW_ICON}
+                  title={`Настройки узла «${node.name}»`}
+                  disabled={busy}
+                >
+                  <NodeSettingsForm
+                    nodeId={node.id}
+                    initial={{ name: node.name, sipAddress: node.sip_address ?? '' }}
+                    onSave={onSaveSettings}
+                  />
+                </FormDialog>
+                <FormDialog
+                  label={<SquareTerminal aria-hidden className="size-4" />}
+                  tooltip="Новая команда"
+                  {...ROW_ICON}
+                  title={`Новая команда установки для «${node.name}»`}
+                  description={`Состояние сейчас: ${NODE_STATUS_MEANING[node.status]}`}
+                  disabled={busy}
+                >
+                  <ReissueInstall onReissue={onReissue} />
+                </FormDialog>
 
-            <ConfirmAction
-              label={<Trash2 aria-hidden className="size-4" />}
-              tooltip="Удалить"
-              {...ROW_ICON}
-              title={`Удалить узел «${node.name}»`}
-              consequence={
-                <>
-                  <p>
-                    Все ключи узла отзываются, вызовы через него прекращаются, из списка он уходит.
-                  </p>
-                  <p>
-                    История вызовов сохраняется: на узел ссылаются CDR. Действие окончательное —
-                    вернуть узел нельзя, понадобится завести новый.
-                  </p>
-                </>
-              }
-              confirmLabel="Удалить навсегда"
-              disabled={busy}
-              onConfirm={onDecommission}
-            />
+                <ConfirmAction
+                  label={<Trash2 aria-hidden className="size-4" />}
+                  tooltip="Удалить"
+                  {...ROW_ICON}
+                  title={`Удалить узел «${node.name}»`}
+                  consequence={
+                    <>
+                      <p>
+                        Все ключи узла отзываются, вызовы через него прекращаются, из списка он
+                        уходит.
+                      </p>
+                      <p>
+                        История вызовов сохраняется: на узел ссылаются CDR. Действие окончательное —
+                        вернуть узел нельзя, понадобится завести новый.
+                      </p>
+                    </>
+                  }
+                  confirmLabel="Удалить навсегда"
+                  disabled={busy}
+                  onConfirm={onDecommission}
+                />
+              </>
+            )}
           </RowActions>
         )}
       </TableCell>
