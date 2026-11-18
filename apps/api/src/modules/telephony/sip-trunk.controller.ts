@@ -69,6 +69,8 @@ interface SipTrunkView {
     failure: number | null;
     reported_at: string;
   } | null;
+  /** Остановлен из-за неверного логина или пароля (ADR-0123); пусто — нет. */
+  readonly auth_blocked_at: string | null;
   readonly created_at: string;
 }
 
@@ -199,6 +201,44 @@ export class SipTrunkController {
   ): Promise<TrunkCheckResult> {
     const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
     return this.checks.check(parseId(id, 'gateway'), partner.id);
+  }
+
+  /**
+   * «Подключить снова» ([ADR-0123](../../../../../docs/adr/0123-ostanovka-provaydera-po-nevernomu-parolyu.md)): снять
+   * остановку по неверному паролю, когда его исправили у провайдера.
+   */
+  @Roles('admin')
+  @Post('sip-trunks/:id/reconnect')
+  @HttpCode(200)
+  async reconnect(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ trunk: SipTrunkView }> {
+    const row = await this.telephony.reconnectTrunk(
+      parseId(id, 'gateway'),
+      undefined,
+      parseId(actor.userId, 'user'),
+      actor.role,
+    );
+    return { trunk: await this.view(row) };
+  }
+
+  /** То же для своего провайдера из кабинета партнёра. */
+  @Cabinets('partner')
+  @Post('partner/sip-trunks/:id/reconnect')
+  @HttpCode(200)
+  async partnerReconnect(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ trunk: SipTrunkView }> {
+    const partner = await this.billing.requirePartnerOwnedBy(actor.userId);
+    const row = await this.telephony.reconnectTrunk(
+      parseId(id, 'gateway'),
+      partner.id,
+      parseId(actor.userId, 'user'),
+      actor.role,
+    );
+    return { trunk: await this.view(row) };
   }
 
   /** Пароль провайдера — по нажатию «показать» в окне настроек; показ — в журнале. */
@@ -345,6 +385,7 @@ function toTrunkView(
             failure: row.trunk.linkFailure,
             reported_at: row.trunk.linkReportedAt.toISOString(),
           },
+    auth_blocked_at: row.trunk.authBlockedAt?.toISOString() ?? null,
     created_at: row.gateway.createdAt.toISOString(),
   };
 }

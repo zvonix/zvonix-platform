@@ -67,6 +67,7 @@ import {
   type SimCardId,
   type SimCardRow,
   type SipTrunkRow,
+  type TrunkLinkReport,
 } from './telephony.repository.js';
 
 /**
@@ -1596,6 +1597,15 @@ export class TelephonyService {
       ...(changes.numbersCount === undefined ? {} : { numbersCount: changes.numbersCount }),
     });
     if (updated === undefined) throw notFound('Транк не найден');
+    // Новые адрес, логин или пароль — новая попытка (ADR-0123): остановка по паролю снимается, а отказы, записанные
+    // в журнал узла до этой правки, её уже не вернут.
+    const credentialsChanged =
+      changes.proxyHost !== undefined ||
+      changes.outboundUsername !== undefined ||
+      changes.outboundSecret !== undefined;
+    const current = credentialsChanged
+      ? ((await this.repository.resumeTrunkAuth(gatewayId, new Date())) ?? updated)
+      : updated;
 
     await this.audit.record({
       action: 'sip_trunk.updated',
@@ -1604,19 +1614,66 @@ export class TelephonyService {
       actorUserId,
       actorRole,
       before: { name: before.gateway.name, ...toTrunkAudit(before.trunk) },
-      after: { name: gateway.name, ...toTrunkAudit(updated) },
+      after: { name: gateway.name, ...toTrunkAudit(current) },
     });
 
-    return { gateway, trunk: updated };
+    return { gateway, trunk: current };
+  }
+
+  /**
+   * «Подключить снова» ([ADR-0123](../../../../../docs/adr/0123-ostanovka-provaydera-po-nevernomu-parolyu.md)): транк,
+   * остановленный из-за неверного логина или пароля, снова поднимается на узле — когда пароль исправили у провайдера,
+   * а не у нас. `partnerId` — из кабинета партнёра: чужой не находится.
+   */
+  async reconnectTrunk(
+    gatewayId: GatewayId,
+    partnerId: PartnerId | undefined,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<{ gateway: GatewayRow; trunk: SipTrunkRow }> {
+    const found = await this.repository.findTrunk(gatewayId);
+    if (found === undefined || (partnerId !== undefined && found.gateway.partnerId !== partnerId)) {
+      throw notFound('SIP-провайдер не найден');
+    }
+    if (found.gateway.status === 'retired') throw conflict('SIP-провайдер удалён');
+    const trunk = await this.repository.resumeTrunkAuth(gatewayId, new Date());
+    if (trunk === undefined) throw notFound('SIP-провайдер не найден');
+    await this.audit.record({
+      action: 'sip_trunk.reconnected',
+      entityType: 'gateway',
+      entityId: gatewayId,
+      actorUserId,
+      actorRole,
+      before: { auth_blocked_at: found.trunk.authBlockedAt?.toISOString() ?? null },
+      after: { auth_blocked_at: null },
+    });
+    return { gateway: found.gateway, trunk };
   }
 
   /** Связь узла с его провайдерами (ADR-0121): узел присылает её с пульсом. */
   async recordTrunkLinks(
     nodeId: Id<'node'>,
-    links: readonly { name: string; state: string; status: string; failure?: number | undefined }[],
+    links: readonly TrunkLinkReport[],
     at: Date,
   ): Promise<number> {
-    return this.repository.recordTrunkLinks(nodeId, links, at);
+    const { recorded, blocked } = await this.repository.recordTrunkLinks(nodeId, links, at);
+    // Остановка по неверному паролю — решение службы, а не человека: в журнал без автора (ADR-0123).
+    for (const gatewayId of blocked) {
+      this.logger.warn('SIP-провайдер остановлен: неверный логин или пароль', {
+        gateway_id: gatewayId,
+        node_id: nodeId,
+      });
+      await this.audit.record({
+        action: 'sip_trunk.auth_blocked',
+        entityType: 'gateway',
+        entityId: gatewayId,
+        actorUserId: null,
+        actorRole: null,
+        before: { auth_blocked_at: null },
+        after: { auth_blocked_at: at.toISOString() },
+      });
+    }
+    return recorded;
   }
 
   /**

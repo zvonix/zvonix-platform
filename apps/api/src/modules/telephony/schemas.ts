@@ -664,6 +664,8 @@ export const trunkLinksSchema = z.object({
         status: z.string().trim().min(1).max(32),
         /** Код последнего отказа регистрации из журнала узла; старый узел его не шлёт. */
         failure: z.number().int().min(100).max(999).optional(),
+        /** Когда был этот отказ, секунды эпохи по часам узла (ADR-0123); старый узел не шлёт. */
+        failure_at: z.number().int().min(0).max(4_102_444_800).optional(),
       }),
     )
     .max(500),

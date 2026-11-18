@@ -170,7 +170,7 @@ function GatewaySettings({
           <p className="text-muted-foreground">
             И у каждой линии — свой Routing Prefix: по нему GOIP понимает, с какой SIM звонить.
           </p>
-          <div className={`max-w-sm ${TABLE_FRAME}`}>
+          <div className={TABLE_FRAME}>
             <Table aria-label="Префиксы линий" className="whitespace-nowrap">
               <TableHeader>
                 <TableRow className="text-muted-foreground hover:bg-transparent">

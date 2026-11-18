@@ -393,7 +393,7 @@ function SummaryTab({ channel }: { channel: Channel }) {
           {failed.message}
         </p>
       )}
-      <div className={`max-w-2xl ${TABLE_FRAME}`}>
+      <div className={TABLE_FRAME}>
         <Table>
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
