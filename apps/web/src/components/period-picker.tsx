@@ -8,6 +8,13 @@ import { Segmented } from '@/components/segmented';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  fromQuickKey,
+  LIST_PERIODS,
+  quickKey,
+  type ListPeriod,
+  type QuickPeriod,
+} from '@/lib/list-period';
 import { fromIsoDay, isoDay, REPORT_PERIODS, type ReportPeriod } from '@/lib/reports';
 
 /** Самый длинный свой период — как у API (`MAX_RANGE_DAYS`). */
@@ -49,25 +56,7 @@ export function PeriodPicker({
   value: ReportPeriod;
   onChange: (period: ReportPeriod) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<DateRange | undefined>();
   const wide = useWide();
-  const custom = !('days' in value);
-
-  const openCalendar = (next: boolean): void => {
-    if (next) {
-      setDraft(custom ? { from: fromIsoDay(value.from), to: fromIsoDay(value.to) } : undefined);
-    }
-    setOpen(next);
-  };
-
-  const apply = (): void => {
-    if (draft?.from === undefined) return;
-    const from = isoDay(draft.from);
-    onChange({ from, to: isoDay(draft.to ?? draft.from) });
-    setOpen(false);
-  };
-
   return (
     <div className="flex flex-wrap items-center gap-1.5 sm:flex-nowrap">
       <Segmented
@@ -83,54 +72,129 @@ export function PeriodPicker({
           onChange({ days });
         }}
       />
-      <Popover open={open} onOpenChange={openCalendar}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            size={custom ? 'sm' : 'icon-sm'}
-            aria-label="Свой период"
-            title="Свой период"
-            aria-pressed={custom}
-            className={custom ? 'num font-semibold' : 'text-muted-foreground'}
-          >
-            <CalendarDays />
-            {custom && rangeLabel(value.from, value.to)}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-auto p-0">
-          <Calendar
-            mode="range"
-            locale={ru}
-            numberOfMonths={wide ? 2 : 1}
-            defaultMonth={
-              draft?.from ??
-              new Date(new Date().getFullYear(), new Date().getMonth() - (wide ? 1 : 0), 1)
-            }
-            selected={draft}
-            onSelect={setDraft}
-            resetOnSelect
-            max={MAX_DAYS}
-            disabled={{ after: new Date() }}
-            className="bg-popover"
-          />
-          <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2">
-            <span className="num text-muted-foreground">
-              {draft?.from === undefined
-                ? 'Выберите начало и конец'
-                : rangeLabel(isoDay(draft.from), isoDay(draft.to ?? draft.from))}
-            </span>
-            <Button
-              size="icon-sm"
-              aria-label="Показать за этот период"
-              title="Показать за этот период"
-              disabled={draft?.from === undefined}
-              onClick={apply}
-            >
-              <Check />
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
+      <RangeButton value={'days' in value ? undefined : value} wide={wide} onApply={onChange} />
     </div>
+  );
+}
+
+/**
+ * Тот же выбор периода для отбора списков (`lib/list-period.ts`): «Всё время» первым и по умолчанию, у разбора
+ * вызовов ещё «Час» и «Сутки» — последние 60 минут и 24 часа. Свой диапазон — тем же календарём, целыми сутками.
+ */
+export function ListPeriodPicker({
+  value,
+  onChange,
+  options = LIST_PERIODS,
+}: {
+  value: ListPeriod;
+  onChange: (period: ListPeriod) => void;
+  options?: readonly QuickPeriod[];
+}) {
+  const wide = useWide();
+  const key = quickKey(value);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Segmented
+        label="Период"
+        options={options.map((option) => ({
+          key: option.key,
+          label: wide ? option.label : option.short,
+        }))}
+        compact={!wide}
+        value={key}
+        onChange={(next) => {
+          onChange(fromQuickKey(next));
+        }}
+      />
+      <RangeButton
+        value={key === null ? (value as { from: string; to: string }) : undefined}
+        wide={wide}
+        onApply={onChange}
+      />
+    </div>
+  );
+}
+
+/** Кнопка своего периода с календарём — одна на оба выбора. `value` — свой период, если выбран он. */
+function RangeButton({
+  value,
+  wide,
+  onApply,
+}: {
+  value: { from: string; to: string } | undefined;
+  wide: boolean;
+  onApply: (period: { from: string; to: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<DateRange | undefined>();
+  const custom = value !== undefined;
+
+  const openCalendar = (next: boolean): void => {
+    if (next) {
+      setDraft(
+        value === undefined
+          ? undefined
+          : { from: fromIsoDay(value.from), to: fromIsoDay(value.to) },
+      );
+    }
+    setOpen(next);
+  };
+
+  const apply = (): void => {
+    if (draft?.from === undefined) return;
+    const from = isoDay(draft.from);
+    onApply({ from, to: isoDay(draft.to ?? draft.from) });
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={openCalendar}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size={custom ? 'sm' : 'icon-sm'}
+          aria-label="Свой период"
+          title="Свой период"
+          aria-pressed={custom}
+          className={custom ? 'num font-semibold' : 'text-muted-foreground'}
+        >
+          <CalendarDays />
+          {custom && rangeLabel(value.from, value.to)}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0">
+        <Calendar
+          mode="range"
+          locale={ru}
+          numberOfMonths={wide ? 2 : 1}
+          defaultMonth={
+            draft?.from ??
+            new Date(new Date().getFullYear(), new Date().getMonth() - (wide ? 1 : 0), 1)
+          }
+          selected={draft}
+          onSelect={setDraft}
+          resetOnSelect
+          max={MAX_DAYS}
+          disabled={{ after: new Date() }}
+          className="bg-popover"
+        />
+        <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2">
+          <span className="num text-muted-foreground">
+            {draft?.from === undefined
+              ? 'Выберите начало и конец'
+              : rangeLabel(isoDay(draft.from), isoDay(draft.to ?? draft.from))}
+          </span>
+          <Button
+            size="icon-sm"
+            aria-label="Показать за этот период"
+            title="Показать за этот период"
+            disabled={draft?.from === undefined}
+            onClick={apply}
+          >
+            <Check />
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -14,7 +14,8 @@ import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
-import { PeriodInput } from '@/components/period-input';
+import { ListPeriodPicker } from '@/components/period-picker';
+import { listPeriodParams, listPeriodSearch, readListPeriod } from '@/lib/list-period';
 import { HintText, StatusDot, toneOf } from '@/components/status-dot';
 import { NUM, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
@@ -87,9 +88,9 @@ function PartnerCalls() {
   const url = useUrlState();
   const columns = useColumnPicker('partner-calls');
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
-  const filtered = url.get('from') !== '' || url.get('to') !== '' || url.get('status') !== '';
+  const filtered = !('all' in readListPeriod(url.get)) || url.get('status') !== '';
 
-  const search = new URLSearchParams(url.query);
+  const search = listPeriodSearch(url.query);
   search.set('limit', String(PAGE_SIZE));
 
   const live = useLiveInterval();
@@ -147,18 +148,10 @@ function PartnerCalls() {
           </select>
         </label>
 
-        <PeriodInput
-          label="С"
-          value={url.get('from')}
-          onChange={(from) => {
-            url.set({ from, offset: '' });
-          }}
-        />
-        <PeriodInput
-          label="По"
-          value={url.get('to')}
-          onChange={(to) => {
-            url.set({ to, offset: '' });
+        <ListPeriodPicker
+          value={readListPeriod(url.get)}
+          onChange={(period) => {
+            url.set({ ...listPeriodParams(period), offset: '' });
           }}
         />
 

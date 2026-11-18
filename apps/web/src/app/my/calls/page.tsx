@@ -16,7 +16,8 @@ import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
-import { PeriodInput } from '@/components/period-input';
+import { ListPeriodPicker } from '@/components/period-picker';
+import { listPeriodParams, listPeriodSearch, readListPeriod } from '@/lib/list-period';
 import { HintText, StatusDot, toneOf } from '@/components/status-dot';
 import { HEAD, NUM, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import {
@@ -99,7 +100,7 @@ function MyCalls() {
   const digits = typedNumber.replace(/\D/gu, '');
   const numberReady = digits.length >= MSISDN_DIGITS;
 
-  const search = new URLSearchParams(url.query);
+  const search = listPeriodSearch(url.query);
   if (!numberReady) search.delete('destination');
   search.set('limit', String(PAGE_SIZE));
 
@@ -165,18 +166,10 @@ function MyCalls() {
           />
         </label>
 
-        <PeriodInput
-          label="С"
-          value={url.get('from')}
-          onChange={(from) => {
-            url.set({ from, offset: '' });
-          }}
-        />
-        <PeriodInput
-          label="По"
-          value={url.get('to')}
-          onChange={(to) => {
-            url.set({ to, offset: '' });
+        <ListPeriodPicker
+          value={readListPeriod(url.get)}
+          onChange={(period) => {
+            url.set({ ...listPeriodParams(period), offset: '' });
           }}
         />
 
