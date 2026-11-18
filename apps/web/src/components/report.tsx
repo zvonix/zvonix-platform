@@ -266,7 +266,7 @@ export function Report({ config }: { config: ReportConfig }) {
           />
           <div className="ml-auto">
             <ExportButton
-              name={`сводка-${dimensionLabel.toLowerCase()}`}
+              name={`сводка-${dimensionLabel.toLowerCase().replace(/\s+/gu, '-')}`}
               load={() => {
                 const data = breakdown.data;
                 if (data === undefined) return Promise.reject(new Error('Разрез ещё не загружен'));
