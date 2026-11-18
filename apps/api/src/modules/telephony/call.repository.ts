@@ -55,7 +55,7 @@ export interface NumberAttempts {
 }
 export type CallRow = typeof calls.$inferSelect;
 
-/** Открытый вызов с клиентом — для счёта стоимости идущих разговоров (ADR-0125). */
+/** Открытый вызов с клиентом — для счёта стоимости идущих разговоров (ADR-0126). */
 export interface OpenCallSpend {
   readonly id: CallId;
   readonly externalId: string;
@@ -593,7 +593,7 @@ export class CallRepository {
   }
 
   /**
-   * Открытые вызовы с клиентом, свежие сверху ([ADR-0125](../../../../../docs/adr/0125-dengi-na-zvonok-bez-rezerva.md)).
+   * Открытые вызовы с клиентом, свежие сверху ([ADR-0126](../../../../../docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)).
    * Без клиента — всех клиентов разом: так проверка во время разговора видит, у кого вообще что-то идёт.
    * Граница по началу держит запрос на индексе `(status, started_at)`, как и подсчёт открытых на линии.
    */

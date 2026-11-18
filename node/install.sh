@@ -646,6 +646,9 @@ install -d -m 0700 "$NODE_ETC"
 # SIP-провайдеры партнёров (ADR-0118, GET /node/sip-gateways.xml): тот же ключ, другой адрес.
 ( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/sip-gateways.xml"\n' \
   "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/sip-gateways.curl" )
+# Доверенные адреса для fail2ban (ADR-0125, GET /node/trusted-addresses.txt): тот же ключ, другой адрес.
+( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/trusted-addresses.txt"\n' \
+  "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/trusted-addresses.curl" )
 # Связь с SIP-провайдерами (ADR-0121, POST /node/sip-gateways/status): тот же ключ, другой адрес.
 ( umask 077 && printf 'user = "%s:%s"\nurl = "%s/node/sip-gateways/status"\n' \
   "$KEY_ID" "$KEY_SECRET" "$CONTROL_PLANE" >"${NODE_ETC}/sip-gateways-status.curl" )
@@ -700,6 +703,40 @@ if curl -fsS --max-time 10 -K "${NODE_ETC}/sip-gateways.curl" -o "\$GW_NEW" 2>/d
   fi
 fi
 rm -f "\$GW_NEW"
+# Доверенные адреса (ADR-0125): откуда за неделю входили с верным паролем линии, шлюзы и линии GOIP. Они идут
+# в ignoreip обеих SIP-тюрем: свой клиент не блокируется за таймаут каталога (18.11.2026 тюрьма чужих логинов
+# закрыла живого клиента на сутки). Ответ без метки первой строкой или с чем-то кроме адресов — не применяется,
+# прежний файл остаётся. Список не изменился — fail2ban не трогается; изменился — перечитываются только две
+# SIP-тюрьмы (блокировки остаются), и с доверенных снимается блок, если он уже стоит.
+TRUST_NEW="${NODE_ETC}/trusted-addresses.new"
+TRUST_FILE=/etc/fail2ban/jail.d/zvonix-freeswitch-trusted.local
+if command -v fail2ban-client >/dev/null 2>&1 \\
+  && curl -fsS --max-time 10 -K "${NODE_ETC}/trusted-addresses.curl" -o "\$TRUST_NEW" 2>/dev/null \\
+  && [ "\$(head -n 1 "\$TRUST_NEW")" = '# zvonix-trusted' ] \\
+  && ! tail -n +2 "\$TRUST_NEW" | grep -qvE '^[0-9a-fA-F.:]{2,45}\$'; then
+  TRUSTED="\$(tail -n +2 "\$TRUST_NEW" | tr '\n' ' ')"
+  {
+    echo '# Доверенные адреса площадки (ADR-0125) — пишет пульс узла из GET /node/trusted-addresses.txt.'
+    echo '# Порождается node/install.sh, правится там; руками не править — перепишется через 30 секунд.'
+    for JAIL in zvonix-freeswitch zvonix-freeswitch-known; do
+      printf '[%s]\nignoreip = 127.0.0.1/8 ::1 %s\n' "\$JAIL" "\$TRUSTED"
+    done
+  } >"\$TRUST_NEW.local"
+  if ! cmp -s "\$TRUST_NEW.local" "\$TRUST_FILE"; then
+    install -m 0644 "\$TRUST_NEW.local" "\$TRUST_FILE"
+    for JAIL in zvonix-freeswitch zvonix-freeswitch-known; do
+      fail2ban-client reload "\$JAIL" >/dev/null 2>&1 || continue
+      BANNED=" \$(fail2ban-client get "\$JAIL" banip 2>/dev/null | tr '\n' ' ') "
+      for IP in \$TRUSTED; do
+        case "\$BANNED" in
+          *" \$IP "*) fail2ban-client set "\$JAIL" unbanip "\$IP" >/dev/null 2>&1 || true ;;
+        esac
+      done
+    done
+  fi
+  rm -f "\$TRUST_NEW.local"
+fi
+rm -f "\$TRUST_NEW"
 # Связь с провайдерами (ADR-0121): по каждому транку из файла — состояние регистрации и годность, как их видит
 # sofia. Без этого «провайдер не принимает звонки» было видно только по GATEWAY_DOWN в отказах. В сообщение идут
 # только имя, состояние, годность и код последнего отказа — ни адреса, ни учётных данных.
@@ -902,11 +939,73 @@ echo "Состояние: $("$FS_CLI" -x "sofia status gateway $NAME" 2>/dev/nul
 SIPCHECK
 chmod 0700 /usr/local/sbin/zvonix-sip-check
 
+# --- Блокировки fail2ban (ADR-0125): список и снятие из кабинета --------------
+# Кабинет «Узлы АТС» → «Блокировки»: кто заблокирован, в какой тюрьме и до какого времени, и снять блок с одного
+# адреса. Через службу команд, как проверка связи. Только чтение списка и снятие одного адреса — ничего другого
+# эти скрипты не делают. Ответ: первая строка «ИТОГ: …», дальше блокировка на строку —
+# «<тюрьма> <адрес> <до, секунды эпохи или ->». Тюрьмы — коротко: f — SIP чужие логины, k — SIP свои, s — SSH:
+# ответ узла обрезается на 16000 знаков, и короткая строка вмещает больше адресов.
+cat >/usr/local/sbin/zvonix-bans <<'BANS'
+#!/bin/sh
+# Список блокировок fail2ban узла (ADR-0125) — порождается node/install.sh, правится там.
+set -u
+command -v fail2ban-client >/dev/null 2>&1 || { echo 'ИТОГ: fail2ban на узле не установлен'; exit 0; }
+LIST="$(mktemp)"
+trap 'rm -f "$LIST"' EXIT
+for PAIR in f:zvonix-freeswitch k:zvonix-freeswitch-known s:sshd; do
+  CODE="${PAIR%%:*}"
+  JAIL="${PAIR#*:}"
+  fail2ban-client status "$JAIL" >/dev/null 2>&1 || continue
+  # fail2ban 1.0: «адрес <таб>начало + длительность = конец»; старый не знает --with-time — тогда без срока.
+  OUT="$(fail2ban-client get "$JAIL" banip --with-time 2>/dev/null)" || OUT=""
+  if [ -z "$OUT" ]; then
+    OUT="$(fail2ban-client get "$JAIL" banip 2>/dev/null | tr ' ' '\n')"
+  fi
+  printf '%s\n' "$OUT" | while IFS= read -r LINE; do
+    IP="$(printf '%s' "$LINE" | awk '{print $1}' | tr -cd '0-9a-fA-F.:')"
+    [ -n "$IP" ] || continue
+    END="$(printf '%s' "$LINE" | sed -n 's/.* = \([0-9-]\{10\} [0-9:]\{8\}\).*/\1/p')"
+    UNTIL=-
+    [ -n "$END" ] && UNTIL="$(date -d "$END" +%s 2>/dev/null | tr -cd '0-9')"
+    echo "$CODE $IP ${UNTIL:--}"
+  done
+done >"$LIST"
+echo "ИТОГ: блокировок $(wc -l <"$LIST" | tr -d ' ')"
+cat "$LIST"
+BANS
+chmod 0700 /usr/local/sbin/zvonix-bans
+
+cat >/usr/local/sbin/zvonix-unban <<'UNBAN'
+#!/bin/sh
+# Снять блокировку одного адреса во всех тюрьмах узла (ADR-0125) — порождается node/install.sh, правится там.
+set -u
+IP="${1:-}"
+# Только адрес: цифры, точки, двоеточия, до 45 знаков. Площадка проверяет то же, но узел верит только себе.
+case "$IP" in
+  '' | *[!0-9a-fA-F.:]*) echo 'ИТОГ: неверный адрес'; exit 0 ;;
+esac
+[ "${#IP}" -le 45 ] || { echo 'ИТОГ: неверный адрес'; exit 0; }
+command -v fail2ban-client >/dev/null 2>&1 || { echo 'ИТОГ: fail2ban на узле не установлен'; exit 0; }
+DONE=""
+for JAIL in zvonix-freeswitch zvonix-freeswitch-known sshd; do
+  case " $(fail2ban-client get "$JAIL" banip 2>/dev/null | tr '\n' ' ') " in
+    *" $IP "*) fail2ban-client set "$JAIL" unbanip "$IP" >/dev/null 2>&1 && DONE="$DONE $JAIL" ;;
+  esac
+done
+if [ -n "$DONE" ]; then
+  echo "ИТОГ: блокировка снята"
+  echo "Тюрьмы:$DONE"
+else
+  echo 'ИТОГ: адрес не заблокирован'
+fi
+UNBAN
+chmod 0700 /usr/local/sbin/zvonix-unban
+
 # --- Служба команд узла (ADR-0115, GET /node/commands) -------------------------
 # Тестовый звонок и сброс входа площадка отдаёт по ESL только узлу своей машины. Узел на отдельной
-# машине сам забирает их долгим запросом, выполняет и присылает ответ. Выполняет только четыре
-# разрешённые команды (звонок, сброс входа, проверка связи, обрыв разговора по UUID) — прочие отвергает.
-# ESL наружу не открывается.
+# машине сам забирает их долгим запросом, выполняет и присылает ответ. Выполняет только шесть
+# разрешённых команд (звонок, сброс входа, проверка связи, список и снятие блокировки, обрыв разговора по UUID) —
+# прочие отвергает. ESL наружу не открывается.
 # Ключ — в файле только для root, в аргументы процесса не попадает; адрес — в самом скрипте.
 
 ( umask 077 && printf 'user = "%s:%s"\n' "$KEY_ID" "$KEY_SECRET" >"${NODE_ETC}/commands.curl" )
@@ -948,7 +1047,12 @@ while :; do
     # Проверка связи с провайдером (ADR-0122): свой скрипт, имя транка он чистит и ищет в файле сам.
     'zvonix-sip-check '*)
       ( report "$ID" "$(/usr/local/sbin/zvonix-sip-check "${API#zvonix-sip-check }" 2>&1 | head -c 8000)" ) & ;;
-    # Обрыв разговора, когда у клиента кончились деньги (ADR-0125): строго UUID канала, ничего больше.
+    # Блокировки fail2ban (ADR-0125): список — только чтение; снятие — одного адреса, адрес скрипт проверяет сам.
+    'zvonix-bans')
+      ( report "$ID" "$(/usr/local/sbin/zvonix-bans 2>&1 | head -c 16000)" ) & ;;
+    'zvonix-unban '*)
+      ( report "$ID" "$(/usr/local/sbin/zvonix-unban "${API#zvonix-unban }" 2>&1 | head -c 2000)" ) & ;;
+    # Обрыв разговора, когда у клиента кончились деньги (ADR-0126): строго UUID канала, ничего больше.
     'uuid_kill '*)
       CALL="${API#uuid_kill }"
       if printf '%s' "$CALL" | grep -Eqx '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'; then

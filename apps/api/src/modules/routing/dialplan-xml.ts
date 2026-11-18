@@ -68,7 +68,7 @@ export interface RoutePlan {
   readonly callerId: string | null;
   readonly realm: string;
   /**
-   * Предел длительности: на нём узел кладёт трубку сам (`sched_hangup`, ADR-0125). Защита от зависшего вызова,
+   * Предел длительности: на нём узел кладёт трубку сам (`sched_hangup`, ADR-0126). Защита от зависшего вызова,
    * который иначе висел бы, пока его не закроет уборка, — с занятой SIM и растущей стоимостью.
    */
   readonly maxDurationSeconds: number;

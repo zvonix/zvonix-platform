@@ -3,7 +3,7 @@
  *
  * Здесь проверяются инварианты, которые не проверяются больше нигде и стоят денег:
  * одновременность на SIM и деньги на звонок — старт по доступному за вычетом идущих разговоров
- * и обрыв самых новых, когда клиент вышел за свой минус (ADR-0125). Без настоящей PostgreSQL
+ * и обрыв самых новых, когда клиент вышел за свой минус (ADR-0126). Без настоящей PostgreSQL
  * они не проверяются вовсе.
  */
 
@@ -187,7 +187,7 @@ async function route(channel: string, destination: string, callId = unique('call
   return post('/routing/preview', { callId, channelId: channel, nodeId, destination });
 }
 
-/** Сколько резервов у клиента — их больше не создаёт никто (ADR-0125). */
+/** Сколько резервов у клиента — их больше не создаёт никто (ADR-0126). */
 async function reservationsOf(client: string): Promise<number> {
   return withDatabase(async (execute) => {
     const result = await execute(
@@ -363,7 +363,7 @@ describe('успешный маршрут', () => {
     // SIM стоит в порту 1 GOIP: узел выберет её линию префиксом (ADR-0053).
     expect(decision.candidates[0]?.line_prefix).toBe('99001');
 
-    // Резерва под разговор нет (ADR-0125): деньги держит проверка во время разговора.
+    // Резерва под разговор нет (ADR-0126): деньги держит проверка во время разговора.
     expect(await reservationsOf(env.client)).toBe(0);
   });
 
@@ -489,7 +489,7 @@ describe('одновременность на SIM', () => {
   });
 });
 
-describe('деньги на старте (ADR-0125)', () => {
+describe('деньги на старте (ADR-0126)', () => {
   it('10 копеек — звонок начинается: резерва под разговор нет', async () => {
     // Прежде резерв часа (60 ₽) не давал звонить и с полусотней рублей на счету — живой случай 2026-11-18.
     const env = await scenario({ deposit: '0.10' });
@@ -598,7 +598,7 @@ describe('деньги на старте (ADR-0125)', () => {
   });
 });
 
-describe('проверка во время разговора (ADR-0125)', () => {
+describe('проверка во время разговора (ADR-0126)', () => {
   async function cutOffOf(callId: string | null): Promise<{ status: string; cut: string | null }> {
     return withDatabase(async (execute) => {
       const result = await execute(

@@ -44,7 +44,7 @@ export type CallStatus = (typeof CALL_STATUSES)[number];
 
 /**
  * Состояния, в которых вызов занимает ресурс: место на SIM и деньги клиента — его стоимость
- * на сейчас считается против доступного ([ADR-0125](../../../docs/adr/0125-dengi-na-zvonok-bez-rezerva.md)).
+ * на сейчас считается против доступного ([ADR-0126](../../../docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)).
  *
  * По ним считается одновременность на SIM. `routing` входит намеренно: между выдачей
  * маршрута и первым гудком проходит время, и если в этот промежуток SIM считается
@@ -98,7 +98,7 @@ export const CALL_FAILURE_REASONS = [
   'no_tariff',
   /**
    * Звонок не начат: остатка и разрешённого минуса за вычетом идущих разговоров нет или не хватает на плату
-   * за соединение ([ADR-0125](../../../docs/adr/0125-dengi-na-zvonok-bez-rezerva.md)).
+   * за соединение ([ADR-0126](../../../docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)).
    */
   'insufficient_funds',
   /** Исчерпано окно лимита. */
@@ -170,7 +170,7 @@ export const CLIENT_FAILURE_REASONS = [
   'operator_unconfirmed',
   /** Оператор не входит в список, разрешённый каналом. Настройка самого клиента. */
   'operator_not_allowed',
-  /** Звонок не начат: нет денег (ADR-0125). */
+  /** Звонок не начат: нет денег (ADR-0126). */
   'insufficient_funds',
   /** Исчерпано окно лимита клиента или канала. */
   'limit_exceeded',
@@ -207,7 +207,7 @@ export function clientFailureReasonOf(reason: CallFailureReason): ClientFailureR
 }
 
 /**
- * Почему площадка оборвала идущий разговор ([ADR-0125](../../../docs/adr/0125-dengi-na-zvonok-bez-rezerva.md)).
+ * Почему площадка оборвала идущий разговор ([ADR-0126](../../../docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)).
  *
  * `balance_exhausted` — клиент вышел за свой разрешённый минус, и проверка во время разговора оборвала
  * самые новые его звонки.
@@ -219,7 +219,7 @@ export const CALL_CUT_OFF_REASONS = ['balance_exhausted'] as const;
 export type CallCutOffReason = (typeof CALL_CUT_OFF_REASONS)[number];
 
 /**
- * Состояние резерва (ADR-0010). Новые резервы не создаются с ADR-0125: оставшиеся закрывает CDR
+ * Состояние резерва (ADR-0010). Новые резервы не создаются с ADR-0126: оставшиеся закрывает CDR
  * или срок, и история остаётся в базе.
  *
  * `held`     — средства придержаны на время вызова;

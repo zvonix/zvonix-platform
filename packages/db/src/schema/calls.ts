@@ -110,7 +110,7 @@ export const calls = pgTable(
 
     /**
      * Почему площадка оборвала идущий разговор: `balance_exhausted` — клиент вышел за свой разрешённый минус
-     * ([ADR-0125](../../../../docs/adr/0125-dengi-na-zvonok-bez-rezerva.md)). Ставится только после того, как узел
+     * ([ADR-0126](../../../../docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)). Ставится только после того, как узел
      * подтвердил обрыв; отметка заодно не даёт обрывать вызов второй раз. Пусто — не обрывали.
      */
     cutOffReason: text().$type<CallCutOffReason>(),

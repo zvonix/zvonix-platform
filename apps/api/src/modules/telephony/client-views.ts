@@ -77,7 +77,7 @@ export interface ClientCallView {
   readonly status: CallStatus;
   readonly failure_reason: ClientFailureReason | null;
   /**
-   * Почему площадка оборвала разговор: `balance_exhausted` — кончились деньги (ADR-0125). Как есть, без перевода:
+   * Почему площадка оборвала разговор: `balance_exhausted` — кончились деньги (ADR-0126). Как есть, без перевода:
    * это про самого клиента, а не про устройство площадки.
    */
   readonly cut_off_reason: CallCutOffReason | null;

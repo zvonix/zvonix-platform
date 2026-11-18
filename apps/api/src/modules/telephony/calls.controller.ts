@@ -32,7 +32,7 @@ interface CallView {
   readonly destination: string;
   readonly status: string;
   readonly failure_reason: string | null;
-  /** Почему площадка оборвала разговор: `balance_exhausted` (ADR-0125). Пусто — не обрывали. */
+  /** Почему площадка оборвала разговор: `balance_exhausted` (ADR-0126). Пусто — не обрывали. */
   readonly cut_off_reason: string | null;
   readonly duration_seconds: number | null;
   readonly started_at: string;

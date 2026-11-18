@@ -90,7 +90,7 @@ import { LimitOwnersService } from './limit-owners.service.js';
     QualityService,
     RegistrationsService,
     CallPaceService,
-    // Деньги идущих разговоров (ADR-0125): маршрутизации — на старте, воркеру — проверка каждые 15 секунд.
+    // Деньги идущих разговоров (ADR-0126): маршрутизации — на старте, воркеру — проверка каждые 15 секунд.
     CallSpendService,
   ],
 })

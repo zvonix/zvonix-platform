@@ -95,3 +95,8 @@ export const heartbeatSchema = z.object({
     .regex(/^[0-9a-f]{6,64}$/u, 'не похожа на версию набора')
     .optional(),
 });
+
+/** Снять блокировку fail2ban с одного адреса на узле (ADR-0125). */
+export const unbanSchema = z.object({
+  address: ipAddress,
+});

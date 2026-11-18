@@ -61,7 +61,7 @@ interface Call {
   readonly destination: string;
   readonly status: CallStatus;
   readonly failure_reason: ClientFailureReason | null;
-  /** Почему площадка оборвала разговор (ADR-0125); пусто — не обрывали. */
+  /** Почему площадка оборвала разговор (ADR-0126); пусто — не обрывали. */
   readonly cut_off_reason: CallCutOffReason | null;
   readonly duration_seconds: number | null;
   /** Списано за вызов, ₽; пусто — списания не было (отказ или ноль секунд). */

@@ -14,8 +14,11 @@ import { CurrentMachine } from '../../http/request-context.js';
 import type { MachinePrincipal } from '../machine/machine.service.js';
 import { NodeCommandsService } from './node-commands.service.js';
 
-/** Потолок ответа FreeSWITCH, который храним: `+OK <uuid>` или `-ERR <ПРИЧИНА>` — строка, а не выгрузка. */
-const MAX_REPLY_CHARS = 4000;
+/**
+ * Потолок ответа узла, который храним. Ответ FreeSWITCH — строка (`+OK <uuid>`, `-ERR <ПРИЧИНА>`), но список блокировок
+ * fail2ban (ADR-0125) — сотни адресов по строке: у открытого сервера SSH перебирают постоянно.
+ */
+const MAX_REPLY_CHARS = 16_000;
 
 @Controller('node/commands')
 export class NodeCommandsController {
