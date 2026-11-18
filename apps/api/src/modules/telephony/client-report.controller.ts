@@ -144,6 +144,26 @@ export class ClientReportController {
     };
   }
 
+  /**
+   * Пароль своей линии — по «глазу» на странице линии (ADR-0124). Владение — из сессии, чужая линия — `404`; показ —
+   * в журнале. `null` — пароль выдан до обновления и не восстанавливается.
+   */
+  @Cabinets('client')
+  @Get('client/channels/:id/secret')
+  async secret(
+    @CurrentUser() actor: Principal,
+    @Param('id') id: string,
+  ): Promise<{ password: string | null }> {
+    const client = await this.billing.requireClientOwnedBy(actor.userId);
+    const password = await this.telephony.revealChannelSecret(
+      parseId(id, 'channel'),
+      client.id,
+      actor.userId,
+      actor.role,
+    );
+    return { password };
+  }
+
   /** Новый доступ своей линии: прежний перестаёт работать. */
   @Cabinets('client')
   @Post('client/channels/:id/credentials')

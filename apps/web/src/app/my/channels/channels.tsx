@@ -2,9 +2,9 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { ChannelStatus, ChannelSuspendedBy } from '@zvonix/shared';
-import { StatusDot } from '@/components/status-dot';
+import { StatusDot, type StatusTone } from '@/components/status-dot';
 import { request } from '@/lib/api';
-import { moment } from '@/lib/format';
+import { channelState } from '@/lib/channel-state';
 
 /**
  * Линии клиента — общее для списка и страницы линии
@@ -20,6 +20,8 @@ export interface Channel {
   readonly comment: string | null;
   readonly max_concurrent_calls: number | null;
   readonly sip_username: string;
+  /** Хранится ли пароль для показа (ADR-0124): нет — выдан до обновления. */
+  readonly has_secret: boolean;
   readonly connection: {
     readonly connected: boolean;
     readonly seen_at: string | null;
@@ -48,20 +50,6 @@ export function useChannels() {
   });
 }
 
-/** Состояние глазами клиента: кто выключил — от этого зависит, включит ли он сам. */
-function channelStateName(channel: Pick<Channel, 'status' | 'suspended_by'>): string {
-  switch (channel.status) {
-    case 'active':
-      return 'Работает';
-    case 'pending':
-      return 'Ждёт площадку';
-    case 'suspended':
-      return channel.suspended_by === 'client' ? 'Выключена' : 'Выключена площадкой';
-    case 'closed':
-      return 'Удалена';
-  }
-}
-
 /** Клиент сам распоряжается линией: работающей или выключенной им же. */
 export function ownedByClient(channel: Pick<Channel, 'status' | 'suspended_by'>): boolean {
   return (
@@ -70,76 +58,28 @@ export function ownedByClient(channel: Pick<Channel, 'status' | 'suspended_by'>)
   );
 }
 
-/** Что значит состояние и кто может его сменить — подсказкой к точке в таблице линий. */
-function channelStateReason(channel: Pick<Channel, 'status' | 'suspended_by'>): string | undefined {
-  switch (channel.status) {
-    case 'active':
-      return undefined;
-    case 'pending':
-      return 'линию ещё не включила площадка — звонить по ней пока нельзя';
-    case 'suspended':
-      return channel.suspended_by === 'client'
-        ? 'вызовы не идут; включить можно на странице линии'
-        : 'вызовы не идут; включить её может только площадка — напишите в поддержку';
-    case 'closed':
-      return 'линия удалена навсегда';
-  }
-}
-
 /**
- * Состояние линии в строке таблицы — точкой и словами, без плашки
- * ([DESIGN.md](../../../../../../docs/DESIGN.md), «Таблица»).
+ * Состояние линии в строке таблицы — одна точка и одно слово (`channelState`): «Подключена», «Работает», «Ждёт
+ * программу», «Выключена»… Подробности — в подсказке ([DESIGN.md](../../../../../../docs/DESIGN.md), «Таблица»).
  */
-export function StateDot({ channel }: { channel: Pick<Channel, 'status' | 'suspended_by'> }) {
-  return (
-    <StatusDot
-      tone={channel.status === 'active' ? 'ok' : 'warn'}
-      label={channelStateName(channel)}
-      reason={channelStateReason(channel)}
-    />
-  );
+export function ChannelStateDot({ channel }: { channel: Channel }) {
+  const state = channelState(channel, 'client');
+  return <StatusDot tone={state.tone} label={state.label} reason={state.reason} />;
 }
 
-/** Состояние меткой — в шапке страницы одной линии (DESIGN.md, «Окно, страница или панель», исключение). */
-export function StateBadge({ channel }: { channel: Pick<Channel, 'status' | 'suspended_by'> }) {
+/** То же меткой — в шапке страницы одной линии (DESIGN.md, «Окно, страница или панель», исключение). */
+export function ChannelStateBadge({ channel }: { channel: Channel }) {
+  const state = channelState(channel, 'client');
   return (
-    <span
-      className={`rounded-md px-2 py-0.5 ${channel.status === 'active' ? 'bg-ok-soft text-ok' : 'bg-warn-soft text-warn'}`}
-    >
-      {channelStateName(channel)}
+    <span className={`rounded-md px-2 py-0.5 ${BADGE[state.tone]}`} title={state.reason}>
+      {state.label}
     </span>
   );
 }
 
-/**
- * Подключена ли программа. Выключенной линии подключаться некуда — прочерк. Не подключена, но звонила — время
- * последнего вызова: программа без регистрации звонит и так, и «сломана» было бы неправдой (ADR-0101, п. 2).
- */
-export function ConnectionState({ channel }: { channel: Channel }) {
-  if (channel.status !== 'active') return <span className="text-faint">—</span>;
-  // Одной строкой: адрес программы и время последнего вызова — в подсказке к точке (DESIGN.md, «Таблица»).
-  if (channel.connection.connected) {
-    return (
-      <StatusDot
-        tone="ok"
-        label="Подключена"
-        reason={
-          channel.connection.address === null
-            ? undefined
-            : `адрес программы ${channel.connection.address}`
-        }
-      />
-    );
-  }
-  return (
-    <StatusDot
-      tone="warn"
-      label="Не подключена"
-      reason={
-        channel.last_call_at == null
-          ? undefined
-          : `последний вызов ${moment(channel.last_call_at)} — программа без подключения всё равно звонит`
-      }
-    />
-  );
-}
+const BADGE: Record<StatusTone, string> = {
+  ok: 'bg-ok-soft text-ok',
+  warn: 'bg-warn-soft text-warn',
+  crit: 'bg-crit-soft text-crit',
+  off: 'bg-muted text-muted-foreground',
+};

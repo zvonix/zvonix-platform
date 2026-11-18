@@ -21,9 +21,9 @@ import {
 } from '@/components/ui/table';
 import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
 import { request } from '@/lib/api';
-import { CHANNELS_KEY, ConnectionState, StateDot, useChannels, type Channel } from './channels';
+import { CHANNELS_KEY, ChannelStateDot, useChannels, type Channel } from './channels';
 
-const COLUMNS = 4;
+const COLUMNS = 3;
 
 export default function MyChannelsPage() {
   return (
@@ -65,13 +65,13 @@ function MyChannels() {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <FormDialog
-          label="Получить линию"
+          label="Добавить линию"
           title="Новая линия"
           variant="outline"
           disabled={list.data === undefined || full}
         >
           <DialogForm
-            submitLabel="Получить линию"
+            submitLabel="Добавить линию"
             canSubmit
             onSubmit={async () => {
               await create.mutateAsync(name.trim());
@@ -117,7 +117,6 @@ function MyChannels() {
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className={HEAD}>Линия</TableHead>
-              <TableHead className={HEAD}>Подключение</TableHead>
               <TableHead className={HEAD}>Состояние</TableHead>
               <TableHead className={`${HEAD} text-right`}>Разговоров сейчас</TableHead>
             </TableRow>
@@ -151,11 +150,9 @@ function MyChannels() {
                     {channel.name}
                   </Link>
                 </TableCell>
+                {/* Одна колонка: подключение и состояние вместе (владелец, 2026-11-18: две рядом — нелогично). */}
                 <TableCell>
-                  <ConnectionState channel={channel} />
-                </TableCell>
-                <TableCell>
-                  <StateDot channel={channel} />
+                  <ChannelStateDot channel={channel} />
                 </TableCell>
                 <TableCell className={NUM}>
                   {channel.open_calls ?? 0}

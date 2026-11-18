@@ -110,7 +110,7 @@ function Integration() {
 
       <div className="flex items-center gap-2">
         <FormDialog
-          label="Создать ключ"
+          label="Добавить ключ"
           title="Новый ключ"
           description="Секрет покажется один раз — сразу после создания."
         >
@@ -242,7 +242,7 @@ function AddKey({ onIssued }: { onIssued: (key: IssuedKey, label: string) => Pro
 
   return (
     <DialogForm
-      submitLabel="Создать и показать секрет"
+      submitLabel="Добавить и показать секрет"
       canSubmit={label.trim() !== ''}
       onSubmit={() => add.mutateAsync()}
     >

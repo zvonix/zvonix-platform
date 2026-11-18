@@ -227,11 +227,11 @@ const DIALOGS: Partial<Record<Role, { route: string; open: (page: Page) => Promi
   client: {
     route: '/my/integration',
     open: async (page) => {
-      await page.getByRole('button', { name: 'Создать ключ' }).click();
+      await page.getByRole('button', { name: 'Добавить ключ' }).click();
       await page.getByLabel('Назначение').fill('Ключ для проверки окна');
       await page
         .getByRole('dialog')
-        .getByRole('button', { name: 'Создать и показать секрет' })
+        .getByRole('button', { name: 'Добавить и показать секрет' })
         .click();
       await page.getByRole('button', { name: 'Отозвать' }).first().click();
     },

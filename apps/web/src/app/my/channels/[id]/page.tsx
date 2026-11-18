@@ -8,6 +8,7 @@ import { useState, type ReactNode } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { ConsoleShell } from '@/components/console-shell';
 import { CopyButton } from '@/components/copy-button';
+import { ChannelPassword } from '@/components/channel-password';
 import { SipServer } from '@/components/sip-server';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
@@ -33,9 +34,8 @@ import { integerFromInput, money } from '@/lib/money';
 import { asr, useBreakdown } from '@/lib/reports';
 import { ChannelSettings } from '../channel-settings';
 import {
+  ChannelStateBadge,
   CHANNELS_KEY,
-  ConnectionState,
-  StateBadge,
   ownedByClient,
   useChannels,
   type Channel,
@@ -98,7 +98,7 @@ function ChannelCard({ id }: { id: string }) {
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <h2 className="text-lg font-semibold">{channel.name}</h2>
-          <StateBadge channel={channel} />
+          <ChannelStateBadge channel={channel} />
         </div>
         {channel.comment !== null && (
           <p className="max-w-prose whitespace-pre-line text-muted-foreground">{channel.comment}</p>
@@ -326,14 +326,13 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** Что вписать в программу: секрета здесь нет, пароль — только «Новым паролем» (ADR-0101, п. 7). */
+/**
+ * Что вписать в программу. Пароль — по «глазу» (ADR-0124); подключена ли программа — в шапке страницы, здесь второй
+ * раз не повторяется.
+ */
 function ConnectionTab({ channel, server }: { channel: Channel; server: string | null }) {
   return (
     <div className="flex flex-col gap-4">
-      <p className="flex flex-wrap items-baseline gap-2">
-        <span className="text-muted-foreground">Сейчас:</span>
-        <ConnectionState channel={channel} />
-      </p>
       <dl className="grid max-w-xl grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2">
         <Field label="Сервер">
           {server === null ? (
@@ -357,9 +356,10 @@ function ConnectionTab({ channel, server }: { channel: Channel; server: string |
           <CopyButton value={channel.sip_username} label="Скопировать имя" />
         </Field>
         <Field label="Пароль">
-          <span className="text-muted-foreground">
-            выдаётся один раз — потерян, нажмите «Новый пароль»
-          </span>
+          <ChannelPassword
+            endpoint={`/client/channels/${channel.id}/secret`}
+            hasSecret={channel.has_secret}
+          />
         </Field>
         <Field label="Кодеки">
           <span className="num">PCMA, PCMU, G.729</span>

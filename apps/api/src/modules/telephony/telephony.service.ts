@@ -32,7 +32,12 @@ import {
   OWN_CHANNELS_MAX,
   type ChannelSuspendedBy,
 } from '@zvonix/shared';
-import { decryptSecret, encryptSecret, SIP_TRUNK_SECRET_PURPOSE } from '../../infra/secret-box.js';
+import {
+  CHANNEL_SIP_SECRET_PURPOSE,
+  decryptSecret,
+  encryptSecret,
+  SIP_TRUNK_SECRET_PURPOSE,
+} from '../../infra/secret-box.js';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
 import { AuditService } from '../audit/audit.service.js';
 import { BillingRepository } from '../billing/billing.repository.js';
@@ -619,6 +624,7 @@ export class TelephonyService {
       status: input.status ?? 'pending',
       sipUsername: credentials.username,
       a1Hash: credentials.a1Hash,
+      sipSecret: this.sealChannelSecret(credentials.password),
       recordingRequired: input.recordingRequired,
       callerId: input.callerId,
     });
@@ -763,6 +769,7 @@ export class TelephonyService {
       id,
       credentials.username,
       credentials.a1Hash,
+      this.sealChannelSecret(credentials.password),
     );
     if (updated === undefined) throw notFound('Канал не найден');
     // Программа со старым паролем не должна числиться подключённой до конца срока регистрации (ADR-0101, п. 3).
@@ -2100,6 +2107,53 @@ export class TelephonyService {
     });
 
     return after.map((row) => ({ region: row.region, regionKey: row.regionKey }));
+  }
+
+  /**
+   * Пароль линии — показать по «глазу» в кабинете ([ADR-0124](../../../../../docs/adr/0124-vosstanovimyy-parol-linii-klienta.md)).
+   * Только по нажатию, не в списке; каждый показ — в журнале. `clientId` — из кабинета клиента (из сессии): чужая
+   * линия не находится. `null` — пароль выдан до ADR-0124 и не восстанавливается.
+   */
+  async revealChannelSecret(
+    id: ChannelId,
+    clientId: Id<'client'> | undefined,
+    actorUserId: Id<'user'>,
+    actorRole: UserRole,
+  ): Promise<string | null> {
+    const channel = await this.repository.findChannel(id);
+    if (channel === undefined || (clientId !== undefined && channel.clientId !== clientId)) {
+      throw notFound('Канал не найден');
+    }
+    const password = this.openChannelSecret(channel.sipSecret, id);
+    await this.audit.record({
+      action: 'channel.secret_viewed',
+      entityType: 'channel',
+      entityId: id,
+      actorUserId,
+      actorRole,
+      before: null,
+      after: { has_secret: password !== null },
+    });
+    return password;
+  }
+
+  /** Пароль линии в базе — только зашифрованным (ADR-0124). */
+  private sealChannelSecret(plain: string): string {
+    return encryptSecret(plain, this.config.SECRET_KEY, CHANNEL_SIP_SECRET_PURPOSE);
+  }
+
+  /**
+   * Расшифровка пароля линии. Не вышло (сменили `SECRET_KEY`, испорчены данные) — ошибка, а не `null`: `null` значит
+   * «пароль выдан до обновления», и тихая подмена соврала бы клиенту о причине.
+   */
+  private openChannelSecret(stored: string | null, id: ChannelId): string | null {
+    if (stored === null) return null;
+    try {
+      return decryptSecret(stored, this.config.SECRET_KEY, CHANNEL_SIP_SECRET_PURPOSE);
+    } catch (cause) {
+      this.logger.error('Пароль линии не расшифровывается', cause, { channel_id: id });
+      throw cause;
+    }
   }
 
   /**
