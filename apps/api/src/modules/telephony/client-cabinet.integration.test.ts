@@ -673,6 +673,62 @@ describe('свои линии', () => {
     expect((await post('/client/channels', {}, as(owner.token))).statusCode).toBe(409);
   }, 120_000);
 
+  it('пароль линии виден по запросу клиенту и администратору, показ — в журнале (ADR-0124)', async () => {
+    const owner = await createClientUser();
+    const clientId = (
+      await post('/clients', { ownerUserId: owner.userId, name: unique('Глаз') })
+    ).json<{ client: { id: string } }>().client.id;
+    expect((await patch(`/clients/${clientId}/status`, { status: 'active' })).statusCode).toBe(200);
+
+    const created = await post('/client/channels', {}, as(owner.token));
+    const { channel, account } = created.json<{
+      channel: { id: string; has_secret: boolean };
+      account: { password: string };
+    }>();
+    expect(channel.has_secret).toBe(true);
+
+    // Клиент — свою линию, тот же пароль, что выдан.
+    const own = await get(`/client/channels/${channel.id}/secret`, as(owner.token));
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toEqual({ password: account.password });
+
+    // Новый пароль — показывается уже он.
+    const renewed = (
+      await post(`/client/channels/${channel.id}/credentials`, {}, as(owner.token))
+    ).json<{ account: { password: string } }>().account.password;
+    expect((await get(`/client/channels/${channel.id}/secret`, as(owner.token))).json()).toEqual({
+      password: renewed,
+    });
+
+    // Администратор — тот же пароль; в базе он только зашифрованным.
+    expect((await get(`/channels/${channel.id}/secret`)).json()).toEqual({ password: renewed });
+    const stored = await withDatabase((execute) =>
+      execute(sql`select sip_secret from channels where id = ${channel.id}`),
+    );
+    expect((stored.rows[0] as { sip_secret: string }).sip_secret).not.toContain(renewed);
+
+    // Каждый показ — в журнале.
+    const viewed = await withDatabase((execute) =>
+      execute(
+        sql`select count(*)::int as n from audit_log where action = 'channel.secret_viewed' and entity_id = ${channel.id}`,
+      ),
+    );
+    expect((viewed.rows[0] as { n: number }).n).toBe(3);
+
+    // Выданный до обновления пароль не восстанавливается: `null`, а не ошибка.
+    await withDatabase((execute) =>
+      execute(sql`update channels set sip_secret = null where id = ${channel.id}`),
+    );
+    expect((await get(`/client/channels/${channel.id}/secret`, as(owner.token))).json()).toEqual({
+      password: null,
+    });
+
+    // Чужая линия — как несуществующая.
+    expect((await get(`/client/channels/${rich.channel}/secret`, as(owner.token))).statusCode).toBe(
+      404,
+    );
+  }, 120_000);
+
   it('чужие не показываются', async () => {
     const channels = (await get('/client/channels', as(poor.token))).json<{
       channels: { id: string }[];

@@ -1577,8 +1577,12 @@ test.describe('кабинет клиента', () => {
     await page.getByRole('link', { name: 'Ночная смена' }).click();
     await expect(page).toHaveURL(/\/my\/channels\/[0-9a-f-]+$/u);
     await expect(page.getByRole('tab', { name: 'Подключение' })).toBeVisible();
-    await expect(page.getByText('Не подключена')).toBeVisible();
+    // Одно состояние вместо двух колонок: новая линия ждёт программу (владелец, 2026-11-18).
+    await expect(page.getByText('Ждёт программу').first()).toBeVisible();
     await expect(page.getByText(/^ch-[0-9a-z]{12}$/u)).toBeVisible();
+    // Пароль — по «глазу», каждый показ в журнале (ADR-0124).
+    await page.getByRole('button', { name: 'Показать пароль' }).click();
+    await expect(page.getByLabel('Пароль линии')).not.toHaveValue('');
 
     await page.getByRole('button', { name: 'Изменить' }).click();
     await page.getByRole('dialog').getByLabel('Комментарий').fill('Резерв на ночь');
@@ -1589,7 +1593,7 @@ test.describe('кабинет клиента', () => {
     await page.getByRole('alertdialog').getByRole('button', { name: 'Выключить' }).click();
     await expect(page.getByText('Выключена', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Включить' }).click();
-    await expect(page.getByText('Работает', { exact: true })).toBeVisible();
+    await expect(page.getByText('Ждёт программу').first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Удалить' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Удалить навсегда' }).click();

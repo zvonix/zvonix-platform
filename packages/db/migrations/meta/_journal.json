@@ -694,6 +694,13 @@
       "when": 1794923579622,
       "tag": "0098_sip_trunks_auth_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1794985469281,
+      "tag": "0099_channels_sip_secret",
+      "breakpoints": true
     }
   ]
 }

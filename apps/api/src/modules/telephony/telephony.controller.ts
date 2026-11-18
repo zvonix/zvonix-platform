@@ -9,7 +9,9 @@ import { Cabinets, Roles } from '../../http/auth.guard.js';
 import { CurrentUser } from '../../http/request-context.js';
 import { zodBody } from '../../http/zod.pipe.js';
 import type { Principal } from '../identity/identity.service.js';
+import type { ChannelActivity } from './call.repository.js';
 import { CallPaceService, pacedSim, toPaceView, type NumberPaceView } from './call-pace.service.js';
+import { CallsService } from './calls.service.js';
 import {
   deviceConnection,
   isRegistered,
@@ -118,6 +120,10 @@ interface ChannelView {
     readonly seen_at: string | null;
     readonly address: string | null;
   };
+  /** Хранится ли пароль для показа (ADR-0124): нет — выдан до обновления. */
+  readonly has_secret: boolean;
+  /** Последний вызов — только в списке. */
+  readonly last_call_at?: string | null;
 }
 
 /**
@@ -173,6 +179,7 @@ export class TelephonyController {
   constructor(
     private readonly telephony: TelephonyService,
     private readonly pace: CallPaceService,
+    private readonly calls: CallsService,
   ) {}
 
   /** Входы линий с адресом узла — один запрос адреса на весь ответ. */
@@ -343,7 +350,12 @@ export class TelephonyController {
     const rows = await this.telephony.listChannels(
       clientId === undefined ? undefined : parseId(clientId, 'client'),
     );
-    return { channels: rows.map(toChannelView) };
+    // Последний вызов — для одного «Состояния»: работает ли линия без постоянного подключения (ADR-0101, п. 2).
+    const activity = await this.calls.channelActivity(
+      rows.map((row) => row.id),
+      new Date(),
+    );
+    return { channels: rows.map((row) => toChannelView(row, activity.get(row.id))) };
   }
 
   /**
@@ -400,6 +412,22 @@ export class TelephonyController {
       actor.role,
     );
     return { account: toAccountView(account, await this.telephony.sipServer()) };
+  }
+
+  /** Пароль линии клиента — по «глазу» в карточке клиента (ADR-0124); показ — в журнале. Поддержка не видит. */
+  @Roles('admin')
+  @Get('channels/:id/secret')
+  async channelSecret(
+    @Param('id') id: string,
+    @CurrentUser() actor: Principal,
+  ): Promise<{ password: string | null }> {
+    const password = await this.telephony.revealChannelSecret(
+      parseId(id, 'channel'),
+      undefined,
+      actor.userId,
+      actor.role,
+    );
+    return { password };
   }
 
   @Roles('admin')
@@ -793,7 +821,7 @@ function toGatewayView(row: GatewayRow): GatewayView {
   };
 }
 
-function toChannelView(row: ChannelRow): ChannelView {
+function toChannelView(row: ChannelRow, activity?: ChannelActivity): ChannelView {
   return {
     id: row.id,
     client_id: row.clientId,
@@ -810,6 +838,8 @@ function toChannelView(row: ChannelRow): ChannelView {
       seen_at: row.registrationSeenAt?.toISOString() ?? null,
       address: row.registrationAddress,
     },
+    has_secret: row.sipSecret !== null,
+    ...(activity === undefined ? {} : { last_call_at: activity.lastCallAt?.toISOString() ?? null }),
   };
 }
 

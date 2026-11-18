@@ -6,7 +6,8 @@ import { KeyRound, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { StatusDialog } from '@/components/status-dialog';
-import { StatusDot, toneOf } from '@/components/status-dot';
+import { ChannelPassword } from '@/components/channel-password';
+import { StatusDot } from '@/components/status-dot';
 import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
@@ -23,7 +24,8 @@ import {
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
-import { CHANNEL_STATUS_MEANING, CHANNEL_STATUS_NAME, usableTone } from '@/lib/labels';
+import { channelState } from '@/lib/channel-state';
+import { CHANNEL_STATUS_MEANING, CHANNEL_STATUS_NAME } from '@/lib/labels';
 
 interface Channel {
   readonly id: string;
@@ -37,9 +39,12 @@ interface Channel {
   /** Комментарий клиента (ADR-0101). */
   readonly comment: string | null;
   readonly connection: { readonly connected: boolean; readonly address: string | null };
+  /** Хранится ли пароль для показа (ADR-0124). */
+  readonly has_secret: boolean;
+  readonly last_call_at?: string | null;
 }
 
-const COLUMNS = 7;
+const COLUMNS = 6;
 
 /** Удаляет линию только клиент: у площадки для этого есть «Приостановить» (ADR-0101). */
 const ADMIN_STATUSES = CHANNEL_STATUSES.filter((status) => status !== 'closed');
@@ -172,7 +177,6 @@ export function ClientChannels({
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className={HEAD}>Канал</TableHead>
               <TableHead className={HEAD}>Состояние</TableHead>
-              <TableHead className={`${HEAD} w-px`}>Подключение</TableHead>
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Имя SIP</TableHead>
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Запись</TableHead>
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Номер для показа</TableHead>
@@ -202,40 +206,11 @@ export function ClientChannels({
                   </span>
                 </TableCell>
                 <TableCell>
-                  <StatusDot
-                    tone={toneOf(usableTone(channel.status === 'active'))}
-                    label={CHANNEL_STATUS_NAME[channel.status]}
-                    reason={
-                      channel.suspended_by === 'client'
-                        ? 'выключил сам клиент в своём кабинете'
-                        : undefined
-                    }
-                    phoneDot
-                  />
-                </TableCell>
-                <TableCell>
-                  {/* Связь АТС клиента — точкой без слова, адрес — в подсказке, как связь линий шлюза. */}
-                  {channel.status !== 'active' ? (
-                    <span className="text-faint">—</span>
-                  ) : channel.connection.connected ? (
-                    <StatusDot
-                      tone="ok"
-                      label="подключение есть"
-                      reason={
-                        channel.connection.address === null
-                          ? undefined
-                          : `АТС клиента на связи с адреса ${channel.connection.address}`
-                      }
-                      dotOnly
-                    />
-                  ) : (
-                    <StatusDot
-                      tone="warn"
-                      label="подключения нет"
-                      reason="АТС клиента не зарегистрирована на площадке — вызовы по каналу не пойдут"
-                      dotOnly
-                    />
-                  )}
+                  {/*
+                    Одно «Состояние» с подключением, как у клиента (lib/channel-state.ts; владелец, 2026-11-18: две
+                    колонки рядом — «Работает» и «Не подключена» — нелогично).
+                  */}
+                  <ChannelStateCell channel={channel} />
                 </TableCell>
                 <TableCell className={WIDE_ONLY}>
                   <span className="num" translate="no">
@@ -459,6 +434,15 @@ function ChannelSettings({
 
       <RecordingField checked={recordingRequired} onChange={setRecordingRequired} />
 
+      {/* Пароль — посмотреть, не изменить: менять — значком «Новый доступ» в строке (ADR-0124). */}
+      <div className="flex flex-col gap-1 sm:col-span-2">
+        <span className="font-medium">Пароль SIP</span>
+        <ChannelPassword
+          endpoint={`/channels/${channel.id}/secret`}
+          hasSecret={channel.has_secret}
+        />
+      </div>
+
       {!nameValid && <p className="text-warn sm:col-span-2">Название — не короче двух знаков.</p>}
 
       <p className="text-muted-foreground sm:col-span-2">
@@ -489,4 +473,10 @@ function RecordingField({
       <span>Запись разговора обязательна</span>
     </label>
   );
+}
+
+/** Состояние канала одним словом — тем же расчётом, что у клиента, словами администратора. */
+function ChannelStateCell({ channel }: { channel: Channel }) {
+  const state = channelState(channel, 'admin');
+  return <StatusDot tone={state.tone} label={state.label} reason={state.reason} phoneDot />;
 }

@@ -30,6 +30,8 @@ const NONCE_BYTES = 12;
 export const TOTP_SECRET_PURPOSE = 'zvonix:totp-secret:v1';
 export const PLATFORM_SETTING_PURPOSE = 'zvonix:platform-setting:v1';
 export const SIP_TRUNK_SECRET_PURPOSE = 'zvonix:sip-trunk-secret:v1';
+/** Пароль линии клиента — чтобы его можно было посмотреть (ADR-0124); вход сверяется по хешу. */
+export const CHANNEL_SIP_SECRET_PURPOSE = 'zvonix:channel-sip-secret:v1';
 /** Пароль ESL узла: с ним площадка может звонить (ADR-0055). */
 export const NODE_ESL_SECRET_PURPOSE = 'zvonix:node-esl-secret:v1';
 /** Ключ инстанса аккаунта MAX у провайдера (ADR-0071). */

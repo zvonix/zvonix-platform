@@ -27,7 +27,8 @@ import type { ChannelRow } from './telephony.repository.js';
 /**
  * Канал в клиентском ответе.
  *
- * Пароля здесь нет и не будет: в базе хеш. Имя учётной записи есть
+ * Пароля здесь нет: он показывается только по отдельному запросу с записью в журнал
+ * ([ADR-0124](../../../../../docs/adr/0124-vosstanovimyy-parol-linii-klienta.md)). Имя учётной записи есть
  * ([ADR-0101](../../../../../docs/adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)): без него клиент,
  * потерявший листок с выдачей, не настроил бы программу, а секрета в имени нет.
  *
@@ -52,6 +53,8 @@ export interface ClientChannelView {
     /** Откуда программа зарегистрировалась: `адрес:порт/транспорт`. */
     readonly address: string | null;
   };
+  /** Хранится ли пароль для показа (ADR-0124): нет — выдан до обновления, посмотреть нельзя. */
+  readonly has_secret: boolean;
   /** Разговоров идёт сейчас и последний вызов — только в списке. */
   readonly open_calls?: number;
   readonly last_call_at?: string | null;
@@ -99,6 +102,7 @@ export function toClientChannelView(
     comment: row.comment,
     max_concurrent_calls: row.maxConcurrentCalls,
     sip_username: row.sipUsername,
+    has_secret: row.sipSecret !== null,
     connection: {
       connected,
       seen_at: row.registrationSeenAt?.toISOString() ?? null,
