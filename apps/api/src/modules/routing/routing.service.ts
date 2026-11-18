@@ -11,6 +11,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   DEFAULT_DISTRIBUTION,
   DomainError,
+  Money,
   REFERENCE_CALL_SECONDS,
   chargeForCall,
   dialledDigits,
@@ -24,7 +25,6 @@ import {
   type TariffRule,
 } from '@zvonix/shared';
 import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
-import { ReservationService } from '../billing/reservation.service.js';
 import { BlockedNumberService } from '../catalog/blocked-numbers.service.js';
 import type { LimitRuleRow } from '../limits/limit.repository.js';
 import { DistributionService } from '../limits/distribution.service.js';
@@ -35,6 +35,7 @@ import { arrangeByDistribution } from './call-distribution.js';
 import { OperatorResolverService } from '../catalog/operator-resolver.service.js';
 import { TariffService } from '../catalog/tariff.service.js';
 import { CallPaceService, pacedNumberOf } from '../telephony/call-pace.service.js';
+import { CallSpendService } from '../telephony/call-spend.service.js';
 import { CallRepository, type CallRow, type Executor } from '../telephony/call.repository.js';
 import { CdrService } from '../telephony/cdr.service.js';
 import {
@@ -92,10 +93,10 @@ export class RoutingService {
     private readonly limits: LimitService,
     private readonly distribution: DistributionService,
     private readonly tariffs: TariffService,
-    private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
     private readonly callRequirements: CallRequirementsService,
     private readonly pace: CallPaceService,
+    private readonly spend: CallSpendService,
     @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
@@ -103,12 +104,12 @@ export class RoutingService {
   }
 
   /**
-   * Принимает решение по вызову и, если он разрешён, придерживает под него ресурсы:
-   * место на SIM и деньги клиента.
+   * Принимает решение по вызову и, если он разрешён, занимает под него место на SIM;
+   * деньги проверяются по доступному за вычетом идущих разговоров (ADR-0126).
    *
    * Повторный запрос с тем же идентификатором вызова возвращает прежнее решение:
-   * узел может переспросить, и второй резерв под тот же вызов означал бы, что деньги
-   * придержаны дважды за одно и то же.
+   * узел может переспросить, и второй вызов под тот же разговор занял бы второе место
+   * на SIM и посчитался бы против денег клиента дважды.
    */
   async route(request: RouteRequest): Promise<RouteDecision> {
     const existing = await this.callsRepository.findByExternalId(request.externalId);
@@ -419,28 +420,40 @@ export class RoutingService {
       return this.reject(request, destination, channel.id, operatorId, region, 'no_sim_available');
     }
 
-    // 8. Деньги. Считается стоимость разговора предельной длительности: резерв обязан
-    //    покрывать любой исход, иначе он не защищает ни от чего.
+    // 8. Деньги (ADR-0126). Резерва под разговор нет: звонок начинается, если у клиента есть доступное за вычетом
+    //    стоимости его идущих разговоров и хватает на плату за соединение. Дальше деньги держит проверка во время
+    //    разговора. Вызов уже записан шагом 7 — по этой строке его увидят проверки одновременных начал.
+    let refused: CallFailureReason | undefined;
     try {
-      const priced = await this.tariffs.priceReservation(
-        claimed.rateId,
+      const funds = await this.spend.checkStart(
         routable.clientId,
-        this.config.MAX_CALL_DURATION_SECONDS,
+        claimed.call.id,
+        claimed.rateId,
         new Date(),
       );
-      await this.reservations.hold({
-        callId: claimed.call.id,
-        clientId: routable.clientId,
-        amount: priced.charge.clientAmount,
-      });
+      if (!funds.allowed) {
+        this.logger.info('Вызов не начат: нет денег', {
+          channel_id: channel.id,
+          call_id: claimed.call.id,
+          available: Money.format(funds.available),
+          spent: Money.format(funds.spent),
+          connection: Money.format(funds.connection),
+        });
+        refused = 'insufficient_funds';
+      }
     } catch (cause) {
+      refused = failureReasonFor(cause);
+      if (refused === 'internal_error') {
+        this.logger.error('Шаг денег маршрутизации не удался', cause, { call_id: claimed.call.id });
+      }
+    }
+    if (refused !== undefined) {
       // Место на SIM освобождается тем, что вызов помечается несостоявшимся.
-      const reason = failureReasonFor(cause);
       await this.callsRepository.setStatus(claimed.call.id, 'failed', {
-        failureReason: reason,
+        failureReason: refused,
         endedAt: new Date(),
       });
-      return { outcome: 'rejected', reason, call: claimed.call };
+      return { outcome: 'rejected', reason: refused, call: claimed.call };
     }
 
     return {
@@ -498,7 +511,7 @@ export class RoutingService {
    * Предел цены клиента ([ADR-0095](../../../../../docs/adr/0095-trebovaniya-klienta-k-partnyoram-zvonkov.md)): стоимость
    * эталонного вызова в 60 секунд **для клиента** — по цене этого направления и той же наценкой, что тарификация.
    * Без предела наценка не читается вовсе. Нет правила наценки — предел не применяется: вызов всё равно получит
-   * свой отказ на резерве, и называть его «требованиями» было бы неправдой.
+   * свой отказ на шаге денег, и называть его «требованиями» было бы неправдой.
    */
   private async withinPriceCap(
     priced: PricedCandidate[],
@@ -819,7 +832,7 @@ export class RoutingService {
     return { outcome: 'rejected', reason, call };
   }
 
-  /** Повтор запроса по тому же вызову возвращает прежнее решение, а не второй резерв. */
+  /** Повтор запроса по тому же вызову возвращает прежнее решение, а не второй вызов. */
   private async replay(call: CallRow): Promise<RouteDecision> {
     if (call.status === 'failed') {
       return { outcome: 'rejected', reason: call.failureReason ?? 'internal_error', call };
@@ -857,11 +870,18 @@ export class RoutingService {
   }
 }
 
-/** Доменная ошибка тарифа или резерва превращается в причину отказа, понятную поддержке. */
-function failureReasonFor(cause: unknown): CallFailureReason {
+/**
+ * Доменная ошибка шага денег превращается в причину отказа, понятную поддержке.
+ *
+ * «Нет денег» — только настоящая нехватка (`details.reason = 'insufficient_funds'`). Прочий `conflict` нехваткой
+ * не назван: так поддержка искала бы деньги там, где сломано другое (ADR-0126).
+ */
+export function failureReasonFor(cause: unknown): CallFailureReason {
   if (cause instanceof DomainError) {
     if (cause.code === 'not_found') return 'no_tariff';
-    if (cause.code === 'conflict') return 'insufficient_funds';
+    if (cause.code === 'conflict' && cause.details?.['reason'] === 'insufficient_funds') {
+      return 'insufficient_funds';
+    }
   }
   return 'internal_error';
 }

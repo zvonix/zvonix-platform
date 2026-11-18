@@ -266,7 +266,7 @@ async function buildScenario(): Promise<void> {
   });
   expect(short.json<{ reason: string }>().reason).toBe('destination_invalid');
 
-  // --- Отказ после выбора железа: денег не хватает даже на резерв -----------------
+  // --- Отказ после выбора железа: денег нет вовсе (ADR-0126) ------------------------
   const poor = await post('/routing/preview', {
     callId: unique('uuid'),
     channelId: channelB,

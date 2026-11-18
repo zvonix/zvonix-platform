@@ -4,9 +4,8 @@
 
 import { Injectable } from '@nestjs/common';
 import { and, asc, eq, lte, sql } from 'drizzle-orm';
-import { toDatabaseError } from '@zvonix/db';
 import { reservations } from '@zvonix/db/schema';
-import { newId, type Id, type MoneyAmount, type ReservationStatus } from '@zvonix/shared';
+import { type Id, type ReservationStatus } from '@zvonix/shared';
 import { DatabaseService } from '../../infra/database.service.js';
 import type { Executor } from './billing.repository.js';
 
@@ -36,27 +35,6 @@ export class ReservationRepository {
     `);
     const row = result.rows[0];
     return row === undefined ? 0n : BigInt(row.total);
-  }
-
-  async insert(
-    draft: {
-      callId: Id<'call'>;
-      clientId: Id<'client'>;
-      amount: MoneyAmount;
-      expiresAt: Date;
-    },
-    executor: Executor,
-  ): Promise<ReservationRow> {
-    try {
-      const [row] = await executor
-        .insert(reservations)
-        .values({ id: newId<'reservation'>(), ...draft })
-        .returning();
-      if (row === undefined) throw new Error('Вставка не вернула строку');
-      return row;
-    } catch (cause) {
-      throw toDatabaseError(cause);
-    }
   }
 
   async findByCall(callId: Id<'call'>): Promise<ReservationRow | undefined> {

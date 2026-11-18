@@ -8,6 +8,17 @@
 
 ## Сейчас в работе
 
+- [ ] Деньги на звонок без резерва ([ADR-0126](docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)), ветка
+      `feat/call-money-no-reservation`. Живой случай 2026-11-18: 150 ₽ на счету, резерв часа ~107 ₽, 162 отказа 402:
+      - [x] ADR
+      - [x] старт без резерва: `CallSpendService`, `connectionCharge`, `failureReasonFor` только по настоящей нехватке
+      - [x] задача `calls.watch-spend` раз в 15 с, `uuid_kill` в службе команд узла, `calls.cut_off_reason` (миграция 0100)
+      - [x] `sched_hangup` в диалплане, `MAX_CALL_DURATION_SECONDS` = 14400, без `RESERVATION_TTL_SECONDS`
+      - [x] списание за разговор без проверки минуса
+      - [x] кабинет: «Не начат: нет денег», «Оборван: закончились деньги»; docs/api, DOMAIN.md
+      - [x] тесты; verify 14/14 (Windows, Git Bash); снимки «Вызовов» клиента 1280/768/390, обе темы
+      - [ ] PR, проверка ведущей сессией; после выкладки — обновить набор узлов (без него `uuid_kill` отвергается)
+
 - [ ] Свои адреса узел не блокирует ([ADR-0125](docs/adr/0125-svoi-adresa-ne-blokiruyutsya.md)), ветка
       `fix/node-ban-trusted` — 18.11.2026 тюрьма чужих логинов закрыла живого клиента после таймаутов каталога:
       - [x] ADR

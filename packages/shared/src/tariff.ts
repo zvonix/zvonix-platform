@@ -206,20 +206,20 @@ export function chargeForCall(
 }
 
 /**
- * Во сколько обойдётся вызов, если проговорить максимально допустимое время.
+ * Сколько клиент платит за сам факт ответа: плата партнёра за соединение с наценкой на неё
+ * и фиксированная часть наценки ([ADR-0126](../../../docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)).
  *
- * Ровно эта сумма резервируется **до** начала звонка: инвариант DOMAIN.md «баланс
- * клиента не уходит ниже разрешённого овердрафта» обеспечивается резервированием,
- * а не проверкой после. Сто одновременных вызовов при остатке на одну минуту иначе
- * все прошли бы проверку и все состоялись.
+ * На столько у клиента должно хватать доступного, чтобы звонок начался: резерва под разговор
+ * больше нет, и минуты дальше держит проверка во время разговора. Минимальная длительность
+ * сюда не входит намеренно — это уже время разговора, а не плата за соединение.
  */
-export function maxCharge(
-  maxDurationSeconds: number,
-  rule: TariffRule,
-  commission: CommissionRule,
-): CallCharge {
-  if (!Number.isInteger(maxDurationSeconds) || maxDurationSeconds < 1) {
-    throw new TariffError('Предельная длительность должна быть целым числом секунд');
+export function connectionCharge(rule: TariffRule, commission: CommissionRule): MoneyAmount {
+  assertRule(rule);
+  if (commission.percentBasisPoints < 0n || Money.isNegative(commission.fixedFee)) {
+    throw new TariffError('Отрицательная наценка платформы');
   }
-  return chargeForCall(maxDurationSeconds, rule, commission);
+  return Money.add(
+    Money.add(rule.connectionFee, commission.fixedFee),
+    Money.applyBasisPoints(rule.connectionFee, commission.percentBasisPoints, rule.rounding),
+  );
 }

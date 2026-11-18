@@ -85,6 +85,13 @@ export interface TransactionDraft {
   readonly alsoInTransaction?: (executor: Executor) => Promise<void>;
 
   /**
+   * Не проверять разрешённый минус клиента. Только для списания за состоявшийся разговор
+   * ([ADR-0126](../../../../../docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)): минуты уже проговорены, и отказ
+   * в списании их не вернёт — разговор остался бы неоплаченным, а узел повторял бы CDR без конца.
+   */
+  readonly beyondOverdraft?: boolean;
+
+  /**
    * Запись в журнал действий — **той же транзакцией**
    * ([ADR-0034](../../../../../docs/adr/0034-zhurnal-deneg-odnoy-tranzakciey.md)).
    *
@@ -199,7 +206,9 @@ export class BillingService {
       for (const line of draft.lines) {
         const balance = await this.repository.adjustBalance(line.accountId, line.amount, tx);
         const account = byId.get(line.accountId);
-        if (account !== undefined) await this.assertWithinOverdraft(account, balance);
+        if (account !== undefined && draft.beyondOverdraft !== true) {
+          await this.assertWithinOverdraft(account, balance);
+        }
       }
 
       if (draft.alsoInTransaction !== undefined) {
@@ -656,6 +665,9 @@ export class BillingService {
       // значило бы соврать журналу о том, кто действовал.
       occurredAt: input.occurredAt,
       lines,
+      // Разговор состоялся: списание проходит, даже если клиент уже ниже своего минуса (ADR-0126). Дальше его
+      // держит проверка во время разговора, а не отказ в оплате прошедших минут.
+      beyondOverdraft: true,
       ...(input.alsoInTransaction === undefined
         ? {}
         : { alsoInTransaction: input.alsoInTransaction }),
@@ -1097,7 +1109,7 @@ export class BillingService {
    *
    * Уменьшение до величины меньше текущего долга **разрешено** и намеренно: это способ
    * сказать «больше в долг не даём». Уже потраченное при этом никуда не девается,
-   * а новые вызовы просто перестают проходить по резерву.
+   * а новые вызовы просто перестают начинаться (ADR-0126).
    */
   async changeOverdraftLimit(
     clientId: ClientId,

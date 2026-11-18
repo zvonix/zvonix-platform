@@ -15,7 +15,6 @@ import {
   conflict,
   DomainError,
   internal,
-  maxCharge,
   Money,
   notFound,
   regionKeysOf,
@@ -511,27 +510,6 @@ export class TariffService {
         ? await this.resolve(partnerId, clientId, direction, terminationKind, at)
         : await this.resolveRate(rateId, clientId, at);
     return { applied, charge: chargeForCall(durationSeconds, applied.rule, applied.commission) };
-  }
-
-  /**
-   * Сколько резервировать до начала звонка.
-   *
-   * Стоимость разговора предельной длительности. Инвариант DOMAIN.md «баланс клиента
-   * не уходит ниже разрешённого овердрафта» обеспечивается резервированием **до** звонка,
-   * а не проверкой после: сто одновременных вызовов при остатке на одну минуту иначе
-   * все прошли бы проверку и все состоялись.
-   */
-  async priceReservation(
-    rateId: Id<'partnerRate'>,
-    clientId: Id<'client'>,
-    maxDurationSeconds: number,
-    at: Date,
-  ): Promise<{ applied: AppliedTariff; charge: CallCharge }> {
-    const applied = await this.resolveRate(rateId, clientId, at);
-    return {
-      applied,
-      charge: maxCharge(maxDurationSeconds, applied.rule, applied.commission),
-    };
   }
 
   async addPartnerRate(

@@ -5,6 +5,7 @@ import { BillingModule } from '../billing/billing.module.js';
 import { LimitsModule } from '../limits/limits.module.js';
 import { NodesModule } from '../nodes/nodes.module.js';
 import { CallPaceService } from './call-pace.service.js';
+import { CallSpendService } from './call-spend.service.js';
 import { CallRepository } from './call.repository.js';
 import { CallsController } from './calls.controller.js';
 import { CallsService } from './calls.service.js';
@@ -74,6 +75,7 @@ import { LimitOwnersService } from './limit-owners.service.js';
     RegistrationsService,
     LimitOwnersService,
     CallPaceService,
+    CallSpendService,
     ClientRoutesService,
     RoutePrioritiesRepository,
   ],
@@ -88,6 +90,8 @@ import { LimitOwnersService } from './limit-owners.service.js';
     QualityService,
     RegistrationsService,
     CallPaceService,
+    // Деньги идущих разговоров (ADR-0126): маршрутизации — на старте, воркеру — проверка каждые 15 секунд.
+    CallSpendService,
   ],
 })
 export class TelephonyModule {}

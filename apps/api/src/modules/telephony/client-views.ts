@@ -13,6 +13,7 @@
 
 import {
   clientFailureReasonOf,
+  type CallCutOffReason,
   type CallStatus,
   type ChannelStatus,
   type ChannelSuspendedBy,
@@ -75,6 +76,11 @@ export interface ClientCallView {
   readonly destination: string;
   readonly status: CallStatus;
   readonly failure_reason: ClientFailureReason | null;
+  /**
+   * Почему площадка оборвала разговор: `balance_exhausted` — кончились деньги (ADR-0126). Как есть, без перевода:
+   * это про самого клиента, а не про устройство площадки.
+   */
+  readonly cut_off_reason: CallCutOffReason | null;
   readonly duration_seconds: number | null;
   readonly started_at: string;
   readonly answered_at: string | null;
@@ -121,6 +127,7 @@ export function toClientCallView(row: CallDetails): ClientCallView {
     destination: call.destination,
     status: call.status,
     failure_reason: call.failureReason === null ? null : clientFailureReasonOf(call.failureReason),
+    cut_off_reason: call.cutOffReason,
     duration_seconds: call.durationSeconds,
     started_at: call.startedAt.toISOString(),
     answered_at: call.answeredAt?.toISOString() ?? null,

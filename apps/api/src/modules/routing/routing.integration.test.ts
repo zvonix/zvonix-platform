@@ -1,11 +1,13 @@
 /**
  * Маршрутизация вызова на реальной базе (ARCHITECTURE.md, ADR-0010, ADR-0013).
  *
- * Здесь проверяются два инварианта, которые не проверяются больше нигде и стоят денег:
- * одновременность на SIM и резерв средств до звонка. Оба держатся на блокировках
- * в транзакции, то есть без настоящей PostgreSQL не проверяются вовсе.
+ * Здесь проверяются инварианты, которые не проверяются больше нигде и стоят денег:
+ * одновременность на SIM и деньги на звонок — старт по доступному за вычетом идущих разговоров
+ * и обрыв самых новых, когда клиент вышел за свой минус (ADR-0126). Без настоящей PostgreSQL
+ * они не проверяются вовсе.
  */
 
+import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -19,6 +21,9 @@ import {
   uniqueEmail,
   withDatabase,
 } from '../../testing/harness.js';
+import { parseId } from '@zvonix/shared';
+import { NodesRepository } from '../nodes/nodes.repository.js';
+import { CallSpendService } from '../telephony/call-spend.service.js';
 
 prepareEnvironment();
 
@@ -33,6 +38,7 @@ function api(): NestFastifyApplication {
 }
 
 const auth = () => ({ authorization: `Bearer ${token}` });
+const asNode = () => ({ authorization: `Bearer ${nodeKey}` });
 
 let counter = 0;
 const unique = (prefix: string): string => {
@@ -181,6 +187,36 @@ async function route(channel: string, destination: string, callId = unique('call
   return post('/routing/preview', { callId, channelId: channel, nodeId, destination });
 }
 
+/** Сколько резервов у клиента — их больше не создаёт никто (ADR-0126). */
+async function reservationsOf(client: string): Promise<number> {
+  return withDatabase(async (execute) => {
+    const result = await execute(
+      sql`select count(*)::int as n from reservations where client_id = ${client}`,
+    );
+    return (result.rows[0] as { n: number }).n;
+  });
+}
+
+/** Сдвигает начало вызова в прошлое: разговор «идёт» столько секунд. */
+async function startedAgo(callId: string | null, seconds: number): Promise<void> {
+  if (callId === null) throw new Error('Вызов не создан');
+  await withDatabase(async (execute) => {
+    await execute(
+      sql`update calls set started_at = now() - make_interval(secs => ${seconds}) where id = ${callId}`,
+    );
+  });
+}
+
+/** Списывает остаток ручным списанием администратора — проводкой, а не правкой баланса. */
+async function spend(client: string, amount: string): Promise<void> {
+  const response = await post(`/clients/${client}/debit`, {
+    amount,
+    idempotencyKey: unique('debit'),
+    description: 'Списание под проверку',
+  });
+  if (response.statusCode >= 300) throw new Error(`Списание не прошло: ${response.body}`);
+}
+
 beforeAll(async () => {
   await resetDatabase();
   app = await startApi();
@@ -315,7 +351,7 @@ describe('запись всех разговоров (ADR-0070)', () => {
 });
 
 describe('успешный маршрут', () => {
-  it('выдаёт кандидата, создаёт вызов и придерживает деньги', async () => {
+  it('выдаёт кандидата и создаёт вызов, не придерживая денег', async () => {
     const env = await scenario();
     const response = await route(env.channel, env.destination);
     expect(response.statusCode).toBe(201);
@@ -327,33 +363,18 @@ describe('успешный маршрут', () => {
     // SIM стоит в порту 1 GOIP: узел выберет её линию префиксом (ADR-0053).
     expect(decision.candidates[0]?.line_prefix).toBe('99001');
 
-    const held = await withDatabase(async (execute) => {
-      const result = await execute(
-        sql`select coalesce(sum(amount), 0)::text as total from reservations
-             where client_id = ${env.client} and status = 'held'`,
-      );
-      return BigInt((result.rows[0] as { total: string }).total);
-    });
-    // Резерв — стоимость разговора предельной длительности: час по рублю за минуту.
-    expect(held).toBe(60_000_000n);
+    // Резерва под разговор нет (ADR-0126): деньги держит проверка во время разговора.
+    expect(await reservationsOf(env.client)).toBe(0);
   });
 
-  it('повторный запрос по тому же вызову не придерживает деньги дважды', async () => {
+  it('повторный запрос по тому же вызову не создаёт второго вызова', async () => {
     const env = await scenario();
     const callId = unique('call');
-    await route(env.channel, env.destination, callId);
-    const again = await route(env.channel, env.destination, callId);
-    expect(again.json<Preview>().outcome).toBe('routed');
-
-    const count = await withDatabase(async (execute) => {
-      const result = await execute(
-        sql`select count(*)::int as n from reservations where client_id = ${env.client}`,
-      );
-      return (result.rows[0] as { n: number }).n;
-    });
-    // Узел может переспросить. Второй резерв означал бы, что деньги придержаны
-    // дважды за одно и то же.
-    expect(count).toBe(1);
+    const first = (await route(env.channel, env.destination, callId)).json<Preview>();
+    const again = (await route(env.channel, env.destination, callId)).json<Preview>();
+    expect(again.outcome).toBe('routed');
+    // Узел может переспросить: это тот же вызов, а не второй разговор за деньги клиента.
+    expect(again.call_id).toBe(first.call_id);
   });
 });
 
@@ -436,11 +457,11 @@ describe('одновременность на SIM', () => {
 
     // Узел умер, не прислав CDR: отматываем начало вызова за предельную длительность.
     await withDatabase(async (execute) => {
-      await execute(sql`update calls set started_at = now() - interval '3 hours'
+      await execute(sql`update calls set started_at = now() - interval '5 hours'
                          where id = ${first.json<Preview>().call_id}`);
     });
 
-    // Резерв освободился бы по сроку сам, а место на SIM — нет: без уборки
+    // Место на SIM само не освободится: без уборки
     // эта SIM больше не приняла бы ни одного звонка.
     expect((await route(env.channel, env.destination)).json<Preview>().outcome).toBe('routed');
 
@@ -468,18 +489,61 @@ describe('одновременность на SIM', () => {
   });
 });
 
-describe('деньги', () => {
-  it('без средств на резерв вызов не состоится', async () => {
-    // Резерв — стоимость часа разговора, то есть 60 ₽. На счету десять.
-    const env = await scenario({ deposit: '10' });
+describe('деньги на старте (ADR-0126)', () => {
+  it('10 копеек — звонок начинается: резерва под разговор нет', async () => {
+    // Прежде резерв часа (60 ₽) не давал звонить и с полусотней рублей на счету — живой случай 2026-11-18.
+    const env = await scenario({ deposit: '0.10' });
+    expect((await route(env.channel, env.destination)).json<Preview>().outcome).toBe('routed');
+  });
+
+  it('без денег звонок не начинается — «нет денег» и 402', async () => {
+    const env = await scenario({ deposit: '0.10' });
+    await spend(env.client, '0.10');
     const decision = (await route(env.channel, env.destination)).json<Preview>();
 
     expect(decision.reason).toBe('insufficient_funds');
     expect(decision.sip_response).toBe('402 Payment Required');
   });
 
+  it('идущие разговоры клиента вычитаются из доступного', async () => {
+    // На счету 5 ₽, первый разговор идёт 6 минут по рублю — уже 6 ₽: второму звонку нечем начаться.
+    const env = await scenario({ deposit: '5' });
+    await post(`/sim-cards/${env.sim}/concurrency`, { maxConcurrentCalls: 2 });
+    const first = (await route(env.channel, env.destination)).json<Preview>();
+    expect(first.outcome).toBe('routed');
+    await startedAgo(first.call_id, 6 * 60);
+
+    expect((await route(env.channel, env.destination)).json<Preview>().reason).toBe(
+      'insufficient_funds',
+    );
+  });
+
+  it('звонок начинается, пока за вычетом идущих разговоров что-то остаётся', async () => {
+    // 5 ₽, первый разговор идёт 4 минуты — 4 ₽: остаётся рубль, второму хватает.
+    const env = await scenario({ deposit: '5' });
+    await post(`/sim-cards/${env.sim}/concurrency`, { maxConcurrentCalls: 2 });
+    const first = (await route(env.channel, env.destination)).json<Preview>();
+    await startedAgo(first.call_id, 4 * 60);
+
+    expect((await route(env.channel, env.destination)).json<Preview>().outcome).toBe('routed');
+  });
+
+  it('доступного должно хватать на плату за соединение', async () => {
+    const env = await scenario({ deposit: '0.50' });
+    // Плата за соединение — рубль: 50 копеек на неё не хватает, хотя это и больше нуля.
+    await withDatabase(async (execute) => {
+      await execute(
+        sql`update partner_rates set connection_fee = 1000000 where partner_id = ${env.partner}`,
+      );
+    });
+    expect((await route(env.channel, env.destination)).json<Preview>().reason).toBe(
+      'insufficient_funds',
+    );
+  });
+
   it('отказ по деньгам освобождает место на SIM', async () => {
-    const env = await scenario({ deposit: '10' });
+    const env = await scenario({ deposit: '0.10' });
+    await spend(env.client, '0.10');
     expect((await route(env.channel, env.destination)).json<Preview>().reason).toBe(
       'insufficient_funds',
     );
@@ -494,20 +558,29 @@ describe('деньги', () => {
     expect((await route(env.channel, env.destination)).json<Preview>().outcome).toBe('routed');
   });
 
-  it('резервы копятся и вместе ограничивают доступное', async () => {
-    // Хватает ровно на два резерва по 60 ₽; SIM пропускает три вызова.
-    const env = await scenario({ deposit: '130' });
-    await post(`/sim-cards/${env.sim}/concurrency`, { maxConcurrentCalls: 3 });
+  it('одновременные начала видят друг друга: денег на три соединения — не больше трёх звонков', async () => {
+    // 3 ₽ на счету, у SIM пять мест, соединение стоит рубль, минуты бесплатны.
+    const env = await scenario({ deposit: '3' });
+    await post(`/sim-cards/${env.sim}/concurrency`, { maxConcurrentCalls: 5 });
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        update partner_rates set connection_fee = 1000000, price_per_minute = 0
+         where partner_id = ${env.partner}
+      `);
+    });
 
-    expect((await route(env.channel, env.destination)).json<Preview>().outcome).toBe('routed');
-    expect((await route(env.channel, env.destination)).json<Preview>().outcome).toBe('routed');
-    expect((await route(env.channel, env.destination)).json<Preview>().reason).toBe(
-      'insufficient_funds',
+    const attempts = await Promise.all(
+      Array.from({ length: 5 }, () => route(env.channel, env.destination)),
     );
+    const routed = attempts.filter((r) => r.json<Preview>().outcome === 'routed');
+    // Каждая проверка видит вызовы, записанные раньше неё: проверка последнего видит всю пачку.
+    expect(routed.length).toBeLessThanOrEqual(3);
+    expect(routed.length).toBeGreaterThan(0);
   });
 
-  it('овердрафт увеличивает доступное', async () => {
-    const env = await scenario({ deposit: '10' });
+  it('разрешённый минус увеличивает доступное', async () => {
+    const env = await scenario({ deposit: '0.10' });
+    await spend(env.client, '0.10');
     await withDatabase(async (execute) => {
       await execute(sql`update clients set overdraft_limit = 100000000 where id = ${env.client}`);
     });
@@ -522,6 +595,112 @@ describe('деньги', () => {
     });
 
     expect((await route(env.channel, env.destination)).json<Preview>().reason).toBe('no_tariff');
+  });
+});
+
+describe('проверка во время разговора (ADR-0126)', () => {
+  async function cutOffOf(callId: string | null): Promise<{ status: string; cut: string | null }> {
+    return withDatabase(async (execute) => {
+      const result = await execute(
+        sql`select status, cut_off_reason from calls where id = ${callId ?? ''}`,
+      );
+      const row = result.rows[0] as { status: string; cut_off_reason: string | null };
+      return { status: row.status, cut: row.cut_off_reason };
+    });
+  }
+
+  it('клиент за минусом — обрывается самый новый разговор, пока остальные укладываются', async () => {
+    // 10,50 ₽ на счету, минуса нет. Старый разговор идёт 10 минут (10 ₽), новый — минуту (1 ₽): 11 ₽ больше
+    // доступного. Без нового остальные укладываются — обрывается только он.
+    const env = await scenario({ deposit: '10.50' });
+    await post(`/sim-cards/${env.sim}/concurrency`, { maxConcurrentCalls: 2 });
+    const olderUuid = randomUUID();
+    const newerUuid = randomUUID();
+    const older = (await route(env.channel, env.destination, olderUuid)).json<Preview>();
+    const newer = (await route(env.channel, env.destination, newerUuid)).json<Preview>();
+    expect([older.outcome, newer.outcome]).toEqual(['routed', 'routed']);
+    await startedAgo(older.call_id, 10 * 60);
+    await startedAgo(newer.call_id, 60);
+
+    // Узел на отдельной машине: обрыв уходит службе команд (ADR-0115), как на живом узле.
+    await api().get(NodesRepository).markCommandsPolled(parseId(nodeId, 'node'), new Date());
+    const watching = api().get(CallSpendService).watch(new Date());
+    const taken = await api().inject({ method: 'GET', url: '/node/commands', headers: asNode() });
+    expect(taken.statusCode).toBe(200);
+    const [commandId, command] = taken.body.split('\n');
+    expect(command).toBe(`uuid_kill ${newerUuid}`);
+    const answered = await api().inject({
+      method: 'POST',
+      url: `/node/commands/${commandId ?? ''}/result`,
+      headers: { ...asNode(), 'content-type': 'text/plain' },
+      payload: '+OK\n',
+    });
+    expect(answered.statusCode).toBe(200);
+    expect(await watching).toBe(1);
+
+    expect(await cutOffOf(newer.call_id)).toEqual({ status: 'routing', cut: 'balance_exhausted' });
+    expect((await cutOffOf(older.call_id)).cut).toBeNull();
+
+    // CDR оборванного: разговор состоялся и тарифицирован, отметка обрыва остаётся.
+    const cdr = await api().inject({
+      method: 'POST',
+      url: '/node/cdr',
+      headers: asNode(),
+      payload: {
+        variables: {
+          uuid: newerUuid,
+          billsec: '60',
+          hangup_cause: 'NORMAL_CLEARING',
+          answer_stamp: '2026-11-18 07:15:00.000000',
+          end_stamp: '2026-11-18 07:16:00.000000',
+        },
+      },
+    });
+    expect(cdr.statusCode).toBe(200);
+    expect(await cutOffOf(newer.call_id)).toEqual({
+      status: 'completed',
+      cut: 'balance_exhausted',
+    });
+
+    // Остальные проверки в файле делят базу: идущий разговор этого клиента закрывается.
+    await withDatabase(async (execute) => {
+      await execute(sql`update calls set status = 'completed' where id = ${older.call_id ?? ''}`);
+    });
+  });
+
+  it('узел не подтвердил обрыв — отметки нет, следующий проход попробует снова', async () => {
+    const env = await scenario({ deposit: '0.50' });
+    const uuid = randomUUID();
+    const call = (await route(env.channel, env.destination, uuid)).json<Preview>();
+    await startedAgo(call.call_id, 5 * 60);
+
+    await api().get(NodesRepository).markCommandsPolled(parseId(nodeId, 'node'), new Date());
+    const watching = api().get(CallSpendService).watch(new Date());
+    const taken = await api().inject({ method: 'GET', url: '/node/commands', headers: asNode() });
+    const [commandId, command] = taken.body.split('\n');
+    expect(command).toBe(`uuid_kill ${uuid}`);
+    // Старый набор узла команду не знает.
+    await api().inject({
+      method: 'POST',
+      url: `/node/commands/${commandId ?? ''}/result`,
+      headers: { ...asNode(), 'content-type': 'text/plain' },
+      payload: '-ERR NODE_REFUSED',
+    });
+    expect(await watching).toBe(0);
+    expect((await cutOffOf(call.call_id)).cut).toBeNull();
+
+    await withDatabase(async (execute) => {
+      await execute(sql`update calls set status = 'completed' where id = ${call.call_id ?? ''}`);
+    });
+  });
+
+  it('клиент в пределе — ничего не обрывается и узлу ничего не уходит', async () => {
+    const env = await scenario({ deposit: '100' });
+    const call = (await route(env.channel, env.destination, randomUUID())).json<Preview>();
+    await startedAgo(call.call_id, 5 * 60);
+
+    expect(await api().get(CallSpendService).watch(new Date())).toBe(0);
+    expect((await cutOffOf(call.call_id)).cut).toBeNull();
   });
 });
 

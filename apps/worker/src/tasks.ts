@@ -22,6 +22,7 @@ import {
   ServersService,
   ApplicationsService,
   CdrService,
+  CallSpendService,
   RegistrationsService,
   NumberingPlanService,
   EXPIRY_SWEEP_LIMIT,
@@ -83,6 +84,14 @@ const RESERVATION_SWEEP_SECONDS = 60;
  * то есть простаивает оборудование партнёра и не проходят заказы клиента.
  */
 const ABANDONED_CALL_SWEEP_SECONDS = 60;
+
+/**
+ * Как часто проверяются деньги идущих разговоров ([ADR-0126](../../../docs/adr/0126-dengi-na-zvonok-bez-rezerva.md)).
+ *
+ * Резерва под звонок нет, и за минус клиента держит только эта проверка: между проходами клиент может уйти
+ * за свой предел на стоимость этих секунд по всем его звонкам. 15 секунд владелец принял как такую цену.
+ */
+const CALL_SPEND_WATCH_SECONDS = 15;
 
 /**
  * Как часто снимаются замолчавшие узлы.
@@ -234,6 +243,7 @@ export class BackgroundTasks {
   constructor(
     private readonly reservations: ReservationService,
     private readonly cdr: CdrService,
+    private readonly callSpend: CallSpendService,
     private readonly registrations: RegistrationsService,
     private readonly nodes: NodesService,
     private readonly nodeCommands: NodeCommandsService,
@@ -270,6 +280,11 @@ export class BackgroundTasks {
         name: 'calls.close-without-cdr',
         everySeconds: ABANDONED_CALL_SWEEP_SECONDS,
         run: (now) => this.cdr.closeCallsWithoutCdr(now),
+      },
+      {
+        name: 'calls.watch-spend',
+        everySeconds: CALL_SPEND_WATCH_SECONDS,
+        run: (now) => this.callSpend.watch(now),
       },
       {
         name: 'registrations.poll',

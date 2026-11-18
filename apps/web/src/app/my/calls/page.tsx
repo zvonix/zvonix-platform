@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import {
   CALL_STATUSES,
+  type CallCutOffReason,
   type CallStatus,
   type ClientFailureReason,
   type TerminationKind,
@@ -33,6 +34,8 @@ import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
 import { money } from '@/lib/money';
 import {
+  CALL_CUT_OFF_FIX,
+  CALL_CUT_OFF_NAME,
   CALL_STATUS_NAME,
   callTone,
   CLIENT_FAILURE_REASON_FIX,
@@ -58,6 +61,8 @@ interface Call {
   readonly destination: string;
   readonly status: CallStatus;
   readonly failure_reason: ClientFailureReason | null;
+  /** Почему площадка оборвала разговор (ADR-0126); пусто — не обрывали. */
+  readonly cut_off_reason: CallCutOffReason | null;
   readonly duration_seconds: number | null;
   /** Списано за вызов, ₽; пусто — списания не было (отказ или ноль секунд). */
   readonly cost: string | null;
@@ -67,6 +72,27 @@ interface Call {
   readonly operator: { id: string; name: string } | null;
   /** Через что ушёл вызов — SIM или SIP; пусто у отказа. */
   readonly termination_kind: TerminationKind | null;
+}
+
+/**
+ * Итог вызова словами клиента: причина отказа или обрыва важнее слова «Не состоялся» (DESIGN.md, «Три аудитории»).
+ * Обрыв — у состоявшегося разговора, отказ — у несостоявшегося; вместе они не бывают.
+ */
+function outcomeReason(call: Call): string | undefined {
+  if (call.cut_off_reason !== null) return CALL_CUT_OFF_NAME[call.cut_off_reason];
+  if (call.failure_reason !== null) return CLIENT_FAILURE_REASON_NAME[call.failure_reason];
+  return undefined;
+}
+
+/** Что с этим делать — в подсказке к итогу. */
+function outcomeHint(call: Call): string | undefined {
+  if (call.cut_off_reason !== null) {
+    return `${CALL_STATUS_NAME[call.status]}. ${CALL_CUT_OFF_FIX[call.cut_off_reason]}`;
+  }
+  if (call.failure_reason !== null) {
+    return `${CALL_STATUS_NAME[call.status]}. ${CLIENT_FAILURE_REASON_FIX[call.failure_reason]}`;
+  }
+  return undefined;
 }
 
 export default function MyCallsPage() {
@@ -205,9 +231,7 @@ function MyCalls() {
                   call.operator?.name,
                   call.region,
                   CALL_STATUS_NAME[call.status],
-                  call.failure_reason === null
-                    ? ''
-                    : CLIENT_FAILURE_REASON_NAME[call.failure_reason],
+                  outcomeReason(call) ?? '',
                   call.duration_seconds,
                   call.cost,
                 ]),
@@ -312,17 +336,9 @@ function MyCalls() {
                     точки, а что сделать — в подсказке. */}
                 <TableCell>
                   <StatusDot
-                    tone={toneOf(callTone(call.status))}
-                    label={
-                      call.failure_reason === null
-                        ? CALL_STATUS_NAME[call.status]
-                        : CLIENT_FAILURE_REASON_NAME[call.failure_reason]
-                    }
-                    reason={
-                      call.failure_reason === null
-                        ? undefined
-                        : `${CALL_STATUS_NAME[call.status]}. ${CLIENT_FAILURE_REASON_FIX[call.failure_reason]}`
-                    }
+                    tone={call.cut_off_reason === null ? toneOf(callTone(call.status)) : 'warn'}
+                    label={outcomeReason(call) ?? CALL_STATUS_NAME[call.status]}
+                    reason={outcomeHint(call)}
                   />
                 </TableCell>
 
