@@ -423,6 +423,8 @@ export class TelephonyRepository {
     status: ChannelStatus;
     sipUsername: string;
     a1Hash: string;
+    /** Пароль, зашифрованный `SecretBox` (ADR-0124). */
+    sipSecret: string;
     recordingRequired: boolean;
     callerId: string | null;
   }): Promise<ChannelRow> {
@@ -563,15 +565,17 @@ export class TelephonyRepository {
     }
   }
 
+  /** Новый пароль линии: хеш для входа и он же зашифрованным — для показа (ADR-0124). */
   async replaceChannelCredentials(
     id: ChannelId,
     sipUsername: string,
     a1Hash: string,
+    sipSecret: string,
   ): Promise<ChannelRow | undefined> {
     try {
       const [row] = await this.db
         .update(channels)
-        .set({ sipUsername, a1Hash })
+        .set({ sipUsername, a1Hash, sipSecret })
         .where(eq(channels.id, id))
         .returning();
       return row;

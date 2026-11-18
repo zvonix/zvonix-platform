@@ -398,7 +398,7 @@ export function MaxTariffs() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <FormDialog label="Новый тариф" title="Новый тариф MAX" variant="outline">
+        <FormDialog label="Добавить тариф" title="Новый тариф MAX" variant="outline">
           <TariffForm />
         </FormDialog>
         <Hint label="Что такое тариф MAX">

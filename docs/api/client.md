@@ -86,7 +86,7 @@
 {
   "channels": [ {
     "id", "name", "status", "suspended_by", "recording_required", "caller_id",
-    "comment", "max_concurrent_calls", "sip_username",
+    "comment", "max_concurrent_calls", "sip_username", "has_secret",
     "connection": { "connected": true, "seen_at": "…", "address": "203.0.113.5:5060/udp" },
     "open_calls": 0, "last_call_at": "…" | null
   } ],
@@ -101,7 +101,7 @@
 
 - `connection.connected` — программа зарегистрирована на узле сейчас: опрос раз в минуту, только после верного
   пароля. Программа, которая звонит без регистрации, — `false`, но виден `last_call_at`.
-- `sip_username` и `server` — что вписать в программу; `server: null` — адрес узла АТС ещё не задан, подключаться некуда ([ADR-0113](../adr/0113-adres-sip-uzla-sam-i-bez-podmeny.md)). **Пароля нет и не будет**: в базе хеш, потерян — перевыпуск.
+- `sip_username` и `server` — что вписать в программу; `server: null` — адрес узла АТС ещё не задан, подключаться некуда ([ADR-0113](../adr/0113-adres-sip-uzla-sam-i-bez-podmeny.md)). Пароля в списке нет: он показывается отдельным запросом (`GET /client/channels/:id/secret`). `has_secret: false` — пароль выдан до 2026-11-18 и не восстанавливается, остаётся перевыпуск ([ADR-0124](../adr/0124-vosstanovimyy-parol-linii-klienta.md)).
 - `suspended_by` — кто выключил: `client` включит сам, `admin` — только площадка.
 - `caller_id` в кабинете не показывается, но из ответа не убран: контракт поля не теряет.
 
@@ -125,7 +125,8 @@
 
 Тело `{ "name"? }` (без названия — «Линия N»). `201` →
 `{ "channel": {…}, "account": { "username", "password", "realm", "server" } }`. Линия сразу
-`active`. **Пароль — единственный показ:** в базе хеш. Клиент не в состоянии `active` или
+`active`. Пароль — в ответе; дальше его можно посмотреть отдельным запросом
+([ADR-0124](../adr/0124-vosstanovimyy-parol-linii-klienta.md)). Клиент не в состоянии `active` или
 линий уже пять — `409`. Решение — [ADR-0058](../adr/0058-klient-sam-poluchaet-liniyu.md).
 
 ## `POST /client/channels/:id/credentials` — новый доступ своей линии
@@ -133,6 +134,13 @@
 `201` → `{ "account": {…} }`. Имя прежнее, пароль новый: старый пароль перестаёт работать, регистрация
 программы на узле сбрасывается.
 Чужая линия — `404`, удалённая — `409`.
+
+## `GET /client/channels/:id/secret` — пароль своей линии
+
+`200` → `{ "password": "…" | null }`. Показ по нажатию «показать» на странице линии, каждый — в журнале
+(`channel.secret_viewed`, сам пароль туда не пишется). `null` — пароль выдан до 2026-11-18: тогда хранился только хеш,
+и восстановить его неоткуда. Владение — из сессии: чужая линия — `404`
+([ADR-0124](../adr/0124-vosstanovimyy-parol-linii-klienta.md)).
 
 ## `GET /client/calls`
 

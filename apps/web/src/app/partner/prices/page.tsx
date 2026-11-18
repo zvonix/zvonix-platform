@@ -291,9 +291,9 @@ function NewTariff() {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   return (
-    <FormDialog label="Новый тариф" title="Новый тариф" variant="outline">
+    <FormDialog label="Добавить тариф" title="Новый тариф" variant="outline">
       <DialogForm
-        submitLabel="Создать тариф"
+        submitLabel="Добавить тариф"
         canSubmit={name.trim() !== ''}
         onSubmit={async () => {
           await request<unknown>('/partner/tariffs', {

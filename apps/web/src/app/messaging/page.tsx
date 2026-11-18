@@ -141,7 +141,7 @@ function MessagingView() {
       {canChange && (
         <div className="flex flex-wrap items-center gap-3">
           <FormDialog
-            label="Завести вручную"
+            label="Добавить вручную"
             title="Аккаунт MAX по данным готового инстанса"
             description="Когда партнёрский ключ провайдера ещё не задан в настройках либо инстанс заведён в кабинете провайдера."
             variant="outline"
@@ -512,7 +512,7 @@ function ManualForm() {
   });
 
   return (
-    <DialogForm submitLabel="Завести" canSubmit={valid} onSubmit={() => register.mutateAsync()}>
+    <DialogForm submitLabel="Добавить" canSubmit={valid} onSubmit={() => register.mutateAsync()}>
       <DialogField label="Партнёр" wide>
         <select
           value={partnerId}

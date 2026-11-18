@@ -8,6 +8,16 @@
 
 ## Сейчас в работе
 
+- [ ] Линии клиента: одно «Состояние» вместо двух колонок и просмотр пароля линии
+      ([ADR-0124](docs/adr/0124-vosstanovimyy-parol-linii-klienta.md)), ветка `feat/channel-secret`:
+      - [x] ADR
+      - [x] схема и миграция `channels.sip_secret` (0099)
+      - [x] API: запись при выдаче, `GET /client/channels/:id/secret`, `GET /channels/:id/secret`, журнал, тесты
+      - [x] кабинет: одно «Состояние» (список, страница линии, админка), «глаз» у пароля
+      - [x] кнопки создания — «Добавить …» везде (DESIGN.md)
+      - [x] docs/api; verify 14/14 (Windows, Git Bash); снимки 1280/390 в обеих темах
+      - [ ] PR, проверка ведущей сессией
+
 - [ ] Единый стандарт таблиц во всех кабинетах ([DESIGN.md](docs/DESIGN.md), «Таблица»), ветка `feat/table-standard`:
       - [x] стандарт и образец на «Оборудовании» партнёра; согласован с владельцем 2026-11-17
       - [x] общие детали: `StatusDot`, `HintText`, `table-parts.tsx`, `StatusDialog` значком

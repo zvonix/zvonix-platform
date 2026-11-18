@@ -119,7 +119,7 @@ export function PartnerSims({
       <div className="flex items-baseline gap-3">
         <h3 className="font-semibold">SIM-карты</h3>
         {canChange && (
-          <FormDialog label="Объявить SIM" title="Новая SIM" variant="outline">
+          <FormDialog label="Добавить SIM" title="Новая SIM" variant="outline">
             <DeclareSimForm onDeclare={(draft) => declare.mutateAsync(draft)} />
           </FormDialog>
         )}
@@ -277,7 +277,7 @@ function DeclareSimForm({ onDeclare }: { onDeclare: (draft: SimDraft) => Promise
 
   return (
     <DialogForm
-      submitLabel="Объявить SIM"
+      submitLabel="Добавить SIM"
       canSubmit={operatorId !== '' && msisdn.trim() !== ''}
       onSubmit={() =>
         onDeclare({
