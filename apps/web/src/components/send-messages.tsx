@@ -256,7 +256,7 @@ export function SendMessages() {
               {list.data?.messages.length === 0 && (
                 <TableRow className="hover:bg-transparent">
                   <TableCell colSpan={8} className="whitespace-normal text-muted-foreground">
-                    {filter.status === '' && filter.from === '' && filter.to === ''
+                    {filter.status === '' && 'all' in filter.period
                       ? 'Сообщений пока нет.'
                       : 'По этому отбору сообщений нет.'}
                   </TableCell>

@@ -12,7 +12,13 @@ import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
 import { useLiveInterval } from '@/lib/live';
-import { PeriodInput } from '@/components/period-input';
+import { ListPeriodPicker } from '@/components/period-picker';
+import {
+  INCIDENT_PERIODS,
+  listPeriodParams,
+  listPeriodSearch,
+  readListPeriod,
+} from '@/lib/list-period';
 import { ClippedText, HintText, StatusDot, toneOf } from '@/components/status-dot';
 import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
 import { Button } from '@/components/ui/button';
@@ -99,7 +105,8 @@ function CallsView() {
   const digits = typedNumber.replace(/\D/gu, '');
   const numberReady = digits.length >= MSISDN_DIGITS;
 
-  const filters = new URLSearchParams(url.query);
+  // Период из адреса — моментами `from`/`to`, как их ждёт API (lib/list-period.ts).
+  const filters = listPeriodSearch(url.query);
   filters.delete('offset');
   if (!numberReady) filters.delete('destination');
   const filterQuery = filters.toString();
@@ -122,19 +129,14 @@ function CallsView() {
       <CallSummary query={filterQuery} />
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-muted-foreground">Период</span>
-        {QUICK_PERIODS.map((period) => (
-          <Button
-            key={period.label}
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              url.set({ from: period.from(), to: '', offset: '' });
-            }}
-          >
-            {period.label}
-          </Button>
-        ))}
+        {/* Тот же выбор периода, что в сводках; «Час» и «Сутки» — последние 60 минут и 24 часа (разбор инцидента). */}
+        <ListPeriodPicker
+          value={readListPeriod(url.get)}
+          options={INCIDENT_PERIODS}
+          onChange={(period) => {
+            url.set({ ...listPeriodParams(period), offset: '' });
+          }}
+        />
 
         <Button
           variant={checking ? 'default' : 'outline'}
@@ -239,21 +241,6 @@ function CallsView() {
             }}
           />
         </label>
-
-        <PeriodInput
-          label="С"
-          value={url.get('from')}
-          onChange={(from) => {
-            url.set({ from, offset: '' });
-          }}
-        />
-        <PeriodInput
-          label="По"
-          value={url.get('to')}
-          onChange={(to) => {
-            url.set({ to, offset: '' });
-          }}
-        />
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
           <SavedFilters />
@@ -477,16 +464,4 @@ function CallRow({
       </TableCell>
     </TableRow>
   );
-}
-
-/** Быстрые границы периода. Момент вычисляется по нажатию — окно фиксируется тогда же. */
-const QUICK_PERIODS = [
-  { label: 'час', from: () => since(60 * 60_000) },
-  { label: 'сутки', from: () => since(24 * 60 * 60_000) },
-  { label: 'неделя', from: () => since(7 * 24 * 60 * 60_000) },
-  { label: 'всё время', from: () => '' },
-] as const;
-
-function since(milliseconds: number): string {
-  return new Date(Date.now() - milliseconds).toISOString();
 }

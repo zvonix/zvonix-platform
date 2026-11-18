@@ -8,7 +8,8 @@ import { ConsoleShell } from '@/components/console-shell';
 import { FilterInput } from '@/components/filter-input';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
-import { PeriodInput } from '@/components/period-input';
+import { ListPeriodPicker } from '@/components/period-picker';
+import { listPeriodParams, listPeriodSearch, readListPeriod } from '@/lib/list-period';
 import { HEAD, ROW_ICON, RowActions, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { WithTooltip } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -60,7 +61,7 @@ function AuditTable() {
   const [opened, setOpened] = useState<string | undefined>(undefined);
 
   const offset = Number.parseInt(url.get('offset'), 10) || 0;
-  const search = new URLSearchParams(url.query);
+  const search = listPeriodSearch(url.query);
   search.set('limit', String(PAGE_SIZE));
 
   const list = useQuery({
@@ -123,18 +124,10 @@ function AuditTable() {
           />
         </label>
 
-        <PeriodInput
-          label="С"
-          value={url.get('from')}
-          onChange={(value) => {
-            url.set({ from: value, offset: '' });
-          }}
-        />
-        <PeriodInput
-          label="По"
-          value={url.get('to')}
-          onChange={(value) => {
-            url.set({ to: value, offset: '' });
+        <ListPeriodPicker
+          value={readListPeriod(url.get)}
+          onChange={(period) => {
+            url.set({ ...listPeriodParams(period), offset: '' });
           }}
         />
 

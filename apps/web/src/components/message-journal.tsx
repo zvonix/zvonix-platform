@@ -4,7 +4,8 @@ import { MESSAGE_STATUSES } from '@zvonix/shared';
 import { useState } from 'react';
 import { ExportButton, type ExportTable } from '@/components/export-button';
 import { PageNav } from '@/components/page-nav';
-import { PeriodInput } from '@/components/period-input';
+import { ListPeriodPicker } from '@/components/period-picker';
+import { listPeriodMoments, type ListPeriod } from '@/lib/list-period';
 import { StatusDot, toneOf } from '@/components/status-dot';
 import { HEAD } from '@/components/table-parts';
 import { Switch } from '@/components/ui/switch';
@@ -22,8 +23,8 @@ const JOURNAL_PAGE = 50;
 
 export interface JournalFilter {
   readonly status: string;
-  readonly from: string;
-  readonly to: string;
+  /** Период — тем же выбором, что в остальных списках (lib/list-period.ts); по умолчанию «Всё время». */
+  readonly period: ListPeriod;
   readonly offset: number;
   /** Показывать отклонённые при приёме (ADR-0098); по умолчанию нет, выбор помнится в браузере. */
   readonly refused: boolean;
@@ -47,8 +48,7 @@ function rememberedRefused(): boolean {
 export function useJournalFilter() {
   const [filter, setFilter] = useState<JournalFilter>(() => ({
     status: '',
-    from: '',
-    to: '',
+    period: { all: true },
     offset: 0,
     refused: typeof window === 'undefined' ? false : rememberedRefused(),
   }));
@@ -77,8 +77,13 @@ export function journalSearch(
   });
   if (filter.status !== '') search.set('status', filter.status);
   if (filter.refused) search.set('refused', '1');
-  if (filter.from !== '') search.set('from', filter.from);
-  if (filter.to !== '') search.set('to', filter.to);
+  // Минутой, а не точным «сейчас»: иначе запрос менялся бы на каждой отрисовке (lib/list-period.ts).
+  const { from, to } = listPeriodMoments(
+    filter.period,
+    new Date(Math.floor(Date.now() / 60_000) * 60_000),
+  );
+  if (from !== '') search.set('from', from);
+  if (to !== '') search.set('to', to);
   for (const [key, value] of Object.entries(extra)) if (value !== '') search.set(key, value);
   return search;
 }
@@ -121,18 +126,10 @@ export function JournalFilters({
           {withRefused && <option value="refused">Отклонено при приёме</option>}
         </select>
       </label>
-      <PeriodInput
-        label="С"
-        value={filter.from}
-        onChange={(from) => {
-          onChange({ from });
-        }}
-      />
-      <PeriodInput
-        label="По"
-        value={filter.to}
-        onChange={(to) => {
-          onChange({ to });
+      <ListPeriodPicker
+        value={filter.period}
+        onChange={(period) => {
+          onChange({ period });
         }}
       />
       {withRefused && (
