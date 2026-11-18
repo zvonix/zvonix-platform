@@ -65,13 +65,13 @@ function MyChannels() {
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <FormDialog
-          label="Получить линию"
+          label="Добавить линию"
           title="Новая линия"
           variant="outline"
           disabled={list.data === undefined || full}
         >
           <DialogForm
-            submitLabel="Получить линию"
+            submitLabel="Добавить линию"
             canSubmit
             onSubmit={async () => {
               await create.mutateAsync(name.trim());

@@ -415,7 +415,7 @@ test.describe('сообщения MAX (ADR-0071)', () => {
     // Цена — в тарифе (ADR-0075): без тарифа аккаунту предлагают его создать.
     await expect(row.getByRole('link', { name: 'Создайте тариф' })).toBeVisible();
     await partner.goto('/partner/max-tariffs');
-    await partner.getByRole('button', { name: 'Новый тариф' }).click();
+    await partner.getByRole('button', { name: 'Добавить тариф' }).click();
     await partner.getByLabel('Название').fill('Основной');
     await partner.getByLabel('Цена за сообщение, ₽').fill('0,45');
     await partner.getByRole('button', { name: 'Создать', exact: true }).click();
@@ -1555,8 +1555,8 @@ test.describe('кабинет клиента', () => {
     await signIn(page, PEOPLE.client);
     await page.goto('/my/channels');
 
-    await page.getByRole('button', { name: 'Получить линию' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Получить линию' }).click();
+    await page.getByRole('button', { name: 'Добавить линию' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Добавить линию' }).click();
 
     await expect(page.getByText(/Пароль показывается/u)).toBeVisible();
     await closeSecret(page);
@@ -1568,10 +1568,10 @@ test.describe('кабинет клиента', () => {
     await signIn(page, PEOPLE.client);
     await page.goto('/my/channels');
 
-    await page.getByRole('button', { name: 'Получить линию' }).click();
+    await page.getByRole('button', { name: 'Добавить линию' }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Название (необязательно)').fill('Ночная смена');
-    await dialog.getByRole('button', { name: 'Получить линию' }).click();
+    await dialog.getByRole('button', { name: 'Добавить линию' }).click();
     await closeSecret(page);
 
     await page.getByRole('link', { name: 'Ночная смена' }).click();
@@ -1743,11 +1743,11 @@ test.describe('клиент заводит доступ своей систем�
 
     // До ADR-0044 ключ выпускал администратор, и секрет обязан был дойти до клиента
     // перепиской. Теперь он появляется там же, где его и вставляют.
-    await page.getByRole('button', { name: 'Создать ключ' }).click();
+    await page.getByRole('button', { name: 'Добавить ключ' }).click();
     await page.getByLabel('Назначение').fill('Диспетчерская на проверке');
     await page
       .getByRole('dialog')
-      .getByRole('button', { name: 'Создать и показать секрет' })
+      .getByRole('button', { name: 'Добавить и показать секрет' })
       .click();
 
     await expect(page.getByText('Ключ «Диспетчерская на проверке»')).toBeVisible();
@@ -1758,11 +1758,11 @@ test.describe('клиент заводит доступ своей систем�
     await signIn(page, PEOPLE.client);
     await page.goto('/my/integration');
 
-    await page.getByRole('button', { name: 'Создать ключ' }).click();
+    await page.getByRole('button', { name: 'Добавить ключ' }).click();
     await page.getByLabel('Назначение').fill('Ключ на отзыв');
     await page
       .getByRole('dialog')
-      .getByRole('button', { name: 'Создать и показать секрет' })
+      .getByRole('button', { name: 'Добавить и показать секрет' })
       .click();
     await expect(page.getByText('Ключ «Ключ на отзыв»')).toBeVisible();
     await closeSecret(page);
