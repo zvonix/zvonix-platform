@@ -1,13 +1,15 @@
 /**
- * Резервирование средств под вызов (ADR-0010).
+ * Резервы средств под вызов (ADR-0010) — **доживающие**.
+ *
+ * С [ADR-0125](../../../../../docs/adr/0125-dengi-na-zvonok-bez-rezerva.md) новые резервы не создаются: звонок
+ * начинается по доступному за вычетом стоимости идущих разговоров, а деньги держит проверка во время разговора.
+ * Здесь остаются закрытие резервов, созданных до выкладки (CDR и срок), и доступная сумма с их учётом.
  *
  * **Резерв не меняет остаток и не создаёт проводок.** Он ограничивает *доступную* сумму:
  *
  *     доступно = остаток + овердрафт − сумма действующих резервов
  *
- * Так инвариант DOMAIN.md «баланс клиента не уходит ниже разрешённого овердрафта»
- * соблюдается **до** звонка, а не проверкой после — сто одновременных вызовов при остатке
- * на одну минуту иначе все прошли бы проверку и все состоялись.
+ * Пока действующих резервов не осталось, доступное — это остаток плюс разрешённый минус.
  *
  * Обратное решение — проводить резерв через журнал — давало бы на каждый несостоявшийся
  * вызов пару записей туда и обратно: проводки неизменяемы, освободить их можно только
@@ -15,16 +17,9 @@
  */
 
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  conflict,
-  Money,
-  notFound,
-  validationFailed,
-  type Id,
-  type MoneyAmount,
-} from '@zvonix/shared';
-import { APP_CONFIG, APP_LOGGER, type Config, type Logger } from '../../infra/tokens.js';
-import { BillingRepository, type Executor } from './billing.repository.js';
+import { Money, notFound, type Id, type MoneyAmount } from '@zvonix/shared';
+import { APP_LOGGER, type Logger } from '../../infra/tokens.js';
+import { BillingRepository } from './billing.repository.js';
 import { ReservationRepository, type ReservationRow } from './reservation.repository.js';
 
 /** Сколько просроченных резервов освобождается за один проход фоновой уборки. */
@@ -45,51 +40,9 @@ export class ReservationService {
   constructor(
     private readonly reservations: ReservationRepository,
     private readonly billing: BillingRepository,
-    @Inject(APP_CONFIG) private readonly config: Config,
     @Inject(APP_LOGGER) logger: Logger,
   ) {
     this.logger = logger.child('reservations');
-  }
-
-  /**
-   * Придерживает сумму под вызов.
-   *
-   * Счёт клиента блокируется на время проверки: без блокировки два одновременных вызова
-   * оба прочитают один и тот же остаток, оба увидят, что средств хватает, и оба пройдут.
-   * Блокировка именно счёта, а не таблицы резервов, потому что ограничение — на клиента.
-   */
-  async hold(input: {
-    callId: Id<'call'>;
-    clientId: Id<'client'>;
-    amount: MoneyAmount;
-  }): Promise<ReservationRow> {
-    if (Money.compare(input.amount, Money.ZERO) <= 0) {
-      throw validationFailed('Резерв должен быть больше нуля');
-    }
-
-    return this.billing.db.transaction(async (tx) => {
-      const funds = await this.availableWithin(input.clientId, tx);
-
-      if (Money.compare(funds.available, input.amount) < 0) {
-        throw conflict('Недостаточно средств с учётом действующих резервов', {
-          details: {
-            available: Money.format(funds.available),
-            required: Money.format(input.amount),
-            held: Money.format(funds.held),
-          },
-        });
-      }
-
-      return this.reservations.insert(
-        {
-          callId: input.callId,
-          clientId: input.clientId,
-          amount: input.amount,
-          expiresAt: new Date(Date.now() + this.config.RESERVATION_TTL_SECONDS * 1000),
-        },
-        tx,
-      );
-    });
   }
 
   /**
@@ -138,22 +91,12 @@ export class ReservationService {
 
   /** Доступная сумма клиента с учётом действующих резервов. */
   async available(clientId: Id<'client'>): Promise<AvailableFunds> {
-    return this.availableWithin(clientId, this.billing.db);
-  }
-
-  private async availableWithin(
-    clientId: Id<'client'>,
-    executor: Executor,
-  ): Promise<AvailableFunds> {
+    const executor = this.billing.db;
     const client = await this.billing.findClient(clientId);
     if (client === undefined) throw notFound('Клиент не найден');
 
     const account = await this.billing.findAccount('client', clientId, 'RUB', executor);
     if (account === undefined) throw notFound('Счёт клиента не найден');
-
-    // Блокировка счёта до конца транзакции. Вне транзакции это обычное чтение и никого
-    // не задерживает; внутри — сериализует одновременные резервы одного клиента.
-    await this.billing.lockAccounts([account.id], executor);
 
     const held = Money.fromMicros(await this.reservations.heldTotal(clientId, executor));
     const available = Money.subtract(Money.add(account.balance, client.overdraftLimit), held);

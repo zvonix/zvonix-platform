@@ -13,7 +13,7 @@ import type { Money as MoneyAmount, Rounding } from './money.js';
 import {
   billedSeconds,
   chargeForCall,
-  maxCharge,
+  connectionCharge,
   partnerCost,
   referenceCost,
   REFERENCE_CALL_SECONDS,
@@ -189,31 +189,29 @@ describe('наценка платформы', () => {
   });
 });
 
-describe('сумма резерва', () => {
-  it('считается как стоимость разговора предельной длительности', () => {
-    const r = rule({ pricePerMinute: rub('2'), connectionFee: rub('1') });
-    const commission: CommissionRule = { fixedFee: rub('0.50'), percentBasisPoints: 1000n };
-
-    const reserve = maxCharge(3600, r, commission);
-    const actual = chargeForCall(3600, r, commission);
-    expect(reserve).toEqual(actual);
+describe('плата за соединение для клиента', () => {
+  it('без платы за соединение и фиксированной наценки — ноль: хватает любой положительной суммы', () => {
+    const commission: CommissionRule = { fixedFee: Money.ZERO, percentBasisPoints: 1500n };
+    expect(connectionCharge(rule({ minimumDurationSeconds: 60 }), commission)).toBe(Money.ZERO);
   });
 
-  it('резерва хватает на любой более короткий разговор', () => {
-    const r = rule({ pricePerMinute: rub('2.50'), connectionFee: rub('1') });
-    const commission: CommissionRule = { fixedFee: rub('0.50'), percentBasisPoints: 1000n };
-    const reserve = maxCharge(600, r, commission);
-
-    // Ради этого свойства резерв и существует: фактическое списание не должно
-    // оказаться больше зарезервированного ни при какой длительности.
-    for (const seconds of [1, 7, 59, 60, 61, 300, 599, 600]) {
-      const actual = chargeForCall(seconds, r, commission);
-      expect(Money.compare(actual.clientAmount, reserve.clientAmount)).toBeLessThanOrEqual(0);
-    }
+  it('плата партнёра с процентом наценки и фиксированная часть', () => {
+    const commission: CommissionRule = { fixedFee: rub('0.05'), percentBasisPoints: 1000n };
+    // 1 ₽ партнёру, 10 % от него и 5 копеек фиксом.
+    expect(connectionCharge(rule({ connectionFee: rub('1') }), commission)).toBe(rub('1.15'));
   });
 
-  it('нулевая предельная длительность бессмысленна и отвергается', () => {
-    expect(() => maxCharge(0, rule(), noCommission)).toThrow(TariffError);
+  it('совпадает с фиксированной частью полного расчёта разговора', () => {
+    // Секунда разговора по нулевой цене за минуту — это ровно плата за ответ.
+    const r = rule({ pricePerMinute: Money.ZERO, connectionFee: rub('0.70') });
+    const commission: CommissionRule = { fixedFee: rub('0.20'), percentBasisPoints: 1500n };
+    expect(connectionCharge(r, commission)).toBe(chargeForCall(1, r, commission).clientAmount);
+  });
+
+  it('отрицательная наценка отвергается', () => {
+    expect(() => connectionCharge(rule(), { fixedFee: rub('-1'), percentBasisPoints: 0n })).toThrow(
+      TariffError,
+    );
   });
 });
 

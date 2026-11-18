@@ -32,6 +32,8 @@ interface CallView {
   readonly destination: string;
   readonly status: string;
   readonly failure_reason: string | null;
+  /** Почему площадка оборвала разговор: `balance_exhausted` (ADR-0125). Пусто — не обрывали. */
+  readonly cut_off_reason: string | null;
   readonly duration_seconds: number | null;
   readonly started_at: string;
   readonly answered_at: string | null;
@@ -177,6 +179,7 @@ function toCallView(row: CallDetails): CallView {
     destination: call.destination,
     status: call.status,
     failure_reason: call.failureReason,
+    cut_off_reason: call.cutOffReason,
     duration_seconds: call.durationSeconds,
     started_at: call.startedAt.toISOString(),
     answered_at: call.answeredAt?.toISOString() ?? null,

@@ -1,9 +1,9 @@
 /**
  * Приём CDR на реальной базе (ADR-0010).
  *
- * Замыкает цепочку этапа 2: маршрут → резерв → разговор → списание. Проверяется то,
- * что стоит денег: повторная доставка не списывает дважды, несостоявшийся разговор
- * освобождает резерв, а сумма трёх проводок равна нулю.
+ * Замыкает цепочку этапа 2: маршрут → разговор → списание. Проверяется то, что стоит денег:
+ * повторная доставка не списывает дважды, несостоявшийся разговор денег не двигает, сумма трёх
+ * проводок равна нулю, а состоявшийся разговор списывается и ниже разрешённого минуса (ADR-0125).
  */
 
 import { sql } from 'drizzle-orm';
@@ -233,13 +233,13 @@ afterAll(async () => {
 });
 
 describe('состоявшийся разговор', () => {
-  it('списывается по тарифу, резерв закрывается, место на SIM освобождается', async () => {
+  it('списывается по тарифу, место на SIM освобождается', async () => {
     const env = await scenario({ pricePerMinute: '10', commissionBp: 1500 });
     const before = await balance(env.client);
     const uuid = await startCall(env.channel, env.destination);
 
-    // Резерв придержан на час разговора: 10 ₽/мин × 60 + 15% = 690 ₽.
-    expect(await heldTotal(env.client)).toBe(690_000_000n);
+    // Резерва под разговор нет (ADR-0125): деньги не придерживаются, их держит проверка во время разговора.
+    expect(await heldTotal(env.client)).toBe(0n);
 
     const response = await sendCdr(uuid, { billsec: '60' });
     expect(response.statusCode).toBe(200);
@@ -302,6 +302,57 @@ describe('состоявшийся разговор', () => {
   });
 });
 
+describe('списание ниже разрешённого минуса (ADR-0125)', () => {
+  it('состоявшийся разговор списывается, даже если клиент уходит за свой минус', async () => {
+    // 10 000 ₽ на счету, минуса нет. Две минуты по 10 000 ₽ с наценкой — далеко за пределом.
+    const env = await scenario({ pricePerMinute: '10000', commissionBp: 0 });
+    const before = await balance(env.client);
+    const uuid = await startCall(env.channel, env.destination);
+
+    const response = await sendCdr(uuid, { billsec: '120' });
+    // Прежде здесь был `409`: разговор был, денег нет, а узел повторял CDR снова и снова.
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ outcome: string }>().outcome).toBe('charged');
+    expect(before - (await balance(env.client))).toBe(20_000_000_000n);
+    expect(await balance(env.client)).toBeLessThan(0n);
+
+    // Повтор — та же проводка, а не вторая.
+    expect((await sendCdr(uuid, { billsec: '120' })).statusCode).toBe(200);
+    expect(before - (await balance(env.client))).toBe(20_000_000_000n);
+  });
+
+  it('ниже предела новый звонок не начинается', async () => {
+    const env = await scenario({ pricePerMinute: '10000', commissionBp: 0 });
+    await sendCdr(await startCall(env.channel, env.destination), { billsec: '120' });
+    // Клиент уже ниже предела: новый звонок не начнётся.
+    const next = await post('/routing/preview', {
+      callId: unique('uuid'),
+      channelId: env.channel,
+      nodeId,
+      destination: env.destination,
+    });
+    expect(next.json<{ reason: string | null }>().reason).toBe('insufficient_funds');
+  });
+});
+
+describe('резерв, созданный до ADR-0125', () => {
+  it('закрывается пришедшим CDR, как прежде', async () => {
+    const env = await scenario();
+    const uuid = await startCall(env.channel, env.destination);
+    await withDatabase(async (execute) => {
+      await execute(sql`
+        insert into reservations (id, call_id, client_id, amount, status, expires_at)
+        select gen_random_uuid(), id, ${env.client}, 600000000, 'held', now() + interval '2 hours'
+          from calls where external_id = ${uuid}
+      `);
+    });
+    expect(await heldTotal(env.client)).toBe(600_000_000n);
+
+    expect((await sendCdr(uuid)).statusCode).toBe(200);
+    expect(await heldTotal(env.client)).toBe(0n);
+  });
+});
+
 describe('идемпотентность', () => {
   it('повторная доставка не списывает дважды', async () => {
     const env = await scenario();
@@ -348,7 +399,7 @@ describe('несостоявшийся разговор', () => {
     ['занято', 'USER_BUSY', 'busy'],
     ['не ответили', 'NO_ANSWER', 'no_answer'],
     ['отменён', 'ORIGINATOR_CANCEL', 'cancelled'],
-  ])('%s: резерв освобождается, денег не движется', async (_name, cause, expected) => {
+  ])('%s: денег не движется', async (_name, cause, expected) => {
     const env = await scenario();
     const before = await balance(env.client);
     const uuid = await startCall(env.channel, env.destination);

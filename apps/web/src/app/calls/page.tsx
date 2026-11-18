@@ -2,7 +2,12 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { CALL_FAILURE_REASONS, CALL_STATUSES } from '@zvonix/shared';
-import type { CallFailureReason, CallStatus, TerminationKind } from '@zvonix/shared';
+import type {
+  CallCutOffReason,
+  CallFailureReason,
+  CallStatus,
+  TerminationKind,
+} from '@zvonix/shared';
 import { Suspense, useState } from 'react';
 import { EndCause, ListenButton, useListenable } from '@/components/call-recording';
 import { ConsoleShell } from '@/components/console-shell';
@@ -36,6 +41,8 @@ import { useClients, usePartners } from '@/lib/dictionaries';
 import { duration, moment } from '@/lib/format';
 import { money } from '@/lib/money';
 import {
+  CALL_CUT_OFF_FIX,
+  CALL_CUT_OFF_NAME,
   CALL_STATUS_NAME,
   callTone,
   FAILURE_REASON_FIX,
@@ -58,6 +65,8 @@ interface Call {
   readonly destination: string;
   readonly status: CallStatus;
   readonly failure_reason: CallFailureReason | null;
+  /** Почему площадка оборвала разговор (ADR-0125); пусто — не обрывали. */
+  readonly cut_off_reason: CallCutOffReason | null;
   readonly duration_seconds: number | null;
   /** Деньги вызова по его проводке; пусто — проводки нет (отказ, ноль секунд). */
   readonly money: { client: string; partner: string; margin: string } | null;
@@ -278,7 +287,11 @@ function CallsView() {
                   call.gateway?.name,
                   call.sim?.msisdn,
                   CALL_STATUS_NAME[call.status],
-                  call.failure_reason === null ? '' : FAILURE_REASON_NAME[call.failure_reason],
+                  call.cut_off_reason !== null
+                    ? CALL_CUT_OFF_NAME[call.cut_off_reason]
+                    : call.failure_reason === null
+                      ? ''
+                      : FAILURE_REASON_NAME[call.failure_reason],
                   call.duration_seconds,
                   call.money?.client,
                   call.money?.partner,
@@ -420,17 +433,21 @@ function CallRow({
       {/* Итог — точкой и словом; почему не состоялся и что делать — в подсказке (DESIGN.md, «Таблица»). */}
       <TableCell className="max-w-[300px] truncate">
         <StatusDot
-          tone={toneOf(callTone(call.status))}
-          // Разбор вызовов: причина отказа видна сразу — словом у точки, что делать — в подсказке.
+          tone={call.cut_off_reason === null ? toneOf(callTone(call.status)) : 'warn'}
+          // Разбор вызовов: причина отказа или обрыва видна сразу — словом у точки, что делать — в подсказке.
           label={
-            call.failure_reason === null
-              ? CALL_STATUS_NAME[call.status]
-              : FAILURE_REASON_NAME[call.failure_reason]
+            call.cut_off_reason !== null
+              ? CALL_CUT_OFF_NAME[call.cut_off_reason]
+              : call.failure_reason === null
+                ? CALL_STATUS_NAME[call.status]
+                : FAILURE_REASON_NAME[call.failure_reason]
           }
           reason={
-            call.failure_reason === null
-              ? undefined
-              : `${CALL_STATUS_NAME[call.status]}. ${FAILURE_REASON_FIX[call.failure_reason]}`
+            call.cut_off_reason !== null
+              ? `${CALL_STATUS_NAME[call.status]}. ${CALL_CUT_OFF_FIX[call.cut_off_reason]}`
+              : call.failure_reason === null
+                ? undefined
+                : `${CALL_STATUS_NAME[call.status]}. ${FAILURE_REASON_FIX[call.failure_reason]}`
           }
         />
         <EndCause cause={call.end_cause} sip={call.end_sip} status={call.status} />

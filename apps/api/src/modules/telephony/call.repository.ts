@@ -3,13 +3,14 @@
  */
 
 import { Injectable } from '@nestjs/common';
-import { and, count, desc, eq, gte, inArray, lt, lte, sql, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, lt, lte, sql, type SQL } from 'drizzle-orm';
 import { toDatabaseError, type Database, type Executor } from '@zvonix/db';
 import { calls, channels, gateways, simCards, sipTrunks } from '@zvonix/db/schema';
 import {
   CALL_REAL_ANSWER_SECONDS,
   newId,
   OPEN_CALL_STATUSES,
+  type CallCutOffReason,
   type CallFailureReason,
   type CallStatus,
   type GatewayType,
@@ -53,6 +54,17 @@ export interface NumberAttempts {
   readonly ended: readonly { readonly id: string; readonly endedAt: Date }[];
 }
 export type CallRow = typeof calls.$inferSelect;
+
+/** Открытый вызов с клиентом — для счёта стоимости идущих разговоров (ADR-0125). */
+export interface OpenCallSpend {
+  readonly id: CallId;
+  readonly externalId: string;
+  readonly clientId: Id<'client'>;
+  readonly nodeId: Id<'node'>;
+  readonly partnerRateId: Id<'partnerRate'> | null;
+  readonly startedAt: Date;
+  readonly cutOffReason: CallCutOffReason | null;
+}
 
 /** Исполнитель запроса: подключение либо открытая транзакция. */
 // Тип объявлен в `@zvonix/db` и переэкспортируется отсюда: вызывающий берёт его
@@ -577,6 +589,54 @@ export class CallRepository {
       .from(calls)
       .innerJoin(gateways, eq(gateways.id, calls.gatewayId))
       .where(eq(calls.id, id));
+    return row;
+  }
+
+  /**
+   * Открытые вызовы с клиентом, свежие сверху ([ADR-0125](../../../../../docs/adr/0125-dengi-na-zvonok-bez-rezerva.md)).
+   * Без клиента — всех клиентов разом: так проверка во время разговора видит, у кого вообще что-то идёт.
+   * Граница по началу держит запрос на индексе `(status, started_at)`, как и подсчёт открытых на линии.
+   */
+  async listOpenSpend(now: Date, clientId?: Id<'client'>): Promise<OpenCallSpend[]> {
+    const horizon = new Date(now.getTime() - OPEN_CALL_HORIZON_MS);
+    return this.db
+      .select({
+        id: calls.id,
+        externalId: calls.externalId,
+        clientId: channels.clientId,
+        nodeId: calls.nodeId,
+        partnerRateId: calls.partnerRateId,
+        startedAt: calls.startedAt,
+        cutOffReason: calls.cutOffReason,
+      })
+      .from(calls)
+      .innerJoin(channels, eq(channels.id, calls.channelId))
+      .where(
+        and(
+          inArray(calls.status, [...OPEN_CALL_STATUSES]),
+          gte(calls.startedAt, horizon),
+          clientId === undefined ? undefined : eq(channels.clientId, clientId),
+        ),
+      )
+      .orderBy(desc(calls.startedAt), desc(calls.id));
+  }
+
+  /**
+   * Отметить обрыв идущего разговора. Условно: только открытый и ещё не оборванный вызов — второй экземпляр
+   * воркера или пришедший CDR отметки не получат. `undefined` — отмечать уже нечего.
+   */
+  async markCutOff(id: CallId, reason: CallCutOffReason): Promise<CallRow | undefined> {
+    const [row] = await this.db
+      .update(calls)
+      .set({ cutOffReason: reason })
+      .where(
+        and(
+          eq(calls.id, id),
+          inArray(calls.status, [...OPEN_CALL_STATUSES]),
+          isNull(calls.cutOffReason),
+        ),
+      )
+      .returning();
     return row;
   }
 

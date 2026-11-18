@@ -67,6 +67,11 @@ export interface RoutePlan {
   /** Номер, который увидит вызываемый. Пусто — номер SIM. */
   readonly callerId: string | null;
   readonly realm: string;
+  /**
+   * Предел длительности: на нём узел кладёт трубку сам (`sched_hangup`, ADR-0125). Защита от зависшего вызова,
+   * который иначе висел бы, пока его не закроет уборка, — с занятой SIM и растущей стоимостью.
+   */
+  readonly maxDurationSeconds: number;
 }
 
 /**
@@ -125,6 +130,9 @@ export function routeDocument(plan: RoutePlan): string {
     // Идентификатор вызова экспортируется на исходящее плечо: без него связать
     // разговор, деньги и запись нечем.
     action('export', `nolocal:zvonix_call_id=${plan.callId}`),
+    // До `bridge`: отсчёт идёт от выдачи маршрута, гудки входят в предел. `ALLOTTED_TIMEOUT` — причина отбоя
+    // в CDR, по которой обрыв на пределе виден поддержке.
+    action('sched_hangup', `+${String(Math.trunc(plan.maxDurationSeconds))} ALLOTTED_TIMEOUT`),
   ];
 
   if (plan.callerId !== null) {

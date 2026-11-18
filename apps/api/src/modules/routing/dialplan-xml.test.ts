@@ -40,6 +40,7 @@ const plan = {
   callId: '0198f3c4-1111-7000-8000-aaaaaaaaaaaa',
   destination: '79001234567',
   realm: 'sip.zvonix.test',
+  maxDurationSeconds: 14_400,
   callerId: null,
   recordingPath: null,
   candidates: [{ kind: 'sim' as const, sipUsername: 'gw-aaaaaaaaaaaa', linePrefix: null }],
@@ -110,6 +111,12 @@ describe('диалплан с маршрутом', () => {
 
   it('идентификатор вызова экспортируется: без него не связать разговор, деньги и запись', () => {
     expect(routeDocument(plan)).toContain(`nolocal:zvonix_call_id=${plan.callId}`);
+  });
+
+  it('узел сам обрывает разговор на пределе длительности — до набора, чтобы гудки входили в предел', () => {
+    const xml = routeDocument(plan);
+    expect(xml).toContain('application="sched_hangup" data="+14400 ALLOTTED_TIMEOUT"');
+    expect(xml.indexOf('sched_hangup')).toBeLessThan(xml.indexOf('application="bridge"'));
   });
 
   it('запись включается только когда её требует канал', () => {

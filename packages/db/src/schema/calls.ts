@@ -13,9 +13,11 @@
 import { sql } from 'drizzle-orm';
 import { check, index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import {
+  CALL_CUT_OFF_REASONS,
   CALL_FAILURE_REASONS,
   CALL_STATUSES,
   RESERVATION_STATUSES,
+  type CallCutOffReason,
   type CallFailureReason,
   type CallStatus,
   type ReservationStatus,
@@ -106,11 +108,19 @@ export const calls = pgTable(
     /** Код и текст SIP-ответа шлюза или провайдера: «503 Service Unavailable». Пусто — ответа не было. */
     endSip: text(),
 
+    /**
+     * Почему площадка оборвала идущий разговор: `balance_exhausted` — клиент вышел за свой разрешённый минус
+     * ([ADR-0125](../../../../docs/adr/0125-dengi-na-zvonok-bez-rezerva.md)). Ставится только после того, как узел
+     * подтвердил обрыв; отметка заодно не даёт обрывать вызов второй раз. Пусто — не обрывали.
+     */
+    cutOffReason: text().$type<CallCutOffReason>(),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     check('calls_status_check', oneOf(t.status, CALL_STATUSES)),
+    check('calls_cut_off_reason_check', oneOf(t.cutOffReason, CALL_CUT_OFF_REASONS)),
     check(
       'calls_failure_reason_check',
       sql`${t.failureReason} is null or ${t.failureReason} in ${sql.raw(`(${CALL_FAILURE_REASONS.map((value) => `'${value}'`).join(', ')})`)}`,
