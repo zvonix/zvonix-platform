@@ -113,6 +113,19 @@ export class NodeDirectoryController {
     return sipGatewaysXml(await this.telephony.nodeTrunks(parseId(machine.ownerId, 'node')));
   }
 
+  /**
+   * Доверенные адреса — готовым текстом для `ignoreip` fail2ban узла
+   * ([ADR-0125](../../../../../docs/adr/0125-svoi-adresa-ne-blokiruyutsya.md)). Забирает пульс узла раз в 30 с;
+   * изменился список — узел перечитывает SIP-тюрьмы и снимает блок с попавших в него.
+   */
+  @Machine('node')
+  @Get('trusted-addresses.txt')
+  @Header('Content-Type', 'text/plain; charset=utf-8')
+  @Header('Cache-Control', 'no-store')
+  async trustedAddresses(): Promise<string> {
+    return this.telephony.nodeTrustedAddresses();
+  }
+
   @Machine('node')
   @Post('directory')
   @HttpCode(200)

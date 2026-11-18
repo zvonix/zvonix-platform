@@ -2377,6 +2377,26 @@ describe('«на связи» по опросу узла (ADR-0103)', () => {
       address: '198.51.100.7:5060/udp',
     });
 
+    // Адрес входа с верным паролем — в доверенных узла: fail2ban его не блокирует (ADR-0125).
+    const trusted = await api().inject({
+      method: 'GET',
+      url: '/node/trusted-addresses.txt',
+      headers: as(nodeKey),
+    });
+    expect(trusted.statusCode).toBe(200);
+    expect(trusted.body.split('\n')[0]).toBe('# zvonix-trusted');
+    expect(trusted.body.split('\n')).toContain('198.51.100.7');
+    // Только узлу: человеку список не отдаётся.
+    expect(
+      (
+        await api().inject({
+          method: 'GET',
+          url: '/node/trusted-addresses.txt',
+          headers: as(owner.token),
+        })
+      ).statusCode,
+    ).toBe(401);
+
     // Пустой список FreeSWITCH — без `rows`: принимается, отмечать нечего.
     expect((await send({ row_count: 0 })).json<{ recorded: number }>().recorded).toBe(0);
     // Только узлу: человеку и без ключа — нет.
