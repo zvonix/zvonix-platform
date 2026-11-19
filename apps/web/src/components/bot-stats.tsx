@@ -11,6 +11,7 @@ import { PageNav } from '@/components/page-nav';
 import { PeriodPicker } from '@/components/period-picker';
 import { StatusDot } from '@/components/status-dot';
 import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import { MoneyTotal } from '@/components/money-total';
 import {
   Table,
   TableBody,
@@ -23,7 +24,6 @@ import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment, plural } from '@/lib/format';
 import { MESSAGE_FAILURE_NAME } from '@/lib/labels';
-import { money } from '@/lib/money';
 import { periodKey, periodMoments, type ReportPeriod } from '@/lib/reports';
 
 interface Counts {
@@ -199,7 +199,10 @@ export function BotStats({ base }: { base: string }) {
                 <span className="num font-semibold">{String(data.messages.failed)}</span>
               </span>
               <span>
-                Стоимость <span className="num font-semibold">{money(data.messages.cost)}</span>
+                Стоимость{' '}
+                <span className="font-semibold">
+                  <MoneyTotal value={data.messages.cost} />
+                </span>
               </span>
             </div>
             {data.failures.length > 0 && (

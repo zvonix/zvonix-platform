@@ -2,9 +2,10 @@
 
 import { AccountLedger } from '@/components/account-ledger';
 import { ConsoleShell } from '@/components/console-shell';
+import { MoneyTotal } from '@/components/money-total';
 import { useClientAccount } from '@/lib/account';
 import { CLIENT_STATUS_MEANING, CLIENT_STATUS_NAME } from '@/lib/labels';
-import { isNegative, money } from '@/lib/money';
+import { isNegative } from '@/lib/money';
 import { TopUp } from './top-up';
 
 export default function MyMoneyPage() {
@@ -75,7 +76,7 @@ function Figure({ title, value, strong }: { title: string; value: string; strong
           .filter((part) => part !== '')
           .join(' ')}
       >
-        {money(value)}
+        <MoneyTotal value={value} />
       </dd>
     </div>
   );

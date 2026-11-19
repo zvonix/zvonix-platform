@@ -17,6 +17,7 @@ import { ReadOnly } from '@/components/read-only';
 import { MoneyOperation } from '@/components/money-operation';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
+import { MoneyTotal } from '@/components/money-total';
 import {
   Table,
   TableBody,
@@ -29,7 +30,7 @@ import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { PARTNER_STATUS_NAME, partnerStatusTone } from '@/lib/labels';
-import { isNegative, money } from '@/lib/money';
+import { isNegative } from '@/lib/money';
 import { useUrlState } from '@/lib/url-state';
 import { NewPartnerForm } from './new-partner-form';
 import type { PartnerRow } from './partner-row';
@@ -206,7 +207,7 @@ function PartnerLine({ partner, canChange }: { partner: PartnerRow; canChange: b
           а не штатное состояние.
         */}
         <span className={isNegative(partner.balance) ? 'text-crit' : undefined}>
-          {money(partner.balance)}
+          <MoneyTotal value={partner.balance} />
         </span>
       </TableCell>
       <TableCell className={WIDE_ONLY}>

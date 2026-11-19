@@ -21,6 +21,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
+import { MoneyTotal } from '@/components/money-total';
 import {
   Table,
   TableBody,
@@ -30,7 +31,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ApiError, request } from '@/lib/api';
-import { integerFromInput, money } from '@/lib/money';
+import { integerFromInput } from '@/lib/money';
 import { asr, useBreakdown } from '@/lib/reports';
 import { ChannelSettings } from '../channel-settings';
 import {
@@ -431,7 +432,7 @@ function SummaryTab({ channel }: { channel: Channel }) {
                     {rows === undefined ? '…' : Math.round((row?.talk_seconds ?? 0) / 60)}
                   </TableCell>
                   <TableCell className={NUM}>
-                    {rows === undefined ? '…' : money(row?.spent ?? '0')}
+                    {rows === undefined ? '…' : <MoneyTotal value={row?.spent ?? '0'} />}
                   </TableCell>
                 </TableRow>
               );

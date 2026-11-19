@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   basisPointsFromPercent,
+  exactMoney,
+  finerThanKopecks,
   integerFromInput,
   isNegative,
   sumMoney,
   money,
   microunits,
   moneyFromInput,
+  moneyTotal,
   numberFromInput,
   percent,
+  roundToKopecks,
 } from './money.js';
 
 /**
@@ -218,5 +222,59 @@ describe('sumMoney', () => {
     expect(sumMoney('11.5', '0.54', undefined, '2')).toBe('14.04');
     expect(sumMoney('-0.54', '0.5')).toBe('-0.04');
     expect(sumMoney()).toBe('0');
+  });
+});
+
+describe('итог до копеек', () => {
+  it('округляет половину вверх', () => {
+    expect(roundToKopecks('0.005')).toBe('0.01');
+    expect(roundToKopecks('0.004999')).toBe('0.00');
+    expect(roundToKopecks('165.478508')).toBe('165.48');
+    expect(roundToKopecks('697.28033')).toBe('697.28');
+    expect(roundToKopecks('0.995')).toBe('1.00');
+    expect(roundToKopecks('999.999')).toBe('1000.00');
+  });
+
+  it('считает строкой: плавающая точка дала бы 2,67', () => {
+    expect((2.675).toFixed(2)).toBe('2.67');
+    expect(roundToKopecks('2.675')).toBe('2.68');
+  });
+
+  it('отрицательные — по модулю, и без «-0,00»', () => {
+    expect(roundToKopecks('-0.005')).toBe('-0.01');
+    expect(roundToKopecks('-12.344')).toBe('-12.34');
+    expect(roundToKopecks('-12.345')).toBe('-12.35');
+    expect(roundToKopecks('-0.004')).toBe('0.00');
+  });
+
+  it('целые и короткие дополняет до двух знаков', () => {
+    expect(roundToKopecks('1500')).toBe('1500.00');
+    expect(roundToKopecks('1.5')).toBe('1.50');
+    expect(roundToKopecks(' 7 ')).toBe('7.00');
+  });
+
+  it('не сумма — не округляется', () => {
+    expect(roundToKopecks('нет данных')).toBeUndefined();
+    expect(roundToKopecks('1.2.3')).toBeUndefined();
+    expect(roundToKopecks('')).toBeUndefined();
+  });
+
+  it('показывает с разрядами, запятой и валютой', () => {
+    expect(moneyTotal('165.478508')).toBe(`165,48${B}₽`);
+    expect(moneyTotal('1234567.5')).toBe(`1${N}234${N}567,50${B}₽`);
+    expect(moneyTotal('-0.005')).toBe(`-0,01${B}₽`);
+    expect(moneyTotal('0')).toBe(`0,00${B}₽`);
+    expect(moneyTotal('нет данных')).toBe('нет данных');
+  });
+
+  it('точное значение — только когда округление что-то спрятало', () => {
+    expect(finerThanKopecks('165.478508')).toBe(true);
+    expect(finerThanKopecks('0.001')).toBe(true);
+    expect(finerThanKopecks('12.34')).toBe(false);
+    expect(finerThanKopecks('12.340000')).toBe(false);
+    expect(finerThanKopecks('12')).toBe(false);
+    expect(finerThanKopecks('нет')).toBe(false);
+    expect(exactMoney('165.478508')).toBe(`165,478508${B}₽`);
+    expect(exactMoney('12.3')).toBeUndefined();
   });
 });

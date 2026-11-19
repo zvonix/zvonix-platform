@@ -1,17 +1,19 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { NODE_OFFLINE_AFTER_MS, type NodeStatus } from '@zvonix/shared';
 import { ConsoleShell } from '@/components/console-shell';
 import type { ChartScope } from '@/components/day-chart';
 import { DayChartCard } from '@/components/day-chart-card';
+import { MoneyTotal } from '@/components/money-total';
 import { PeriodPicker } from '@/components/period-picker';
 import { request } from '@/lib/api';
 import { duration } from '@/lib/format';
 import { useLiveInterval } from '@/lib/live';
-import { money } from '@/lib/money';
+import { sumMoney } from '@/lib/money';
+import { changeDirection, changeText, periodChange, type PeriodChange } from '@/lib/period-change';
 import { gaugeTone, usedPercent } from '@/lib/gauge';
 import { NODE_STATUS_NAME, nodeTone } from '@/lib/labels';
 import {
@@ -22,13 +24,10 @@ import {
   type ReportRow,
 } from '@/lib/reports';
 
-const asNumber = (value: string | undefined): number => Number(value ?? '0');
-
-/** Списано с клиентов за сутки — за вызовы и за сообщения MAX. */
-const dayRevenue = (row: ReportRow): number =>
-  asNumber(row.revenue) + asNumber(row.message_revenue);
-
-/** Сумма показателей за дни. Деньги — числом: нужны только для сравнения и подписи, не для учёта. */
+/**
+ * Сумма показателей за дни. Деньги — строкой API, сложенные точно: плитка показывает итог до копеек,
+ * а в подсказке — точное значение, и оно должно быть точным, а не суммой чисел с плавающей точкой.
+ */
 function sum(rows: readonly ReportRow[]) {
   return rows.reduce(
     (total, row) => ({
@@ -36,20 +35,26 @@ function sum(rows: readonly ReportRow[]) {
       answered: total.answered + row.answered,
       talk: total.talk + row.talk_seconds,
       // Деньги — звонки и MAX вместе: «Списано» и «Наш доход» считали одни вызовы (владелец, 2026-10-23).
-      revenue: total.revenue + dayRevenue(row),
-      margin: total.margin + asNumber(row.margin) + asNumber(row.message_margin),
+      revenue: sumMoney(total.revenue, row.revenue, row.message_revenue),
+      margin: sumMoney(total.margin, row.margin, row.message_margin),
     }),
-    { calls: 0, answered: 0, talk: 0, revenue: 0, margin: 0 },
+    { calls: 0, answered: 0, talk: 0, revenue: '0', margin: '0' },
   );
 }
 
-/** Изменение к предыдущим суткам в процентах; `undefined`, когда сравнивать не с чем. */
-function change(now: number, before: number): number | undefined {
-  if (before === 0) return now === 0 ? 0 : undefined;
-  return ((now - before) / before) * 100;
-}
+/** Изменение суммы денег: для сравнения точности числа хватает, учёта здесь нет. */
+const moneyChange = (now: string, before: string): PeriodChange =>
+  periodChange(Number(now), Number(before));
 
-const rubles = (value: number): string => money(value.toFixed(2));
+/** Изменение доли в процентных пунктах; доли нет в одном из периодов — сравнивать не с чем. */
+const pointsChange = (now: number | undefined, before: number | undefined): PeriodChange =>
+  now === undefined || before === undefined
+    ? { kind: 'unknown' }
+    : { kind: 'percent', value: now - before };
+
+/** Пока прошлый период не загружен, его нули — не «раньше не было», а «ещё не знаем». */
+const knownIf = (loaded: boolean, change: PeriodChange): PeriodChange =>
+  loaded ? change : { kind: 'unknown' };
 
 export default function OverviewPage() {
   return (
@@ -93,6 +98,7 @@ function Overview() {
 
   const now = sum(overview.data?.series ?? []);
   const before = sum(earlier.data?.series ?? []);
+  const known = (change: PeriodChange) => knownIf(earlier.data !== undefined, change);
   const share = now.calls === 0 ? undefined : (now.answered / now.calls) * 100;
   const shareBefore = before.calls === 0 ? undefined : (before.answered / before.calls) * 100;
 
@@ -152,34 +158,32 @@ function Overview() {
             href="/reports"
             label="Вызовов"
             value={String(now.calls)}
-            delta={change(now.calls, before.calls)}
+            delta={known(periodChange(now.calls, before.calls))}
           />
           <Kpi
             href="/reports"
             label="Доля состоявшихся"
             value={share === undefined ? '—' : `${share.toFixed(1).replace('.', ',')} %`}
-            delta={
-              share === undefined || shareBefore === undefined ? undefined : share - shareBefore
-            }
+            delta={known(pointsChange(share, shareBefore))}
             points
           />
           <Kpi
             href="/reports"
             label="Время разговоров"
             value={duration(now.talk)}
-            delta={change(now.talk, before.talk)}
+            delta={known(periodChange(now.talk, before.talk))}
           />
           <Kpi
             href="/reports"
             label="Списано с клиентов"
-            value={rubles(now.revenue)}
-            delta={change(now.revenue, before.revenue)}
+            value={<MoneyTotal value={now.revenue} inLink />}
+            delta={known(moneyChange(now.revenue, before.revenue))}
           />
           <Kpi
             href="/reports"
             label="Наш доход"
-            value={rubles(now.margin)}
-            delta={change(now.margin, before.margin)}
+            value={<MoneyTotal value={now.margin} inLink />}
+            delta={known(moneyChange(now.margin, before.margin))}
           />
         </div>
       </section>
@@ -218,14 +222,14 @@ function Kpi({
 }: {
   href: string;
   label: string;
-  value: string;
-  /** Изменение к предыдущим суткам; для долей — в процентных пунктах. */
-  delta: number | undefined;
+  value: ReactNode;
+  /** Изменение к такому же периоду перед этим; для долей — в процентных пунктах. */
+  delta: PeriodChange;
   points?: boolean;
   /** Рост — плохо (например, «не отправлено»): цвет меняется местами. */
   inverse?: boolean;
 }) {
-  const sign = delta === undefined ? '' : delta > 0 ? '+' : '';
+  const direction = changeDirection(delta);
   return (
     <Link
       href={href}
@@ -235,18 +239,14 @@ function Kpi({
       <span className="num text-xl font-semibold">{value}</span>
       <span
         className={`text-xs ${
-          delta === undefined || Math.abs(delta) < 0.05
+          direction === 'none' || direction === 'flat'
             ? 'text-faint'
-            : delta > 0 !== inverse
+            : (direction === 'up') !== inverse
               ? 'text-ok'
               : 'text-crit'
         }`}
       >
-        {delta === undefined
-          ? 'нет данных для сравнения'
-          : Math.abs(delta) < 0.05
-            ? 'без изменений'
-            : `${sign}${delta.toFixed(1).replace('.', ',')} ${points ? 'п. п.' : '%'} к прошлому периоду`}
+        {changeText(delta, points)}
       </span>
     </Link>
   );
@@ -354,13 +354,14 @@ function MessagesBlock({ period }: { period: ReportPeriod }) {
         messages: all.messages + row.messages,
         delivered: all.delivered + row.delivered,
         failed: all.failed + row.failed,
-        revenue: all.revenue + asNumber(row.revenue),
-        margin: all.margin + asNumber(row.margin),
+        revenue: sumMoney(all.revenue, row.revenue),
+        margin: sumMoney(all.margin, row.margin),
       }),
-      { messages: 0, delivered: 0, failed: 0, revenue: 0, margin: 0 },
+      { messages: 0, delivered: 0, failed: 0, revenue: '0', margin: '0' },
     );
   const now = total(series);
   const before = total(earlier.data?.series ?? []);
+  const known = (change: PeriodChange) => knownIf(earlier.data !== undefined, change);
   const delivery = now.messages === 0 ? undefined : (now.delivered / now.messages) * 100;
   const deliveryBefore =
     before.messages === 0 ? undefined : (before.delivered / before.messages) * 100;
@@ -373,37 +374,33 @@ function MessagesBlock({ period }: { period: ReportPeriod }) {
           href="/messaging"
           label="Сообщений"
           value={String(now.messages)}
-          delta={change(now.messages, before.messages)}
+          delta={known(periodChange(now.messages, before.messages))}
         />
         <Kpi
           href="/messaging"
           label="Доставлено"
           value={delivery === undefined ? '—' : `${delivery.toFixed(1).replace('.', ',')} %`}
-          delta={
-            delivery === undefined || deliveryBefore === undefined
-              ? undefined
-              : delivery - deliveryBefore
-          }
+          delta={known(pointsChange(delivery, deliveryBefore))}
           points
         />
         <Kpi
           href="/messaging"
           label="Не отправлено"
           value={String(now.failed)}
-          delta={change(now.failed, before.failed)}
+          delta={known(periodChange(now.failed, before.failed))}
           inverse
         />
         <Kpi
           href="/messaging"
           label="Списано с клиентов"
-          value={rubles(now.revenue)}
-          delta={change(now.revenue, before.revenue)}
+          value={<MoneyTotal value={now.revenue} inLink />}
+          delta={known(moneyChange(now.revenue, before.revenue))}
         />
         <Kpi
           href="/messaging"
           label="Наш доход"
-          value={rubles(now.margin)}
-          delta={change(now.margin, before.margin)}
+          value={<MoneyTotal value={now.margin} inLink />}
+          delta={known(moneyChange(now.margin, before.margin))}
         />
       </div>
     </section>
