@@ -330,7 +330,7 @@ function OverdraftField({
         </Hint>
       </div>
       <p>
-        Сейчас — <span className="num">{money(client.overdraft_limit)}</span>
+        Сейчас — <MoneyTotal value={client.overdraft_limit} />
       </p>
       <div>
         <FormDialog

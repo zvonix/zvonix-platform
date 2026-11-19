@@ -30,7 +30,7 @@ import { MoneyTotal } from '@/components/money-total';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { CLIENT_STATUS_NAME, clientStatusTone } from '@/lib/labels';
-import { isNegative, money } from '@/lib/money';
+import { isNegative } from '@/lib/money';
 import { useUrlState } from '@/lib/url-state';
 import { NewClientForm } from './new-client-form';
 
@@ -200,7 +200,7 @@ function ClientsTable() {
                   </span>
                 </TableCell>
                 <TableCell className={`${NUM} text-muted-foreground ${WIDE_ONLY}`}>
-                  {money(client.overdraft_limit)}
+                  <MoneyTotal value={client.overdraft_limit} />
                 </TableCell>
                 <TableCell className={WIDE_ONLY}>
                   <span className="num text-muted-foreground">{moment(client.created_at)}</span>
