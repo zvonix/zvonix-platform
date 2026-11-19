@@ -2,9 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { ChannelStatus, ChannelSuspendedBy } from '@zvonix/shared';
-import { StatusDot, type StatusTone } from '@/components/status-dot';
 import { request } from '@/lib/api';
-import { channelState } from '@/lib/channel-state';
 
 /**
  * Линии клиента — общее для списка и страницы линии
@@ -57,29 +55,3 @@ export function ownedByClient(channel: Pick<Channel, 'status' | 'suspended_by'>)
     (channel.status === 'suspended' && channel.suspended_by === 'client')
   );
 }
-
-/**
- * Состояние линии в строке таблицы — одна точка и одно слово (`channelState`): «Подключена», «Работает», «Ждёт
- * программу», «Выключена»… Подробности — в подсказке ([DESIGN.md](../../../../../../docs/DESIGN.md), «Таблица»).
- */
-export function ChannelStateDot({ channel }: { channel: Channel }) {
-  const state = channelState(channel, 'client');
-  return <StatusDot tone={state.tone} label={state.label} reason={state.reason} />;
-}
-
-/** То же меткой — в шапке страницы одной линии (DESIGN.md, «Окно, страница или панель», исключение). */
-export function ChannelStateBadge({ channel }: { channel: Channel }) {
-  const state = channelState(channel, 'client');
-  return (
-    <span className={`rounded-md px-2 py-0.5 ${BADGE[state.tone]}`} title={state.reason}>
-      {state.label}
-    </span>
-  );
-}
-
-const BADGE: Record<StatusTone, string> = {
-  ok: 'bg-ok-soft text-ok',
-  warn: 'bg-warn-soft text-warn',
-  crit: 'bg-crit-soft text-crit',
-  off: 'bg-muted text-muted-foreground',
-};

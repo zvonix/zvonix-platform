@@ -23,6 +23,34 @@ export function moment(value: string | null | undefined): string {
   return Number.isNaN(parsed.getTime()) ? '—' : FULL.format(parsed);
 }
 
+const SHORT = new Intl.DateTimeFormat('ru-RU', {
+  day: '2-digit',
+  month: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+const SHORT_WITH_YEAR = new Intl.DateTimeFormat('ru-RU', {
+  year: 'numeric',
+  day: '2-digit',
+  month: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+/**
+ * Момент коротко — «19.11, 12:00», для столбца таблицы («Последний вызов» линии). Год пишется, только если он не
+ * текущий: иначе прошлогодний вызов читался бы как сегодняшний.
+ */
+export function shortMoment(value: string | null | undefined, now: Date = new Date()): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  return parsed.getFullYear() === now.getFullYear()
+    ? SHORT.format(parsed)
+    : SHORT_WITH_YEAR.format(parsed);
+}
+
 /**
  * Момент по часам пояса, а не браузера: «обнулится 29.10, 00:00» у правила, чьи сутки считаются по Москве
  * ([ADR-0102](../../../../docs/adr/0102-chasovoy-poyas-akkaunta-i-limity.md)). По часам браузера та же полночь читалась

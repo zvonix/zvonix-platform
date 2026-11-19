@@ -7,7 +7,11 @@ import { useState } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
 import { StatusDialog } from '@/components/status-dialog';
 import { ChannelPassword } from '@/components/channel-password';
-import { StatusDot } from '@/components/status-dot';
+import {
+  ChannelConnectionCell,
+  ChannelEnabledCell,
+  ChannelLastCallCell,
+} from '@/components/channel-facts';
 import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
@@ -24,7 +28,6 @@ import {
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { atMost } from '@/lib/wait';
-import { channelState } from '@/lib/channel-state';
 import { CHANNEL_STATUS_MEANING, CHANNEL_STATUS_NAME } from '@/lib/labels';
 
 interface Channel {
@@ -44,7 +47,7 @@ interface Channel {
   readonly last_call_at?: string | null;
 }
 
-const COLUMNS = 6;
+const COLUMNS = 8;
 
 /** Удаляет линию только клиент: у площадки для этого есть «Приостановить» (ADR-0101). */
 const ADMIN_STATUSES = CHANNEL_STATUSES.filter((status) => status !== 'closed');
@@ -176,7 +179,9 @@ export function ClientChannels({
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className={HEAD}>Канал</TableHead>
-              <TableHead className={HEAD}>Состояние</TableHead>
+              <TableHead className={HEAD}>Включена</TableHead>
+              <TableHead className={HEAD}>Подключение</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Последний вызов</TableHead>
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Имя SIP</TableHead>
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Запись</TableHead>
               <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Номер для показа</TableHead>
@@ -205,12 +210,18 @@ export function ClientChannels({
                     {channel.name}
                   </span>
                 </TableCell>
+                {/*
+                  Те же три сведения, что у клиента, словами администратора (lib/channel-state.ts; владелец,
+                  2026-11-19: каждое — своим столбцом, название столбца говорит, о чём ответ).
+                */}
                 <TableCell>
-                  {/*
-                    Одно «Состояние» с подключением, как у клиента (lib/channel-state.ts; владелец, 2026-11-18: две
-                    колонки рядом — «Работает» и «Не подключена» — нелогично).
-                  */}
-                  <ChannelStateCell channel={channel} />
+                  <ChannelEnabledCell channel={channel} viewer="admin" />
+                </TableCell>
+                <TableCell>
+                  <ChannelConnectionCell channel={channel} viewer="admin" />
+                </TableCell>
+                <TableCell className={WIDE_ONLY}>
+                  <ChannelLastCallCell channel={channel} />
                 </TableCell>
                 <TableCell className={WIDE_ONLY}>
                   <span className="num" translate="no">
@@ -473,10 +484,4 @@ function RecordingField({
       <span>Запись разговора обязательна</span>
     </label>
   );
-}
-
-/** Состояние канала одним словом — тем же расчётом, что у клиента, словами администратора. */
-function ChannelStateCell({ channel }: { channel: Channel }) {
-  const state = channelState(channel, 'admin');
-  return <StatusDot tone={state.tone} label={state.label} reason={state.reason} phoneDot />;
 }

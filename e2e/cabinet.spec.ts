@@ -1577,8 +1577,9 @@ test.describe('кабинет клиента', () => {
     await page.getByRole('link', { name: 'Ночная смена' }).click();
     await expect(page).toHaveURL(/\/my\/channels\/[0-9a-f-]+$/u);
     await expect(page.getByRole('tab', { name: 'Подключение' })).toBeVisible();
-    // Одно состояние вместо двух колонок: новая линия ждёт программу (владелец, 2026-11-18).
-    await expect(page.getByText('Ждёт программу').first()).toBeVisible();
+    // Три сведения строками (владелец, 2026-11-19): новая линия включена, программа не подключена — и подсказка рядом.
+    await expect(page.getByText('Последний вызов')).toBeVisible();
+    await expect(page.getByText('Введите в программе логин и пароль этой линии')).toBeVisible();
     await expect(page.getByText(/^ch-[0-9a-z]{12}$/u)).toBeVisible();
     // Пароль — по «глазу», каждый показ в журнале (ADR-0124).
     await page.getByRole('button', { name: 'Показать пароль' }).click();
@@ -1591,9 +1592,11 @@ test.describe('кабинет клиента', () => {
 
     await page.getByRole('button', { name: 'Выключить' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Выключить' }).click();
-    await expect(page.getByText('Выключена', { exact: true })).toBeVisible();
+    await expect(page.getByText('Выключена вами', { exact: true })).toBeVisible();
+    // Выключенной линии подключение не нужно — подсказки «введите логин и пароль» нет.
+    await expect(page.getByText('Введите в программе логин и пароль этой линии')).toHaveCount(0);
     await page.getByRole('button', { name: 'Включить' }).click();
-    await expect(page.getByText('Ждёт программу').first()).toBeVisible();
+    await expect(page.getByText('Введите в программе логин и пароль этой линии')).toBeVisible();
 
     await page.getByRole('button', { name: 'Удалить' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Удалить навсегда' }).click();

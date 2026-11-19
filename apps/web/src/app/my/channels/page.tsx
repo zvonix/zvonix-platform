@@ -19,11 +19,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { HEAD, NUM, TABLE_FRAME } from '@/components/table-parts';
+import {
+  ChannelConnectionCell,
+  ChannelEnabledCell,
+  ChannelLastCallCell,
+} from '@/components/channel-facts';
+import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { request } from '@/lib/api';
-import { CHANNELS_KEY, ChannelStateDot, useChannels, type Channel } from './channels';
+import { CHANNELS_KEY, useChannels, type Channel } from './channels';
 
-const COLUMNS = 3;
+const COLUMNS = 5;
 
 export default function MyChannelsPage() {
   return (
@@ -34,7 +39,7 @@ export default function MyChannelsPage() {
 }
 
 /**
- * Свои линии: подключена ли программа, состояние, сколько разговоров идёт. Всё остальное — на странице линии
+ * Свои линии: включена ли, подключена ли программа, когда звонили последний раз, сколько разговоров идёт. Всё остальное — на странице линии
  * ([ADR-0101](../../../../../../docs/adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md)).
  */
 function MyChannels() {
@@ -117,8 +122,10 @@ function MyChannels() {
           <TableHeader>
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className={HEAD}>Линия</TableHead>
-              <TableHead className={HEAD}>Состояние</TableHead>
-              <TableHead className={`${HEAD} text-right`}>Разговоров сейчас</TableHead>
+              <TableHead className={HEAD}>Включена</TableHead>
+              <TableHead className={HEAD}>Подключение</TableHead>
+              <TableHead className={HEAD}>Последний вызов</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY} text-right`}>Разговоров сейчас</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -150,11 +157,21 @@ function MyChannels() {
                     {channel.name}
                   </Link>
                 </TableCell>
-                {/* Одна колонка: подключение и состояние вместе (владелец, 2026-11-18: две рядом — нелогично). */}
+                {/*
+                  Три сведения своими столбцами, название столбца говорит, о чём ответ (владелец, 2026-11-19:
+                  разница между «Работает» и «Подключена» в одном слове была непонятна).
+                */}
                 <TableCell>
-                  <ChannelStateDot channel={channel} />
+                  <ChannelEnabledCell channel={channel} viewer="client" />
                 </TableCell>
-                <TableCell className={NUM}>
+                <TableCell>
+                  <ChannelConnectionCell channel={channel} viewer="client" />
+                </TableCell>
+                <TableCell>
+                  <ChannelLastCallCell channel={channel} />
+                </TableCell>
+                {/* На телефоне прячется: идущие разговоры видны в «Вызовах», а три сведения о линии важнее. */}
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
                   {channel.open_calls ?? 0}
                   {channel.max_concurrent_calls !== null && (
                     <span className="text-faint"> из {channel.max_concurrent_calls}</span>
