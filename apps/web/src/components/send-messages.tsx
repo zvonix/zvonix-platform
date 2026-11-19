@@ -32,7 +32,8 @@ import {
 import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
-import { money } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
+import { money, moneyInText } from '@/lib/money';
 
 interface Message {
   readonly id: string;
@@ -182,7 +183,7 @@ export function SendMessages() {
               </Button>
               {done !== undefined && (
                 <span role="status" className="text-ok">
-                  Принято: {done.to}, списано {done.cost === null ? '—' : money(done.cost)}.
+                  Принято: {done.to}, списано {done.cost === null ? '—' : moneyInText(done.cost)}.
                 </span>
               )}
             </div>
@@ -289,7 +290,7 @@ export function SendMessages() {
                       {message.cost === null ? (
                         <span className="text-faint">—</span>
                       ) : (
-                        money(message.cost)
+                        <MoneyTotal value={message.cost} />
                       )}
                     </TableCell>
                     <TableCell>

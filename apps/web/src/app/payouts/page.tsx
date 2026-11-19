@@ -8,7 +8,8 @@ import { ErrorNote } from '@/components/error-note';
 import { Input } from '@/components/ui/input';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
-import { microunits, money, moneyFromInput, numberFromInput } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
+import { microunits, money, moneyFromInput, moneyInText, numberFromInput } from '@/lib/money';
 import type { PartnerRow } from '../partners/partner-row';
 
 interface Outcome {
@@ -134,7 +135,7 @@ function PayoutsView() {
             >
               {names.get(result.partner_id) ?? result.partner_id}:{' '}
               {result.outcome === 'paid' &&
-                `выплата записана, причитается ${money(result.balance ?? '0')}`}
+                `выплата записана, причитается ${moneyInText(result.balance ?? '0')}`}
               {result.outcome === 'already_paid' && 'уже была записана, повторно не тронуто'}
               {result.outcome === 'refused' && `не записана — ${result.reason ?? 'отказ'}`}
             </p>
@@ -166,7 +167,7 @@ function PayoutsView() {
                 />
                 <span>{row.partner.name}</span>
                 <span className="num col-start-2 text-muted-foreground sm:col-start-auto sm:text-right">
-                  причитается {money(row.partner.balance)}
+                  причитается <MoneyTotal value={row.partner.balance} />
                 </span>
                 <Input
                   className="num col-start-2 sm:col-start-auto"

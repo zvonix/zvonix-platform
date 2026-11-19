@@ -29,7 +29,7 @@ import {
 import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
-import { money } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
 import { CALL_STATUS_NAME, callTone, endCauseName } from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
 import {
@@ -279,7 +279,7 @@ function PartnerCalls() {
                     {call.earned === null ? (
                       <span className="text-faint">—</span>
                     ) : (
-                      money(call.earned)
+                      <MoneyTotal value={call.earned} />
                     )}
                   </TableCell>
 

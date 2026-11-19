@@ -6,7 +6,7 @@ import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { ROW_ICON } from '@/components/table-parts';
 import { Input } from '@/components/ui/input';
 import { request } from '@/lib/api';
-import { money, moneyFromInput, numberFromInput } from '@/lib/money';
+import { money, moneyFromInput, moneyInText, numberFromInput } from '@/lib/money';
 
 interface Posted {
   readonly transaction_id: string;
@@ -147,8 +147,8 @@ export function MoneyOperation({
         {done !== undefined && (
           <p className={done.already_posted ? 'text-warn' : 'text-ok'}>
             {done.already_posted
-              ? `Точно такая операция уже проводилась — повторно деньги не тронуты. ${balanceName}: ${money(done.balance)}.`
-              : `${doneText}. ${balanceName}: ${money(done.balance)}.`}
+              ? `Точно такая операция уже проводилась — повторно деньги не тронуты. ${balanceName}: ${moneyInText(done.balance)}.`
+              : `${doneText}. ${balanceName}: ${moneyInText(done.balance)}.`}
           </p>
         )}
       </div>

@@ -16,7 +16,8 @@ import {
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { transactionName, type LedgerAccount } from '@/lib/labels';
-import { isNegative, money } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
+import { isNegative } from '@/lib/money';
 
 const PAGE_SIZE = 20;
 
@@ -154,7 +155,7 @@ export function AccountLedger({ source, account }: { source: string; account: Le
                   </TableCell>
                   <TableCell className={NUM}>
                     <span className={isNegative(entry.amount) ? 'text-crit' : 'text-ok'}>
-                      {money(entry.amount)}
+                      <MoneyTotal value={entry.amount} />
                     </span>
                   </TableCell>
                 </TableRow>

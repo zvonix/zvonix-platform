@@ -32,7 +32,7 @@ import {
 import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
-import { money } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
 import {
   CALL_CUT_OFF_FIX,
   CALL_CUT_OFF_NAME,
@@ -343,7 +343,11 @@ function MyCalls() {
                 </TableCell>
 
                 <TableCell className={NUM}>
-                  {call.cost === null ? <span className="text-faint">—</span> : money(call.cost)}
+                  {call.cost === null ? (
+                    <span className="text-faint">—</span>
+                  ) : (
+                    <MoneyTotal value={call.cost} />
+                  )}
                 </TableCell>
 
                 <TableCell className={`${NUM} ${WIDE_ONLY}`}>

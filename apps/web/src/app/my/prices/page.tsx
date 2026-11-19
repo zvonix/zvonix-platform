@@ -17,7 +17,8 @@ import {
 import { request } from '@/lib/api';
 import { useOperators } from '@/lib/dictionaries';
 import { TERMINATION_KIND_MEANING, TERMINATION_KIND_NAME } from '@/lib/labels';
-import { money } from '@/lib/money';
+import { HintText } from '@/components/status-dot';
+import { finerThanKopecks, money, moneyTotal } from '@/lib/money';
 
 const COLUMNS = 8;
 
@@ -156,7 +157,7 @@ function MyPrices() {
                 </TableCell>
 
                 <TableCell className={`${NUM} whitespace-nowrap`}>
-                  {row.examples.map((example) => money(example.amount)).join(' / ')}
+                  <Examples amounts={row.examples.map((example) => example.amount)} />
                 </TableCell>
               </TableRow>
             ))}
@@ -183,4 +184,16 @@ function billing(row: Tariff): string {
 
   if (row.minimum_duration_seconds === 0) return step;
   return `${step}, но не меньше ${String(row.minimum_duration_seconds)} с`;
+}
+
+/**
+ * Во что обойдётся вызов 15, 30 и 60 с — до копеек, точно — одной подсказкой на ячейку (DESIGN.md, «Деньги»).
+ *
+ * Одна подсказка, а не три: три кнопки в ячейке на каждой строке — лишние остановки клавиатуры, а сравнивают
+ * их всё равно вместе. Ставки «За соединение» и «За минуту» рядом остаются полными: это тариф.
+ */
+function Examples({ amounts }: { amounts: readonly string[] }) {
+  const shown = amounts.map(moneyTotal).join(' / ');
+  if (!amounts.some(finerThanKopecks)) return <span className="num">{shown}</span>;
+  return <HintText label={shown} reason={`точно ${amounts.map(money).join(' / ')}`} />;
 }

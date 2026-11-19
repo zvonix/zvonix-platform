@@ -7,7 +7,8 @@ import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import { MoneyOperation } from '@/components/money-operation';
 import { Input } from '@/components/ui/input';
 import { ApiError, request } from '@/lib/api';
-import { isNegative, money, moneyFromInput, numberFromInput } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
+import { isNegative, money, moneyFromInput, moneyInText, numberFromInput } from '@/lib/money';
 import type { ClientRow } from './page';
 
 interface Funds {
@@ -200,8 +201,8 @@ export function DepositForm({ client, canChange }: { client: ClientRow; canChang
         {done !== undefined && (
           <p className={done.already_posted ? 'text-warn' : 'text-ok'}>
             {done.already_posted
-              ? `Точно такая операция уже проводилась — повторно деньги не добавлены. Остаток: ${money(done.balance)}.`
-              : `Проведено. Остаток: ${money(done.balance)}.`}
+              ? `Точно такая операция уже проводилась — повторно деньги не добавлены. Остаток: ${moneyInText(done.balance)}.`
+              : `Проведено. Остаток: ${moneyInText(done.balance)}.`}
           </p>
         )}
       </div>
@@ -221,7 +222,8 @@ function Figure({
   highlight?: boolean;
 }) {
   // Отказ — не «загрузка»: вечное «…» при упавшем запросе читалось как «ещё считаем».
-  const text = value === undefined ? (failed === undefined ? '…' : '—') : money(value);
+  const text =
+    value === undefined ? failed === undefined ? '…' : '—' : <MoneyTotal value={value} />;
   return (
     <div>
       <div className="text-muted-foreground">{title}</div>

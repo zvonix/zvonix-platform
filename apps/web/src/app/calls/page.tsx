@@ -39,7 +39,7 @@ import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { useClients, usePartners } from '@/lib/dictionaries';
 import { duration, moment } from '@/lib/format';
-import { money } from '@/lib/money';
+import { money, moneyTotal } from '@/lib/money';
 import {
   CALL_CUT_OFF_FIX,
   CALL_CUT_OFF_NAME,
@@ -458,7 +458,7 @@ function CallRow({
           <span className="text-faint">—</span>
         ) : (
           <HintText
-            label={money(call.money.client)}
+            label={moneyTotal(call.money.client)}
             reason={`Списано с клиента ${money(call.money.client)}; партнёру ${money(call.money.partner)}; площадке ${money(call.money.margin)}`}
           />
         )}

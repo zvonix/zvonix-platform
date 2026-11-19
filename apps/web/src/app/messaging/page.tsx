@@ -47,6 +47,7 @@ import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
+import { MoneyTotal } from '@/components/money-total';
 import { money } from '@/lib/money';
 import type { PartnerRow } from '../partners/partner-row';
 
@@ -458,12 +459,14 @@ function RecentMessages() {
                   <span className="num">{message.to}</span>
                 </TableCell>
                 <StageCells message={message} />
-                <TableCell className={NUM}>{money(message.money.client)}</TableCell>
-                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
-                  {money(message.money.partner)}
+                <TableCell className={NUM}>
+                  <MoneyTotal value={message.money.client} />
                 </TableCell>
                 <TableCell className={`${NUM} ${WIDE_ONLY}`}>
-                  {money(message.money.margin)}
+                  <MoneyTotal value={message.money.partner} />
+                </TableCell>
+                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                  <MoneyTotal value={message.money.margin} />
                 </TableCell>
               </TableRow>
             ))}
