@@ -16,7 +16,7 @@ import { FilterInput } from '@/components/filter-input';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
-import { useLiveInterval } from '@/lib/live';
+import { LIVE_BY_DEFAULT, useLiveInterval } from '@/lib/live';
 import { ListPeriodPicker } from '@/components/period-picker';
 import {
   INCIDENT_PERIODS,
@@ -124,7 +124,7 @@ function CallsView() {
   search.set('limit', String(PAGE_SIZE));
   if (offset > 0) search.set('offset', String(offset));
 
-  const live = useLiveInterval();
+  const live = useLiveInterval(LIVE_BY_DEFAULT);
   const list = useQuery({
     queryKey: ['calls', search.toString()],
     refetchInterval: live,
@@ -301,7 +301,7 @@ function CallsView() {
               };
             }}
           />
-          <LiveSwitch />
+          <LiveSwitch pageDefault={LIVE_BY_DEFAULT} />
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}

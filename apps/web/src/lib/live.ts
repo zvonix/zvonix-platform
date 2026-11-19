@@ -7,28 +7,50 @@ import { useSyncExternalStore } from 'react';
  *
  * Одна настройка на браузер, а не на страницу: человек, включивший обновление на «Вызовах»,
  * ждёт того же на «Оборудовании». Хранится в браузере — это удобство одного человека, а не
- * состояние площадки. По умолчанию выключено: опрос — лишняя нагрузка на API, и включает его
- * тот, кому он нужен.
+ * состояние площадки.
+ *
+ * Пока человек ничего не выбрал, у каждой страницы своё значение по умолчанию: «Вызовы» и
+ * «Оборудование» партнёра обновляются раз в `LIVE_BY_DEFAULT` секунд — на них смотрят, пока
+ * идут вызовы (владелец, 2026-11-19), остальные страницы — выключены, опрос там лишняя нагрузка
+ * на API. Сделанный выбор, и «выкл» тоже, сохраняется и дальше действует на всех страницах:
+ * выключивший обновление на «Вызовах» не должен получить его снова на «Оборудовании».
  *
  * Пока вкладка скрыта, TanStack Query опрос не ведёт (`refetchIntervalInBackground` по
- * умолчанию выключен) — фоновая вкладка API не нагружает.
+ * умолчанию выключен) — фоновая вкладка API не нагружает, а вернувшись, человек сразу видит
+ * свежее (`refetchOnWindowFocus`). Перечитывается тот же запрос с тем же ключом: страница,
+ * фильтры и период — в адресе, опрос их не трогает.
  */
 export const LIVE_OPTIONS = [
   { seconds: 0, label: 'выкл' },
   { seconds: 5, label: 'каждые 5 с' },
+  { seconds: 10, label: 'каждые 10 с' },
   { seconds: 15, label: 'каждые 15 с' },
 ] as const;
+
+/** Значение по умолчанию у «Вызовов» и «Оборудования», пока человек не выбрал своё. */
+export const LIVE_BY_DEFAULT = 10;
 
 const KEY = 'zvonix.live-seconds';
 const listeners = new Set<() => void>();
 
-function read(): number {
+/**
+ * Сохранённый выбор — или значение страницы, если выбора нет или он непонятен.
+ *
+ * Непонятный — например, вариант, которого больше нет в `LIVE_OPTIONS`: тогда действует значение страницы,
+ * а не «выкл», — человек свой выбор не делал, он остался от старого кабинета.
+ */
+export function liveSecondsFrom(stored: string | null, pageDefault: number): number {
+  if (stored === null || stored.trim() === '') return pageDefault;
+  const value = Number(stored);
+  return LIVE_OPTIONS.some((option) => option.seconds === value) ? value : pageDefault;
+}
+
+function readStored(): string | null {
   try {
-    const value = Number(window.localStorage.getItem(KEY));
-    return LIVE_OPTIONS.some((option) => option.seconds === value) ? value : 0;
+    return window.localStorage.getItem(KEY);
   } catch {
-    // Хранилище недоступно (приватное окно) — обновление просто выключено.
-    return 0;
+    // Хранилище недоступно (приватное окно) — действует значение страницы.
+    return null;
   }
 }
 
@@ -41,22 +63,33 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
+/** Выбор, сделанный без хранилища, — живёт до перезагрузки страницы. */
+let unsaved: string | null = null;
+
 export function setLiveSeconds(seconds: number): void {
+  unsaved = String(seconds);
   try {
-    window.localStorage.setItem(KEY, String(seconds));
+    window.localStorage.setItem(KEY, unsaved);
   } catch {
-    // Без хранилища выбор живёт до перезагрузки страницы: подписчиков всё равно оповещаем.
+    // Без хранилища выбор живёт в `unsaved`: подписчиков всё равно оповещаем.
   }
   for (const listener of listeners) listener();
 }
 
-/** Выбранный период в секундах; 0 — выключено. */
-export function useLiveSeconds(): number {
-  return useSyncExternalStore(subscribe, read, () => 0);
+/**
+ * Выбранный период в секундах; 0 — выключено. `pageDefault` — значение страницы, пока выбора нет;
+ * у переключателя на той же странице оно должно быть тем же (`LiveSwitch`).
+ */
+export function useLiveSeconds(pageDefault = 0): number {
+  return useSyncExternalStore(
+    subscribe,
+    () => liveSecondsFrom(readStored() ?? unsaved, pageDefault),
+    () => pageDefault,
+  );
 }
 
 /** Значение для `refetchInterval`: `false` — не опрашивать. */
-export function useLiveInterval(): number | false {
-  const seconds = useLiveSeconds();
+export function useLiveInterval(pageDefault = 0): number | false {
+  const seconds = useLiveSeconds(pageDefault);
   return seconds === 0 ? false : seconds * 1000;
 }

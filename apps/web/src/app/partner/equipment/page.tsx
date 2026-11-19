@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { LiveSwitch } from '@/components/live-switch';
-import { useLiveInterval } from '@/lib/live';
+import { LIVE_BY_DEFAULT, useLiveInterval } from '@/lib/live';
 import { ChevronDown, ChevronRight, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -51,7 +51,7 @@ export default function PartnerEquipmentPage() {
  * осталась для подключения — сервера, входов и способа подключения.
  */
 function PartnerEquipment() {
-  const live = useLiveInterval();
+  const live = useLiveInterval(LIVE_BY_DEFAULT);
   const equipment = useQuery({
     queryKey: EQUIPMENT_KEY,
     queryFn: () => request<Equipment>('/partner/equipment'),
@@ -112,7 +112,7 @@ function PartnerEquipment() {
         <AddGateway />
         <AddTrunk />
         <div className="ml-auto">
-          <LiveSwitch />
+          <LiveSwitch pageDefault={LIVE_BY_DEFAULT} />
         </div>
       </div>
 

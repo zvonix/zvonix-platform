@@ -16,7 +16,7 @@ import { FilterInput } from '@/components/filter-input';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
-import { useLiveInterval } from '@/lib/live';
+import { LIVE_BY_DEFAULT, useLiveInterval } from '@/lib/live';
 import { ListPeriodPicker } from '@/components/period-picker';
 import { listPeriodParams, listPeriodSearch, readListPeriod } from '@/lib/list-period';
 import { HintText, StatusDot, toneOf } from '@/components/status-dot';
@@ -130,7 +130,7 @@ function MyCalls() {
   if (!numberReady) search.delete('destination');
   search.set('limit', String(PAGE_SIZE));
 
-  const live = useLiveInterval();
+  const live = useLiveInterval(LIVE_BY_DEFAULT);
   const list = useQuery({
     queryKey: ['my', 'calls', search.toString()],
     refetchInterval: live,
@@ -239,7 +239,7 @@ function MyCalls() {
               };
             }}
           />
-          <LiveSwitch />
+          <LiveSwitch pageDefault={LIVE_BY_DEFAULT} />
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}
