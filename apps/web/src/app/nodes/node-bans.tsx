@@ -25,7 +25,7 @@ import { moment } from '@/lib/format';
  * только администратор, и каждое снятие пишется в журнал.
  */
 
-type BanJail = 'sip_foreign' | 'sip_known' | 'ssh';
+type BanJail = 'sip_foreign' | 'sip_known' | 'sip_noauth' | 'ssh';
 
 interface NodeBans {
   readonly available: boolean;
@@ -38,6 +38,7 @@ interface NodeBans {
 const JAIL_NAME: Record<BanJail, string> = {
   sip_foreign: 'SIP: подбор чужих логинов',
   sip_known: 'SIP: поток под логинами площадки',
+  sip_noauth: 'SIP: звонки без пароля',
   ssh: 'SSH: подбор пароля',
 };
 

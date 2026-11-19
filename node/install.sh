@@ -479,6 +479,158 @@ fail2ban_file() {
   chmod 0644 "/etc/fail2ban/$1"
 }
 
+# INVITE без пароля (ADR-0127): сканер шлёт INVITE, получает 407 и не отвечает. Канал ждёт INVITE с паролем
+# 10 секунд и бросается строкой «Abandoned», в которой адреса нет: адрес только в строке «receiving invite from»
+# того же канала. fail2ban сравнивает строки по одной и связать их надёжно не может: его кэш связки — 100 записей,
+# при потоке от 10 INVITE в секунду они вытесняются раньше, чем канал бросится. Связывает служба
+# zvonix-sip-noauth: читает журнал FreeSWITCH и на каждый брошенный канал пишет одну строку с адресом
+# в /var/log/zvonix/sip-noauth.log, её считает тюрьма zvonix-freeswitch-noauth. Настоящий клиент отвечает на 407
+# повторным INVITE с паролем, его канал уходит в диалплан и не бросается — под правило он не попадает.
+install_sip_noauth() {
+  local fs_log="$1"
+  install -d -m 0755 /usr/local/lib/zvonix /var/log/zvonix
+  # Связка по uuid канала — на любом awk из POSIX (mawk у Ubuntu по умолчанию, gawk). Строки одного канала:
+  # «receiving invite from <адрес>:<порт>» — адрес запоминается; через 10 секунд «Abandoned» — строка для fail2ban,
+  # запись забывается; «Close Channel» — запись забывается. Если «Close Channel» потерялась, запись старше 5 минут
+  # удаляет чистка раз в минуту: память ограничена числом каналов за 5 минут, а не растёт без предела.
+  # Время — из самой строки журнала, а не часов awk: у mawk их может не быть.
+  # Поля до имени канала пишет FreeSWITCH, а имя канала и call-id задаёт звонящий. Поэтому признаки сверяются
+  # по полям 1–7, а строка, где «receiving invite from» встречается не один раз, не запоминается вовсе:
+  # подставным текстом в номере или call-id нельзя приписать брошенный канал чужому адресу.
+  cat >/usr/local/lib/zvonix/sip-noauth.awk <<'NOAUTH_AWK'
+# Связка строк журнала FreeSWITCH по uuid канала (ADR-0127) — порождается node/install.sh, правится там.
+function is_uuid(s) { return length(s) == 36 && s ~ /^[0-9a-f-]+$/ }
+function is_date(s) { return s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ }
+function is_time(s) { return s ~ /^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]/ }
+# Секунды от начала эпохи по дате и времени строки (days_from_civil); часовой пояс не важен — нужна разница.
+function epoch(d, t,    p, q, y, m, era, yoe, doy, doe) {
+  split(d, p, "-")
+  split(t, q, ":")
+  y = p[1] + 0
+  m = p[2] + 0
+  if (m <= 2) y -= 1
+  era = int(y / 400)
+  yoe = y - era * 400
+  doy = int((153 * (m > 2 ? m - 3 : m + 9) + 2) / 5) + p[3] - 1
+  doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+  return (era * 146097 + doe - 719468) * 86400 + q[1] * 3600 + q[2] * 60 + int(q[3])
+}
+# «a.b.c.d:порт» или «[v6]:порт» → адрес; что-то другое — пусто.
+function host(s) {
+  if (substr(s, 1, 1) == "[") {
+    s = substr(s, 2)
+    sub(/\].*$/, "", s)
+  } else {
+    sub(/:[0-9]+$/, "", s)
+  }
+  return (s ~ /^[0-9a-fA-F.:]+$/ && length(s) <= 45) ? s : ""
+}
+function forget(u) {
+  delete addr[u]
+  delete born[u]
+}
+BEGIN { MARK = " receiving invite from "; swept = -1 }
+!is_uuid($1) || !is_date($2) || !is_time($3) { next }
+{
+  now = epoch($2, $3)
+  if (swept < 0 || now - swept >= 60 || now < swept) {
+    for (u in born) if (now - born[u] > 300 || born[u] - now > 300) forget(u)
+    swept = now
+  }
+}
+$5 == "[INFO]" && $6 ~ /^sofia\.c:[0-9]+$/ && $8 == "receiving" && $9 == "invite" && $10 == "from" && $12 == "version:" {
+  rest = $0
+  count = 0
+  while ((at = index(rest, MARK)) > 0) {
+    count++
+    rest = substr(rest, at + length(MARK))
+  }
+  if (count == 1 && !($1 in addr)) {
+    a = host($11)
+    if (a != "") {
+      addr[$1] = a
+      born[$1] = now
+    }
+  }
+  next
+}
+$5 == "[WARNING]" && $6 ~ /^switch_core_state_machine\.c:[0-9]+$/ && $7 == $1 && $NF == "Abandoned" {
+  if ($1 in addr) {
+    print $2 " " $3 " INVITE без авторизации от " addr[$1]
+    fflush()
+    forget($1)
+  }
+  next
+}
+$5 == "[NOTICE]" && $6 ~ /^switch_core_session\.c:[0-9]+$/ && $7 == "Close" && $8 == "Channel" {
+  if ($1 in addr) forget($1)
+}
+NOAUTH_AWK
+  {
+    echo '#!/bin/sh'
+    echo '# INVITE без пароля → строка для fail2ban (ADR-0127) — порождается node/install.sh, правится там.'
+    printf "FS_LOG='%s'\n" "$fs_log"
+    cat <<'NOAUTH'
+set -u
+# gawk и mawk с -W interactive отдают строку сразу, как она пришла; mawk без ключа копит ввод из канала блоками.
+if command -v gawk >/dev/null 2>&1; then
+  AWK='gawk'
+elif command -v mawk >/dev/null 2>&1; then
+  AWK='mawk -W interactive'
+else
+  AWK='awk'
+fi
+# tail -F держится за имя файла: FreeSWITCH при ротации переименовывает журнал и заводит новый, tail переходит
+# на новый, служба не останавливается. С -n 0 старые строки не перечитываются. Упал awk или tail — завершается
+# вся цепочка, и systemd поднимает службу заново.
+# shellcheck disable=SC2086 # $AWK — команда с ключом, разбивка на слова нужна.
+tail -n 0 -F "$FS_LOG" | $AWK -f /usr/local/lib/zvonix/sip-noauth.awk >>/var/log/zvonix/sip-noauth.log
+NOAUTH
+  } >/usr/local/sbin/zvonix-sip-noauth
+  chmod 0700 /usr/local/sbin/zvonix-sip-noauth
+  # Файл заводится до fail2ban: тюрьма без своего журнала не поднимается.
+  touch /var/log/zvonix/sip-noauth.log
+  chmod 0640 /var/log/zvonix/sip-noauth.log
+  # copytruncate: служба держит файл открытым и после ротации пишет в тот же путь.
+  cat >/etc/logrotate.d/zvonix-sip-noauth <<'ROTATE'
+# Журнал INVITE без пароля (ADR-0127) — порождается node/install.sh, правится там.
+/var/log/zvonix/sip-noauth.log {
+  daily
+  maxsize 50M
+  rotate 7
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+}
+ROTATE
+  chmod 0644 /etc/logrotate.d/zvonix-sip-noauth
+  cat >/etc/systemd/system/zvonix-sip-noauth.service <<'UNIT'
+[Unit]
+Description=INVITE без пароля — строка для fail2ban (Zvonix)
+After=freeswitch.service
+
+[Service]
+ExecStart=/usr/local/sbin/zvonix-sip-noauth
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/zvonix
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable zvonix-sip-noauth.service >/dev/null 2>&1 || true
+  # Перезапуск, а не start: при обновлении служба должна взять новый скрипт.
+  systemctl restart zvonix-sip-noauth.service \
+    || echo "ВНИМАНИЕ: служба zvonix-sip-noauth не запустилась — INVITE без пароля не блокируются (journalctl -u zvonix-sip-noauth)" >&2
+}
+
 if ! command -v fail2ban-client >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get install -y -qq fail2ban python3-systemd \
@@ -491,6 +643,7 @@ if command -v fail2ban-client >/dev/null 2>&1; then
   if [ -f "$FREESWITCH_LOG" ]; then
 @@FAIL2BAN_FILES@@
     sed -i "s|${MARK}FREESWITCH_LOG${MARK}|${FREESWITCH_LOG}|" /etc/fail2ban/jail.d/zvonix-freeswitch.conf
+    install_sip_noauth "$FREESWITCH_LOG"
     # Адреса, которые SSH не блокирует (свои офис и дом): только цифры, точки, двоеточия, слеши и пробелы.
     ALLOW_IPS_RE='^[0-9a-fA-F.:/ ]+$'
     if [ -n "${ZVONIX_SSH_ALLOW_IPS:-}" ] && [[ "$ZVONIX_SSH_ALLOW_IPS" =~ $ALLOW_IPS_RE ]]; then
@@ -508,13 +661,13 @@ if command -v fail2ban-client >/dev/null 2>&1; then
       fail2ban-client ping >/dev/null 2>&1 && break
       sleep 1
     done
-    # Две тюрьмы (ревизия 2026-09-25): чужие логины — сканеры, логины площадки — шлюз
-    # партнёра со старым паролем, его блокирует только поток уровня атаки.
-    for jail in zvonix-freeswitch zvonix-freeswitch-known; do
+    # Три тюрьмы: чужие логины — сканеры; логины площадки — шлюз партнёра со старым паролем, его блокирует
+    # только поток уровня атаки (ревизия 2026-09-25); INVITE без пароля — сканер номеров (ADR-0127).
+    for jail in zvonix-freeswitch zvonix-freeswitch-known zvonix-freeswitch-noauth; do
       fail2ban-client status "$jail" >/dev/null 2>&1 \
         || echo "ВНИМАНИЕ: тюрьма $jail не поднялась — journalctl -u fail2ban" >&2
     done
-    echo "Подбор паролей SIP закрывается на порту 5060: чужие логины — 5 неудач за час, блок на сутки; свои — 1200 за 10 минут, блок на час"
+    echo "Подбор паролей SIP закрывается на порту 5060: чужие логины — 5 неудач за час, блок на сутки; свои — 1200 за 10 минут, блок на час; INVITE без пароля — больше 20 за 10 минут, блок на сутки"
   else
     echo "ВНИМАНИЕ: журнал FreeSWITCH не найден (${FREESWITCH_LOG}) — защита от подбора паролей SIP не включена" >&2
   fi
@@ -704,10 +857,11 @@ if curl -fsS --max-time 10 -K "${NODE_ETC}/sip-gateways.curl" -o "\$GW_NEW" 2>/d
 fi
 rm -f "\$GW_NEW"
 # Доверенные адреса (ADR-0125): откуда за неделю входили с верным паролем линии, шлюзы и линии GOIP. Они идут
-# в ignoreip обеих SIP-тюрем: свой клиент не блокируется за таймаут каталога (18.11.2026 тюрьма чужих логинов
-# закрыла живого клиента на сутки). Ответ без метки первой строкой или с чем-то кроме адресов — не применяется,
-# прежний файл остаётся. Список не изменился — fail2ban не трогается; изменился — перечитываются только две
-# SIP-тюрьмы (блокировки остаются), и с доверенных снимается блок, если он уже стоит.
+# в ignoreip всех трёх SIP-тюрем, включая INVITE без пароля (ADR-0127): свой клиент не блокируется за таймаут
+# каталога (18.11.2026 тюрьма чужих логинов закрыла живого клиента на сутки). Ответ без метки первой строкой или
+# с чем-то кроме адресов — не применяется, прежний файл остаётся. Список не изменился — fail2ban не трогается;
+# изменился — перечитываются только SIP-тюрьмы (блокировки остаются), и с доверенных снимается блок, если он
+# уже стоит.
 TRUST_NEW="${NODE_ETC}/trusted-addresses.new"
 TRUST_FILE=/etc/fail2ban/jail.d/zvonix-freeswitch-trusted.local
 if command -v fail2ban-client >/dev/null 2>&1 \\
@@ -718,13 +872,13 @@ if command -v fail2ban-client >/dev/null 2>&1 \\
   {
     echo '# Доверенные адреса площадки (ADR-0125) — пишет пульс узла из GET /node/trusted-addresses.txt.'
     echo '# Порождается node/install.sh, правится там; руками не править — перепишется через 30 секунд.'
-    for JAIL in zvonix-freeswitch zvonix-freeswitch-known; do
+    for JAIL in zvonix-freeswitch zvonix-freeswitch-known zvonix-freeswitch-noauth; do
       printf '[%s]\nignoreip = 127.0.0.1/8 ::1 %s\n' "\$JAIL" "\$TRUSTED"
     done
   } >"\$TRUST_NEW.local"
   if ! cmp -s "\$TRUST_NEW.local" "\$TRUST_FILE"; then
     install -m 0644 "\$TRUST_NEW.local" "\$TRUST_FILE"
-    for JAIL in zvonix-freeswitch zvonix-freeswitch-known; do
+    for JAIL in zvonix-freeswitch zvonix-freeswitch-known zvonix-freeswitch-noauth; do
       fail2ban-client reload "\$JAIL" >/dev/null 2>&1 || continue
       BANNED=" \$(fail2ban-client get "\$JAIL" banip 2>/dev/null | tr '\n' ' ') "
       for IP in \$TRUSTED; do
@@ -943,7 +1097,8 @@ chmod 0700 /usr/local/sbin/zvonix-sip-check
 # Кабинет «Узлы АТС» → «Блокировки»: кто заблокирован, в какой тюрьме и до какого времени, и снять блок с одного
 # адреса. Через службу команд, как проверка связи. Только чтение списка и снятие одного адреса — ничего другого
 # эти скрипты не делают. Ответ: первая строка «ИТОГ: …», дальше блокировка на строку —
-# «<тюрьма> <адрес> <до, секунды эпохи или ->». Тюрьмы — коротко: f — SIP чужие логины, k — SIP свои, s — SSH:
+# «<тюрьма> <адрес> <до, секунды эпохи или ->». Тюрьмы — коротко: f — SIP чужие логины, k — SIP свои,
+# n — SIP звонки без пароля (ADR-0127), s — SSH:
 # ответ узла обрезается на 16000 знаков, и короткая строка вмещает больше адресов.
 cat >/usr/local/sbin/zvonix-bans <<'BANS'
 #!/bin/sh
@@ -952,7 +1107,7 @@ set -u
 command -v fail2ban-client >/dev/null 2>&1 || { echo 'ИТОГ: fail2ban на узле не установлен'; exit 0; }
 LIST="$(mktemp)"
 trap 'rm -f "$LIST"' EXIT
-for PAIR in f:zvonix-freeswitch k:zvonix-freeswitch-known s:sshd; do
+for PAIR in f:zvonix-freeswitch k:zvonix-freeswitch-known n:zvonix-freeswitch-noauth s:sshd; do
   CODE="${PAIR%%:*}"
   JAIL="${PAIR#*:}"
   fail2ban-client status "$JAIL" >/dev/null 2>&1 || continue
@@ -987,7 +1142,7 @@ esac
 [ "${#IP}" -le 45 ] || { echo 'ИТОГ: неверный адрес'; exit 0; }
 command -v fail2ban-client >/dev/null 2>&1 || { echo 'ИТОГ: fail2ban на узле не установлен'; exit 0; }
 DONE=""
-for JAIL in zvonix-freeswitch zvonix-freeswitch-known sshd; do
+for JAIL in zvonix-freeswitch zvonix-freeswitch-known zvonix-freeswitch-noauth sshd; do
   case " $(fail2ban-client get "$JAIL" banip 2>/dev/null | tr '\n' ' ') " in
     *" $IP "*) fail2ban-client set "$JAIL" unbanip "$IP" >/dev/null 2>&1 && DONE="$DONE $JAIL" ;;
   esac

@@ -50,6 +50,15 @@ curl -fsSL https://cp.example.com/install.sh | sudo bash -s -- zvx_enroll_….<�
 площадки: на каждую попытку регистрации узел спрашивает учётную запись у неё. Снять
 блокировку раньше срока — `fail2ban-client unban <адрес>`.
 
+Третья SIP-тюрьма — **INVITE без пароля** (`zvonix-freeswitch-noauth`,
+[ADR-0127](../docs/adr/0127-invite-bez-parolya-blokiruetsya.md)): сканер номеров получает 407
+и не отвечает, канал через 10 секунд бросается. Больше 20 таких за 10 минут — блок на сутки.
+Адрес брошенного канала в журнал FreeSWITCH не попадает, его связывает служба
+`zvonix-sip-noauth` (`tail -F` журнала и awk по uuid канала) и пишет строкой в
+`/var/log/zvonix/sip-noauth.log` — этот файл и читает тюрьма. Работает ли служба —
+`systemctl status zvonix-sip-noauth`. Свои адреса площадки не блокирует ни одна из трёх
+SIP-тюрем ([ADR-0125](../docs/adr/0125-svoi-adresa-ne-blokiruyutsya.md)).
+
 SIP-домен узла — `SIP_REALM` площадки: он входит в `a1-hash` учётных записей шлюзов,
 и менять его можно только до выдачи первого пароля.
 
@@ -170,7 +179,7 @@ sudo bash node/build-freeswitch.sh     # в выпуске: /opt/zvonix/current/
 | `conf/autoload_configs/sofia.conf.xml` | Единственный профиль SIP: проверка пароля, NAT у шлюзов, кодеки |
 | `conf/dialplan/zvonix.xml` | Запасной маршрут: площадка не ответила — отказ 503 |
 | `conf/directory/zvonix.xml` | Пустой статический каталог: учётные записи даёт только площадка |
-| `fail2ban/` | Фильтр и тюрьма против подбора паролей SIP |
+| `fail2ban/` | Фильтры и тюрьмы против подбора паролей SIP и INVITE без пароля |
 | `build-freeswitch.sh` | Сборка FreeSWITCH из исходников для первого узла |
 | `install.sh` | **Шаблон** установщика: его отдаёт control plane, подставляя адреса и вкладывая внутрь весь набор. С `--update` — обновление узла без токена |
 | `/etc/zvonix-node/` на узле | Ключ узла (`node.env`) и конфигурация пульса — только root |
