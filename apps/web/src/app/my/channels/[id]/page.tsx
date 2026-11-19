@@ -35,12 +35,7 @@ import { ApiError, request } from '@/lib/api';
 import { integerFromInput } from '@/lib/money';
 import { asr, useBreakdown } from '@/lib/reports';
 import { ChannelSettings } from '../channel-settings';
-import {
-  CHANNELS_KEY,
-  ownedByClient,
-  useChannels,
-  type Channel,
-} from '../channels';
+import { CHANNELS_KEY, ownedByClient, useChannels, type Channel } from '../channels';
 
 export default function MyChannelPage() {
   const params = useParams<{ id: string }>();
