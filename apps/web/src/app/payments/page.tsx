@@ -25,7 +25,8 @@ import { useClients } from '@/lib/dictionaries';
 import { moment } from '@/lib/format';
 import { PAYMENT_STATUS_NAME, PAYMENT_STATUS_TONE } from '@/lib/labels';
 import { useLiveInterval } from '@/lib/live';
-import { money, moneyFromInput, numberFromInput } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
+import { money, moneyFromInput, moneyInText, moneyTotal, numberFromInput } from '@/lib/money';
 
 interface Payment {
   readonly id: string;
@@ -140,11 +141,11 @@ function Payments() {
                   {payment.received_amount !== null &&
                   payment.received_amount !== payment.amount ? (
                     <HintText
-                      label={money(payment.amount)}
-                      reason={`Зачислено ${money(payment.received_amount)}`}
+                      label={moneyTotal(payment.amount)}
+                      reason={`Заявка на ${moneyInText(payment.amount)}, зачислено ${moneyInText(payment.received_amount)}`}
                     />
                   ) : (
-                    money(payment.amount)
+                    <MoneyTotal value={payment.amount} />
                   )}
                 </TableCell>
                 <TableCell className={WIDE_ONLY}>
@@ -249,8 +250,8 @@ function ConfirmPayment({
           />
         </DialogField>
         <p className="text-muted-foreground sm:col-span-2">
-          Клиент просил {money(payment.amount)}. Если перевод пришёл на другую сумму, впишите ту,
-          что пришла на самом деле. Действие попадёт в журнал вместе с вашим именем.
+          Клиент просил {moneyInText(payment.amount)}. Если перевод пришёл на другую сумму, впишите
+          ту, что пришла на самом деле. Действие попадёт в журнал вместе с вашим именем.
         </p>
       </DialogForm>
     </FormDialog>
@@ -275,7 +276,7 @@ function RejectPayment({ payment }: { payment: Payment }) {
       label={<X aria-hidden className="size-4" />}
       tooltip="Отклонить"
       {...ROW_ICON}
-      title={`Отклонить заявку на ${money(payment.amount)}`}
+      title={`Отклонить заявку на ${moneyInText(payment.amount)}`}
       description="Деньги не зачисляются. Причину увидит клиент."
       onOpenChange={(open) => {
         if (open) setReason('');

@@ -10,7 +10,8 @@ import { Input } from '@/components/ui/input';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { useLiveInterval } from '@/lib/live';
-import { money, moneyFromInput, numberFromInput } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
+import { money, moneyFromInput, moneyInText, numberFromInput } from '@/lib/money';
 import { PAYMENT_STATUS_NAME, PAYMENT_STATUS_TONE } from '@/lib/labels';
 
 interface Payment {
@@ -146,7 +147,7 @@ export function TopUp() {
       {created !== undefined && (
         <div className="flex flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2">
           <p className="text-ok">
-            Заявка на <b className="num">{money(created.amount)}</b> создана.
+            Заявка на <b className="num">{moneyInText(created.amount)}</b> создана.
           </p>
           <p>Переведите деньги по реквизитам и укажите в переводе номер заявки:</p>
           <p className="num font-semibold">{numberOf(created.id)}</p>
@@ -162,14 +163,16 @@ export function TopUp() {
               className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-card px-3 py-2"
             >
               <span className="num text-muted-foreground">{moment(payment.created_at)}</span>
-              <span className="num w-[110px] font-semibold">{money(payment.amount)}</span>
+              <span className="w-[110px] font-semibold">
+                <MoneyTotal value={payment.amount} />
+              </span>
               <StatusDot
                 tone={toneOf(PAYMENT_STATUS_TONE[payment.status])}
                 label={PAYMENT_STATUS_NAME[payment.status]}
               />
               <span className="num text-muted-foreground">№ {numberOf(payment.id)}</span>
               {payment.status === 'succeeded' && payment.received_amount !== null && (
-                <span>зачислено {money(payment.received_amount)}</span>
+                <span>зачислено {moneyInText(payment.received_amount)}</span>
               )}
               {payment.resolution_note !== null && (
                 <span className="text-muted-foreground">{payment.resolution_note}</span>

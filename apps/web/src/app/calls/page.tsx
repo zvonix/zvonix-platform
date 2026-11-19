@@ -16,7 +16,7 @@ import { FilterInput } from '@/components/filter-input';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
-import { useLiveInterval } from '@/lib/live';
+import { LIVE_BY_DEFAULT, useLiveInterval } from '@/lib/live';
 import { ListPeriodPicker } from '@/components/period-picker';
 import {
   INCIDENT_PERIODS,
@@ -39,7 +39,7 @@ import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { useClients, usePartners } from '@/lib/dictionaries';
 import { duration, moment } from '@/lib/format';
-import { money } from '@/lib/money';
+import { money, moneyTotal } from '@/lib/money';
 import {
   CALL_CUT_OFF_FIX,
   CALL_CUT_OFF_NAME,
@@ -124,7 +124,7 @@ function CallsView() {
   search.set('limit', String(PAGE_SIZE));
   if (offset > 0) search.set('offset', String(offset));
 
-  const live = useLiveInterval();
+  const live = useLiveInterval(LIVE_BY_DEFAULT);
   const list = useQuery({
     queryKey: ['calls', search.toString()],
     refetchInterval: live,
@@ -301,7 +301,7 @@ function CallsView() {
               };
             }}
           />
-          <LiveSwitch />
+          <LiveSwitch pageDefault={LIVE_BY_DEFAULT} />
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}
@@ -458,7 +458,7 @@ function CallRow({
           <span className="text-faint">—</span>
         ) : (
           <HintText
-            label={money(call.money.client)}
+            label={moneyTotal(call.money.client)}
             reason={`Списано с клиента ${money(call.money.client)}; партнёру ${money(call.money.partner)}; площадке ${money(call.money.margin)}`}
           />
         )}

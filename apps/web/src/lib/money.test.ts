@@ -9,6 +9,7 @@ import {
   money,
   microunits,
   moneyFromInput,
+  moneyInText,
   moneyTotal,
   numberFromInput,
   percent,
@@ -276,5 +277,12 @@ describe('итог до копеек', () => {
     expect(finerThanKopecks('нет')).toBe(false);
     expect(exactMoney('165.478508')).toBe(`165,478508${B}₽`);
     expect(exactMoney('12.3')).toBeUndefined();
+  });
+
+  it('во фразе — до копеек, точное значение в скобках, только если что-то округлено', () => {
+    expect(moneyInText('0.263333')).toBe(`0,26${B}₽ (точно 0,263333${B}₽)`);
+    expect(moneyInText('-0.620666')).toBe(`-0,62${B}₽ (точно -0,620666${B}₽)`);
+    expect(moneyInText('1500')).toBe(`1${N}500,00${B}₽`);
+    expect(moneyInText('12.340000')).toBe(`12,34${B}₽`);
   });
 });

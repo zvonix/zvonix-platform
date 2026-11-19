@@ -1622,16 +1622,21 @@ test.describe('кабинет клиента', () => {
     await expect(page.getByRole('cell', { name: '0 ₽', exact: true }).first()).toBeVisible();
   });
 
-  test('обновление вызовов включается и помнится после перезагрузки', async ({ page }) => {
+  test('вызовы обновляются сами раз в 10 с, а «выкл» помнится после перезагрузки', async ({
+    page,
+  }) => {
     await signIn(page, PEOPLE.client);
     await page.goto('/my/calls');
 
-    const live = page.getByLabel('Обновлять');
-    await expect(live).toHaveValue('0');
-    await live.selectOption('5');
+    // Выбора ещё нет — у «Вызовов» своё значение страницы (lib/live.ts).
+    await expect(page.getByLabel('Обновлять')).toHaveValue('10');
+    await page.getByLabel('Обновлять').selectOption('0');
+    await page.reload();
+    await expect(page.getByLabel('Обновлять')).toHaveValue('0');
+
+    await page.getByLabel('Обновлять').selectOption('5');
     await page.reload();
     await expect(page.getByLabel('Обновлять')).toHaveValue('5');
-    await page.getByLabel('Обновлять').selectOption('0');
   });
 
   test('вызовы клиента скачиваются файлом CSV', async ({ page }) => {

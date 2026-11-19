@@ -25,7 +25,7 @@ import { ApiError, request } from '@/lib/api';
 import { loadAllRows } from '@/lib/csv';
 import { moment } from '@/lib/format';
 import { MESSAGE_STATUS_NAME } from '@/lib/labels';
-import { money } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
 
 interface PartnerMessage {
   readonly id: string;
@@ -142,7 +142,9 @@ function Journal() {
                   {accountName(message.account_id)}
                 </TableCell>
                 <StageCells message={message} />
-                <TableCell className={NUM}>{money(message.earned)}</TableCell>
+                <TableCell className={NUM}>
+                  <MoneyTotal value={message.earned} />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

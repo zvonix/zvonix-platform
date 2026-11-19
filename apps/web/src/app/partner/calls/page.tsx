@@ -13,7 +13,7 @@ import { Hint } from '@/components/hint';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
-import { useLiveInterval } from '@/lib/live';
+import { LIVE_BY_DEFAULT, useLiveInterval } from '@/lib/live';
 import { ListPeriodPicker } from '@/components/period-picker';
 import { listPeriodParams, listPeriodSearch, readListPeriod } from '@/lib/list-period';
 import { HintText, StatusDot, toneOf } from '@/components/status-dot';
@@ -29,7 +29,7 @@ import {
 import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
-import { money } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
 import { CALL_STATUS_NAME, callTone, endCauseName } from '@/lib/labels';
 import { useUrlState } from '@/lib/url-state';
 import {
@@ -93,7 +93,7 @@ function PartnerCalls() {
   const search = listPeriodSearch(url.query);
   search.set('limit', String(PAGE_SIZE));
 
-  const live = useLiveInterval();
+  const live = useLiveInterval(LIVE_BY_DEFAULT);
   const list = useQuery({
     queryKey: ['partner', 'calls', search.toString()],
     refetchInterval: live,
@@ -186,7 +186,7 @@ function PartnerCalls() {
               };
             }}
           />
-          <LiveSwitch />
+          <LiveSwitch pageDefault={LIVE_BY_DEFAULT} />
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}
@@ -279,7 +279,7 @@ function PartnerCalls() {
                     {call.earned === null ? (
                       <span className="text-faint">—</span>
                     ) : (
-                      money(call.earned)
+                      <MoneyTotal value={call.earned} />
                     )}
                   </TableCell>
 

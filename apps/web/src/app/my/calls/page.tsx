@@ -16,7 +16,7 @@ import { FilterInput } from '@/components/filter-input';
 import { LiveSwitch } from '@/components/live-switch';
 import { PageNav } from '@/components/page-nav';
 import { SavedFilters, useColumnPicker } from '@/components/table-view';
-import { useLiveInterval } from '@/lib/live';
+import { LIVE_BY_DEFAULT, useLiveInterval } from '@/lib/live';
 import { ListPeriodPicker } from '@/components/period-picker';
 import { listPeriodParams, listPeriodSearch, readListPeriod } from '@/lib/list-period';
 import { HintText, StatusDot, toneOf } from '@/components/status-dot';
@@ -32,7 +32,7 @@ import {
 import { request } from '@/lib/api';
 import { loadAllCalls } from '@/lib/csv';
 import { duration, moment } from '@/lib/format';
-import { money } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
 import {
   CALL_CUT_OFF_FIX,
   CALL_CUT_OFF_NAME,
@@ -130,7 +130,7 @@ function MyCalls() {
   if (!numberReady) search.delete('destination');
   search.set('limit', String(PAGE_SIZE));
 
-  const live = useLiveInterval();
+  const live = useLiveInterval(LIVE_BY_DEFAULT);
   const list = useQuery({
     queryKey: ['my', 'calls', search.toString()],
     refetchInterval: live,
@@ -239,7 +239,7 @@ function MyCalls() {
               };
             }}
           />
-          <LiveSwitch />
+          <LiveSwitch pageDefault={LIVE_BY_DEFAULT} />
           <PageNav
             offset={offset}
             limit={PAGE_SIZE}
@@ -343,7 +343,11 @@ function MyCalls() {
                 </TableCell>
 
                 <TableCell className={NUM}>
-                  {call.cost === null ? <span className="text-faint">—</span> : money(call.cost)}
+                  {call.cost === null ? (
+                    <span className="text-faint">—</span>
+                  ) : (
+                    <MoneyTotal value={call.cost} />
+                  )}
                 </TableCell>
 
                 <TableCell className={`${NUM} ${WIDE_ONLY}`}>
