@@ -12,7 +12,15 @@ import {
   ChannelEnabledCell,
   ChannelLastCallCell,
 } from '@/components/channel-facts';
-import { HEAD, RowActions, ROW_ICON, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import {
+  FROM_2XL,
+  FROM_XL,
+  HEAD,
+  RowActions,
+  ROW_ICON,
+  TABLE_FRAME,
+  WIDE_ONLY,
+} from '@/components/table-parts';
 import { ErrorNote } from '@/components/error-note';
 import { DialogField, DialogForm, FormDialog } from '@/components/form-dialog';
 import type { IssuedCredentials, SipAccount } from '@/components/sip-credentials';
@@ -180,11 +188,11 @@ export function ClientChannels({
             <TableRow className="text-muted-foreground hover:bg-transparent">
               <TableHead className={HEAD}>Канал</TableHead>
               <TableHead className={HEAD}>Включена</TableHead>
-              <TableHead className={HEAD}>Подключение</TableHead>
-              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Последний вызов</TableHead>
-              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Имя SIP</TableHead>
-              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Запись</TableHead>
-              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Номер для показа</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Подключение</TableHead>
+              <TableHead className={`${HEAD} ${FROM_XL}`}>Последний вызов</TableHead>
+              <TableHead className={`${HEAD} ${FROM_XL}`}>Имя SIP</TableHead>
+              <TableHead className={`${HEAD} ${FROM_2XL}`}>Запись</TableHead>
+              <TableHead className={`${HEAD} ${FROM_2XL}`}>Номер для показа</TableHead>
               <TableHead className={`${HEAD} w-px`}>
                 <span className="sr-only">Действия</span>
               </TableHead>
@@ -217,25 +225,30 @@ export function ClientChannels({
                 <TableCell>
                   <ChannelEnabledCell channel={channel} viewer="admin" />
                 </TableCell>
-                <TableCell>
+                {/*
+                  Столбцы появляются по важности (DESIGN.md, «Таблица»): на телефоне — канал, «Включена» и действия;
+                  подключение — с 768, последний вызов и имя SIP — с 1280, запись и номер для показа — с 1536, они есть
+                  и в окне «Настроить». Иначе таблица уезжала вбок даже на 1280.
+                */}
+                <TableCell className={WIDE_ONLY}>
                   <ChannelConnectionCell channel={channel} viewer="admin" />
                 </TableCell>
-                <TableCell className={WIDE_ONLY}>
+                <TableCell className={FROM_XL}>
                   <ChannelLastCallCell channel={channel} />
                 </TableCell>
-                <TableCell className={WIDE_ONLY}>
+                <TableCell className={FROM_XL}>
                   <span className="num" translate="no">
                     {channel.sip_username}
                   </span>
                 </TableCell>
-                <TableCell className={WIDE_ONLY}>
+                <TableCell className={FROM_2XL}>
                   {channel.recording_required ? (
                     'обязательна'
                   ) : (
                     <span className="text-muted-foreground">не нужна</span>
                   )}
                 </TableCell>
-                <TableCell className={WIDE_ONLY}>
+                <TableCell className={FROM_2XL}>
                   {channel.caller_id === null ? (
                     <span className="text-muted-foreground">номер SIM</span>
                   ) : (

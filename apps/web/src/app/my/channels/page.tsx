@@ -24,7 +24,7 @@ import {
   ChannelEnabledCell,
   ChannelLastCallCell,
 } from '@/components/channel-facts';
-import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
+import { FROM_XL, HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
 import { request } from '@/lib/api';
 import { CHANNELS_KEY, useChannels, type Channel } from './channels';
 
@@ -124,8 +124,8 @@ function MyChannels() {
               <TableHead className={HEAD}>Линия</TableHead>
               <TableHead className={HEAD}>Включена</TableHead>
               <TableHead className={HEAD}>Подключение</TableHead>
-              <TableHead className={HEAD}>Последний вызов</TableHead>
-              <TableHead className={`${HEAD} ${WIDE_ONLY} text-right`}>Разговоров сейчас</TableHead>
+              <TableHead className={`${HEAD} ${WIDE_ONLY}`}>Последний вызов</TableHead>
+              <TableHead className={`${HEAD} ${FROM_XL} text-right`}>Разговоров сейчас</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -167,11 +167,14 @@ function MyChannels() {
                 <TableCell>
                   <ChannelConnectionCell channel={channel} viewer="client" />
                 </TableCell>
-                <TableCell>
+                {/*
+                  Уже 768 — только название и две точки, затем дата; «Разговоров сейчас» — с 1280: идущие разговоры
+                  видны и в «Вызовах», а три сведения о линии важнее (DESIGN.md, «Таблица», «Телефон»).
+                */}
+                <TableCell className={WIDE_ONLY}>
                   <ChannelLastCallCell channel={channel} />
                 </TableCell>
-                {/* На телефоне прячется: идущие разговоры видны в «Вызовах», а три сведения о линии важнее. */}
-                <TableCell className={`${NUM} ${WIDE_ONLY}`}>
+                <TableCell className={`${NUM} ${FROM_XL}`}>
                   {channel.open_calls ?? 0}
                   {channel.max_concurrent_calls !== null && (
                     <span className="text-faint"> из {channel.max_concurrent_calls}</span>

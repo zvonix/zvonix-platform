@@ -31,6 +31,12 @@ const TEXT: Record<StatusTone, string> = {
   off: 'text-muted-foreground',
 };
 
+/** Классы целиком, а не склейкой: Tailwind находит только написанные полностью. */
+const LABEL_FROM = {
+  md: { label: 'hidden md:inline', align: 'md:justify-start' },
+  lg: { label: 'hidden lg:inline', align: 'lg:justify-start' },
+} as const;
+
 /**
  * Состояние в строке таблицы — точка и одно-два слова, причина и подробности в подсказке
  * ([DESIGN.md](../../../../docs/DESIGN.md), «Таблица»; владелец, 2026-11-17: «много ненужной информации, всё в
@@ -46,6 +52,7 @@ export function StatusDot({
   reason,
   dotOnly = false,
   phoneDot = false,
+  labelFrom = 'md',
 }: {
   tone: StatusTone;
   label: string;
@@ -53,6 +60,11 @@ export function StatusDot({
   dotOnly?: boolean;
   /** На телефоне — только точка, слово в подсказке: иначе рубильник в конце строки уезжает за край. */
   phoneDot?: boolean;
+  /**
+   * С какой ширины при `phoneDot` видно слово: `lg` — для таблицы, где рядом два длинных состояния (линия клиента:
+   * «Выключена площадкой» и «Есть, с адреса …»), и на 768 с открытым меню им не хватает места.
+   */
+  labelFrom?: 'md' | 'lg';
 }) {
   const dot = <span aria-hidden className={`size-2 shrink-0 rounded-full ${DOT[tone]}`} />;
   const why = reason ?? '';
@@ -71,7 +83,7 @@ export function StatusDot({
   const body = (
     <>
       {dot}
-      {phoneDot ? <span className="hidden md:inline">{label}</span> : label}
+      {phoneDot ? <span className={LABEL_FROM[labelFrom].label}>{label}</span> : label}
     </>
   );
   if (!hasReason && !phoneDot) return <span className={className}>{body}</span>;
@@ -81,7 +93,9 @@ export function StatusDot({
       tip={phoneDot ? full : why}
       label={full}
       className={
-        phoneDot ? `${className} min-h-6 min-w-6 justify-center md:justify-start` : className
+        phoneDot
+          ? `${className} min-h-6 min-w-6 justify-center ${LABEL_FROM[labelFrom].align}`
+          : className
       }
     >
       {body}

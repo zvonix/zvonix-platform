@@ -26,6 +26,14 @@ export const ROW_ICON = {
  */
 export const WIDE_ONLY = 'hidden md:table-cell';
 
+/**
+ * То же для широких таблиц, которым не хватает и 1024 с открытым меню: столбец появляется с 1280 (`FROM_XL`) или
+ * 1536 (`FROM_2XL`). Чем столбец второстепеннее, тем позже: у линий клиента в админке «Запись» и «Номер для показа»
+ * есть ещё в окне «Настроить».
+ */
+export const FROM_XL = 'hidden xl:table-cell';
+export const FROM_2XL = 'hidden 2xl:table-cell';
+
 /** Обёртка таблицы — одна на кабинет: рамка, карточка, своя прокрутка вбок (страница вбок не едет никогда). */
 export const TABLE_FRAME = 'overflow-x-auto rounded-lg border border-border bg-card';
 

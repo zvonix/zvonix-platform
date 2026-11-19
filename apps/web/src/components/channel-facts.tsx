@@ -17,7 +17,7 @@ import {
  * от 2026-11-19).
  */
 
-/** Ячейка «Включена»: на телефоне — точка, слово в подсказке (DESIGN.md, «Таблица», «Телефон»). */
+/** Ячейка «Включена»: на узком экране — точка, слово в подсказке (DESIGN.md, «Таблица», «Телефон»). */
 export function ChannelEnabledCell({
   channel,
   viewer,
@@ -49,8 +49,14 @@ export function ChannelLastCallCell({ channel }: { channel: ChannelStateInput })
   );
 }
 
+/**
+ * Слово видно с 1024: на 768 с открытым меню рядом не помещаются «Выключена площадкой» и «Есть, с адреса …», и
+ * таблица уезжала вбок. Уже — точки, слово и пояснение в подсказке.
+ */
 function FactDot({ fact }: { fact: ChannelFact }) {
-  return <StatusDot tone={fact.tone} label={fact.label} reason={fact.reason} phoneDot />;
+  return (
+    <StatusDot tone={fact.tone} label={fact.label} reason={fact.reason} phoneDot labelFrom="lg" />
+  );
 }
 
 /**
