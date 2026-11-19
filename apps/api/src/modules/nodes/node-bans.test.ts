@@ -5,17 +5,20 @@ describe('список блокировок узла (ADR-0125)', () => {
   it('ответ zvonix-bans: тюрьма, адрес, до какого времени', () => {
     const found = parseBans(
       [
-        'ИТОГ: блокировок 3',
+        'ИТОГ: блокировок 4',
         'f 45.95.147.220 1795000000',
         'k 31.216.170.27 -',
+        'n 37.187.220.233 1795086400',
         's 2001:db8::7 1795003600',
       ].join('\n'),
     );
     expect(found.available).toBe(true);
-    expect(found.total).toBe(3);
+    expect(found.total).toBe(4);
     expect(found.bans).toEqual([
       { jail: 'sip_foreign', address: '45.95.147.220', until: new Date(1_795_000_000_000) },
       { jail: 'sip_known', address: '31.216.170.27', until: null },
+      // INVITE без пароля (ADR-0127).
+      { jail: 'sip_noauth', address: '37.187.220.233', until: new Date(1_795_086_400_000) },
       { jail: 'ssh', address: '2001:db8::7', until: new Date(1_795_003_600_000) },
     ]);
   });
