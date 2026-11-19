@@ -14,11 +14,12 @@ import { PartnerMaxCard } from '@/components/max-card';
 import { ReadOnly } from '@/components/read-only';
 import { IssuedSecretPanel, type IssuedSecret } from '@/components/sip-credentials';
 import { Input } from '@/components/ui/input';
+import { MoneyTotal } from '@/components/money-total';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { PARTNER_STATUS_MEANING, PARTNER_STATUS_NAME, partnerStatusTone } from '@/lib/labels';
-import { isNegative, money } from '@/lib/money';
+import { isNegative } from '@/lib/money';
 import { atMost } from '@/lib/wait';
 import { PartnerEquipment } from '../partner-equipment';
 import { PartnerMoney } from '../partner-money';
@@ -142,7 +143,7 @@ function PartnerCard({ id }: { id: string }) {
               а не штатное состояние.
             */}
             <dd className={isNegative(partner.balance) ? 'num text-crit' : 'num'}>
-              {money(partner.balance)}
+              <MoneyTotal value={partner.balance} />
             </dd>
           </div>
           <div className="flex gap-1">

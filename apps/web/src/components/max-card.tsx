@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FormDialog } from '@/components/form-dialog';
 import { MessengerAccountStatus } from '@/components/messenger-status';
 import { SmppEvents } from '@/components/smpp-events';
+import { MoneyTotal } from '@/components/money-total';
 import { request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { money } from '@/lib/money';
@@ -63,9 +64,14 @@ export function ClientMaxCard({ clientId }: { clientId: string }) {
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
         <dt className="text-muted-foreground">За {String(DAYS)} суток</dt>
         <dd className="num">
-          {totals === undefined
-            ? 'сообщений не было'
-            : `${String(totals.messages)} отправлено, ${String(totals.messages_delivered)} доставлено · ${money(totals.message_revenue ?? '0')}`}
+          {totals === undefined ? (
+            'сообщений не было'
+          ) : (
+            <>
+              {`${String(totals.messages)} отправлено, ${String(totals.messages_delivered)} доставлено · `}
+              <MoneyTotal value={totals.message_revenue ?? '0'} />
+            </>
+          )}
         </dd>
 
         <dt className="text-muted-foreground">SMPP</dt>
@@ -129,9 +135,14 @@ export function PartnerMaxCard({ partnerId }: { partnerId: string }) {
       <h2 className="font-semibold">Сообщения MAX</h2>
       <p className="num">
         За {String(DAYS)} суток:{' '}
-        {totals === undefined
-          ? 'сообщений не было'
-          : `${String(totals.messages)} отправлено, ${String(totals.messages_delivered)} доставлено · начислено ${money(totals.message_partner_cost ?? '0')}`}
+        {totals === undefined ? (
+          'сообщений не было'
+        ) : (
+          <>
+            {`${String(totals.messages)} отправлено, ${String(totals.messages_delivered)} доставлено · начислено `}
+            <MoneyTotal value={totals.message_partner_cost ?? '0'} />
+          </>
+        )}
       </p>
       {own.length === 0 ? (
         <p className="text-muted-foreground">Аккаунтов MAX нет.</p>

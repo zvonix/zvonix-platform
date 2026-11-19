@@ -16,6 +16,7 @@ import { ReadOnly } from '@/components/read-only';
 import { SipCredentials, type IssuedCredentials } from '@/components/sip-credentials';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { MoneyTotal } from '@/components/money-total';
 import { useCanChange } from '@/lib/access';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
@@ -169,7 +170,7 @@ function ClientCard() {
               это штатное состояние, а не авария (DESIGN.md).
             */}
             <b className={isNegative(client.balance) ? 'text-warn' : undefined}>
-              {money(client.balance)}
+              <MoneyTotal value={client.balance} />
             </b>
           </span>
           <span className="num text-muted-foreground">добавлен {moment(client.created_at)}</span>

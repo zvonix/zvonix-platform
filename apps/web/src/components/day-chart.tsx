@@ -30,6 +30,18 @@ export interface DayPoint {
   readonly texts: readonly string[];
   /** Сумма рядов строкой — подпись над сложенным столбцом и итог подсказки. */
   readonly totalText: string;
+  /**
+   * Точные значения к `texts`, когда те округлены до копеек и округление что-то спрятало
+   * ([DESIGN.md](../../../../docs/DESIGN.md), «Деньги»): показываются в подсказке строкой «точно …».
+   */
+  readonly exactTexts?: readonly (string | undefined)[];
+  readonly exactTotal?: string | undefined;
+}
+
+/** Строка «точно …» под округлённой суммой подсказки; нечего уточнять — ничего. */
+function Exact({ text }: { text: string | undefined }) {
+  if (text === undefined) return null;
+  return <div className="num pl-5 text-xs text-muted-foreground">точно {text}</div>;
 }
 
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -206,19 +218,25 @@ export function DayChart({
                 <div className="grid min-w-36 gap-1 rounded-md border border-border bg-popover px-2.5 py-1.5 text-popover-foreground shadow-md">
                   <div className="text-muted-foreground">{longDay(point.day)}</div>
                   {series.map((entry, i) => (
-                    <div key={entry.label} className="flex items-center gap-2">
-                      <span
-                        className="h-0.5 w-3 rounded-full"
-                        style={{ background: entry.color }}
-                      />
-                      <span className="num font-semibold">{point.texts[i]}</span>
-                      <span className="ml-auto pl-2 text-muted-foreground">{entry.label}</span>
+                    <div key={entry.label}>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-0.5 w-3 rounded-full"
+                          style={{ background: entry.color }}
+                        />
+                        <span className="num font-semibold">{point.texts[i]}</span>
+                        <span className="ml-auto pl-2 text-muted-foreground">{entry.label}</span>
+                      </div>
+                      <Exact text={point.exactTexts?.[i]} />
                     </div>
                   ))}
                   {stacked && series.length > 1 && (
-                    <div className="flex items-center gap-2 border-t border-border pt-1">
-                      <span className="num font-semibold">{point.totalText}</span>
-                      <span className="ml-auto pl-2 text-muted-foreground">Всего</span>
+                    <div className="border-t border-border pt-1">
+                      <div className="flex items-center gap-2">
+                        <span className="num font-semibold">{point.totalText}</span>
+                        <span className="ml-auto pl-2 text-muted-foreground">Всего</span>
+                      </div>
+                      <Exact text={point.exactTotal} />
                     </div>
                   )}
                 </div>

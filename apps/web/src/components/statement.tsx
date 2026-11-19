@@ -1,9 +1,10 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ErrorNote } from '@/components/error-note';
 import { ExportButton } from '@/components/export-button';
+import { MoneyTotal } from '@/components/money-total';
 import { Button } from '@/components/ui/button';
 import { ApiError, request } from '@/lib/api';
 import { duration } from '@/lib/format';
@@ -233,7 +234,10 @@ export function Statement({ config }: { config: StatementConfig }) {
                       <Figure title="Доставлено" value={String(data.totals.messages_delivered)} />
                     </>
                   )}
-                  <Figure title={config.moneyLabel} value={money(amountOf(data.totals, key))} />
+                  <Figure
+                    title={config.moneyLabel}
+                    value={<MoneyTotal value={amountOf(data.totals, key)} />}
+                  />
                 </div>
 
                 {count === 0 ? (
@@ -279,6 +283,8 @@ export function Statement({ config }: { config: StatementConfig }) {
             );
           })}
 
+          {/* Движение по счёту — точно, до микроединицы, а не до копеек: остаток на начало, проводки и списания
+              обязаны сходиться с остатком на конец, а округлённые по отдельности — не сойдутся (DESIGN.md, «Деньги»). */}
           <Block title="Движение по счёту">
             <table className="w-full">
               <tbody>
@@ -331,7 +337,7 @@ export function Statement({ config }: { config: StatementConfig }) {
   );
 }
 
-function Figure({ title, value }: { title: string; value: string }) {
+function Figure({ title, value }: { title: string; value: ReactNode }) {
   return (
     <div>
       <div className="text-neutral-600">{title}</div>
@@ -402,7 +408,9 @@ function Rows({
                 <td className="num py-1 text-right">{row.messages_delivered}</td>
               </>
             )}
-            <td className="num py-1 text-right">{money(amountOf(row, moneyKey))}</td>
+            <td className="num py-1 text-right">
+              <MoneyTotal value={amountOf(row, moneyKey)} />
+            </td>
           </tr>
         ))}
       </tbody>

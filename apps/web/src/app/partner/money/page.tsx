@@ -2,9 +2,9 @@
 
 import { AccountLedger } from '@/components/account-ledger';
 import { ConsoleShell } from '@/components/console-shell';
+import { MoneyTotal } from '@/components/money-total';
 import { usePartnerAccount } from '@/lib/account';
 import { PARTNER_STATUS_MEANING, PARTNER_STATUS_NAME } from '@/lib/labels';
-import { money } from '@/lib/money';
 
 export default function PartnerMoneyPage() {
   return (
@@ -48,7 +48,9 @@ function PartnerMoney() {
         <dl className="grid max-w-[720px] grid-cols-2 gap-x-6 gap-y-1">
           <div>
             <dt className="text-muted-foreground">Заработано, к выплате</dt>
-            <dd className="num text-[15px] font-semibold">{money(funds.balance)}</dd>
+            <dd className="num text-[15px] font-semibold">
+              <MoneyTotal value={funds.balance} />
+            </dd>
           </div>
         </dl>
       </div>

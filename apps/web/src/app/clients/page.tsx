@@ -26,6 +26,7 @@ import {
 import { ReadOnly } from '@/components/read-only';
 import { useCanChange } from '@/lib/access';
 import { ErrorNote } from '@/components/error-note';
+import { MoneyTotal } from '@/components/money-total';
 import { ApiError, request } from '@/lib/api';
 import { moment } from '@/lib/format';
 import { CLIENT_STATUS_NAME, clientStatusTone } from '@/lib/labels';
@@ -195,7 +196,7 @@ function ClientsTable() {
                     это штатное состояние, а не авария (DESIGN.md).
                   */}
                   <span className={isNegative(client.balance) ? 'text-warn' : undefined}>
-                    {money(client.balance)}
+                    <MoneyTotal value={client.balance} />
                   </span>
                 </TableCell>
                 <TableCell className={`${NUM} text-muted-foreground ${WIDE_ONLY}`}>

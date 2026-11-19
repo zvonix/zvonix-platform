@@ -49,6 +49,7 @@ import { DensitySwitch } from '@/components/density-switch';
 import { MobileMenuButton, MobileTabs, SideNav, type NavGroup } from '@/components/shell-nav';
 import { ThemeSwitch } from '@/components/theme-switch';
 import { Button } from '@/components/ui/button';
+import { MoneyTotal } from '@/components/money-total';
 import { useClientAccount, usePartnerAccount } from '@/lib/account';
 import { ApiError, request } from '@/lib/api';
 import {
@@ -59,7 +60,7 @@ import {
   useCabinets,
   type OwnedCabinets,
 } from '@/lib/cabinets';
-import { isNegative, money } from '@/lib/money';
+import { isNegative } from '@/lib/money';
 import { useSession, type CurrentUser } from '@/lib/session';
 
 /**
@@ -589,7 +590,7 @@ function BalanceChip({ cabinet }: { cabinet: Cabinet }) {
     >
       <span className="text-muted-foreground">{title}</span>
       <span className={`num font-semibold ${isNegative(value) ? 'text-crit' : ''}`}>
-        {money(value)}
+        <MoneyTotal value={value} inLink />
       </span>
     </Link>
   );

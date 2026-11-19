@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { CHART_COLORS, DayChart, type ChartScope, type DayPoint } from '@/components/day-chart';
 import { Segmented } from '@/components/segmented';
 import { plural } from '@/lib/format';
-import { money, sumMoney } from '@/lib/money';
+import { MoneyTotal } from '@/components/money-total';
+import { exactMoney, moneyTotal, sumMoney } from '@/lib/money';
 import { asNumber, type MoneyKey, type ReportRow } from '@/lib/reports';
 
 /** Деньги графика: за вызовы (`key`) и за сообщения (`messageKey`) — одним показателем. */
@@ -32,6 +33,15 @@ const seriesOf = (scope: ChartScope) =>
     ...(scope === 'calls' ? [] : [{ label: 'Сообщения', color: CHART_COLORS.messages }]),
   ] as const;
 
+/**
+ * Деньги ряда за сутки: высота числом, подпись до копеек (точное — в подсказке графика), сама сумма — строкой API.
+ * Посекундная тарификация даёт «165,478508 ₽» над столбцом — такие подписи не читаются (владелец, 2026-11-19).
+ */
+const moneyPart = (value: string | undefined) => {
+  const raw = value ?? '0';
+  return { value: asNumber(raw), text: moneyTotal(raw), raw };
+};
+
 /** Сутки ряда сводки → точка графика: высоты числом, подписи — строкой API. */
 function pointOf(
   row: ReportRow & { readonly day: string },
@@ -41,23 +51,16 @@ function pointOf(
   const calls =
     pair === undefined
       ? { value: row.calls, text: callsWord(row.calls), raw: undefined }
-      : {
-          value: asNumber(row[pair.key]),
-          text: money(row[pair.key] ?? '0'),
-          raw: row[pair.key] ?? '0',
-        };
+      : moneyPart(row[pair.key]);
   const messages =
     pair === undefined
       ? { value: row.messages, text: messagesWord(row.messages), raw: undefined }
-      : {
-          value: asNumber(row[pair.messageKey]),
-          text: money(row[pair.messageKey] ?? '0'),
-          raw: row[pair.messageKey] ?? '0',
-        };
+      : moneyPart(row[pair.messageKey]);
   const parts = [
     ...(scope === 'messages' ? [] : [calls]),
     ...(scope === 'calls' ? [] : [messages]),
   ];
+  const rawTotal = parts.length === 1 ? parts[0]?.raw : sumMoney(calls.raw, messages.raw);
   return {
     day: row.day,
     values: parts.map((part) => part.value),
@@ -67,7 +70,15 @@ function pointOf(
         ? (parts[0]?.text ?? '')
         : pair === undefined
           ? String(row.calls + row.messages)
-          : money(sumMoney(calls.raw, messages.raw)),
+          : moneyTotal(rawTotal ?? '0'),
+    ...(pair === undefined
+      ? {}
+      : {
+          exactTexts: parts.map((part) =>
+            part.raw === undefined ? undefined : exactMoney(part.raw),
+          ),
+          exactTotal: rawTotal === undefined ? undefined : exactMoney(rawTotal),
+        }),
   };
 }
 
@@ -110,13 +121,15 @@ export function DayChartCard({
         ? totals.calls
         : totals.messages) === 0;
   const total =
-    moneyShown !== undefined
-      ? money(scopeMoney(moneyShown))
-      : scope === 'all'
-        ? `${callsWord(totals.calls)} · ${messagesWord(totals.messages)}`
-        : scope === 'calls'
-          ? callsWord(totals.calls)
-          : messagesWord(totals.messages);
+    moneyShown !== undefined ? (
+      <MoneyTotal value={scopeMoney(moneyShown)} />
+    ) : scope === 'all' ? (
+      `${callsWord(totals.calls)} · ${messagesWord(totals.messages)}`
+    ) : scope === 'calls' ? (
+      callsWord(totals.calls)
+    ) : (
+      messagesWord(totals.messages)
+    );
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
@@ -140,8 +153,8 @@ export function DayChartCard({
           <span className="num text-[17px] leading-tight font-semibold">{total}</span>
           {moneyShown !== undefined && scope === 'all' && (
             <span className="num text-muted-foreground">
-              звонки {money(totals[moneyShown.key] ?? '0')} · сообщения{' '}
-              {money(totals[moneyShown.messageKey] ?? '0')}
+              звонки <MoneyTotal value={totals[moneyShown.key] ?? '0'} /> · сообщения{' '}
+              <MoneyTotal value={totals[moneyShown.messageKey] ?? '0'} />
             </span>
           )}
           {moneyShown !== undefined && extra !== undefined && scope !== 'calls' && (

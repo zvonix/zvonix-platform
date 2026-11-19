@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { ChartScope } from '@/components/day-chart';
 import { DayChartCard, SCOPES } from '@/components/day-chart-card';
 import { ExportButton } from '@/components/export-button';
 import { LiveSwitch } from '@/components/live-switch';
+import { MoneyTotal } from '@/components/money-total';
 import { PeriodPicker } from '@/components/period-picker';
 import { Segmented } from '@/components/segmented';
 import { HEAD, NUM, TABLE_FRAME, WIDE_ONLY } from '@/components/table-parts';
@@ -17,7 +18,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { duration } from '@/lib/format';
-import { money, sumMoney } from '@/lib/money';
+import { moneyTotal, sumMoney } from '@/lib/money';
 import {
   acd,
   asr,
@@ -202,7 +203,12 @@ export function Report({ config }: { config: ReportConfig }) {
             style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}
           >
             {config.money.map((entry) => (
-              <Card key={entry.key} title={entry.label} value={money(scopeMoney(entry))} strong />
+              <Card
+                key={entry.key}
+                title={entry.label}
+                value={<MoneyTotal value={scopeMoney(entry)} />}
+                strong
+              />
             ))}
             {/* Ровно три карточки счётчиков в любом режиме: вместе с деньгами (одна у клиента и партнёра,
                 три у сотрудников) их чётное число — без одинокой карточки во втором ряду. */}
@@ -249,7 +255,7 @@ export function Report({ config }: { config: ReportConfig }) {
             extra={
               config.botFeeLabel === undefined
                 ? undefined
-                : `и ${config.botFeeLabel} ${money(overview.data.bot_fees ?? '0')}`
+                : `и ${config.botFeeLabel} ${moneyTotal(overview.data.bot_fees ?? '0')}`
             }
           />
         </div>
@@ -367,7 +373,7 @@ export function Report({ config }: { config: ReportConfig }) {
                   )}
                   {config.money.map((entry, index) => (
                     <TableCell key={entry.key} className={`${NUM} ${index === 0 ? '' : WIDE_ONLY}`}>
-                      {money(row[moneyOf(entry)] ?? '0')}
+                      <MoneyTotal value={row[moneyOf(entry)] ?? '0'} />
                     </TableCell>
                   ))}
                 </TableRow>
@@ -393,7 +399,7 @@ function Card({
   strong,
 }: {
   title: string;
-  value: string;
+  value: ReactNode;
   note?: string;
   strong?: boolean;
 }) {

@@ -41,6 +41,48 @@ export function money(value: string): string {
 }
 
 /**
+ * Сумма, округлённая до копеек, — снова строкой API (`165.48`), или `undefined`, если это не сумма.
+ *
+ * Строкой, а не через `Number`: `(2.675).toFixed(2)` в двоичной плавающей точке даёт `2.67`, а должно `2.68`.
+ * Половина — в большую по модулю сторону, как округляет человек и бухгалтерия: `0.005` → `0.01`,
+ * `-0.005` → `-0.01`. Знак у получившегося нуля не ставится: «-0,00 ₽» читается как долг, которого нет.
+ */
+export function roundToKopecks(value: string): string | undefined {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (match === null) return undefined;
+  const [, sign = '', whole = '0', fraction = ''] = match;
+  let kopecks = BigInt(whole + fraction.padEnd(2, '0').slice(0, 2));
+  if ((fraction[2] ?? '0') >= '5') kopecks += 1n;
+  const rubles = (kopecks / 100n).toString();
+  const rest = (kopecks % 100n).toString().padStart(2, '0');
+  return `${kopecks === 0n ? '' : sign}${rubles}.${rest}`;
+}
+
+/** Точнее копеек? Тогда округлённый показ что-то прячет, и точное значение нужно в подсказке. */
+export function finerThanKopecks(value: string): boolean {
+  const match = /^-?\d+(?:\.(\d+))?$/.exec(value.trim());
+  return match !== null && (match[1] ?? '').replace(/0+$/u, '').length > 2;
+}
+
+/** Точная сумма для подсказки к итогу — только если `moneyTotal` что-то округлил; иначе `undefined`. */
+export function exactMoney(value: string): string | undefined {
+  return finerThanKopecks(value) ? money(value) : undefined;
+}
+
+/**
+ * Итог, сводка, плитка, подпись графика — до копеек и всегда с двумя знаками: `165,48 ₽`, `1 500,00 ₽`.
+ *
+ * Тарификация посекундная, и сумма за период выходит вида `165,478508 ₽` — такое число не читается
+ * (владелец, 2026-11-19). Округление здесь не молчаливое: где оно что-то спрятало, точное значение показывает
+ * `MoneyTotal` в подсказке ([DESIGN.md](../../../../docs/DESIGN.md), «Деньги»). Цены минуты, стоимость
+ * отдельного вызова, платежи и проводки этим не показываются — там нужна каждая цифра, это `money`.
+ */
+export function moneyTotal(value: string): string {
+  const rounded = roundToKopecks(value);
+  return rounded === undefined ? value : money(rounded);
+}
+
+/**
  * Границы коридора словами: «1 ₽ — 3 ₽», «от 1 ₽», «до 3 ₽». Нет обеих — тире.
  * Граница, которой нет, — это «без ограничения с этой стороны», а не ноль и не пустое место.
  */
