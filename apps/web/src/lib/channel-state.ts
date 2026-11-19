@@ -32,7 +32,7 @@ export interface ChannelFact {
 }
 
 /** Сколько включённая линия может быть без подключения и не тревожить: программа, которая звонит без регистрации. */
-export const RECENT_CALL_MS = 24 * 60 * 60 * 1000;
+const RECENT_CALL_MS = 24 * 60 * 60 * 1000;
 
 /** «Включена» — можно ли звонить по линии, а если нельзя — кто её выключил. */
 export function channelEnabled(channel: ChannelStateInput, viewer: ChannelViewer): ChannelFact {
