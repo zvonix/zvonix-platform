@@ -52,7 +52,7 @@ curl -fsSL https://cp.example.com/install.sh | sudo bash -s -- zvx_enroll_….<�
 
 Третья SIP-тюрьма — **INVITE без пароля** (`zvonix-freeswitch-noauth`,
 [ADR-0127](../docs/adr/0127-invite-bez-parolya-blokiruetsya.md)): сканер номеров получает 407
-и не отвечает, канал через 10 секунд бросается. Больше 20 таких за 10 минут — блок на сутки.
+и не отвечает, канал через 10 секунд бросается. 10 таких за 10 минут — блок на сутки.
 Адрес брошенного канала в журнал FreeSWITCH не попадает, его связывает служба
 `zvonix-sip-noauth` (`tail -F` журнала и awk по uuid канала) и пишет строкой в
 `/var/log/zvonix/sip-noauth.log` — этот файл и читает тюрьма. Работает ли служба —
