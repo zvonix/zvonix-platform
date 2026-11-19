@@ -24,6 +24,7 @@ const SUMMARY_PREFIX = 'ИТОГ: ';
 const JAILS = {
   f: 'sip_foreign',
   k: 'sip_known',
+  n: 'sip_noauth',
   s: 'ssh',
 } as const;
 

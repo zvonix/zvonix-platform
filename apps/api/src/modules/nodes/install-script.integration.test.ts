@@ -230,6 +230,12 @@ describe('установщик узла', () => {
     // Журнал у сборки из исходников лежит под её префиксом — путь подставляет узел.
     expect(script).toContain('@@FREESWITCH_LOG@@');
     expect(script).toContain('global_getvar log_dir');
+    // INVITE без пароля (ADR-0127): своя тюрьма по журналу службы, которая связывает строки по uuid канала.
+    expect(script).toContain("fail2ban_file 'filter.d/zvonix-freeswitch-noauth.conf'");
+    expect(script).toContain('[zvonix-freeswitch-noauth]');
+    expect(script).toContain('install_sip_noauth "$FREESWITCH_LOG"');
+    expect(script).toContain('ExecStart=/usr/local/sbin/zvonix-sip-noauth\nRestart=always');
+    expect(script).toContain('/etc/logrotate.d/zvonix-sip-noauth');
   });
 
   it('собранный скрипт исполним: внутрь вложен XML, и это могло его сломать', () => {

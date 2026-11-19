@@ -73,8 +73,9 @@ FreeSWITCH (строка `<имя> Failed Registration [<код>]`; 908 — пр
 - Первая строка — метка. Без неё, или если в строках есть что-то кроме цифр, точек и двоеточий, узел ответ
   не применяет и оставляет прежний файл. Адреса без повторов и по порядку: одинаковый список даёт одинаковый
   текст. Пустой список — одна строка метки.
-- Узел пишет `ignoreip` обеих SIP-тюрем (`zvonix-freeswitch`, `zvonix-freeswitch-known`) в
-  `/etc/fail2ban/jail.d/zvonix-freeswitch-trusted.local`. Только если текст изменился, он перечитывает эти две
+- Узел пишет `ignoreip` всех трёх SIP-тюрем (`zvonix-freeswitch`, `zvonix-freeswitch-known`
+  и `zvonix-freeswitch-noauth` — INVITE без пароля, [ADR-0127](../adr/0127-invite-bez-parolya-blokiruetsya.md)) в
+  `/etc/fail2ban/jail.d/zvonix-freeswitch-trusted.local`. Только если текст изменился, он перечитывает эти
   тюрьмы и снимает блок с доверенных, которые уже заблокированы.
 
 ## `GET /node/sip-gateways.xml` — ключ узла
@@ -476,10 +477,11 @@ Basic поверх TLS: имя — идентификатор ключа, пар
 
 **Блокировки** ([ADR-0125](../adr/0125-svoi-adresa-ne-blokiruyutsya.md)). `zvonix-bans` отвечает первой строкой
 `ИТОГ: блокировок N`, дальше по строке на блокировку: `<тюрьма> <адрес> <до>`. Тюрьма — `f` (SIP, чужие логины),
-`k` (SIP, логины площадки), `s` (SSH); «до» — секунды эпохи или `-`, если fail2ban срок не сообщил.
-`zvonix-unban` снимает блок с адреса во всех трёх тюрьмах: `ИТОГ: блокировка снята` и строка `Тюрьмы: …` или
+`k` (SIP, логины площадки), `n` (SIP, INVITE без пароля, [ADR-0127](../adr/0127-invite-bez-parolya-blokiruetsya.md)),
+`s` (SSH); «до» — секунды эпохи или `-`, если fail2ban срок не сообщил.
+`zvonix-unban` снимает блок с адреса во всех четырёх тюрьмах: `ИТОГ: блокировка снята` и строка `Тюрьмы: …` или
 `ИТОГ: адрес не заблокирован`. Кабинет: `GET /nodes/:id/bans` (`admin`, `support`) →
-`{ available, message, total, bans: [{ jail: "sip_foreign" | "sip_known" | "ssh", address, until }] }`;
+`{ available, message, total, bans: [{ jail: "sip_foreign" | "sip_known" | "sip_noauth" | "ssh", address, until }] }`;
 `POST /nodes/:id/bans/unban` (`admin`) с телом `{ "address": "…" }` (IPv4 или IPv6) →
 `{ removed, message }`, журнал `node.ban_removed`.
 Ключ — в `/etc/zvonix-node/commands.curl` (только root).
