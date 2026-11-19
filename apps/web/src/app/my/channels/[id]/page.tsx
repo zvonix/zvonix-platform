@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { ConfirmAction } from '@/components/confirm-action';
+import { ChannelFacts } from '@/components/channel-facts';
 import { ConsoleShell } from '@/components/console-shell';
 import { CopyButton } from '@/components/copy-button';
 import { ChannelPassword } from '@/components/channel-password';
@@ -34,13 +35,7 @@ import { ApiError, request } from '@/lib/api';
 import { integerFromInput } from '@/lib/money';
 import { asr, useBreakdown } from '@/lib/reports';
 import { ChannelSettings } from '../channel-settings';
-import {
-  ChannelStateBadge,
-  CHANNELS_KEY,
-  ownedByClient,
-  useChannels,
-  type Channel,
-} from '../channels';
+import { CHANNELS_KEY, ownedByClient, useChannels, type Channel } from '../channels';
 
 export default function MyChannelPage() {
   const params = useParams<{ id: string }>();
@@ -97,10 +92,9 @@ function ChannelCard({ id }: { id: string }) {
       <BackLink />
 
       <header className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h2 className="text-lg font-semibold">{channel.name}</h2>
-          <ChannelStateBadge channel={channel} />
-        </div>
+        <h2 className="text-lg font-semibold">{channel.name}</h2>
+        {/* Те же три сведения, что столбцами в списке линий, — строками и с пояснением рядом. */}
+        <ChannelFacts channel={channel} viewer="client" />
         {channel.comment !== null && (
           <p className="max-w-prose whitespace-pre-line text-muted-foreground">{channel.comment}</p>
         )}

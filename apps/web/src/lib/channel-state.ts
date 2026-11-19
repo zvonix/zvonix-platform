@@ -1,58 +1,44 @@
 import type { ChannelStatus, ChannelSuspendedBy } from '@zvonix/shared';
-import type { StatusTone } from '@/components/status-dot';
-import { moment } from '@/lib/format';
+import type { StatusTone } from '../components/status-dot';
+import { shortMoment } from './format';
 
 /**
- * Состояние линии клиента одним словом — одно на кабинет клиента и админку
- * ([ADR-0101](../../../../docs/adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md), п. 1–2).
+ * Состояние линии клиента — тремя сведениями, по одному на столбец: «Включена», «Подключение», «Последний вызов».
+ * Одни на кабинет клиента и админку
+ * ([ADR-0101](../../../../docs/adr/0101-liniya-klienta-podklyuchenie-i-samoobsluzhivanie.md), п. 1–2 и дополнение
+ * от 2026-11-19).
  *
- * Раньше рядом стояли две колонки: «Состояние: Работает» и «Подключение: Не подключена». Владелец назвал это
- * нелогичным (2026-11-18): для работающей линии важен один ответ — звонит ли она. Поэтому у работающей линии слово
- * берётся из подключения и вызовов, у остальных — из состояния. Подробности в подсказке.
+ * История. Сначала рядом стояли «Состояние: Работает» и «Подключение: Не подключена» — «Работает» значило
+ * «включена», и это читалось как противоречие. Потом (2026-11-18) их свели в одно слово: «Подключена», «Работает»,
+ * «Ждёт программу»… — и стало непонятно, чем «Работает» отличается от «Подключена». Теперь каждое сведение —
+ * в своём столбце, и название столбца говорит, о чём ответ (владелец, 2026-11-19).
  */
 
 export interface ChannelStateInput {
   readonly status: ChannelStatus;
   readonly suspended_by: ChannelSuspendedBy | null;
   readonly connection: { readonly connected: boolean; readonly address: string | null };
-  /** Последний вызов — есть только в списке; без него «Работает» не отличить от «Ждёт программу». */
+  /** Последний вызов; поля нет в ответах на правку — тогда считается, что звонков не было. */
   readonly last_call_at?: string | null;
 }
 
-/** Кто смотрит: клиенту «выключил клиент» звучит как «выключена». */
+/** Кто смотрит: клиенту «выключил клиент» звучит как «выключена вами». */
 export type ChannelViewer = 'client' | 'admin';
 
-export function channelState(
-  channel: ChannelStateInput,
-  viewer: ChannelViewer,
-): { tone: StatusTone; label: string; reason?: string } {
+export interface ChannelFact {
+  readonly tone: StatusTone;
+  readonly label: string;
+  readonly reason?: string;
+}
+
+/** Сколько включённая линия может быть без подключения и не тревожить: программа, которая звонит без регистрации. */
+const RECENT_CALL_MS = 24 * 60 * 60 * 1000;
+
+/** «Включена» — можно ли звонить по линии, а если нельзя — кто её выключил. */
+export function channelEnabled(channel: ChannelStateInput, viewer: ChannelViewer): ChannelFact {
   switch (channel.status) {
-    case 'active': {
-      if (channel.connection.connected) {
-        return {
-          tone: 'ok',
-          label: 'Подключена',
-          ...(channel.connection.address === null
-            ? {}
-            : { reason: `Программа подключена с адреса ${channel.connection.address}` }),
-        };
-      }
-      if (channel.last_call_at != null) {
-        return {
-          tone: 'ok',
-          label: 'Работает',
-          reason: `Последний вызов ${moment(channel.last_call_at)}. Программа звонит без постоянного подключения — так тоже можно`,
-        };
-      }
-      return {
-        tone: 'warn',
-        label: 'Ждёт программу',
-        reason:
-          viewer === 'client'
-            ? 'Введите в программе логин и пароль этой линии'
-            : 'Программа клиента ещё не подключалась и не звонила',
-      };
-    }
+    case 'active':
+      return { tone: 'ok', label: 'Да' };
     case 'pending':
       return {
         tone: 'warn',
@@ -66,7 +52,7 @@ export function channelState(
       if (channel.suspended_by === 'client') {
         return {
           tone: 'off',
-          label: viewer === 'client' ? 'Выключена' : 'Выключена клиентом',
+          label: viewer === 'client' ? 'Выключена вами' : 'Выключена клиентом',
           reason:
             viewer === 'client'
               ? 'Вызовы не идут; включить можно на странице линии'
@@ -84,4 +70,67 @@ export function channelState(
     case 'closed':
       return { tone: 'off', label: 'Удалена', reason: 'Линия удалена навсегда' };
   }
+}
+
+/**
+ * «Подключение» — держит ли программа клиента регистрацию на площадке.
+ *
+ * «Нет» тревожит только у включённой линии, по которой не звонили сутки: программа, которая звонит без постоянного
+ * подключения, работает, а выключенной линии подключение и не нужно.
+ */
+export function channelConnection(
+  channel: ChannelStateInput,
+  viewer: ChannelViewer,
+  now: Date = new Date(),
+): ChannelFact {
+  const { connected, address } = channel.connection;
+  if (connected) {
+    if (address === null) return { tone: 'ok', label: 'Есть' };
+    return {
+      tone: 'ok',
+      label: `Есть, с адреса ${hostOf(address)}`,
+      reason: `Программа подключена с адреса ${address}`,
+    };
+  }
+  if (channel.status !== 'active') return { tone: 'off', label: 'Нет' };
+  if (calledRecently(channel.last_call_at, now)) {
+    return {
+      tone: 'off',
+      label: 'Нет',
+      reason: 'Программа звонит без постоянного подключения — так тоже можно',
+    };
+  }
+  return {
+    tone: 'warn',
+    label: 'Нет',
+    reason:
+      viewer === 'client'
+        ? 'Введите в программе логин и пароль этой линии'
+        : 'Программа клиента не подключена и не звонила за последние сутки',
+  };
+}
+
+/** «Последний вызов» — день и время или прочерк, если звонков не было. */
+export function channelLastCall(channel: ChannelStateInput, now: Date = new Date()): string {
+  return shortMoment(channel.last_call_at, now);
+}
+
+function calledRecently(lastCallAt: string | null | undefined, now: Date): boolean {
+  if (lastCallAt === null || lastCallAt === undefined) return false;
+  const at = new Date(lastCallAt).getTime();
+  return !Number.isNaN(at) && now.getTime() - at <= RECENT_CALL_MS;
+}
+
+/**
+ * Адрес без порта и способа связи: `94.198.51.21:5060/udp` → `94.198.51.21`; полный адрес — в подсказке.
+ * У адреса IPv6 без скобок порт от адреса не отделить — такой показывается целиком.
+ */
+export function hostOf(address: string): string {
+  const withoutProto = address.split('/')[0] ?? address;
+  if (withoutProto.startsWith('[')) {
+    const end = withoutProto.indexOf(']');
+    return end === -1 ? withoutProto : withoutProto.slice(1, end);
+  }
+  const colons = withoutProto.split(':').length - 1;
+  return colons === 1 ? withoutProto.slice(0, withoutProto.indexOf(':')) : withoutProto;
 }
